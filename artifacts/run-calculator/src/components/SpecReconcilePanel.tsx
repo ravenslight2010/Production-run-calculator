@@ -169,7 +169,7 @@ const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sau
 type Props = {
   autoCheckSignal?: number;
   canManageProfiles?: boolean;
-  reopenRequest?: { importType: "spec" | "premix"; snapshotId: number; requestId: number } | null;
+  reopenRequest?: { importType: "spec" | "premix" | "cheese"; snapshotId: number; requestId: number } | null;
 };
 
 export default function SpecReconcilePanel({

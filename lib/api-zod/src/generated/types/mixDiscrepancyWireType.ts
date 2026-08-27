@@ -14,4 +14,5 @@ export const MixDiscrepancyWireType = {
   'missing-component': 'missing-component',
   'extra-component': 'extra-component',
   'amount-mismatch': 'amount-mismatch',
+  'pull-timing-mismatch': 'pull-timing-mismatch',
 } as const;

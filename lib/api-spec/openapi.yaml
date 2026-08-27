@@ -3346,13 +3346,72 @@ paths:
               $ref: "#/components/schemas/SavePremixSheetInput"
       responses:
         "200":
-          description: The full updated premix-sheet list after the save
+          description: Snapshot id and the full updated premix-sheet list after the save
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SavedPremixSheetList"
+                allOf:
+                  - $ref: "#/components/schemas/SavedPremixSheetList"
+                  - type: object
+                    required: [snapshotId]
+                    properties:
+                      snapshotId: { type: integer }
         "400":
           description: Invalid input
+
+  /cheese-sheets:
+    get:
+      operationId: listCheeseSheets
+      tags: [cheeseRecipes]
+      summary: List retained cheese recipe workbook snapshots
+      description: >-
+        Returns parsed Cheese Mix Recipe Specs retained after reviewed imports,
+        newest first, with at most two versions per distinct source filename.
+        Original workbook bytes are never stored.
+      responses:
+        "200":
+          description: All saved cheese recipe sheets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedCheeseSheetList"
+    post:
+      operationId: saveCheeseSheet
+      tags: [cheeseRecipes]
+      summary: Retain a parsed cheese recipe workbook snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveCheeseSheetInput"
+      responses:
+        "200":
+          description: Snapshot id and the updated retained-source list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedCheeseSheetSaveResponse"
+        "400": { description: Invalid input }
+
+  /cheese-sheets/{id}:
+    delete:
+      operationId: deleteCheeseSheet
+      tags: [cheeseRecipes]
+      summary: Delete a retained cheese recipe workbook snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The updated retained-source list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedCheeseSheetList"
 
   /premix-sheets/{id}:
     delete:
@@ -6285,6 +6344,9 @@ components:
         perPizza:
           type: number
           description: Pounds of this ingredient per pizza
+        perBatchLbs:
+          type: number
+          description: Pounds of this ingredient in one batch, retained from the source workbook
 
     SavedMix:
       type: object
@@ -6368,6 +6430,77 @@ components:
           items:
             $ref: "#/components/schemas/SavedPremixSheet"
 
+    SavedCheeseRecipe:
+      type: object
+      required: [id, name, brand, flavors, shredderSetting, cellulose, notes, components, enabled]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        brand: { type: string }
+        flavors:
+          type: array
+          items: { type: string }
+        shredderSetting: { type: string }
+        cellulose: { type: string }
+        notes: { type: string }
+        components:
+          type: array
+          items:
+            type: object
+            required: [ingredient, lbs]
+            properties:
+              ingredient: { type: string }
+              lbs: { type: number }
+              ozPerPizza: { type: number }
+              sharePct: { type: number }
+        enabled: { type: boolean }
+
+    SavedCheeseSheet:
+      type: object
+      required: [id, label, createdAt, data]
+      properties:
+        id: { type: integer }
+        label: { type: string }
+        sourceKey:
+          type: string
+          nullable: true
+          description: Stable per-file identity; retention keeps two versions per source key.
+        createdAt: { type: number, description: Epoch milliseconds the snapshot was saved }
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedCheeseRecipe"
+
+    SavedCheeseSheetList:
+      type: object
+      required: [cheeseSheets]
+      properties:
+        cheeseSheets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedCheeseSheet"
+
+    SaveCheeseSheetInput:
+      type: object
+      required: [label, data]
+      properties:
+        label: { type: string }
+        sourceKey:
+          type: string
+          description: Optional normalized uploaded filename identity.
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedCheeseRecipe"
+
+    SavedCheeseSheetSaveResponse:
+      allOf:
+        - $ref: "#/components/schemas/SavedCheeseSheetList"
+        - type: object
+          required: [snapshotId]
+          properties:
+            snapshotId: { type: integer }
+
     SavePremixSheetInput:
       type: object
       required:
@@ -6400,7 +6533,7 @@ components:
           enum: [premix, spec]
         type:
           type: string
-          enum: [missing-mix, missing-component, extra-component, amount-mismatch]
+          enum: [missing-mix, missing-component, extra-component, amount-mismatch, pull-timing-mismatch]
         brand:
           type: string
         flavor:

@@ -38,7 +38,8 @@ export type MixDiscrepancyType =
   | "missing-mix" // premix only: the sheet declares a mix that doesn't exist yet
   | "missing-component" // the sheet lists an ingredient the current mix lacks
   | "extra-component" // the current mix has an ingredient the sheet/spec doesn't list
-  | "amount-mismatch"; // a per-pizza weight (or batch size) differs from the sheet/spec
+  | "amount-mismatch" // a per-pizza weight (or batch size) differs from the sheet/spec
+  | "pull-timing-mismatch"; // make/pull-ahead timing differs from the source
 
 export type MixDiscrepancy = {
   source: MixDiscrepancySource;
@@ -70,6 +71,8 @@ export type MixReconcileItem = {
   discrepancies: MixDiscrepancy[];
   /** The Mix to write through saveMixes if the manager applies this item. */
   suggestedMix: Mix;
+  /** Fingerprint of the current row used to build suggestedMix; rejects stale apply. */
+  currentSignature?: string;
 };
 
 export type MixReconcileOutput = {
@@ -104,6 +107,26 @@ function productLabel(m: { brand: string; flavor: string }): string {
   const f = m.flavor.trim();
   if (b && f) return `${b} ${f}`;
   return b || f || "(unnamed product)";
+}
+
+export function mixReconcileSignature(mix: Mix): string {
+  return JSON.stringify({
+    id: mix.id,
+    name: mix.name,
+    brand: mix.brand,
+    flavor: mix.flavor,
+    batchSize: mix.batchSize,
+    daysEarly: mix.daysEarly,
+    notes: mix.notes ?? "",
+    amountAlreadyMade: mix.amountAlreadyMade,
+    enabled: mix.enabled,
+    isPrep: mix.isPrep ?? false,
+    components: mix.components.map((component) => ({
+      ingredient: ci(component.ingredient),
+      perPizza: component.perPizza,
+      perBatchLbs: component.perBatchLbs ?? 0,
+    })).sort((a, b) => a.ingredient.localeCompare(b.ingredient)),
+  });
 }
 
 /**
@@ -230,7 +253,11 @@ export function reconcileMixesWithPremixSheet(input: {
           sheetPerPizza: sc.perPizza,
           message: `"${current.name}" is missing ${sc.ingredient} (${fmt(sc.perPizza)} oz/pizza) that the premix sheet lists.`,
         });
-      } else if (Math.abs(cc.perPizza - sc.perPizza) > tol) {
+      } else if (
+        Math.abs(cc.perPizza - sc.perPizza) > tol ||
+        (sc.perBatchLbs != null || cc.perBatchLbs != null) &&
+          Math.abs((cc.perBatchLbs ?? 0) - (sc.perBatchLbs ?? 0)) > tol
+      ) {
         mixDiscs.push({
           source: "premix",
           type: "amount-mismatch",
@@ -240,7 +267,7 @@ export function reconcileMixesWithPremixSheet(input: {
           ingredient: sc.ingredient,
           sheetPerPizza: sc.perPizza,
           mixPerPizza: cc.perPizza,
-          message: `${sc.ingredient} in "${current.name}" is ${fmt(cc.perPizza)} oz/pizza but the premix sheet lists ${fmt(sc.perPizza)}.`,
+          message: `${sc.ingredient} in "${current.name}" is ${fmt(cc.perPizza)} oz/pizza${cc.perBatchLbs != null ? ` and ${fmt(cc.perBatchLbs)} lb/batch` : ""} but the premix sheet lists ${fmt(sc.perPizza)} oz/pizza${sc.perBatchLbs != null ? ` and ${fmt(sc.perBatchLbs)} lb/batch` : ""}.`,
         });
       }
     }
@@ -270,6 +297,18 @@ export function reconcileMixesWithPremixSheet(input: {
         message: `Batch size of "${current.name}" is ${fmt(current.batchSize)} lb but the premix sheet lists ${fmt(sheet.batchSize)} lb.`,
       });
     }
+    if (current.daysEarly !== sheet.daysEarly) {
+      mixDiscs.push({
+        source: "premix",
+        type: "pull-timing-mismatch",
+        brand: current.brand,
+        flavor: current.flavor,
+        mixName: current.name,
+        sheetPerPizza: sheet.daysEarly,
+        mixPerPizza: current.daysEarly,
+        message: `Pull timing for "${current.name}" is ${current.daysEarly} day${current.daysEarly === 1 ? "" : "s"} early now; the premix sheet says ${sheet.daysEarly} day${sheet.daysEarly === 1 ? "" : "s"} early.`,
+      });
+    }
 
     if (mixDiscs.length === 0) continue;
 
@@ -291,6 +330,7 @@ export function reconcileMixesWithPremixSheet(input: {
       mixName: current.name,
       discrepancies: mixDiscs,
       suggestedMix,
+      currentSignature: mixReconcileSignature(current),
     });
   }
 
@@ -374,6 +414,7 @@ export function reconcileMixesWithSpec(input: {
       mixName: mix.name,
       discrepancies: mixDiscs,
       suggestedMix: { ...mix, components: newComponents },
+      currentSignature: mixReconcileSignature(mix),
     });
   }
 

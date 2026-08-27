@@ -1360,7 +1360,7 @@ export const AiMixReconcileBody = zod.object({
   "label": zod.string().optional().describe('Optional label for what was compared (e.g. the sheet name)'),
   "discrepancies": zod.array(zod.object({
   "source": zod.enum(['premix', 'spec']),
-  "type": zod.enum(['missing-mix', 'missing-component', 'extra-component', 'amount-mismatch']),
+  "type": zod.enum(['missing-mix', 'missing-component', 'extra-component', 'amount-mismatch', 'pull-timing-mismatch']),
   "brand": zod.string(),
   "flavor": zod.string(),
   "mixName": zod.string(),
@@ -1393,7 +1393,8 @@ export const AiMixAssistantBody = zod.object({
   "enabled": zod.boolean().optional(),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
 }))
 }))
 })
@@ -4040,7 +4041,8 @@ export const ListPremixSheetsResponse = zod.object({
   "amountAlreadyMade": zod.number(),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
 })),
   "enabled": zod.boolean()
 }).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
@@ -4067,7 +4069,8 @@ export const SavePremixSheetBody = zod.object({
   "amountAlreadyMade": zod.number(),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
 })),
   "enabled": zod.boolean()
 }).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
@@ -4091,10 +4094,128 @@ export const SavePremixSheetResponse = zod.object({
   "amountAlreadyMade": zod.number(),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
 })),
   "enabled": zod.boolean()
 }).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
+}))
+}).and(zod.object({
+  "snapshotId": zod.number().int()
+}))
+
+
+/**
+ * Returns parsed Cheese Mix Recipe Specs retained after reviewed imports, newest first, with at most two versions per distinct source filename. Original workbook bytes are never stored.
+ * @summary List retained cheese recipe workbook snapshots
+ */
+export const ListCheeseSheetsResponse = zod.object({
+  "cheeseSheets": zod.array(zod.object({
+  "id": zod.number().int(),
+  "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity; retention keeps two versions per source key.'),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()),
+  "shredderSetting": zod.string(),
+  "cellulose": zod.string(),
+  "notes": zod.string(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number(),
+  "ozPerPizza": zod.number().optional(),
+  "sharePct": zod.number().optional()
+})),
+  "enabled": zod.boolean()
+}))
+}))
+})
+
+
+/**
+ * @summary Retain a parsed cheese recipe workbook snapshot
+ */
+export const SaveCheeseSheetBody = zod.object({
+  "label": zod.string(),
+  "sourceKey": zod.string().optional().describe('Optional normalized uploaded filename identity.'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()),
+  "shredderSetting": zod.string(),
+  "cellulose": zod.string(),
+  "notes": zod.string(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number(),
+  "ozPerPizza": zod.number().optional(),
+  "sharePct": zod.number().optional()
+})),
+  "enabled": zod.boolean()
+}))
+})
+
+export const SaveCheeseSheetResponse = zod.object({
+  "cheeseSheets": zod.array(zod.object({
+  "id": zod.number().int(),
+  "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity; retention keeps two versions per source key.'),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()),
+  "shredderSetting": zod.string(),
+  "cellulose": zod.string(),
+  "notes": zod.string(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number(),
+  "ozPerPizza": zod.number().optional(),
+  "sharePct": zod.number().optional()
+})),
+  "enabled": zod.boolean()
+}))
+}))
+}).and(zod.object({
+  "snapshotId": zod.number().int()
+}))
+
+
+/**
+ * @summary Delete a retained cheese recipe workbook snapshot
+ */
+export const DeleteCheeseSheetParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DeleteCheeseSheetResponse = zod.object({
+  "cheeseSheets": zod.array(zod.object({
+  "id": zod.number().int(),
+  "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity; retention keeps two versions per source key.'),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()),
+  "shredderSetting": zod.string(),
+  "cellulose": zod.string(),
+  "notes": zod.string(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number(),
+  "ozPerPizza": zod.number().optional(),
+  "sharePct": zod.number().optional()
+})),
+  "enabled": zod.boolean()
+}))
 }))
 })
 
@@ -4124,7 +4245,8 @@ export const DeletePremixSheetResponse = zod.object({
   "amountAlreadyMade": zod.number(),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
 })),
   "enabled": zod.boolean()
 }).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')

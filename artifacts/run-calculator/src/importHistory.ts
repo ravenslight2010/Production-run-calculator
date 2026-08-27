@@ -33,7 +33,7 @@ export type ImportHistoryImportType =
   | "spec" | "premix" | "cheese" | "sauce" | "dough" | "schedule" | "shipping" | "recipe";
 
 export type ImportHistoryReopenRequest = {
-  importType: "spec" | "premix";
+  importType: "spec" | "premix" | "cheese";
   snapshotId: number;
   requestId: number;
 };
@@ -96,7 +96,7 @@ export function requiredImportAction(item: Pick<ImportHistoryItem, "status" | "s
   if (followUp) return followUp;
   if (item.status === "failed") return "Retry from the retained review, or choose the original source file again.";
   if (item.status === "partial") {
-    return item.snapshotId != null && (item.importType === "spec" || item.importType === "premix")
+    return item.snapshotId != null && (item.importType === "spec" || item.importType === "premix" || item.importType === "cheese")
       ? "Reopen the saved review and resolve the outstanding items."
       : "Review the skipped or unresolved items before importing again.";
   }

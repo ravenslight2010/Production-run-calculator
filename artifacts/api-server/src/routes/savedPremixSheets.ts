@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, savedPremixSheetsTable, type SavedPremixSheetRow } from "@workspace/db";
 import { SavePremixSheetBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -54,7 +55,7 @@ router.get("/premix-sheets", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/premix-sheets", async (req: Request, res: Response) => {
+router.post("/premix-sheets", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const parsed = SavePremixSheetBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -64,12 +65,14 @@ router.post("/premix-sheets", async (req: Request, res: Response) => {
   const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
 
   try {
-    await db.insert(savedPremixSheetsTable).values({
+    const inserted = await db.insert(savedPremixSheetsTable).values({
       scope: currentScope(),
       label,
       sourceKey,
       data: parsed.data.data,
-    });
+    }).returning({ id: savedPremixSheetsTable.id });
+    const snapshotId = inserted[0]?.id;
+    if (snapshotId == null) throw new Error("Premix snapshot was not inserted");
 
     // Keep only the two most recent snapshots PER distinct file (sourceKey), not
     // two overall — the factory has many distinct premix workbooks and wants the
@@ -97,14 +100,14 @@ router.post("/premix-sheets", async (req: Request, res: Response) => {
     }
 
     const premixSheets = await listAll();
-    res.json({ premixSheets });
+    res.json({ snapshotId, premixSheets });
   } catch (err) {
     req.log.error({ err }, "failed to save premix sheet");
     res.status(500).json({ error: "Failed to save premix sheet" });
   }
 });
 
-router.delete("/premix-sheets/:id", async (req: Request, res: Response) => {
+router.delete("/premix-sheets/:id", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });

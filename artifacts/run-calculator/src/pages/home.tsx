@@ -588,9 +588,9 @@ import {
 import type { ShippingPatch } from "@workspace/shipping-import";
 import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
 import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
-import { fetchSavedPremixSheets } from "@/savedPremixSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
 import CheeseRecipesManager from "@/components/CheeseRecipesManager";
+import CheeseReconcilePanel from "@/components/CheeseReconcilePanel";
 import DieLineDefaultsManager from "@/components/DieLineDefaultsManager";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import CheeseImportDialog from "@/components/CheeseImportDialog";
@@ -11609,15 +11609,20 @@ export default function Home() {
   function retryImporterFromHistory(item: ImportHistoryItem) {
     if (
       item.snapshotId != null &&
-      (item.importType === "spec" || item.importType === "premix")
+      (item.importType === "spec" || item.importType === "premix" || item.importType === "cheese")
     ) {
       setImportReopenRequest((previous) => ({
-        importType: item.importType === "spec" ? "spec" : "premix",
+        importType: item.importType as "spec" | "premix" | "cheese",
         snapshotId: item.snapshotId!,
         requestId: (previous?.requestId ?? 0) + 1,
       }));
-      setActiveTab(item.importType === "premix" ? "mixes" : "summary");
-      setShowManageDialog(false);
+      setManageCategory(
+        item.importType === "premix"
+          ? "mixes"
+          : item.importType === "cheese"
+            ? "cheeseRecipes"
+            : "import",
+      );
       toast({
         title: "Saved import review reopened",
         description: "Review the retained source-versus-landed details before applying any scoped repair.",
@@ -12375,12 +12380,6 @@ export default function Home() {
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
-      let premixSnapshotId: number | null = null;
-      try {
-        const saved = await fetchSavedPremixSheets();
-        const key = deriveSourceKey(premixImportPrepared.sourceNames ?? []);
-        premixSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
-      } catch { /* history still records without the optional snapshot reference */ }
       void recordImportHistory({
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared.sourceNames ?? []),
@@ -12421,7 +12420,7 @@ export default function Home() {
             ...(result.warning ? ["Open Freezer Pull settings and save the missing reminders."] : []),
             ...(premixImportPrepared.note?.includes("could not be read") ? ["Reopen the saved review and resolve or retry the skipped source files."] : []),
           ],
-          snapshotId: premixSnapshotId,
+          snapshotId: result.snapshotId ?? null,
         },
       }).catch(() => {});
       // Refresh the shared mixes query so imported mixes appear immediately in
@@ -12860,7 +12859,7 @@ export default function Home() {
         sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
         sourceLabel: (cheeseImportPrepared.sourceNames ?? []).join(", ") || "Cheese recipe sheet",
         customerScope: [...new Set(recipesToApply.map((r) => r.brand).filter(Boolean))].join(", "),
-        status: recipesToRemove.length > 0 || cheeseImportPrepared.note?.includes("could not be read") ? "partial" : "complete",
+        status: result.warning || recipesToRemove.length > 0 || cheeseImportPrepared.note?.includes("could not be read") ? "partial" : "complete",
         summary: {
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed recipe pool" },
           source: {
@@ -12908,19 +12907,27 @@ export default function Home() {
                     message: `Manager-approved mapping: "${alias.externalName.trim()}" → "${alias.canonicalName.trim()}".`,
                   })),
               }),
-          followUp: cheeseImportPrepared.note?.includes("could not be read")
-            ? ["Review the skipped source files and retry them before relying on this import."]
-            : [],
+          followUp: [
+            ...(result.warning ? ["The retained source could not be saved; retry the reviewed import before relying on repair history."] : []),
+            ...(cheeseImportPrepared.note?.includes("could not be read")
+              ? ["Review the skipped source files and retry them before relying on this import."]
+              : []),
+          ],
+          snapshotId: result.snapshotId ?? null,
         },
       }).catch(() => {});
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
       void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      setSheetListSignal((c) => c + 1);
       setShowCheeseImport(false);
       setCheeseImportPrepared(null);
       toast({
-        title: "Cheese recipes imported",
-        description: `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved.`,
+        title: result.warning ? "Cheese recipes imported with a warning" : "Cheese recipes imported",
+        description: result.warning
+          ? `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved. ${result.warning}`
+          : `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved.`,
+        ...(result.warning ? { variant: "destructive" as const } : {}),
       });
       // Fan updated per-batch lbs into all profiles that reference the changed
       // recipes by name, and refresh pending runs + the open form.
@@ -15220,8 +15227,13 @@ export default function Home() {
                             ...request,
                             requestId: (previous?.requestId ?? 0) + 1,
                           }));
-                          setActiveTab(request.importType === "premix" ? "mixes" : "summary");
-                          setShowManageDialog(false);
+                          setManageCategory(
+                            request.importType === "premix"
+                              ? "mixes"
+                              : request.importType === "cheese"
+                                ? "cheeseRecipes"
+                                : "import",
+                          );
                         }}
                       />
                     )}
@@ -15457,7 +15469,7 @@ export default function Home() {
                       brandFlavors={brandFlavors}
                       ingredientSuggestions={unifiedIngredientUniverse}
                     />
-                    <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
+                    <MixReconcilePanel isManager={isManager} canManageInventory={canManageInventory} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
                     <MixAssistChat />
                   </div>
                 )}
@@ -15475,6 +15487,11 @@ export default function Home() {
                       brands={brands}
                       ingredientSuggestions={unifiedIngredientUniverse}
                       onSaved={propagateCheeseRecipeUpdates}
+                    />
+                    <CheeseReconcilePanel
+                      canManageInventory={canManageInventory}
+                      refreshSignal={sheetListSignal}
+                      reopenRequest={importReopenRequest}
                     />
                   </div>
                 )}

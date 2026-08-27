@@ -50,14 +50,17 @@ function fmtDate(ms: number): string {
 
 export default function MixReconcilePanel({
   isManager,
+  canManageInventory,
   refreshSignal = 0,
   reopenRequest,
 }: {
   isManager: boolean;
+  canManageInventory?: boolean;
   /** Bump to re-fetch the saved sheet lists (e.g. right after an import saves one). */
   refreshSignal?: number;
-  reopenRequest?: { importType: "spec" | "premix"; snapshotId: number; requestId: number } | null;
+  reopenRequest?: { importType: "spec" | "premix" | "cheese"; snapshotId: number; requestId: number } | null;
 }) {
+  const canApply = canManageInventory ?? isManager;
   const qc = useQueryClient();
   const [premixSheets, setPremixSheets] = useState<SavedPremixSheet[]>([]);
   const [specSheets, setSpecSheets] = useState<SavedSpecSheet[]>([]);
@@ -149,8 +152,8 @@ export default function MixReconcilePanel({
       await applyMixReconcileItem(item);
       await qc.invalidateQueries({ queryKey: ["mixes"] });
       setAppliedIds((prev) => new Set(prev).add(item.mixId));
-    } catch {
-      setResultError("Couldn't apply that fix. Please try again.");
+    } catch (err) {
+      setResultError(err instanceof Error ? err.message : "Couldn't apply that fix. Refresh and review it again.");
     } finally {
       setBusyKey(null);
     }
@@ -323,7 +326,7 @@ export default function MixReconcilePanel({
                             {[item.brand, item.flavor].filter(Boolean).join(" ")}
                           </span>
                         </div>
-                        {isManager ? (
+                        {canApply ? (
                           applied ? (
                             <Badge variant="secondary">Applied</Badge>
                           ) : (

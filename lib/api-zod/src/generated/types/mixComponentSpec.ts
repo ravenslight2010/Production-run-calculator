@@ -10,4 +10,6 @@ export interface MixComponentSpec {
   ingredient: string;
   /** Pounds of this ingredient per pizza */
   perPizza: number;
+  /** Pounds of this ingredient in one batch, retained from the source workbook */
+  perBatchLbs?: number;
 }

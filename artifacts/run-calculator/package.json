@@ -108,6 +108,7 @@
     "@workspace/allergen": "workspace:*",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",
+    "@workspace/cheese-reconcile": "workspace:*",
     "@workspace/cycle-count": "workspace:*",
     "@workspace/day-summary": "workspace:*",
     "@workspace/downtime-trends": "workspace:*",

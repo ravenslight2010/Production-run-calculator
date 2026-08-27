@@ -27,8 +27,15 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
+
+// This file mounts the router directly instead of the authenticated application
+// stack. Capability behavior is exercised by the application route tests; the
+// retention suite focuses on persistence, scope, validation, and pruning.
+vi.mock("../middlewares/requireCapability", () => ({
+  requireCapability: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];

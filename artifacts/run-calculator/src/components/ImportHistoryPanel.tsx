@@ -135,7 +135,7 @@ export default function ImportHistoryPanel({
                       <div className="mt-2 flex flex-wrap gap-2">
                         {latest && latest.status !== "complete" && onRetry ? (
                           <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => onRetry(latest)}>
-                            <RotateCcw className="mr-1 h-3 w-3" /> {latest.snapshotId != null && (latest.importType === "spec" || latest.importType === "premix") ? "Resume review" : "Retry import"}
+                            <RotateCcw className="mr-1 h-3 w-3" /> {latest.snapshotId != null && (latest.importType === "spec" || latest.importType === "premix" || latest.importType === "cheese") ? "Resume review" : "Retry import"}
                           </Button>
                         ) : onStart ? (
                           <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => onStart(importer.type)}>
@@ -220,12 +220,12 @@ export default function ImportHistoryPanel({
                         </ul>
                       </div>
                     ) : null}
-                    {item.snapshotId != null && onReopen && (item.importType === "spec" || item.importType === "premix") ? (
+                    {item.snapshotId != null && onReopen && (item.importType === "spec" || item.importType === "premix" || item.importType === "cheese") ? (
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => onReopen({ importType: item.importType === "spec" ? "spec" : "premix", snapshotId: item.snapshotId! })}
+                        onClick={() => onReopen({ importType: item.importType as "spec" | "premix" | "cheese", snapshotId: item.snapshotId! })}
                       >
                         Reopen saved review / scoped repair
                       </Button>

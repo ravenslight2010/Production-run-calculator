@@ -26,6 +26,11 @@ export type SavedPremixSheet = {
   data: Mix[];
 };
 
+export type SavedPremixSheetSaveResult = {
+  snapshotId: number;
+  premixSheets: SavedPremixSheet[];
+};
+
 function authHeaders(json = false): Record<string, string> {
   const h: Record<string, string> = { "x-client-id": inventoryClientId() };
   if (json) h["Content-Type"] = "application/json";
@@ -43,15 +48,16 @@ export async function savePremixSheet(
   label: string,
   data: Mix[],
   sourceKey?: string,
-): Promise<SavedPremixSheet[]> {
+): Promise<SavedPremixSheetSaveResult> {
   const res = await fetch("/api/premix-sheets", {
     method: "POST",
     headers: authHeaders(true),
     body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
   });
   if (!res.ok) throw new Error(`Save premix sheet failed (${res.status})`);
-  const out = (await res.json()) as { premixSheets: SavedPremixSheet[] };
-  return out.premixSheets ?? [];
+  const out = (await res.json()) as SavedPremixSheetSaveResult;
+  if (!Number.isInteger(out.snapshotId)) throw new Error("Premix snapshot response did not include an id");
+  return { snapshotId: out.snapshotId, premixSheets: out.premixSheets ?? [] };
 }
 
 export async function deletePremixSheet(id: number): Promise<SavedPremixSheet[]> {

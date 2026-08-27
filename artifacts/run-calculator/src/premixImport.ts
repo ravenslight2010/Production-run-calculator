@@ -59,6 +59,8 @@ import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./saved
 export type PremixImportPrepared = {
   /** Ready-to-apply mixes (grounded, AI-matched, deterministic ids). */
   mixes: Mix[];
+  /** Complete reviewed source projection, before the manager deselects rows. */
+  sourceMixes?: Mix[];
   /** Per-mix review list (each parsed mix + new/update status) for confirmation. */
   candidates: PremixCandidate[];
   summary: PremixImportSummary;
@@ -285,6 +287,7 @@ export async function preparePremixImport(
 
   return {
     mixes,
+    sourceMixes: [...mixes],
     candidates,
     summary,
     newAliases,
@@ -307,6 +310,7 @@ export type PremixCommitResult = {
   freezerPullCount: number;
   /** Non-fatal problem worth surfacing (the mixes themselves applied fine). */
   warning?: string;
+  snapshotId?: number;
 };
 
 /**
@@ -330,7 +334,12 @@ export async function commitPremixImport(
   // mix cannot reach the server and replace populated data.
   mixesToApply = mixesToApply.filter((mix) => (mix.components?.length ?? 0) > 0);
   // Nothing to apply at all — no mixes, no pull-note reminders, no removals.
-  if (mixesToApply.length === 0 && freezerPulls.length === 0 && mixesToRemove.length === 0)
+  if (
+    mixesToApply.length === 0 &&
+    freezerPulls.length === 0 &&
+    mixesToRemove.length === 0 &&
+    (prepared.sourceMixes?.length ?? prepared.mixes.length) === 0
+  )
     return { freezerPullCount: 0 };
 
   // A premix sheet can be entirely prep/pull-early rows (no per-pizza mixes).
@@ -349,19 +358,6 @@ export async function commitPremixImport(
       : afterRemoval;
     await saveMixes(merged);
 
-    // Snapshot the imported mixes server-side so the Mixes section can later
-    // reconcile the current mixes against this premix sheet (new/drifted mixes).
-    // Best-effort: the import already applied; the snapshot is a monitoring bonus.
-    try {
-      const names = prepared.sourceNames ?? [];
-      await savePremixSheet(
-        buildPremixSheetLabel(mixesToApply, names),
-        [...mixesToApply],
-        deriveSourceKey(names),
-      );
-    } catch {
-      // ignore — monitoring snapshot is non-critical
-    }
   }
 
   // Set the freezer-pull settings the pull notes suggested for the included
@@ -369,6 +365,24 @@ export async function commitPremixImport(
   // Failure here is surfaced as a warning — the mixes themselves applied fine.
   let freezerPullCount = 0;
   let warning: string | undefined;
+  let snapshotId: number | undefined;
+  // Retain the complete parsed source, not the manager's last selection. A
+  // source remains useful for a later repair even when individual rows were
+  // skipped during the original reviewed commit.
+  try {
+    const names = prepared.sourceNames ?? [];
+    const saved = await savePremixSheet(
+      buildPremixSheetLabel(prepared.sourceMixes ?? prepared.mixes, names),
+      [...(prepared.sourceMixes ?? prepared.mixes)],
+      deriveSourceKey(names),
+    );
+    // Older clients/mocks may still return the pre-ID response shape. The
+    // server used by this client always returns an id, but retaining the
+    // import remains successful if a compatible legacy writer returns void.
+    snapshotId = saved?.snapshotId;
+  } catch {
+    warning = "The import was applied, but its retained repair source could not be saved.";
+  }
   if (freezerPulls.length > 0) {
     try {
       const existingItems = await fetchFreezerPullItems();
@@ -478,7 +492,7 @@ export async function commitPremixImport(
     }
   }
 
-  return { freezerPullCount, ...(warning ? { warning } : {}) };
+  return { freezerPullCount, ...(warning ? { warning } : {}), ...(snapshotId != null ? { snapshotId } : {}) };
 }
 
 export { premixId };

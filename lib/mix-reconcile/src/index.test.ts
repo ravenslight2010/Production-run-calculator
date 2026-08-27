@@ -212,6 +212,24 @@ describe("reconcileMixesWithPremixSheet", () => {
     expect(out.discrepancies).toHaveLength(0);
     expect(out.items).toHaveLength(0);
   });
+
+  it("reports batch formula and pull-timing differences", () => {
+    const out = reconcileMixesWithPremixSheet({
+      currentMixes: [mix({
+        daysEarly: 0,
+        components: [{ ingredient: "Onion", perPizza: 0.05, perBatchLbs: 2 }],
+      })],
+      sheetMixes: [mix({
+        daysEarly: 2,
+        components: [{ ingredient: "Onion", perPizza: 0.05, perBatchLbs: 3 }],
+      })],
+    });
+    expect(out.discrepancies.map((d) => d.type)).toEqual([
+      "amount-mismatch",
+      "pull-timing-mismatch",
+    ]);
+    expect(out.items[0]?.suggestedMix.amountAlreadyMade).toBe(0);
+  });
 });
 
 describe("formatMixDiscrepanciesForPrompt", () => {

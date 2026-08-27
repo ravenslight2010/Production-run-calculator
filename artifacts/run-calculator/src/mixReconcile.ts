@@ -20,6 +20,7 @@ import {
   specImportToMixProducts,
   type MixDiscrepancy,
   type MixReconcileItem,
+  mixReconcileSignature,
 } from "@workspace/mix-reconcile";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchSavedPremixSheets } from "./savedPremixSheets";
@@ -128,6 +129,9 @@ export async function reconcileSpecSheetMixes(
 export async function applyMixReconcileItem(item: MixReconcileItem): Promise<Mix[]> {
   const existing = await fetchMixes();
   const idx = existing.findIndex((m) => m.id === item.suggestedMix.id);
+  if (item.currentSignature && (idx < 0 || mixReconcileSignature(existing[idx]!) !== item.currentSignature)) {
+    throw new Error("The current mix changed while this repair was open. Refresh and review it again.");
+  }
   const next = idx >= 0
     ? existing.map((m) => (m.id === item.suggestedMix.id ? item.suggestedMix : m))
     : [...existing, item.suggestedMix];

@@ -1334,6 +1334,8 @@ export interface MixComponentSpec {
   ingredient: string;
   /** Pounds of this ingredient per pizza */
   perPizza: number;
+  /** Pounds of this ingredient in one batch, retained from the source workbook */
+  perBatchLbs?: number;
 }
 
 /**
@@ -1373,6 +1375,50 @@ export interface SavedPremixSheetList {
   premixSheets: SavedPremixSheet[];
 }
 
+export type SavedCheeseRecipeComponentsItem = {
+  ingredient: string;
+  lbs: number;
+  ozPerPizza?: number;
+  sharePct?: number;
+};
+
+export interface SavedCheeseRecipe {
+  id: string;
+  name: string;
+  brand: string;
+  flavors: string[];
+  shredderSetting: string;
+  cellulose: string;
+  notes: string;
+  components: SavedCheeseRecipeComponentsItem[];
+  enabled: boolean;
+}
+
+export interface SavedCheeseSheet {
+  id: number;
+  label: string;
+  /** Stable per-file identity; retention keeps two versions per source key. */
+  sourceKey?: string | null;
+  /** Epoch milliseconds the snapshot was saved */
+  createdAt: number;
+  data: SavedCheeseRecipe[];
+}
+
+export interface SavedCheeseSheetList {
+  cheeseSheets: SavedCheeseSheet[];
+}
+
+export interface SaveCheeseSheetInput {
+  label: string;
+  /** Optional normalized uploaded filename identity. */
+  sourceKey?: string;
+  data: SavedCheeseRecipe[];
+}
+
+export type SavedCheeseSheetSaveResponse = SavedCheeseSheetList & {
+  snapshotId: number;
+};
+
 export interface SavePremixSheetInput {
   label: string;
   /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older/mobile clients (they share a legacy bucket). */
@@ -1396,6 +1442,7 @@ export const MixDiscrepancyWireType = {
   'missing-component': 'missing-component',
   'extra-component': 'extra-component',
   'amount-mismatch': 'amount-mismatch',
+  'pull-timing-mismatch': 'pull-timing-mismatch',
 } as const;
 
 export interface MixDiscrepancyWire {
@@ -3996,6 +4043,10 @@ export type AuditProfileDataHealth200 = {
 
 export type GetProfileNameLinkCleanupAudit200 = {
   heal: ProfileNameLinkCleanupAudit | null;
+};
+
+export type SavePremixSheet200 = SavedPremixSheetList & {
+  snapshotId: number;
 };
 
 export type ListImportHistoryParams = {

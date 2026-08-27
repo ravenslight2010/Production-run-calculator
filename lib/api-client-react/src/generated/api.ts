@@ -161,6 +161,7 @@ import type {
   SaveAiCorrectionsInput,
   SaveBrandProfilesInput,
   SaveCheeseRecipesInput,
+  SaveCheeseSheetInput,
   SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
   SaveDieLineDefaultsInput,
@@ -176,12 +177,15 @@ import type {
   SaveMixesInput,
   SaveNamedRecipesInput,
   SavePhotoAliasesInput,
+  SavePremixSheet200,
   SavePremixSheetInput,
   SaveProductionRulesInput,
   SaveRunTemplatesInput,
   SaveShippingGuideInput,
   SaveSpecImportAliasesInput,
   SaveSpecSheetInput,
+  SavedCheeseSheetList,
+  SavedCheeseSheetSaveResponse,
   SavedPremixSheetList,
   SavedShippingGuideList,
   SavedSpecSheetList,
@@ -10991,7 +10995,7 @@ export const getSavePremixSheetUrl = () => {
  * Persists a snapshot of an imported premix workbook (its Mix[]) so the current mixes can later be reconciled against it. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
  * @summary Save a premix-sheet snapshot (keeps only the two most recent)
  */
-export const savePremixSheet = async (savePremixSheetInput: SavePremixSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<SavedPremixSheetList> => {
+export const savePremixSheet = async (savePremixSheetInput: SavePremixSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<SavePremixSheet200> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -10999,7 +11003,7 @@ export const savePremixSheet = async (savePremixSheetInput: SavePremixSheetInput
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<SavedPremixSheetList>(getSavePremixSheetUrl(),
+return customFetch<SavePremixSheet200>(getSavePremixSheetUrl(),
   {
     ...options,
     method: 'POST',
@@ -11056,6 +11060,234 @@ export const useSavePremixSheet = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSavePremixSheetMutationOptions(options));
+    }
+
+export const getListCheeseSheetsUrl = () => {
+
+
+
+
+  return `/api/cheese-sheets`
+}
+
+/**
+ * Returns parsed Cheese Mix Recipe Specs retained after reviewed imports, newest first, with at most two versions per distinct source filename. Original workbook bytes are never stored.
+ * @summary List retained cheese recipe workbook snapshots
+ */
+export const listCheeseSheets = async ( options?: Parameters<typeof customFetch>[1]): Promise<SavedCheeseSheetList> => {
+
+  return customFetch<SavedCheeseSheetList>(getListCheeseSheetsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCheeseSheetsQueryKey = () => {
+    return [
+    `/api/cheese-sheets`
+    ] as const;
+    }
+
+
+export const getListCheeseSheetsQueryOptions = <TData = Awaited<ReturnType<typeof listCheeseSheets>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCheeseSheetsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCheeseSheets>>> = ({ signal }) => listCheeseSheets({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCheeseSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof listCheeseSheets>>>
+export type ListCheeseSheetsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List retained cheese recipe workbook snapshots
+ */
+
+export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheeseSheets>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCheeseSheetsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveCheeseSheetUrl = () => {
+
+
+
+
+  return `/api/cheese-sheets`
+}
+
+/**
+ * @summary Retain a parsed cheese recipe workbook snapshot
+ */
+export const saveCheeseSheet = async (saveCheeseSheetInput: SaveCheeseSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<SavedCheeseSheetSaveResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<SavedCheeseSheetSaveResponse>(getSaveCheeseSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(saveCheeseSheetInput)
+  }
+);}
+
+
+
+
+
+export const getSaveCheeseSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCheeseSheet>>, TError,SaveCheeseSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveCheeseSheet>>, TError,SaveCheeseSheetMutationVariables, TContext> => {
+
+const mutationKey = ['saveCheeseSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveCheeseSheet>>, SaveCheeseSheetMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveCheeseSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveCheeseSheetMutationResult = NonNullable<Awaited<ReturnType<typeof saveCheeseSheet>>>
+    export type SaveCheeseSheetMutationBody = BodyType<SaveCheeseSheetInput>
+    export type SaveCheeseSheetMutationError = ErrorType<void>
+    export type SaveCheeseSheetMutationVariables = {data: BodyType<SaveCheeseSheetInput>}
+
+    /**
+ * @summary Retain a parsed cheese recipe workbook snapshot
+ */
+export const useSaveCheeseSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCheeseSheet>>, TError,SaveCheeseSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveCheeseSheet>>,
+        TError,
+        SaveCheeseSheetMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveCheeseSheetMutationOptions(options));
+    }
+
+export const getDeleteCheeseSheetUrl = (id: number,) => {
+
+
+
+
+  return `/api/cheese-sheets/${id}`
+}
+
+/**
+ * @summary Delete a retained cheese recipe workbook snapshot
+ */
+export const deleteCheeseSheet = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<SavedCheeseSheetList> => {
+
+  return customFetch<SavedCheeseSheetList>(getDeleteCheeseSheetUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteCheeseSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseSheet>>, TError,DeleteCheeseSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseSheet>>, TError,DeleteCheeseSheetMutationVariables, TContext> => {
+
+const mutationKey = ['deleteCheeseSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCheeseSheet>>, DeleteCheeseSheetMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteCheeseSheet(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCheeseSheetMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCheeseSheet>>>
+
+    export type DeleteCheeseSheetMutationError = ErrorType<unknown>
+    export type DeleteCheeseSheetMutationVariables = {id: number}
+
+    /**
+ * @summary Delete a retained cheese recipe workbook snapshot
+ */
+export const useDeleteCheeseSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseSheet>>, TError,DeleteCheeseSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCheeseSheet>>,
+        TError,
+        DeleteCheeseSheetMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteCheeseSheetMutationOptions(options));
     }
 
 export const getDeletePremixSheetUrl = (id: number,) => {

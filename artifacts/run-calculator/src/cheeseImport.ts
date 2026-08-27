@@ -47,6 +47,7 @@ import {
   saveSpecImportAliases,
 } from "./specImportAliases";
 import { saveAiCorrections } from "./aiCorrections";
+import { saveCheeseSheet, buildCheeseSheetLabel, deriveSourceKey } from "./savedCheeseSheets";
 import {
   auditedCheeseApprovalFor,
   isAuditedCheeseWorkbook,
@@ -283,6 +284,8 @@ export type CheeseCommitResult = {
   count: number;
   /** The full saved pool returned by the server after the commit. */
   saved: CheeseRecipe[];
+  snapshotId?: number;
+  warning?: string;
 };
 
 /**
@@ -315,8 +318,9 @@ export async function commitCheeseImport(
       );
     }
   }
-  if (recipesToApply.length === 0 && recipesToRemove.length === 0) return { count: 0, saved: [] };
-  const existing = await fetchCheeseRecipes();
+  let saved: CheeseRecipe[] = [];
+  if (recipesToApply.length > 0 || recipesToRemove.length > 0) {
+    const existing = await fetchCheeseRecipes();
   const removeSet = new Set(recipesToRemove);
   const afterRemoval = recipesToRemove.length > 0
     ? existing.filter((r) => !removeSet.has(r.id))
@@ -324,7 +328,21 @@ export async function commitCheeseImport(
   const merged = recipesWithComponents.length > 0
     ? mergeCheeseRecipes(afterRemoval, recipesWithComponents)
     : afterRemoval;
-  const saved = await saveCheeseRecipes(merged);
+    saved = await saveCheeseRecipes(merged);
+  }
+  let snapshotId: number | undefined;
+  let warning: string | undefined;
+  try {
+    const source = prepared.recipes.filter((recipe) => (recipe.components?.length ?? 0) > 0);
+    const retained = await saveCheeseSheet(
+      buildCheeseSheetLabel(source, prepared.sourceNames),
+      source,
+      deriveSourceKey(prepared.sourceNames ?? []),
+    );
+    snapshotId = retained.snapshotId;
+  } catch {
+    warning = "The reviewed cheese changes were applied, but the retained repair source could not be saved.";
+  }
   // Remember the review's manual "use existing recipe" picks as blend-name
   // aliases so the next import of the same sheet pre-suggests the same links.
   // Best-effort: the recipes already saved; learning is a bonus.
@@ -408,5 +426,10 @@ export async function commitCheeseImport(
       );
     }
   }
-  return { count: recipesWithComponents.length, saved };
+  return {
+    count: recipesWithComponents.length,
+    saved,
+    ...(snapshotId != null ? { snapshotId } : {}),
+    ...(warning ? { warning } : {}),
+  };
 }
