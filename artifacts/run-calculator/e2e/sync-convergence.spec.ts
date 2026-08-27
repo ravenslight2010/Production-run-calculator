@@ -7,7 +7,7 @@
  * canonical server response after wake.
  */
 
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import {
   cleanupTestUsers,
@@ -727,6 +727,116 @@ test(
       expect((empty.dayState as SyncPayload["dayState"]).runs).toEqual([]);
     } finally {
       await peerContext.close();
+    }
+  },
+);
+
+test(
+  "manager moves a future run into a populated today plan and keeps it after reload",
+  async ({ page }: { page: Page }, testInfo: TestInfo) => {
+    const username = uid();
+    users.add(username);
+    const liveRunId = `move-live-${Date.now()}`;
+    const futureRunId = `move-future-${Date.now()}`;
+    const currentDate = today();
+    const futureDate = (() => {
+      const d = new Date(`${currentDate}T12:00:00`);
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+
+    await signUp(page, username);
+    await promoteToManager(page);
+    await page.evaluate(async ({ currentDate, futureDate, liveRunId, futureRunId }) => {
+      const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+      const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
+      const put = async (path: string, payload: unknown) => {
+        const response = await fetch(`${path}&epoch=${epoch}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ senderId: "schedule-move-e2e", payload }),
+        });
+        if (!response.ok) throw new Error(`fixture PUT failed: ${response.status}`);
+      };
+      await put(`/api/sync/today?today=${currentDate}`, {
+        dayState: {
+          date: currentDate,
+          runs: [{ id: liveRunId, brand: "Move Existing", flavor: "Live Plan" }],
+        },
+        runValues: { [liveRunId]: { casesNeeded: 11, casesPerSkid: 12 } },
+        runValuesUpdatedAt: { [liveRunId]: 100 },
+      });
+      await put(`/api/sync/${futureDate}?today=${currentDate}`, {
+        dayState: {
+          date: futureDate,
+          runs: [{ id: futureRunId, brand: "Move Future", flavor: "Tomorrow" }],
+        },
+        runValues: { [futureRunId]: { casesNeeded: 37, casesPerSkid: 12 } },
+        runValuesUpdatedAt: { [futureRunId]: 200 },
+      });
+    }, { currentDate, futureDate, liveRunId, futureRunId });
+
+    try {
+      // Promotion happens after sign-up, so reload once to hydrate the manager
+      // capability before using the manager-only Schedule control.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+      const dialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      await expect(dialog).toBeVisible();
+
+      const futureDay = page.getByTestId(`schedule-day-${futureDate}`);
+      await expect(futureDay).toBeVisible();
+      await futureDay.locator("button").first().click();
+      const moveRun = futureDay.getByTestId(`move-run-${futureRunId}`);
+      await expect(moveRun).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("01-future-run-before-move.png"), fullPage: true });
+      await moveRun.click();
+
+      const moveDate = futureDay.getByTestId(`move-date-${futureRunId}`);
+      await expect(moveDate).toHaveAttribute("min", currentDate);
+      await moveDate.fill(currentDate);
+      await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
+
+      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      await expect(page.getByTestId(`schedule-day-${futureDate}`)).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath("02-after-move.png"), fullPage: true });
+
+      const canonical = await page.evaluate(async (date) => {
+        const response = await fetch(`/api/sync/today?today=${date}`, { cache: "no-store" });
+        return await response.json() as {
+          dayState?: { runs?: Array<{ id?: string }> };
+          runValues?: Record<string, { casesNeeded?: number }>;
+          runValuesUpdatedAt?: Record<string, number>;
+        };
+      }, currentDate);
+      expect(canonical.dayState?.runs?.map((run) => run.id)).toEqual([liveRunId, futureRunId]);
+      expect(canonical.runValues?.[futureRunId]?.casesNeeded).toBe(37);
+      expect(canonical.runValuesUpdatedAt?.[futureRunId]).toBe(200);
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      const getStarted = page.getByRole("button", { name: /^get.?started$/i });
+      if (await getStarted.isVisible().catch(() => false)) {
+        await getStarted.click();
+      }
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+      const reloadedDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      await expect(reloadedDialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      await expect(page.getByTestId(`schedule-day-${futureDate}`)).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath("03-today-after-reload.png"), fullPage: true });
+    } finally {
+      const db = new Client({
+        connectionString: requireIsolatedTestDatabase("schedule move e2e cleanup"),
+      });
+      try {
+        await db.connect();
+        await db.query("DELETE FROM daily_sync WHERE date IN ($1, $2)", [currentDate, futureDate]);
+      } finally {
+        await db.end().catch(() => {});
+      }
     }
   },
 );

@@ -152,8 +152,8 @@
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release evidence timing and revision](release-check-shard-budget.md) + [revision-bound-release-evidence](revision-bound-release-evidence.md) — shard runtime and managed rebases both affect whether release reports remain valid.
 - [Skill trigger runtime](skill-trigger-runtime.md) — trigger benchmarks need an authenticated Claude CLI; evaluator subprocess failures are synthetic non-triggers, not model evidence.
-- [Large source-audit captures](large-source-audit-captures.md) — shard escaped production JSON reads and assemble only after the hashed source corpus is stable.
-- [Source-audit report versions](source-audit-report-versions.md) — persisted comparisons dispatch by supported read version while newly generated reports remain current-version strict.
+- [Source-audit reports](large-source-audit-captures.md) + [versions](source-audit-report-versions.md) — keep hashed source captures shard-safe and dispatch persisted comparisons by supported read version.
 - [Development esbuild override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
 - [Queue history cursor precision](queue-history-cursor-precision.md) — keyset cursors must use a stable database key when PostgreSQL timestamps exceed JavaScript Date precision.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
+- [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.

@@ -1,0 +1,61 @@
+{
+  "revision": "800735ba492e586e318328fcedb15c91f7088055",
+  "mode": "full",
+  "results": [
+    {
+      "label": "production dependency audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1664
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 14960
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1021
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 40490
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 61401
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 6817
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 3846
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1084
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 23227
+    }
+  ],
+  "updatedAt": "2026-08-27T22:27:21.962Z"
+}

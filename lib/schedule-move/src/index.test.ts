@@ -120,4 +120,13 @@ describe("relocateValues", () => {
     expect(res.source).toEqual({});
     expect(res.target).toEqual({ a: 1 });
   });
+
+  it("relocates per-run edit stamps without changing the target's existing stamps", () => {
+    const src = { moved: 1200, untouched: 900 };
+    const tgt = { live: 2400 };
+    const res = relocateValues(src, tgt, [{ from: "moved", to: "moved-copy" }]);
+
+    expect(res.source).toEqual({ untouched: 900 });
+    expect(res.target).toEqual({ live: 2400, "moved-copy": 1200 });
+  });
 });

@@ -6755,6 +6755,11 @@ export default function Home() {
   const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
   const [scheduleMoveDate, setScheduleMoveDate] = useState("");
   const [scheduleMoving, setScheduleMoving] = useState(false);
+  const scheduleMoveCleanupRef = useRef<{
+    fromDate: string;
+    toDate: string;
+    movedIds: string[];
+  } | null>(null);
 
   // ── Back-button trap (Android / PWA) ──────────────────────────────────────
   // Priority: close any open overlay first, then unwind tab history, then stay.
@@ -6977,12 +6982,20 @@ export default function Home() {
       setScheduleDeleteConfirm(null);
     } catch {}
   }
-  async function fetchSchedulePayload(date: string): Promise<SyncPayload | null> {
+  async function fetchSchedulePayload(date: string): Promise<{ payload: SyncPayload | null; available: boolean }> {
     try {
-      const res = await fetch(`/api/sync/${date}`);
-      if (!res.ok) return null;
-      return (await res.json()) as SyncPayload | null;
-    } catch { return null; }
+      const res = date === todayStr()
+        ? await fetch(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" })
+        : await fetch(`/api/sync/${date}?today=${todayStr()}`, { cache: "no-store" });
+      if (!res.ok) return { payload: null, available: false };
+      const payload = await res.json() as SyncPayload | null;
+      return {
+        payload: payload?.dayState ? payload : null,
+        available: true,
+      };
+    } catch {
+      return { payload: null, available: false };
+    }
   }
   async function refreshScheduledDays() {
     try {
@@ -6990,58 +7003,167 @@ export default function Home() {
       setScheduledDays(normalizeScheduledDays(d));
     } catch {}
   }
-  // Move a whole scheduled day (sel "all") or a single run (sel.runId) to another
-  // future date. Web schedule pool is future days only — the live "today" runs are
-  // never a move source or target (mobile allows today; see schedule-move memory).
-  // Target is written before the source is trimmed/deleted, so a partial network
-  // failure can only leave a duplicate (visible, user-fixable) — never lose runs.
-  async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string) {
-    if (!toDate || toDate === fromDate) return;
-    const src = await fetchSchedulePayload(fromDate);
-    if (!src?.dayState) return;
+  // Move a whole scheduled day (sel "all") or a single run (sel.runId) to
+  // another future date or today's live plan. The live target is read from the
+  // canonical today row, then written through the normal today endpoint so its
+  // additive/tombstone/LWW protections and SSE peers remain in the loop.
+  // Target is written before the source is trimmed/deleted: a partial failure
+  // leaves the source intact and the move panel actionable instead of losing it.
+  async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string): Promise<boolean> {
+    setScheduleError(null);
+    const today = todayStr();
+    if (!toDate || toDate === fromDate) return false;
+    if (fromDate <= today || toDate < today) {
+      setScheduleError("Choose a future scheduled day and today or a future date.");
+      return false;
+    }
+    const sourceResult = await fetchSchedulePayload(fromDate);
+    if (!sourceResult.available) {
+      setScheduleError("Couldn't load the source day. Check your connection and try again.");
+      return false;
+    }
+    const src = sourceResult.payload;
+    if (!src?.dayState) {
+      setScheduleError("That scheduled day is no longer available. Refresh and try again.");
+      return false;
+    }
     let ids: string[] | "all";
     if (sel === "all") ids = "all";
     else {
-      if (!src.dayState.runs.some(r => r.id === sel.runId)) return;
+      if (!src.dayState.runs.some(r => r.id === sel.runId)) {
+        setScheduleError("That run is no longer on the source day. Refresh and try again.");
+        return false;
+      }
       ids = [sel.runId];
     }
-    const tgt = await fetchSchedulePayload(toDate);
+    const targetResult = await fetchSchedulePayload(toDate);
+    if (!targetResult.available) {
+      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
+      return false;
+    }
+    const tgt = targetResult.payload;
     const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
-    if (idMap.length === 0) return;
+    if (idMap.length === 0) {
+      setScheduleError("There were no runs to move. Refresh and try again.");
+      return false;
+    }
     const vals = relocateValues(
       (src.runValues ?? {}) as Record<string, FormValues>,
       (tgt?.runValues ?? {}) as Record<string, FormValues>,
       idMap,
     );
+    const stamps = relocateValues(
+      src.runValuesUpdatedAt ?? {},
+      tgt?.runValuesUpdatedAt ?? {},
+      idMap,
+    );
+    const packaging = relocateValues(
+      src.packagingProgress ?? {},
+      tgt?.packagingProgress ?? {},
+      idMap,
+    );
     const base = tgt ?? src;
     const targetPayload: SyncPayload = {
       ...base,
-      dayState: { ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: writeDayResetAt(toDate, todayStr(), (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()) },
+      // A move is built from a canonical read, so send it as a complete
+      // merge. Reusing a cached partial-sync baseSnapshotId makes an otherwise
+      // valid move fall back when the normal live sync advances that snapshot
+      // between the read and this write.
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: undefined,
+      dayState: {
+        ...(base.dayState ?? src.dayState),
+        runs: target,
+        date: toDate,
+        resetAt: writeDayResetAt(toDate, today, (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()),
+      },
       runValues: vals.target,
+      runValuesUpdatedAt: stamps.target,
+      packagingProgress: packaging.target,
     };
-    const tRes = await fetch(`/api/sync/${toDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ payload: targetPayload }),
-    });
-    const targetResult = await consumeCanonicalSyncWriteResponse(tRes, false);
-    if (!tRes.ok || targetResult.stale) return;
-    if (source.length === 0) {
-      await fetch(`/api/sync/${fromDate}?today=${todayStr()}`, { method: "DELETE" });
-    } else {
-      const sourcePayload: SyncPayload = {
-        ...src,
-        dayState: { ...src.dayState, runs: source, date: fromDate },
-        runValues: vals.source,
-      };
-      const sRes = await fetch(`/api/sync/${fromDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload: sourcePayload }),
-      });
-      await consumeCanonicalSyncWriteResponse(sRes, false);
+    const selectedIds = idMap.map(({ from }) => from);
+    const pendingCleanup = scheduleMoveCleanupRef.current;
+    const retryingCleanup = !!pendingCleanup &&
+      pendingCleanup.fromDate === fromDate &&
+      pendingCleanup.toDate === toDate &&
+      pendingCleanup.movedIds.length === selectedIds.length &&
+      pendingCleanup.movedIds.every((id) => selectedIds.includes(id));
+    if (!retryingCleanup) {
+      let canonicalTarget: { body: unknown; stale: boolean };
+      try {
+        const tRes = await fetch(
+          toDate === today
+            ? `/api/sync/today?today=${today}&epoch=${getStoredResetEpoch()}`
+            : `/api/sync/${toDate}?today=${today}&epoch=${getStoredResetEpoch()}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payload: targetPayload }),
+          },
+        );
+        canonicalTarget = await consumeCanonicalSyncWriteResponse(tRes, toDate === today);
+        const canonicalTargetBody = canonicalTarget.body as { data?: unknown; partialFallback?: boolean } | null;
+        if (!tRes.ok || canonicalTarget.stale || canonicalTargetBody?.partialFallback || !canonicalTargetBody?.data) {
+          setScheduleError(
+            canonicalTarget.stale
+              ? "The destination was reset before the move completed. Refresh and try again."
+              : "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
+          );
+          return false;
+        }
+      } catch {
+        setScheduleError(
+          "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
+        );
+        return false;
+      }
+      // If the second write fails, the next click can finish source cleanup
+      // without writing the already-canonical destination a second time.
+      scheduleMoveCleanupRef.current = { fromDate, toDate, movedIds: selectedIds };
     }
+    try {
+      if (source.length === 0) {
+        const deleteRes = await fetch(`/api/sync/${fromDate}?today=${today}`, { method: "DELETE" });
+        if (!deleteRes.ok) {
+          setScheduleError("The run was added to today's plan, but the future source could not be removed. Retry Move to finish.");
+          return false;
+        }
+      } else {
+        const sourcePayload: SyncPayload = {
+          ...src,
+          dayState: {
+            ...src.dayState,
+            runs: source,
+            date: fromDate,
+          },
+          syncVersion: 1,
+          completeness: "complete",
+          baseSnapshotId: undefined,
+          runValues: vals.source,
+          runValuesUpdatedAt: stamps.source,
+          packagingProgress: packaging.source,
+        };
+        const sRes = await fetch(`/api/sync/${fromDate}?today=${today}&epoch=${getStoredResetEpoch()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload: sourcePayload }),
+        });
+        const sourceResult = await consumeCanonicalSyncWriteResponse(sRes, false);
+        const sourceResultBody = sourceResult.body as { partialFallback?: boolean } | null;
+        if (!sRes.ok || sourceResult.stale || sourceResultBody?.partialFallback) {
+          setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
+          return false;
+        }
+      }
+    } catch {
+      setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
+      return false;
+    }
+    scheduleMoveCleanupRef.current = null;
     await refreshScheduledDays();
+    setScheduleError(null);
+    return true;
   }
   function updateAdvancedField<K extends keyof FormValues>(runId: string, field: K, value: FormValues[K]) {
     setScheduleEditorRunValues(prev => ({
@@ -9271,8 +9393,9 @@ export default function Home() {
       for (const day of days) {
         if (day.date <= todayStr()) continue;
         if (!(day.runs ?? []).some(matches)) continue;
-        const payload = await fetchSchedulePayload(day.date);
-        if (!payload?.dayState?.runs) { allOk = false; continue; }
+        const payloadResult = await fetchSchedulePayload(day.date);
+        const payload = payloadResult.payload;
+        if (!payloadResult.available || !payload?.dayState?.runs) { allOk = false; continue; }
         const rv = { ...(payload.runValues ?? {}) };
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
@@ -17873,7 +17996,7 @@ export default function Home() {
                         day-state path (stamped values + tombstones + push), so
                         changes stick instead of being reverted by the next
                         sync push (e.g. Start Run). */}
-                    <div className="rounded-lg bg-primary/5 border border-primary/30 overflow-hidden">
+                    <div data-testid="schedule-today-card" className="rounded-lg bg-primary/5 border border-primary/30 overflow-hidden">
                       <div className="flex items-center justify-between gap-3 p-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold truncate">
@@ -17890,6 +18013,11 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+                    {scheduleError && (
+                      <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                        {scheduleError}
+                      </p>
+                    )}
                     {scheduledDays.length === 0 ? (
                       <div className="text-center py-10">
                         <CalendarPlus className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -17899,7 +18027,7 @@ export default function Home() {
                     ) : scheduledDays.map(day => {
                       const isExpanded = expandedScheduleDay === day.date;
                       return (
-                        <div key={day.date} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
+                        <div key={day.date} data-testid={`schedule-day-${day.date}`} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
                           {/* ── Header row ── */}
                           <div className="flex items-center justify-between gap-3 p-3">
                             <button
@@ -17920,8 +18048,10 @@ export default function Home() {
                             <div className="flex gap-1.5 shrink-0 items-center">
                               <button
                                 type="button"
+                                data-testid={`move-day-${day.date}`}
                                 onClick={() => {
                                   setScheduleDeleteConfirm(null);
+                                setScheduleError(null);
                                   if (scheduleMove?.from === day.date && scheduleMove.runId === null) {
                                     setScheduleMove(null);
                                   } else {
@@ -17964,7 +18094,7 @@ export default function Home() {
                                 <input
                                   type="date"
                                   value={scheduleMoveDate}
-                                  min={tomorrowStr()}
+                                   min={todayStr()}
                                   onChange={e => setScheduleMoveDate(e.target.value)}
                                   className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
                                 />
@@ -17973,9 +18103,9 @@ export default function Home() {
                                   disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
                                   onClick={async () => {
                                     setScheduleMoving(true);
-                                    await performScheduleMove(day.date, "all", scheduleMoveDate);
-                                    setScheduleMoving(false);
-                                    setScheduleMove(null);
+                                   const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                   setScheduleMoving(false);
+                                   if (moved) setScheduleMove(null);
                                   }}
                                   className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
                                 >
@@ -18023,11 +18153,13 @@ export default function Home() {
                                     </button>
                                     <button
                                       type="button"
+                                        data-testid={`move-run-${run.id}`}
                                       disabled={!run.id}
                                       onClick={() => {
                                         if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) {
                                           setScheduleMove(null);
                                         } else {
+                                          setScheduleError(null);
                                           setScheduleMove({ from: day.date, runId: run.id });
                                           setScheduleMoveDate(tomorrowStr());
                                         }
@@ -18041,8 +18173,9 @@ export default function Home() {
                                     <div className="flex items-center gap-2 mt-1.5 ml-6">
                                       <input
                                         type="date"
+                                         data-testid={`move-date-${run.id}`}
                                         value={scheduleMoveDate}
-                                        min={tomorrowStr()}
+                                         min={todayStr()}
                                         onChange={e => setScheduleMoveDate(e.target.value)}
                                         className="flex-1 h-7 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
                                       />
@@ -18051,9 +18184,9 @@ export default function Home() {
                                         disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
                                         onClick={async () => {
                                           setScheduleMoving(true);
-                                          await performScheduleMove(day.date, { runId: run.id }, scheduleMoveDate);
-                                          setScheduleMoving(false);
-                                          setScheduleMove(null);
+                                           const moved = await performScheduleMove(day.date, { runId: run.id }, scheduleMoveDate);
+                                           setScheduleMoving(false);
+                                           if (moved) setScheduleMove(null);
                                         }}
                                         className="px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
                                       >
