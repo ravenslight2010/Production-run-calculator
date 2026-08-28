@@ -7,7 +7,7 @@
  * canonical server response after wake.
  */
 
-import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Browser, type Page, type Route, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import {
   cleanupTestUsers,
@@ -82,6 +82,103 @@ async function promoteToManager(page: Page): Promise<void> {
   try {
     await db.connect();
     await db.query("UPDATE user_roles SET role = 'manager' WHERE user_id = $1", [identity?.userId]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
+type ScheduleMoveFixture = {
+  currentDate: string;
+  futureDate: string;
+  liveRunId: string;
+  futureRunId: string;
+};
+
+function scheduleMoveFixture(): ScheduleMoveFixture {
+  const currentDate = today();
+  const futureDate = (() => {
+    const d = new Date(`${currentDate}T12:00:00`);
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    currentDate,
+    futureDate,
+    liveRunId: `move-live-${suffix}`,
+    futureRunId: `move-future-${suffix}`,
+  };
+}
+
+async function seedScheduleMoveFixture(page: Page, fixture: ScheduleMoveFixture): Promise<void> {
+  await page.evaluate(async ({ currentDate, futureDate, liveRunId, futureRunId }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+    const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
+    const put = async (path: string, payload: unknown) => {
+      const response = await fetch(`${path}&epoch=${epoch}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ senderId: "schedule-move-e2e", payload }),
+      });
+      if (!response.ok) throw new Error(`fixture PUT failed: ${response.status}`);
+    };
+    await put(`/api/sync/today?today=${currentDate}`, {
+      dayState: {
+        date: currentDate,
+        runs: [{ id: liveRunId, brand: "Move Existing", flavor: "Live Plan" }],
+      },
+      runValues: { [liveRunId]: { casesNeeded: 11, casesPerSkid: 12 } },
+      runValuesUpdatedAt: { [liveRunId]: 100 },
+    });
+    await put(`/api/sync/${futureDate}?today=${currentDate}`, {
+      dayState: {
+        date: futureDate,
+        runs: [{ id: futureRunId, brand: "Move Future", flavor: "Tomorrow" }],
+      },
+      runValues: { [futureRunId]: { casesNeeded: 37, casesPerSkid: 12 } },
+      runValuesUpdatedAt: { [futureRunId]: 200 },
+    });
+  }, fixture);
+}
+
+function observeScheduleMoveEvidence(page: Page) {
+  const consoleMessages: string[] = [];
+  const pageErrors: string[] = [];
+  const backendResponses: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") {
+      consoleMessages.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.url().includes("/api/sync/")) {
+      backendResponses.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+  return { consoleMessages, pageErrors, backendResponses };
+}
+
+async function attachScheduleMoveEvidence(
+  testInfo: TestInfo,
+  evidence: ReturnType<typeof observeScheduleMoveEvidence>,
+): Promise<void> {
+  await testInfo.attach("schedule-move-console-backend-evidence.json", {
+    body: JSON.stringify(evidence, null, 2),
+    contentType: "application/json",
+  });
+}
+
+async function cleanupScheduleMoveFixture(fixture: ScheduleMoveFixture): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("schedule move e2e cleanup"),
+  });
+  try {
+    await db.connect();
+    await db.query("DELETE FROM daily_sync WHERE date IN ($1, $2)", [
+      fixture.currentDate,
+      fixture.futureDate,
+    ]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -235,6 +332,7 @@ test(
     }, { timeout: 15_000 }).toBe(17);
   },
 );
+
 
 test(
   "queued Target Cases edit recovers when a sleeping tab wakes",
@@ -837,6 +935,158 @@ test(
       } finally {
         await db.end().catch(() => {});
       }
+    }
+  },
+);
+
+test(
+  "keeps the future source available with retry guidance when the destination write fails",
+  async ({ page }: { page: Page }, testInfo: TestInfo) => {
+    const username = uid();
+    users.add(username);
+    const fixture = scheduleMoveFixture();
+    const evidence = observeScheduleMoveEvidence(page);
+    let forcedDestinationFailures = 0;
+    const destinationFailureRoute = async (route: Route) => {
+      const request = route.request();
+      if (
+        request.method() === "PUT" &&
+        new URL(request.url()).pathname === "/api/sync/today" &&
+        request.postData()?.includes(fixture.futureRunId)
+      ) {
+        forcedDestinationFailures += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced destination failure" }),
+        });
+        return;
+      }
+      await route.continue();
+    };
+
+    try {
+      await signUp(page, username);
+      await promoteToManager(page);
+      await seedScheduleMoveFixture(page, fixture);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+
+      const dialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      const futureDay = page.getByTestId(`schedule-day-${fixture.futureDate}`);
+      await expect(futureDay).toBeVisible();
+      await futureDay.locator("button").first().click();
+      const moveRun = futureDay.getByTestId(`move-run-${fixture.futureRunId}`);
+      await moveRun.click();
+      const moveDate = futureDay.getByTestId(`move-date-${fixture.futureRunId}`);
+      await moveDate.fill(fixture.currentDate);
+
+      await page.route("**/api/sync/**", destinationFailureRoute);
+      await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
+
+      await expect(page.getByRole("alert")).toContainText(
+        "The source is unchanged; check your connection and try again.",
+      );
+      await expect(futureDay).toBeVisible();
+      await expect(moveDate).toHaveValue(fixture.currentDate);
+      expect(forcedDestinationFailures).toBe(1);
+      await page.screenshot({
+        path: testInfo.outputPath("04-destination-failure-source-retained.png"),
+        fullPage: true,
+      });
+
+      // The failed destination write leaves the same move controls active. A
+      // retry after the injected failure should now complete normally.
+      await page.unroute("**/api/sync/**", destinationFailureRoute);
+      await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
+      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      await expect(page.getByTestId(`schedule-day-${fixture.futureDate}`)).toHaveCount(0);
+      expect(evidence.pageErrors).toEqual([]);
+    } finally {
+      await page.unroute("**/api/sync/**", destinationFailureRoute).catch(() => {});
+      await attachScheduleMoveEvidence(testInfo, evidence);
+      await cleanupScheduleMoveFixture(fixture);
+    }
+  },
+);
+
+test(
+  "retries source cleanup after a successful destination write without duplicating today's run",
+  async ({ page }: { page: Page }, testInfo: TestInfo) => {
+    const username = uid();
+    users.add(username);
+    const fixture = scheduleMoveFixture();
+    const evidence = observeScheduleMoveEvidence(page);
+    let forcedCleanupFailures = 0;
+    const cleanupFailureRoute = async (route: Route) => {
+      const request = route.request();
+      if (
+        request.method() === "DELETE" &&
+        new URL(request.url()).pathname === `/api/sync/${fixture.futureDate}`
+      ) {
+        forcedCleanupFailures += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced source cleanup failure" }),
+        });
+        return;
+      }
+      await route.continue();
+    };
+
+    try {
+      await signUp(page, username);
+      await promoteToManager(page);
+      await seedScheduleMoveFixture(page, fixture);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+
+      const dialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      const futureDay = page.getByTestId(`schedule-day-${fixture.futureDate}`);
+      await expect(futureDay).toBeVisible();
+      await futureDay.locator("button").first().click();
+      const moveRun = futureDay.getByTestId(`move-run-${fixture.futureRunId}`);
+      await moveRun.click();
+      const moveDate = futureDay.getByTestId(`move-date-${fixture.futureRunId}`);
+      await moveDate.fill(fixture.currentDate);
+
+      await page.route("**/api/sync/**", cleanupFailureRoute);
+      await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
+
+      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      await expect(page.getByRole("alert")).toContainText("Retry Move to finish.");
+      await expect(futureDay).toBeVisible();
+      expect(forcedCleanupFailures).toBe(1);
+      await page.screenshot({
+        path: testInfo.outputPath("05-cleanup-failure-retry-guidance.png"),
+        fullPage: true,
+      });
+
+      // The destination is already canonical. Retrying the same move must
+      // perform only the pending source cleanup, not append another run.
+      await page.unroute("**/api/sync/**", cleanupFailureRoute);
+      await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
+      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      await expect(page.getByTestId(`schedule-day-${fixture.futureDate}`)).toHaveCount(0);
+
+      const canonical = await page.evaluate(async (date) => {
+        const response = await fetch(`/api/sync/today?today=${date}`, { cache: "no-store" });
+        return await response.json() as { dayState?: { runs?: Array<{ id?: string }> } };
+      }, fixture.currentDate);
+      expect(canonical.dayState?.runs?.map((run) => run.id)).toEqual([
+        fixture.liveRunId,
+        fixture.futureRunId,
+      ]);
+      expect(evidence.pageErrors).toEqual([]);
+    } finally {
+      await page.unroute("**/api/sync/**", cleanupFailureRoute).catch(() => {});
+      await attachScheduleMoveEvidence(testInfo, evidence);
+      await cleanupScheduleMoveFixture(fixture);
     }
   },
 );
