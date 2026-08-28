@@ -22740,23 +22740,23 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn}>−</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
                   <p className="text-xl font-mono font-bold text-foreground tabular-nums">
                     {packedSkids}
                     {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
                   </p>
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn}>+</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
                 </div>
               </div>
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn}>−</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
                   <p className="text-xl font-mono font-bold text-foreground tabular-nums">
                     {packedCasesOnSkid}
                     {hasCps && <span className="text-xs text-muted-foreground font-normal">/{cps}</span>}
                   </p>
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn}>+</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn} data-testid="btn-inc-packCases">+</button>
                 </div>
               </div>
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">

@@ -51,15 +51,18 @@ async function signUpAndDismissOnboarding(page: Page, username: string): Promise
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
   const onboarding = page.getByRole("dialog");
-  await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  await onboarding.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: "Close" }).click();
+    await onboarding.getByRole("button", { name: /get started|close/i }).first().click();
     await page.locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
   }
 }
 
-async function seedRunningValues(page: Page): Promise<void> {
+async function seedRunningValues(
+  page: Page,
+  valueOverrides: Record<string, number> = {},
+): Promise<void> {
   await page.locator('[data-testid="tab-run"]').click();
   // The tab can be attached before the initial live-day snapshot has hydrated.
   // Wait for the same visible setup surface an operator uses to know the run is
@@ -69,7 +72,7 @@ async function seedRunningValues(page: Page): Promise<void> {
   await page.getByTestId("button-start-run").click();
   await page.getByRole("button", { name: /stop.?run/i }).waitFor({ state: "visible" });
 
-  await page.evaluate(() => {
+  await page.evaluate((overrides) => {
     const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}");
     const run = day.runs?.[day.currentIndex ?? 0];
     if (!run?.id) throw new Error("The new test run was not persisted locally");
@@ -92,16 +95,47 @@ async function seedRunningValues(page: Page): Promise<void> {
       mixerLowSec: 30,
       mixerHighSec: 30,
       hopperSec: 30,
+      ...overrides,
     }));
-  });
+    if (Object.keys(overrides).length > 0) {
+      const now = Date.now();
+      day.runs = day.runs.map((candidate: { id?: string }) =>
+        candidate.id === run.id
+          ? { ...candidate, startedAt: now - 120_000, endedAt: undefined, pausedAt: undefined }
+          : candidate,
+      );
+      localStorage.setItem("run-calc-day", JSON.stringify(day));
+    }
+  }, valueOverrides);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   const onboarding = page.getByRole("dialog");
-  await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  await onboarding.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: "Close" }).click();
+    await onboarding.getByRole("button", { name: /get started|close/i }).first().click();
     await page.locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
+  }
+  for (const field of [
+    "casesNeeded",
+    "pizzasPerCase",
+    "casesPerSkid",
+    "crustsPerCycle",
+    "cycleSpeed",
+    "speedAdjustment",
+    "freezerTime",
+  ]) {
+    if (!(field in valueOverrides)) continue;
+    const input = page.getByTestId(`input-${field}`);
+    await input.evaluate((element, value) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(element, value);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    }, String(valueOverrides[field]));
   }
 }
 
@@ -131,4 +165,39 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
 
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
+});
+
+test("Dough and Sauce phone quick checks share line-speed feedback across tab switches", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const username = uid();
+  testUsernames.add(username);
+  await signUpAndDismissOnboarding(page, username);
+  await seedRunningValues(page, {
+    casesNeeded: 100,
+    casesPerSkid: 10,
+    pizzasPerCase: 1,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+  });
+  // The server-backed run snapshot can replace the local fixture's backdated
+  // start time on reload. Let the real post-freezer eligibility window elapse
+  // so this browser check exercises the suggestion, not its wait-state copy.
+  await page.waitForTimeout(31_000);
+
+  // Each quick check contributes one signed case correction. The provider
+  // must retain the first correction while the Dough surface unmounts and
+  // Sauce mounts, then expose the resulting suggestion on Packaging.
+  await page.getByTestId("tab-dough").click();
+  await expect(page.getByTestId("btn-inc-packCases")).toBeVisible();
+  await page.getByTestId("btn-inc-packCases").click();
+
+  await page.getByTestId("tab-sauce").click();
+  await expect(page.getByTestId("btn-inc-packCases")).toBeVisible();
+  await page.getByTestId("btn-inc-packCases").click();
+
+  await page.getByTestId("tab-packaging").click();
+  await expect(page.getByTestId("speed-nudge-card")).toBeVisible();
+  await expect(page.getByTestId("speed-nudge-card")).toContainText("Line Speed Suggestion");
 });

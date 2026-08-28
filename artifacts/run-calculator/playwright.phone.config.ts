@@ -14,6 +14,7 @@ const realMobileBrowserWsEndpoint =
 export default defineConfig({
   testDir: "./e2e",
   testMatch: [
+    "live-sauce-dough-phone.spec.ts",
     "phone-layout.spec.ts",
     "management-performance.spec.ts",
     "sync-convergence.spec.ts",
@@ -34,7 +35,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testMatch: "phone-layout.spec.ts",
+      testMatch: ["live-sauce-dough-phone.spec.ts", "phone-layout.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
