@@ -50,6 +50,7 @@ import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
+import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
 export { detectConflicts } from "../lib/syncConflict";
 
 const router: IRouter = Router();
@@ -578,6 +579,84 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       };
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   res.json(responseBody);
+});
+
+router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promise<void> => {
+  const startedAt = Date.now();
+  const claim = parseAutoTrackClaim(req.body?.claim, startedAt);
+  if (!claim) {
+    res.status(400).json({ error: "Invalid auto-track event" });
+    return;
+  }
+  const date = clientToday(req);
+  const scope = currentScope();
+  const staleEpoch = await isStaleResetPush(req, scope);
+  if (staleEpoch !== null) {
+    res.setHeader("X-Sync-Response", "stale");
+    res.json({ ok: true, stale: true, epoch: staleEpoch });
+    return;
+  }
+
+  try {
+    let result:
+      | ReturnType<typeof applyAutoTrackClaim>
+      | undefined;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await db.transaction(async (tx) => {
+          const [existing] = await tx
+            .select()
+            .from(dailySyncTable)
+            .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
+            .for("update");
+          const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
+          if (applied.outcome === "accepted") {
+            if (existing) {
+              await tx.update(dailySyncTable)
+                .set({ data: applied.data as any, updatedAt: new Date() })
+                .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+            } else {
+              await tx.insert(dailySyncTable)
+                .values({ date, scope, data: applied.data as any, updatedAt: new Date() });
+            }
+          }
+          return applied;
+        });
+        break;
+      } catch (error) {
+        if (isUniqueViolation(error) && attempt < 3) continue;
+        throw error;
+      }
+    }
+    if (!result) throw new Error("Auto-track claim did not complete");
+    const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
+    if (result.outcome === "accepted") broadcast(result.data, senderId, scope, date);
+    req.log.info({
+      event: "auto_track_claim",
+      outcome: result.outcome,
+      channel: claim.channel,
+      runId: createHash("sha256").update(claim.runId).digest("hex").slice(0, 12),
+      eventId: createHash("sha256").update(claim.eventId).digest("hex").slice(0, 12),
+      sequence: claim.sequence,
+      durationMs: Date.now() - startedAt,
+    }, "Auto-track claim resolved");
+    res.json({
+      ok: true,
+      outcome: result.outcome,
+      state: result.channelState,
+      values: result.values,
+      data: result.data,
+      snapshotId: syncSnapshotId(result.data),
+    });
+  } catch (error) {
+    req.log.error({
+      err: error,
+      event: "auto_track_claim",
+      channel: claim.channel,
+      durationMs: Date.now() - startedAt,
+    }, "Auto-track claim failed");
+    res.status(500).json({ error: "Automatic tracking could not sync. Please try again." });
+  }
 });
 
 router.get("/sync/events", async (req: Request, res: Response): Promise<void> => {

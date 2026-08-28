@@ -18,7 +18,12 @@ import {
 import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
 import { useClock } from "../hooks/useClock";
 import { useNotifications } from "../hooks/useNotifications";
-import { useAutoTrack, suggestedDoughStaging } from "../hooks/useAutoTrack";
+import {
+  useAutoTrack,
+  suggestedDoughStaging,
+  type AutoTrackEventClaim,
+  type AutoTrackEventResult,
+} from "../hooks/useAutoTrack";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
 import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
 import type { NotificationPrefs } from "../notificationPrefs";
@@ -106,6 +111,7 @@ export interface LiveRunContextValue {
   autoSuppressUntilRef: React.MutableRefObject<number>;
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
+  coordinationStatus: ReturnType<typeof useAutoTrack>["coordinationStatus"];
   isDoughTimerPaused: boolean;
   pauseDoughTimers: () => void;
   resumeDoughTimers: () => void;
@@ -154,6 +160,7 @@ export interface LiveRunProviderProps {
   autoTrackBlocked?: boolean;
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
   autoTrackRebaseAfterBlock?: boolean;
+  claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -185,6 +192,7 @@ export function LiveRunProvider({
   autoTrackBlocked = false,
   autoTrackBlockedRef,
   autoTrackRebaseAfterBlock = false,
+  claimAutoTrackEvent,
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus);
 
@@ -543,9 +551,10 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers } =
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
     useAutoTrack({
       runId: currentRunId,
+      runGeneration: String(currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0),
       runStatus,
       endedAt: currentRun?.endedAt ?? null,
       packagingDrainActive,
@@ -566,6 +575,7 @@ export function LiveRunProvider({
       autoTrackBlocked,
       autoTrackBlockedRef,
       autoTrackRebaseAfterBlock,
+      claimAutoTrackEvent,
     });
 
   // ── Pre-seed next run's dough counters when this run's press is done ─────
@@ -609,6 +619,7 @@ export function LiveRunProvider({
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      coordinationStatus,
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
@@ -622,6 +633,7 @@ export function LiveRunProvider({
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      coordinationStatus,
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,

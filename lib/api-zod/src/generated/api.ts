@@ -5207,3 +5207,85 @@ export const PutSyncTodayResponse = zod.object({
 })
 
 
+/**
+ * @summary Atomically claim one due automatic production event
+ */
+export const claimAutoTrackEventQueryEpochMin = 0;
+
+
+
+export const ClaimAutoTrackEventQueryParams = zod.object({
+  "today": zod.date().optional(),
+  "epoch": zod.coerce.number().int().min(claimAutoTrackEventQueryEpochMin).optional()
+})
+
+export const claimAutoTrackEventBodySenderIdMax = 160;
+
+export const claimAutoTrackEventBodyClaimRunIdMax = 160;
+
+export const claimAutoTrackEventBodyClaimGenerationMax = 160;
+
+export const claimAutoTrackEventBodyClaimSequenceMax = 10000000;
+
+export const claimAutoTrackEventBodyClaimEventIdMax = 160;
+
+export const claimAutoTrackEventBodyClaimBaseUpdatedAtMin = 0;
+
+export const claimAutoTrackEventBodyClaimCorrectionGenerationMin = 0;
+
+export const claimAutoTrackEventBodyClaimMutationsItemFromMin = 0;
+export const claimAutoTrackEventBodyClaimMutationsItemFromMax = 1000000;
+
+export const claimAutoTrackEventBodyClaimMutationsItemToMin = 0;
+export const claimAutoTrackEventBodyClaimMutationsItemToMax = 1000000;
+
+export const claimAutoTrackEventBodyClaimMutationsMax = 2;
+
+
+
+export const ClaimAutoTrackEventBody = zod.object({
+  "senderId": zod.string().max(claimAutoTrackEventBodySenderIdMax).optional(),
+  "claim": zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string().min(1).max(claimAutoTrackEventBodyClaimRunIdMax),
+  "channel": zod.enum(['case', 'tray-consume', 'tray-produce', 'batch-consume', 'batch-produce', 'hopper']),
+  "generation": zod.string().min(1).max(claimAutoTrackEventBodyClaimGenerationMax),
+  "sequence": zod.number().int().min(1).max(claimAutoTrackEventBodyClaimSequenceMax),
+  "eventId": zod.string().min(1).max(claimAutoTrackEventBodyClaimEventIdMax),
+  "dueAt": zod.number(),
+  "nextDueAt": zod.number(),
+  "baseUpdatedAt": zod.number().min(claimAutoTrackEventBodyClaimBaseUpdatedAtMin),
+  "correctionGeneration": zod.number().int().min(claimAutoTrackEventBodyClaimCorrectionGenerationMin).optional(),
+  "mutations": zod.array(zod.object({
+  "field": zod.enum(['skidsCompleted', 'casesOnCurrentSkid', 'traysOnLine', 'batchesReady']),
+  "from": zod.number().min(claimAutoTrackEventBodyClaimMutationsItemFromMin).max(claimAutoTrackEventBodyClaimMutationsItemFromMax),
+  "to": zod.number().min(claimAutoTrackEventBodyClaimMutationsItemToMin).max(claimAutoTrackEventBodyClaimMutationsItemToMax)
+})).max(claimAutoTrackEventBodyClaimMutationsMax)
+})
+})
+
+export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
+
+export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const ClaimAutoTrackEventResponse = zod.object({
+  "ok": zod.boolean(),
+  "outcome": zod.enum(['accepted', 'duplicate', 'stale', 'conflict']),
+  "state": zod.object({
+  "generation": zod.string(),
+  "sequence": zod.number().int(),
+  "nextDueAt": zod.number(),
+  "acceptedEventId": zod.string().optional(),
+  "acceptedRunValuesUpdatedAt": zod.number().min(claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin).optional(),
+  "updatedAt": zod.number()
+}),
+  "values": zod.record(zod.string(), zod.unknown()),
+  "data": zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
+  "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp)
+})
+
+

@@ -33,10 +33,13 @@ import type {
   AuditProfileDataHealth200,
   AuthCredentials,
   AuthResponse,
+  AutoTrackClaimRequest,
+  AutoTrackClaimResponse,
   BrandProfileList,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
   CheeseRecipeList,
+  ClaimAutoTrackEventParams,
   CommandInput,
   ConsumeInput,
   ConsumeResult,
@@ -14167,5 +14170,91 @@ export const usePutSyncToday = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPutSyncTodayMutationOptions(options));
+    }
+
+export const getClaimAutoTrackEventUrl = (params?: ClaimAutoTrackEventParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/auto-track/claim?${stringifiedParams}` : `/api/sync/auto-track/claim`
+}
+
+/**
+ * @summary Atomically claim one due automatic production event
+ */
+export const claimAutoTrackEvent = async (autoTrackClaimRequest: AutoTrackClaimRequest,
+    params?: ClaimAutoTrackEventParams, options?: Parameters<typeof customFetch>[1]): Promise<AutoTrackClaimResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<AutoTrackClaimResponse>(getClaimAutoTrackEventUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(autoTrackClaimRequest)
+  }
+);}
+
+
+
+
+
+export const getClaimAutoTrackEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimAutoTrackEvent>>, TError,ClaimAutoTrackEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof claimAutoTrackEvent>>, TError,ClaimAutoTrackEventMutationVariables, TContext> => {
+
+const mutationKey = ['claimAutoTrackEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof claimAutoTrackEvent>>, ClaimAutoTrackEventMutationVariables> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  claimAutoTrackEvent(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClaimAutoTrackEventMutationResult = NonNullable<Awaited<ReturnType<typeof claimAutoTrackEvent>>>
+    export type ClaimAutoTrackEventMutationBody = BodyType<AutoTrackClaimRequest>
+    export type ClaimAutoTrackEventMutationError = ErrorType<void>
+    export type ClaimAutoTrackEventMutationVariables = {data: BodyType<AutoTrackClaimRequest>;params?: ClaimAutoTrackEventParams}
+
+    /**
+ * @summary Atomically claim one due automatic production event
+ */
+export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimAutoTrackEvent>>, TError,ClaimAutoTrackEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof claimAutoTrackEvent>>,
+        TError,
+        ClaimAutoTrackEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getClaimAutoTrackEventMutationOptions(options));
     }
 

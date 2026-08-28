@@ -5,9 +5,109 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
+export type AutoTrackMutationField = typeof AutoTrackMutationField[keyof typeof AutoTrackMutationField];
+
+
+export const AutoTrackMutationField = {
+  skidsCompleted: 'skidsCompleted',
+  casesOnCurrentSkid: 'casesOnCurrentSkid',
+  traysOnLine: 'traysOnLine',
+  batchesReady: 'batchesReady',
+} as const;
+
+export interface AutoTrackMutation {
+  field: AutoTrackMutationField;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  from: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  to: number;
 }
+
+export type AutoTrackClaimVersion = typeof AutoTrackClaimVersion[keyof typeof AutoTrackClaimVersion];
+
+
+export const AutoTrackClaimVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type AutoTrackClaimChannel = typeof AutoTrackClaimChannel[keyof typeof AutoTrackClaimChannel];
+
+
+export const AutoTrackClaimChannel = {
+  case: 'case',
+  'tray-consume': 'tray-consume',
+  'tray-produce': 'tray-produce',
+  'batch-consume': 'batch-consume',
+  'batch-produce': 'batch-produce',
+  hopper: 'hopper',
+} as const;
+
+export interface AutoTrackClaim {
+  version: AutoTrackClaimVersion;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  runId: string;
+  channel: AutoTrackClaimChannel;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  generation: string;
+  /**
+     * @minimum 1
+     * @maximum 10000000
+     */
+  sequence: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  eventId: string;
+  dueAt: number;
+  nextDueAt: number;
+  /** @minimum 0 */
+  baseUpdatedAt: number;
+  /** @minimum 0 */
+  correctionGeneration?: number;
+  /** @maxItems 2 */
+  mutations: AutoTrackMutation[];
+}
+
+export interface AutoTrackClaimRequest {
+  /** @maxLength 160 */
+  senderId?: string;
+  claim: AutoTrackClaim;
+}
+
+export interface AutoTrackChannelState {
+  generation: string;
+  sequence: number;
+  nextDueAt: number;
+  acceptedEventId?: string;
+  /** @minimum 0 */
+  acceptedRunValuesUpdatedAt?: number;
+  updatedAt: number;
+}
+
+export type AutoTrackClaimResponseOutcome = typeof AutoTrackClaimResponseOutcome[keyof typeof AutoTrackClaimResponseOutcome];
+
+
+export const AutoTrackClaimResponseOutcome = {
+  accepted: 'accepted',
+  duplicate: 'duplicate',
+  stale: 'stale',
+  conflict: 'conflict',
+} as const;
+
+export type AutoTrackClaimResponseValues = { [key: string]: unknown };
 
 export type SyncPayloadDayState = { [key: string]: unknown };
 
@@ -21,6 +121,20 @@ export interface SyncPayload {
   runValues: SyncPayloadRunValues;
   [key: string]: unknown;
  }
+
+export interface AutoTrackClaimResponse {
+  ok: boolean;
+  outcome: AutoTrackClaimResponseOutcome;
+  state: AutoTrackChannelState;
+  values: AutoTrackClaimResponseValues;
+  data: SyncPayload;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+}
+
+export interface HealthStatus {
+  status: string;
+}
 
 export interface SyncUnchangedResponse {
   unchanged: true;
@@ -4145,5 +4259,13 @@ export type PutSyncToday200 = {
   snapshotId?: string;
   stale?: boolean;
   epoch?: number;
+};
+
+export type ClaimAutoTrackEventParams = {
+today?: ClientTodayParameter;
+/**
+ * @minimum 0
+ */
+epoch?: number;
 };
 

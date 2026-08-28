@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { type FormValues } from "../types";
+import { AUTO_TRACK_COORDINATION_EVENT } from "../autoTrackCoordinationClient";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -60,8 +61,44 @@ interface AutoTrackValues {
   batchesReady: number;
 }
 
+export type AutoTrackChannel =
+  | "case"
+  | "tray-consume"
+  | "tray-produce"
+  | "batch-consume"
+  | "batch-produce"
+  | "hopper";
+
+export type AutoTrackMutation = {
+  field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady";
+  from: number;
+  to: number;
+};
+
+export type AutoTrackEventClaim = {
+  version: 1;
+  runId: string;
+  channel: AutoTrackChannel;
+  generation: string;
+  sequence: number;
+  eventId: string;
+  dueAt: number;
+  nextDueAt: number;
+  baseUpdatedAt: number;
+  correctionGeneration?: number;
+  mutations: AutoTrackMutation[];
+};
+
+export type AutoTrackEventResult = {
+  outcome: "accepted" | "duplicate" | "stale" | "conflict";
+  state: { generation: string; sequence: number; nextDueAt: number };
+  values: Partial<FormValues>;
+};
+
 interface AutoTrackParams {
   runId: string;
+  /** Shared lifecycle stamp; changes on start/pause/resume/end/manual run switch. */
+  runGeneration?: string;
 
   runStatus: RunStatus;
   /**
@@ -141,6 +178,7 @@ interface AutoTrackParams {
    */
 
   autoTrackRebaseAfterBlock?: boolean;
+  claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
 }
 
 interface AutoTrackResult {
@@ -181,6 +219,8 @@ interface AutoTrackResult {
   pauseDoughTimers: () => void;
   /** Restart dough countdowns from full duration and clear the paused state. */
   resumeDoughTimers: () => void;
+  /** Server event acknowledgement state for accessible status messaging. */
+  coordinationStatus: "ready" | "waiting" | "delayed";
 }
 
 /** Exported return type — shared with __mocks__/useAutoTrack.ts for compile-time drift detection. */
@@ -274,6 +314,7 @@ export function getAutoTrackTiming(
  */
 export function useAutoTrack({
   runId,
+  runGeneration,
   runStatus,
   endedAt = null,
   packagingDrainActive = false,
@@ -292,6 +333,7 @@ export function useAutoTrack({
   // Preserve the established behavior for callers that only provide the
   // original boolean barrier. Home opts out explicitly for unchanged pulls.
   autoTrackRebaseAfterBlock = true,
+  claimAutoTrackEvent,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
@@ -372,6 +414,65 @@ export function useAutoTrack({
   const packagingDrainElapsedSecRef = useRef<number>(0);
   const packagingDrainWallMsRef = useRef<number>(0);
   const previousPackagingDrainActiveRef = useRef(false);
+  const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
+  const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
+  const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
+  const [coordinationPendingCount, setCoordinationPendingCount] = useState(0);
+  const [coordinationDelayed, setCoordinationDelayed] = useState(false);
+
+  useEffect(() => {
+    const adopt = (event: Event) => {
+      const coordination = (event as CustomEvent<{
+        runs?: Record<string, Partial<Record<AutoTrackChannel, {
+          generation: string;
+          sequence: number;
+          nextDueAt: number;
+        }>>>;
+      }>).detail;
+      const channels = coordination?.runs?.[runId];
+      if (!channels) return;
+      for (const [channel, state] of Object.entries(channels) as Array<[
+        AutoTrackChannel,
+        { generation: string; sequence: number; nextDueAt: number },
+      ]>) {
+        const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
+        if (state.generation !== generation) {
+          coordinationSequenceRef.current[channel] = 0;
+          const dueRef = channel === "case"
+            ? caseNextDueMsRef
+            : channel === "tray-consume"
+              ? trayNextDueMsRef
+              : channel === "tray-produce"
+                ? trayProdNextDueMsRef
+                : channel === "batch-consume"
+                  ? batchNextDueMsRef
+                  : channel === "batch-produce"
+                    ? batchProdNextDueMsRef
+                    : hopperProdNextDueMsRef;
+          dueRef.current = state.nextDueAt;
+          continue;
+        }
+        coordinationSequenceRef.current[channel] = Math.max(
+          coordinationSequenceRef.current[channel] ?? 0,
+          state.sequence,
+        );
+        const dueRef = channel === "case"
+          ? caseNextDueMsRef
+          : channel === "tray-consume"
+            ? trayNextDueMsRef
+            : channel === "tray-produce"
+              ? trayProdNextDueMsRef
+              : channel === "batch-consume"
+                ? batchNextDueMsRef
+                : channel === "batch-produce"
+                  ? batchProdNextDueMsRef
+                  : hopperProdNextDueMsRef;
+        dueRef.current = state.nextDueAt;
+      }
+    };
+    window.addEventListener(AUTO_TRACK_COORDINATION_EVENT, adopt);
+    return () => window.removeEventListener(AUTO_TRACK_COORDINATION_EVENT, adopt);
+  }, [endedAt, runGeneration, runId, runStatus]);
 
   // Freezer-drain window: after End Run, packaging keeps casing product for as
   // long as the tunnel takes to empty. Case/skid auto-track keeps ticking
@@ -451,6 +552,11 @@ export function useAutoTrack({
     packagingDrainElapsedSecRef.current = 0;
     packagingDrainWallMsRef.current = 0;
     previousPackagingDrainActiveRef.current = false;
+    coordinationSequenceRef.current = {};
+    coordinationRetryEventRef.current = {};
+    coordinationPendingRef.current.clear();
+    setCoordinationPendingCount(0);
+    setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
     doughTimerPausedRef.current = 0;
     setIsDoughTimerPaused(false);
@@ -501,6 +607,101 @@ export function useAutoTrack({
     }
   }, [rearmCaseTimer, rearmDoughTimers]);
 
+  const commitAutomatic = useCallback((
+    channel: AutoTrackChannel,
+    dueAt: number,
+    nextDueAt: number,
+    mutations: AutoTrackMutation[],
+  ) => {
+    const applyValues = (values: Partial<FormValues>) => {
+      const nextSkids = values.skidsCompleted;
+      const nextCases = values.casesOnCurrentSkid;
+      if (typeof nextSkids === "number" && typeof nextCases === "number") {
+        if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) === false) return;
+        form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+        form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+      }
+      if (typeof values.traysOnLine === "number") {
+        form.setValue("traysOnLine", values.traysOnLine, { shouldDirty: true });
+      }
+      if (typeof values.batchesReady === "number") {
+        form.setValue("batchesReady", values.batchesReady, { shouldDirty: true });
+      }
+    };
+    const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
+    if (!claimAutoTrackEvent) {
+      applyValues(localValues);
+      return;
+    }
+    if (coordinationPendingRef.current.has(channel)) return;
+
+    const sequence = (coordinationSequenceRef.current[channel] ?? 0) + 1;
+    const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
+    const eventId = coordinationRetryEventRef.current[channel]
+      ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
+    coordinationRetryEventRef.current[channel] = eventId;
+    coordinationPendingRef.current.add(channel);
+    setCoordinationPendingCount(coordinationPendingRef.current.size);
+    setCoordinationDelayed(false);
+    void claimAutoTrackEvent({
+      version: 1,
+      runId,
+      channel,
+      generation,
+      sequence,
+      eventId,
+      dueAt,
+      nextDueAt,
+      // Home replaces this placeholder with its last adopted canonical stamp.
+      baseUpdatedAt: 0,
+      mutations,
+    }).then((result) => {
+      coordinationSequenceRef.current[channel] = Math.max(
+        coordinationSequenceRef.current[channel] ?? 0,
+        result.state.sequence,
+      );
+      const dueRef = channel === "case"
+        ? caseNextDueMsRef
+        : channel === "tray-consume"
+          ? trayNextDueMsRef
+          : channel === "tray-produce"
+            ? trayProdNextDueMsRef
+            : channel === "batch-consume"
+              ? batchNextDueMsRef
+              : channel === "batch-produce"
+                ? batchProdNextDueMsRef
+                : hopperProdNextDueMsRef;
+      dueRef.current = result.state.nextDueAt;
+      coordinationRetryEventRef.current[channel] = undefined;
+      applyValues(result.values);
+    }).catch(() => {
+      const dueRef = channel === "case"
+        ? caseNextDueMsRef
+        : channel === "tray-consume"
+          ? trayNextDueMsRef
+          : channel === "tray-produce"
+            ? trayProdNextDueMsRef
+            : channel === "batch-consume"
+              ? batchNextDueMsRef
+              : channel === "batch-produce"
+                ? batchProdNextDueMsRef
+                : hopperProdNextDueMsRef;
+      dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
+      setCoordinationDelayed(true);
+    }).finally(() => {
+      coordinationPendingRef.current.delete(channel);
+      setCoordinationPendingCount(coordinationPendingRef.current.size);
+    });
+  }, [
+    claimAutoTrackEvent,
+    endedAt,
+    form,
+    onPackagingProgressAutoAdvance,
+    runGeneration,
+    runId,
+    runStatus,
+  ]);
+
   // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
   // Does not affect the cases/skids counter or the global auto-track toggle.
   const pauseDoughTimers = useCallback(() => {
@@ -529,15 +730,28 @@ export function useAutoTrack({
 
     const nextSkids = Math.floor(newTotal / cps);
     const nextCases = Math.round(newTotal % cps);
-    if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
-      form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-      form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-    }
+    const dueAt = Date.now();
+    const periodMs = getAutoTrackTiming(
+      calc.ppm,
+      v.pizzasPerCase,
+      calc.perTray,
+      calc.perBatch,
+      machine,
+    ).caseMs || 1000;
+    commitAutomatic("case", dueAt, dueAt + periodMs, [
+      { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
+      { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
+    ]);
   }, [
+    calc.perBatch,
+    calc.perTray,
+    calc.ppm,
+    commitAutomatic,
     form,
-    onPackagingProgressAutoAdvance,
+    machine,
     v.casesNeeded,
     v.casesPerSkid,
+    v.pizzasPerCase,
   ]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
@@ -565,7 +779,7 @@ export function useAutoTrack({
   // we switch or reload into is not double-counted.
   useEffect(() => {
     resetBookkeeping();
-  }, [runId, resetBookkeeping]);
+  }, [runGeneration, runId, resetBookkeeping]);
 
   // Re-baseline when auto-track is toggled off so stale bookkeeping cannot
   // carry across a manual-edit window. On the actual Manual → Auto
@@ -783,10 +997,10 @@ export function useAutoTrack({
             if (newTotal !== curTotal) {
               const nextSkids = Math.floor(newTotal / cps);
               const nextCases = Math.round(newTotal % cps);
-              if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
-                form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-              }
+              commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
+                { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
+                { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
+              ]);
             }
           }
         } else if (prevExpected < 0) {
@@ -798,10 +1012,10 @@ export function useAutoTrack({
             const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
             const nextSkids = Math.floor(seedTotal / cps);
             const nextCases = Math.round(seedTotal % cps);
-            if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
-              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-            }
+            commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
+              { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
+              { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
+            ]);
           }
         } else {
           // Add the production since the last tick on top of the current value, so a
@@ -832,10 +1046,10 @@ export function useAutoTrack({
               if (newTotal !== curTotal) {
                 const nextSkids = Math.floor(newTotal / cps);
                 const nextCases = Math.round(newTotal % cps);
-                if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
-                  form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                  form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                }
+                commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
+                  { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
+                  { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
+                ]);
               }
             }
           } else {
@@ -869,6 +1083,7 @@ export function useAutoTrack({
         hopperProdNextDueMsRef.current = nowMs + hopperMs;
       } else if (nowMs >= hopperProdNextDueMsRef.current) {
         hopperProdNextDueMsRef.current = nowMs + hopperMs;
+        commitAutomatic("hopper", nowMs, hopperProdNextDueMsRef.current, []);
       }
     }
 
@@ -932,7 +1147,9 @@ export function useAutoTrack({
             traySeededRef.current = true;
             const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
             if (v.traysOnLine === 0 && seed !== null) {
-              form.setValue("traysOnLine", seed, { shouldDirty: true });
+              commitAutomatic("tray-consume", nowMs, trayNextDueMsRef.current, [
+                { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: seed },
+              ]);
               traySeededThisTick = true;
               traysSeededAmount = seed;
             }
@@ -953,7 +1170,11 @@ export function useAutoTrack({
         if (delta > 0) next = Math.min(next, Math.max(v.traysOnLine, 74));
         next = Math.max(0, next);
         if (next !== v.traysOnLine) {
-          form.setValue("traysOnLine", next, { shouldDirty: true });
+          commitAutomatic(delta > 0 ? "tray-produce" : "tray-consume", nowMs, delta > 0
+            ? trayProdNextDueMsRef.current
+            : trayNextDueMsRef.current, [
+            { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: next },
+          ]);
         }
       }
     }
@@ -1006,7 +1227,9 @@ export function useAutoTrack({
               ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded))))
               : null;
             if (v.batchesReady === 0 && seed !== null) {
-              form.setValue("batchesReady", seed, { shouldDirty: true });
+              commitAutomatic("batch-consume", nowMs, batchNextDueMsRef.current, [
+                { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: seed },
+              ]);
               batchSeededThisTick = true;
             }
           }
@@ -1029,7 +1252,11 @@ export function useAutoTrack({
         if (delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
         next = Math.max(0, Math.round(next * 100) / 100);
         if (next !== v.batchesReady) {
-          form.setValue("batchesReady", next, { shouldDirty: true });
+          commitAutomatic(delta > 0 ? "batch-produce" : "batch-consume", nowMs, delta > 0
+            ? batchProdNextDueMsRef.current
+            : batchNextDueMsRef.current, [
+            { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: next },
+          ]);
         }
       }
     }
@@ -1046,5 +1273,10 @@ export function useAutoTrack({
     isDoughTimerPaused,
     pauseDoughTimers,
     resumeDoughTimers,
+    coordinationStatus: coordinationDelayed
+      ? "delayed"
+      : coordinationPendingCount > 0
+        ? "waiting"
+        : "ready",
   };
 }

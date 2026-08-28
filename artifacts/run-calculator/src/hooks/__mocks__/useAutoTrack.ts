@@ -79,6 +79,7 @@ export function useAutoTrack(): UseAutoTrackReturn {
     isDoughTimerPaused:   false,
     pauseDoughTimers:     mockPauseDoughTimers,
     resumeDoughTimers:    mockResumeDoughTimers,
+    coordinationStatus:   "ready",
   };
 }
 

@@ -4227,6 +4227,35 @@ paths:
                   stale: { type: boolean }
                   epoch: { type: integer }
 
+  /sync/auto-track/claim:
+    post:
+      operationId: claimAutoTrackEvent
+      tags: [sync]
+      summary: Atomically claim one due automatic production event
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: epoch
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutoTrackClaimRequest"
+      responses:
+        "200":
+          description: Accepted, duplicate, stale, or conflicting canonical event result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoTrackClaimResponse"
+        "400":
+          description: Invalid or out-of-bounds event
+        "500":
+          description: Safe automatic tracking failure
+
 components:
   parameters:
     ClientToday:
@@ -4240,6 +4269,66 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    AutoTrackMutation:
+      type: object
+      required: [field, from, to]
+      properties:
+        field:
+          type: string
+          enum: [skidsCompleted, casesOnCurrentSkid, traysOnLine, batchesReady]
+        from: { type: number, minimum: 0, maximum: 1000000 }
+        to: { type: number, minimum: 0, maximum: 1000000 }
+    AutoTrackClaim:
+      type: object
+      required: [version, runId, channel, generation, sequence, eventId, dueAt, nextDueAt, baseUpdatedAt, mutations]
+      properties:
+        version: { type: integer, enum: [1] }
+        runId: { type: string, minLength: 1, maxLength: 160 }
+        channel:
+          type: string
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper]
+        generation: { type: string, minLength: 1, maxLength: 160 }
+        sequence: { type: integer, minimum: 1, maximum: 10000000 }
+        eventId: { type: string, minLength: 1, maxLength: 160 }
+        dueAt: { type: number }
+        nextDueAt: { type: number }
+        baseUpdatedAt: { type: number, minimum: 0 }
+        correctionGeneration: { type: integer, minimum: 0 }
+        mutations:
+          type: array
+          maxItems: 2
+          items: { $ref: "#/components/schemas/AutoTrackMutation" }
+    AutoTrackClaimRequest:
+      type: object
+      required: [claim]
+      properties:
+        senderId: { type: string, maxLength: 160 }
+        claim: { $ref: "#/components/schemas/AutoTrackClaim" }
+    AutoTrackChannelState:
+      type: object
+      required: [generation, sequence, nextDueAt, updatedAt]
+      properties:
+        generation: { type: string }
+        sequence: { type: integer }
+        nextDueAt: { type: number }
+        acceptedEventId: { type: string }
+        acceptedRunValuesUpdatedAt: { type: number, minimum: 0 }
+        updatedAt: { type: number }
+    AutoTrackClaimResponse:
+      type: object
+      required: [ok, outcome, state, values, data, snapshotId]
+      properties:
+        ok: { type: boolean }
+        outcome:
+          type: string
+          enum: [accepted, duplicate, stale, conflict]
+        state: { $ref: "#/components/schemas/AutoTrackChannelState" }
+        values:
+          type: object
+          additionalProperties: true
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+
     HealthStatus:
       type: object
       properties:

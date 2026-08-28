@@ -459,7 +459,16 @@ import {
 import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
-import { getAutoTrackTiming, suggestedDoughStaging } from "../hooks/useAutoTrack";
+import {
+  getAutoTrackTiming,
+  suggestedDoughStaging,
+  type AutoTrackEventClaim,
+  type AutoTrackEventResult,
+} from "../hooks/useAutoTrack";
+import {
+  publishAutoTrackCoordination,
+  subscribeAutoTrackCoordination,
+} from "../autoTrackCoordinationClient";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
@@ -7259,6 +7268,24 @@ export default function Home() {
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
+  const autoTrackClaimQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastAcceptedAutoTrackStampRef = useRef<Record<string, number>>({});
+  useEffect(() => subscribeAutoTrackCoordination((payload) => {
+    for (const [runId, channels] of Object.entries(payload.runs ?? {})) {
+      const acceptedStamp = Math.max(
+        0,
+        ...Object.values(channels ?? {}).map((state) =>
+          Number(state?.acceptedRunValuesUpdatedAt) || 0
+        ),
+      );
+      if (acceptedStamp > 0) {
+        lastAcceptedAutoTrackStampRef.current[runId] = Math.max(
+          lastAcceptedAutoTrackStampRef.current[runId] ?? 0,
+          acceptedStamp,
+        );
+      }
+    }
+  }), []);
   // History is independently persisted and merged by date. Keep it on the
   // first/change payload for recovery, but omit the unchanged cold section
   // from ordinary live updates.
@@ -7275,6 +7302,89 @@ export default function Home() {
         : lastAcknowledgedAt
           ? "synchronized"
           : "connected";
+
+  function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
+    const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
+    const request = autoTrackClaimQueueRef.current
+      .catch(() => {})
+      .then(async (): Promise<AutoTrackEventResult> => {
+    if (!navigator.onLine || foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current) {
+      throw new Error("Automatic tracking is waiting for shared sync");
+    }
+    const currentBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
+    const previousQueuedClaimWon =
+      currentBaseUpdatedAt !== enqueuedBaseUpdatedAt
+      && lastAcceptedAutoTrackStampRef.current[claim.runId] === currentBaseUpdatedAt;
+    const currentValues = previousQueuedClaimWon
+      ? loadRunValues(claim.runId)
+      : null;
+    const rebasedMutations = currentValues
+      ? claim.mutations.map((mutation) => {
+          const from = Number(currentValues[mutation.field]) || 0;
+          const delta = mutation.to - mutation.from;
+          return {
+            ...mutation,
+            from,
+            to: Math.max(0, Math.round((from + delta) * 100) / 100),
+          };
+        })
+      : claim.mutations;
+    const response = await fetch(
+      `/api/sync/auto-track/claim?today=${encodeURIComponent(todayStr())}&epoch=${getStoredResetEpoch()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderId: clientId.current,
+          claim: {
+            ...claim,
+            baseUpdatedAt: currentBaseUpdatedAt,
+            mutations: rebasedMutations,
+            ...(claim.channel === "case"
+              ? {
+                  correctionGeneration:
+                    loadPackagingProgress()[claim.runId]?.correctionGeneration ?? 0,
+                }
+              : {}),
+          },
+        }),
+      },
+    );
+    if (response.status === 401) {
+      reportUnauthorized();
+      throw new Error("Sign in again to continue automatic tracking");
+    }
+    const body = await response.json().catch(() => null) as {
+      error?: string;
+      stale?: boolean;
+      epoch?: number;
+      outcome?: AutoTrackEventResult["outcome"];
+      state?: AutoTrackEventResult["state"];
+      values?: AutoTrackEventResult["values"];
+      data?: SyncPayload;
+      snapshotId?: string;
+    } | null;
+    if (!response.ok || !body?.outcome || !body.state || !body.values) {
+      throw new Error(body?.error ?? "Automatic tracking could not sync");
+    }
+    if (body.stale) {
+      throw new Error("Automatic tracking is waiting for today's reset");
+    }
+    if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
+    if (body.data) {
+      publishAutoTrackCoordination(body.data);
+      canonicalRunValuesUpdatedAtRef.current = { ...(body.data.runValuesUpdatedAt ?? {}) };
+      if (body.outcome === "accepted" || body.outcome === "duplicate") {
+        lastAcceptedAutoTrackStampRef.current[claim.runId] =
+          body.data.runValuesUpdatedAt?.[claim.runId] ?? currentBaseUpdatedAt;
+      }
+      applySyncCallbackRef.current(body.data);
+    }
+    return { outcome: body.outcome, state: body.state, values: body.values };
+      });
+    autoTrackClaimQueueRef.current = request.then(() => {}, () => {});
+    return request;
+  }
 
   // Mirror today's substitution overlay into the shared-calc module so every
   // call site (calc useMemo, warehouse roll-up, consumeRun, schedule/history
@@ -7411,6 +7521,7 @@ export default function Home() {
         peerResponseBytes?: number;
       },
     ) => {
+      publishAutoTrackCoordination(payload);
       isSyncApplyingRef.current = true;
       const arraysEqual = (a: string[], b: string[]) =>
         a.length === b.length && a.every((x, i) => x === b[i]);
@@ -18669,6 +18780,7 @@ export default function Home() {
         autoTrackBlocked={autoTrackBlocked}
         autoTrackBlockedRef={foregroundSyncBarrierRef}
         autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
+        claimAutoTrackEvent={claimAutoTrackEvent}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
@@ -21309,7 +21421,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs, packagingDrainActive,
+    fireAutoTrackNow, tickDueRefs, packagingDrainActive, coordinationStatus,
   } = useLiveRun();
 
   // ── Speed drift detection ─────────────────────────────────────────────────
@@ -21704,6 +21816,15 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                         <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Active Skid Building</h3>
                         {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
                           <div className="flex items-center gap-2">
+                            {coordinationStatus !== "ready" && (
+                              <span
+                                role="status"
+                                aria-live="polite"
+                                className="text-[9px] font-semibold text-muted-foreground"
+                              >
+                                {coordinationStatus === "waiting" ? "Syncing automatic count…" : "Automatic count paused — waiting for sync"}
+                              </span>
+                            )}
                             <div className={`w-2 h-2 rounded-full ${autoTrackProgress ? "bg-primary animate-pulse shadow-[0_0_8px_rgba(255,149,0,0.8)]" : "bg-muted-foreground"}`} />
                             <button
                               type="button"

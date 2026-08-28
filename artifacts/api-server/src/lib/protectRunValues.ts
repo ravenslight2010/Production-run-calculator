@@ -379,6 +379,65 @@ function withMergedStamps(
   return out;
 }
 
+function preserveAndInvalidateAutoTrackCoordination(
+  protectedPayload: unknown,
+  existingCoordination: unknown,
+  existingPayload: Record<string, unknown>,
+): unknown {
+  if (!isPlainObject(protectedPayload) || !isPlainObject(existingCoordination)) return protectedPayload;
+  const priorValues = isPlainObject(existingPayload.runValues) ? existingPayload.runValues : {};
+  const nextValues = isPlainObject(protectedPayload.runValues) ? protectedPayload.runValues : {};
+  const coordinationRuns = isPlainObject(existingCoordination.runs)
+    ? { ...existingCoordination.runs }
+    : {};
+  const now = Date.now();
+
+  for (const [runId, rawNext] of Object.entries(nextValues)) {
+    if (!isPlainObject(rawNext)) continue;
+    const rawPrior = priorValues[runId];
+    if (!isPlainObject(rawPrior)) continue;
+    const runCoordination = isPlainObject(coordinationRuns[runId])
+      ? { ...coordinationRuns[runId] }
+      : {};
+    const changedChannels = new Set<string>();
+    if (
+      asNumber(rawNext.skidsCompleted) !== asNumber(rawPrior.skidsCompleted)
+      || asNumber(rawNext.casesOnCurrentSkid) !== asNumber(rawPrior.casesOnCurrentSkid)
+    ) changedChannels.add("case");
+    if (asNumber(rawNext.traysOnLine) !== asNumber(rawPrior.traysOnLine)) {
+      changedChannels.add("tray-consume");
+      changedChannels.add("tray-produce");
+    }
+    if (asNumber(rawNext.batchesReady) !== asNumber(rawPrior.batchesReady)) {
+      changedChannels.add("batch-consume");
+      changedChannels.add("batch-produce");
+    }
+    if (changedChannels.size === 0) continue;
+    const stamp = asNumber(
+      isPlainObject(protectedPayload.runValuesUpdatedAt)
+        ? protectedPayload.runValuesUpdatedAt[runId]
+        : now,
+    );
+    for (const channel of changedChannels) {
+      if (!Object.prototype.hasOwnProperty.call(runCoordination, channel)) continue;
+      runCoordination[channel] = {
+        generation: `manual:${stamp}`,
+        sequence: 0,
+        nextDueAt: now,
+        updatedAt: now,
+      };
+    }
+    coordinationRuns[runId] = runCoordination;
+  }
+  return {
+    ...protectedPayload,
+    autoTrackCoordination: {
+      ...existingCoordination,
+      runs: coordinationRuns,
+    },
+  };
+}
+
 /**
  * Merge `incoming` against the already-stored `existing` payload so that:
  *   - a run's stored VALUE only changes on a strictly-newer-stamped edit, and
@@ -413,6 +472,29 @@ export function protectRunValues(
     out.packagingProgress = progress;
     out.runValues = outVals;
     return withMergedStamps(out, incoming, undefined);
+  }
+
+  // Timer coordination is server-authoritative. An ordinary snapshot can
+  // echo this field, but cannot replace or remove the state advanced by the
+  // locked auto-track claim endpoint.
+  const incomingDayForCoordination = isPlainObject(incoming.dayState) ? incoming.dayState : undefined;
+  const existingDayForCoordination = isPlainObject(existing.dayState) ? existing.dayState : undefined;
+  const replacesCoordinatedDay =
+    options.allowRunListReplacement
+    && asNumber(existingDayForCoordination?.resetAt) > 0
+    && asNumber(incomingDayForCoordination?.resetAt) > asNumber(existingDayForCoordination?.resetAt);
+  if (
+    !replacesCoordinatedDay
+    && Object.prototype.hasOwnProperty.call(existing, "autoTrackCoordination")
+  ) {
+    const existingWithoutCoordination = { ...existing };
+    delete existingWithoutCoordination.autoTrackCoordination;
+    const protectedPayload = protectRunValues(incoming, existingWithoutCoordination, options);
+    return preserveAndInvalidateAutoTrackCoordination(
+      protectedPayload,
+      existing.autoTrackCoordination,
+      existing,
+    );
   }
 
   const inDay = isPlainObject(incoming.dayState) ? incoming.dayState : undefined;

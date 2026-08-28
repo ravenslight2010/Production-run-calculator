@@ -138,6 +138,92 @@ function managerAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(MANAGER)}` };
 }
 
+describe("POST /sync/auto-track/claim", () => {
+  const DATE = "2030-03-10";
+  const RUN = `run-${DATE}`;
+  const endpoint = () => `${baseUrl}/api/sync/auto-track/claim?today=${DATE}`;
+  const event = (senderId: string, eventId: string, sequence = 1, from = 10, to = 9) => ({
+    senderId,
+    claim: {
+      version: 1,
+      runId: RUN,
+      channel: "tray-consume",
+      generation: `${RUN}:2`,
+      sequence,
+      eventId,
+      dueAt: Date.now() - 5,
+      nextDueAt: Date.now() + 1_000,
+      baseUpdatedAt: 1,
+      mutations: [{ field: "traysOnLine", from, to }],
+    },
+  });
+  const post = (body: unknown) => fetch(endpoint(), {
+    method: "POST",
+    headers: { ...authHeaders(), "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  beforeEach(async () => {
+    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "seed",
+        payload: {
+          dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 }] },
+          runValues: { [RUN]: { traysOnLine: 10 } },
+          runValuesUpdatedAt: { [RUN]: 1 },
+        },
+      }),
+    });
+  });
+
+  it("commits one of two competing tabs and converges both on one decrement", async () => {
+    const [a, b] = await Promise.all([
+      post(event("tab-a", "tab-a:tray:1")),
+      post(event("tab-b", "tab-b:tray:1")),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      outcome: string;
+      values: { traysOnLine: number };
+    }>;
+    expect(bodies.map((body) => body.outcome).sort()).toEqual(["accepted", "stale"]);
+    expect(bodies.every((body) => body.values.traysOnLine === 9)).toBe(true);
+  });
+
+  it("returns duplicate for an accepted retry and rejects a stale-base event after manual correction", async () => {
+    const body = event("tab-a", "tab-a:retryable:1");
+    const first = await (await post(body)).json() as { outcome: string };
+    expect(first.outcome).toBe("accepted");
+    const retry = await (await post(body)).json() as { outcome: string; values: { traysOnLine: number } };
+    expect(retry.outcome).toBe("duplicate");
+    expect(retry.values.traysOnLine).toBe(9);
+
+    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "manual",
+        payload: {
+          dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep" }] },
+          runValues: { [RUN]: { traysOnLine: 14 } },
+          runValuesUpdatedAt: { [RUN]: Date.now() + 1_000 },
+        },
+      }),
+    });
+    const staleBase = await (await post(event("tab-b", "tab-b:tray:2", 2, 9, 8))).json() as {
+      outcome: string;
+      values: { traysOnLine: number };
+    };
+    // The manual write invalidates the old coordinated generation, so the
+    // pending automatic event is rejected as stale before value comparison.
+    expect(staleBase.outcome).toBe("stale");
+    expect(staleBase.values.traysOnLine).toBe(14);
+  });
+});
+
 describe("GET /sync/scheduled — client-local-date filtering", () => {
   it("returns only days strictly after the client-supplied `today`", async () => {
     const res = await fetch(`${baseUrl}/api/sync/scheduled?today=2030-03-10`, {

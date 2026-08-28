@@ -415,6 +415,20 @@ export type SyncPayload = {
   // register. Manual corrections advance correctionGeneration; automatic
   // tracking may only advance the generation it has already adopted.
   packagingProgress?: Record<string, PackagingProgress>;
+  autoTrackCoordination?: {
+    version: 1;
+    runs: Record<string, Partial<Record<
+      "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper",
+      {
+        generation: string;
+        sequence: number;
+        nextDueAt: number;
+        acceptedEventId?: string;
+            acceptedRunValuesUpdatedAt?: number;
+        updatedAt: number;
+      }
+    >>>;
+  };
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
   ingredientTypes?: string[];
