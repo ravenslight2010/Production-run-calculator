@@ -726,7 +726,7 @@ const ROUTES: GatedRoute[] = [
     capability: "manage-staff",
     method: "POST",
     path: () => "/api/profile-data/health-check/apply",
-    okStatus: 200,
+    okStatus: 400,
   },
   {
     name: "POST /profile-data/health-check/batches/:batchId/undo",

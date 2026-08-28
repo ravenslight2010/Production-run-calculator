@@ -43,7 +43,16 @@ export type MasterDataHealthReport = {
   groups: Record<HealthSeverity, MasterDataHealthFinding[]>;
   summary: Record<HealthCategory | HealthSeverity | "total", number>;
   repairs: Array<
-    | { findingId: string; action: "delete-alias"; category: "aliases"; source: "import" | "spec" | "merge"; rowId: number }
+    | {
+      findingId: string;
+      action: "delete-alias";
+      category: "aliases";
+      source: "import" | "spec" | "merge";
+      rowId: number;
+      externalName: string;
+      canonicalName: string;
+      context: string | null;
+    }
     | { findingId: string; action: "update-profile-recipe-link"; category: "profiles"; profileKey: string; field: string; from: string; to: string; source: "saved-spec" | "spec-alias" }
   >;
 };
@@ -298,7 +307,16 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
       if (!external || !canonical || external === canonical) {
         const id = `${source}:${alias.id}`;
         out.push(finding(scope, "aliases", "warning", id, "Alias is blank or maps a name to itself.", true, false));
-        repairs.push({ findingId: `aliases:${id}`, action: "delete-alias", category: "aliases", source, rowId: alias.id });
+       repairs.push({
+         findingId: `aliases:${id}`,
+         action: "delete-alias",
+         category: "aliases",
+         source,
+         rowId: alias.id,
+         externalName: "externalName" in alias ? alias.externalName : "",
+         canonicalName: "canonicalName" in alias ? alias.canonicalName : "",
+         context: "context" in alias ? alias.context : "brandContext" in alias ? alias.brandContext : null,
+       });
       }
     });
   }

@@ -20,7 +20,7 @@ export default function ProfileDataHealthCard() {
     staleTime: 0,
   });
   const applyMutation = useMutation({
-    mutationFn: applyProfileDataHealthRepairs,
+    mutationFn: () => applyProfileDataHealthRepairs(repairs.map((repair) => repair.id)),
     onSuccess: (next) => {
       setResult(next);
       setConfirming(false);

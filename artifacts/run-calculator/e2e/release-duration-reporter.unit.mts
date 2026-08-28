@@ -136,7 +136,7 @@ assert.deepEqual(
       durationMs: 140_000,
       baselineDurationMs: 100_000,
       increaseMs: 40_000,
-      increasePercent: 40,
+      increasePercent: (40_000 / 100_000) * 100,
     },
   ],
 );

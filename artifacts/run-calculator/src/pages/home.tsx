@@ -14851,7 +14851,7 @@ export default function Home() {
           ...(canManageInventory ? [{ key: "dieDefaults", label: "Die Defaults" }] : []),
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
-          ...(canManageStaff ? [{ key: "audit", label: "Audit Log" }] : []),
+           ...(canManageStaff ? [{ key: "audit", label: "Data Health & Audit" }] : []),
           ...(canManageStaff ? [{ key: "ai-corrections", label: "AI Memory" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -14865,7 +14865,7 @@ export default function Home() {
           brands: "Brands", flavors: "Flavors", ingredientTypes: "Applicator Types",
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
-          cycleCount: "Cycle Counts", staff: "Staff", audit: "Audit Log", pin: "Change PIN",
+           cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", pin: "Change PIN",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
         };

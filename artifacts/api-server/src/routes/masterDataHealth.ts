@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
-import { db, masterDataHealthScansTable, importAliasesTable, specImportAliasesTable, mergeAliasesTable, brandProfilesTable } from "@workspace/db";
+import { desc, eq } from "drizzle-orm";
+import { db, masterDataHealthScansTable } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { buildMasterDataHealthReport } from "../lib/masterDataHealth";
@@ -77,33 +77,12 @@ router.post("/master-data/health/repair", canReview, async (req: Request, res: R
       res.json({ preview: repairs, applied: 0, report });
       return;
     }
-    let applied = 0;
-    for (const repair of repairs) {
-      if (repair.action === "update-profile-recipe-link") {
-        const [profile] = await db.select().from(brandProfilesTable)
-          .where(and(eq(brandProfilesTable.key, repair.profileKey), eq(brandProfilesTable.scope, scope)));
-        const values = profile?.values && typeof profile.values === "object" ? profile.values as Record<string, unknown> : {};
-        if (!profile || String(values[repair.field] ?? "") !== repair.from) continue;
-        const updated = await db.update(brandProfilesTable)
-          .set({ values: { ...values, [repair.field]: repair.to }, updatedAtMs: Date.now() + 1 })
-          .where(and(
-            eq(brandProfilesTable.key, repair.profileKey),
-            eq(brandProfilesTable.scope, scope),
-            // The report is a review snapshot. Do not overwrite a protected
-            // value if a profile changed after the manager reviewed it.
-            eq(brandProfilesTable.values, profile.values),
-          ))
-          .returning({ key: brandProfilesTable.key });
-        if (updated.length) applied++;
-        continue;
-      }
-      const id = repair.rowId;
-      const table = repair.source === "import" ? importAliasesTable
-        : repair.source === "spec" ? specImportAliasesTable : mergeAliasesTable;
-      const deleted = await db.delete(table).where(and(eq(table.id, id), eq(table.scope, scope))).returning({ id: table.id });
-      if (deleted.length) applied++;
-    }
-    res.json({ preview: report.repairs, applied, report: await buildMasterDataHealthReport(db, scope) });
+    res.status(409).json({
+      error: "Apply selected repairs from the Data Health & Audit workspace",
+      preview: repairs,
+      applied: 0,
+      report,
+    });
   } catch (err) {
     req.log.error({ err }, "failed to repair master-data health");
     res.status(500).json({ error: "Failed to repair master-data health" });

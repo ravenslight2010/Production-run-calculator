@@ -101,7 +101,7 @@ rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
-The main config enumerates 99 cases and retains
+The main config enumerates 100 cases and retains
 `release-evidence/browser-full/FINAL-REPORT.md` after a real full-suite run.
 The report includes the revision, completion counts, total duration, and
 per-file test-result durations. Discovery (`--list`) and focused runs do not

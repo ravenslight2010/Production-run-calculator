@@ -42,6 +42,9 @@ let facilityKnowledgeTable: DbModule["facilityKnowledgeTable"];
 let aiConversationTurnsTable: DbModule["aiConversationTurnsTable"];
 let mergeAliasesTable: DbModule["mergeAliasesTable"];
 let importAliasesTable: DbModule["importAliasesTable"];
+let specImportAliasesTable: DbModule["specImportAliasesTable"];
+let dataHealthRepairBatchesTable: DbModule["dataHealthRepairBatchesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let ingredientsTable: DbModule["ingredientsTable"];
 let brandProfilesTable: DbModule["brandProfilesTable"];
 let doughRecipesTable: DbModule["doughRecipesTable"];
@@ -96,6 +99,9 @@ beforeAll(async () => {
   aiConversationTurnsTable = dbMod.aiConversationTurnsTable;
   mergeAliasesTable = dbMod.mergeAliasesTable;
   importAliasesTable = dbMod.importAliasesTable;
+  specImportAliasesTable = dbMod.specImportAliasesTable;
+  dataHealthRepairBatchesTable = dbMod.dataHealthRepairBatchesTable;
+  auditLogsTable = dbMod.auditLogsTable;
   ingredientsTable = dbMod.ingredientsTable;
   brandProfilesTable = dbMod.brandProfilesTable;
   doughRecipesTable = dbMod.doughRecipesTable;
@@ -136,7 +142,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${ingredientsTable}, ${brandProfilesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${savedSpecSheetsTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${specImportAliasesTable}, ${dataHealthRepairBatchesTable}, ${auditLogsTable}, ${ingredientsTable}, ${brandProfilesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${savedSpecSheetsTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
 });
@@ -559,19 +565,40 @@ describe("profile data health check", () => {
       headers: { authorization: `Bearer ${signToken(manager)}` },
     });
     expect(before.status).toBe(200);
-    const report = await before.json() as { report: { safeRepairs: Array<{ recipeKind: string }>; findings: Array<{ status: string }> } };
+    const report = await before.json() as { report: { safeRepairs: Array<{ id: string; recipeKind: string }>; findings: Array<{ status: string }> } };
     expect(report.report.safeRepairs).toHaveLength(1);
     expect(report.report.safeRepairs[0]?.recipeKind).toBe("sauce");
     expect(report.report.findings.map((item) => item.status)).toContain("missing-recipe");
     const [beforeProfile] = await db.select().from(brandProfilesTable);
     expect((beforeProfile.values as Record<string, unknown>).frontlineRecipeName).toBe("Mystic Pizza Sauce");
+    const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    const workspace = await workspaceResponse.json() as {
+      workspace: {
+        findings: Array<{
+          id: string;
+          preview?: { changes?: Array<{ field: string; before: string; after: string }> };
+        }>;
+      };
+    };
+    const profilePreview = workspace.workspace.findings.find((finding) =>
+      finding.id === report.report.safeRepairs[0]?.id)?.preview;
+    expect(profilePreview?.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "frontlineRecipeName", before: "Mystic Pizza Sauce", after: "Red Hot Pizza Sauce" }),
+      expect.objectContaining({ field: "frontlineRecipe", before: "0 recipe rows", after: expect.stringContaining("Garlic Sauce") }),
+    ]));
 
     const applied = await fetch(`${baseUrl}/api/profile-data/health-check/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signToken(manager)}`,
+      },
+      body: JSON.stringify({ findingIds: [report.report.safeRepairs[0]?.id] }),
     });
     expect(applied.status).toBe(200);
-    const body = await applied.json() as { summary: { repairedProfiles: number; repairedRuns: number }; after: { safeRepairs: unknown[] } };
+    const body = await applied.json() as { batchId: string; summary: { repairedProfiles: number; repairedRuns: number }; after: { safeRepairs: unknown[] } };
     expect(body.summary).toEqual({ repairedProfiles: 1, repairedRuns: 1 });
     expect(body.after.safeRepairs).toHaveLength(0);
 
@@ -584,5 +611,130 @@ describe("profile data health check", () => {
     const data = day.data as Record<string, any>;
     expect(data.runValues.future).toMatchObject({ frontlineRecipeName: "Red Hot Pizza Sauce" });
     expect(data.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+
+    const undo = await fetch(
+      `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(body.batchId)}/undo`,
+      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+    );
+    expect(undo.status).toBe(200);
+    const [restoredProfile] = await db.select().from(brandProfilesTable);
+    expect(restoredProfile.updatedAtMs).toBeGreaterThan(profile.updatedAtMs);
+    expect(restoredProfile.values).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+    const repeatedUndo = await fetch(
+      `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(body.batchId)}/undo`,
+      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+    );
+    expect(repeatedUndo.status).toBe(200);
+    expect(await repeatedUndo.json()).toMatchObject({ alreadyUndone: true });
+  });
+
+  it("normalizes an alias finding and applies only the selected repair with guarded undo", async () => {
+    const manager = await freshManager();
+    await db.insert(importAliasesTable).values([
+      { scope: "live", type: "brand", externalName: "Same Name", canonicalName: "Same Name" },
+      { scope: "live", type: "brand", externalName: "Keep Me", canonicalName: "Canonical Brand" },
+    ]);
+
+    const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(workspaceResponse.status).toBe(200);
+    const workspaceBody = await workspaceResponse.json() as {
+      workspace: {
+        findings: Array<{
+          id: string;
+          category: string;
+          repairability: string;
+          affectedRecord: string;
+          preview?: { before: string; after: string };
+        }>;
+      };
+    };
+    const aliasFinding = workspaceBody.workspace.findings.find((finding) =>
+      finding.category === "aliases" && finding.repairability === "safe");
+    expect(aliasFinding).toMatchObject({ category: "aliases", repairability: "safe" });
+    expect(aliasFinding?.affectedRecord).toContain("import:");
+    expect(aliasFinding?.preview?.before).toBe("Same Name → Same Name");
+
+    const appliedResponse = await fetch(`${baseUrl}/api/profile-data/health-check/apply`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signToken(manager)}`,
+      },
+      body: JSON.stringify({ findingIds: [aliasFinding?.id] }),
+    });
+    expect(appliedResponse.status).toBe(200);
+    const applied = await appliedResponse.json() as {
+      batchId: string;
+      outcome: { applied: number; skipped: number; failed: number };
+    };
+    expect(applied.outcome).toEqual(expect.objectContaining({ applied: 1, skipped: 0, failed: 0 }));
+    expect((await db.select().from(importAliasesTable)).map((row) => row.externalName)).toEqual(["Keep Me"]);
+    expect(await db.select().from(dataHealthRepairBatchesTable)).toHaveLength(1);
+    expect((await db.select().from(auditLogsTable)).some((row) => row.action === "profile_data_health_repair")).toBe(true);
+
+    const undoResponse = await fetch(
+      `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(applied.batchId)}/undo`,
+      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+    );
+    expect(undoResponse.status).toBe(200);
+    expect((await db.select().from(importAliasesTable)).map((row) => row.externalName).sort())
+      .toEqual(["Keep Me", "Same Name"]);
+  });
+
+  it("keeps legacy master profile-link findings review-only and counts unsupported selections as skipped", async () => {
+    const manager = await freshManager();
+    await db.insert(doughRecipesTable).values({
+      id: "crb-safe-dough",
+      scope: "live",
+      name: "CRB Dough",
+      components: [{ ingredient: "Flour", lbs: 1 }],
+      enabled: true,
+    });
+    await db.insert(brandProfilesTable).values({
+      key: "basha-five-cheese-health",
+      scope: "live",
+      brand: "Basha's Ultra Thin Crust",
+      flavor: "5 Cheese",
+      values: { doughRecipeName: '11" CRB Recipe', doughRecipe: [] },
+      updatedAtMs: Date.now(),
+    });
+
+    const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(workspaceResponse.status).toBe(200);
+    const body = await workspaceResponse.json() as {
+      workspace: {
+        findings: Array<{
+          id: string;
+          source: string;
+          repairability: string;
+          sourceRoute: string;
+          preview?: { before: string; after: string };
+        }>;
+        safeRepairs: Array<{ findingId?: string }>;
+      };
+    };
+    const finding = body.workspace.findings.find((item) =>
+      item.source === "master-data" && item.id.includes("basha") && item.id.includes("doughRecipeName"));
+    expect(finding).toMatchObject({
+      repairability: "review",
+      sourceRoute: "setupProfiles",
+      preview: { before: '11" CRB Recipe', after: "CRB Dough" },
+    });
+    expect(body.workspace.safeRepairs.some((repair) => repair.findingId === finding?.id)).toBe(false);
+
+    const apply = await fetch(`${baseUrl}/api/profile-data/health-check/apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${signToken(manager)}` },
+      body: JSON.stringify({ findingIds: [finding?.id] }),
+    });
+    expect(apply.status).toBe(200);
+    expect(await apply.json()).toMatchObject({
+      batchId: null,
+      outcome: { applied: 0, skipped: 1, failed: 0, repairedRuns: 0 },
+    });
   });
 });
