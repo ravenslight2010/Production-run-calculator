@@ -162,6 +162,24 @@ export function writeDayResetAt(
   return now;
 }
 
+// A session established by the current sign-in already satisfied today's
+// re-authentication requirement. Sessions restored from a cookie must still
+// be signed out after rollover.
+export function shouldSignOutAfterRollover(
+  sessionEstablishedByCurrentAuth: boolean,
+): boolean {
+  return !sessionEstablishedByCurrentAuth;
+}
+
+// Only a successful sync read that explicitly found no scheduled runs may
+// publish a fresh empty day. Network failures and non-OK responses leave the
+// server's scheduled data untouched.
+export function shouldPublishFreshRolloverState(
+  serverConfirmedNoRuns: boolean,
+): boolean {
+  return serverConfirmedNoRuns;
+}
+
 export function runLabel(r: RunMeta): string {
   if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
   if (r.brand) return r.brand;

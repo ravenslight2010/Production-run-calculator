@@ -28,6 +28,10 @@ export type AuthContextValue = {
   // the rollover's own sync push to land (the server boundary then invalidates
   // it), and by the 401 handler when the session is already gone server-side.
   forceSignedOut: () => void;
+  // Returns true once for a session established by the current sign-in/sign-up
+  // transition. A restored cookie session returns false, preserving the daily
+  // re-authentication requirement during rollover.
+  consumeFreshSession: () => boolean;
   // Re-check the session against the server (used when the SSE stream errors,
   // which can mean the daily reset just signed us out).
   revalidate: () => void;

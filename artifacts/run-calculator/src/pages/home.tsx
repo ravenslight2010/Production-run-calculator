@@ -92,6 +92,8 @@ import {
   genId,
   todayStr,
   writeDayResetAt,
+  shouldSignOutAfterRollover,
+  shouldPublishFreshRolloverState,
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
@@ -2897,6 +2899,7 @@ export default function Home() {
   const {
     signOut,
     forceSignedOut,
+    consumeFreshSession,
     revalidate,
     me,
     markOnboardingSeen,
@@ -8675,6 +8678,11 @@ export default function Home() {
   // Detect day change while the tab is open (visibility change + periodic check)
   useEffect(() => {
     async function checkDateRollover() {
+      // A Home mount immediately after sign-in is already today's
+      // re-authentication. Consume this marker before the async rollover work
+      // so a duplicate interval/timer check cannot make the same session skip
+      // a later rollover.
+      const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
       const stored = (() => {
         try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
       })();
@@ -8755,13 +8763,11 @@ export default function Home() {
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
               fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
-              // The new day's resetAt becomes the server-side session boundary
-              // (pushed above), so the daily reset signs everyone out. Call
-              // signOut (not forceSignedOut) to also clear the rc_auth cookie —
-              // forceSignedOut only wipes the in-memory cache, so a hard refresh
-              // would re-authenticate from the cookie before resetBoundaryAt
-              // propagates. The push is already in-flight so it lands fine.
-              void signOut();
+              // A restored session must sign out after rollover so a hard
+              // refresh cannot bypass the daily re-authentication boundary.
+              // A session just established by sign-in has already
+              // re-authenticated for this production day.
+              if (shouldSignOut) void signOut();
               return;
             }
             serverConfirmedNoRuns = true;
@@ -8779,11 +8785,10 @@ export default function Home() {
         lastFormRunIdRef.current = "";
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
-        if (serverConfirmedNoRuns) schedulePush(fresh, 0);
-        // See note above: the daily reset signs everyone out, including us.
-        // Use signOut (not forceSignedOut) to clear the rc_auth cookie so a
-        // hard refresh can't bypass sign-in via the still-valid cookie.
-        void signOut();
+        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
+        // See note above: restored sessions sign out after the daily reset,
+        // while the current sign-in transition is already re-authenticated.
+        if (shouldSignOut) void signOut();
       }
     }
     // Run once on mount too. loadDayState() only resets the in-memory view when
@@ -13784,6 +13789,7 @@ export default function Home() {
     let timeout: ReturnType<typeof setTimeout>;
     function scheduleReset() {
       timeout = setTimeout(async () => {
+        const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
         const storedDs = (() => {
           try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; }
           catch { return null; }
@@ -13862,10 +13868,9 @@ export default function Home() {
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
               fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
-              // Sign out to clear the rc_auth cookie — without this a hard
-              // refresh re-authenticates from the cookie before resetBoundaryAt
-              // propagates, bypassing the sign-in requirement.
-              void signOut();
+              // A restored session must sign out after rollover; a session
+              // established by the current sign-in has already re-authenticated.
+              if (shouldSignOut) void signOut();
               scheduleReset();
               return;
             }
@@ -13884,15 +13889,16 @@ export default function Home() {
         lastFormRunIdRef.current = "";
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
-        if (serverConfirmedNoRuns) schedulePush(fresh, 0);
-        // Clear the rc_auth cookie so a hard refresh can't bypass sign-in.
-        void signOut();
+        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
+        // Clear the rc_auth cookie for restored sessions so a hard refresh
+        // cannot bypass sign-in. The current sign-in transition is exempt.
+        if (shouldSignOut) void signOut();
         scheduleReset();
       }, msUntilMidnight());
     }
     scheduleReset();
     return () => clearTimeout(timeout);
-  }, []);
+  }, [consumeFreshSession]);
 
   // Clear hidden fields the moment their recipe-driven hide condition becomes true
   useEffect(() => {

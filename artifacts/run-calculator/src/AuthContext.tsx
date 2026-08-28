@@ -31,6 +31,7 @@ import { AuthContext } from "./useAuth";
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const authEpochRef = useRef(0);
+  const freshSessionRef = useRef(false);
 
   const advanceAuthEpoch = useCallback(() => {
     const next = authEpochRef.current + 1;
@@ -91,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const transitionEpoch = advanceAuthEpoch();
       const { user } = await signInRequest(username, password);
       if (transitionEpoch !== authEpochRef.current) return;
+      freshSessionRef.current = true;
       await resetCacheTo(user);
     },
     [advanceAuthEpoch, resetCacheTo],
@@ -101,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const transitionEpoch = advanceAuthEpoch();
       const { user } = await signUpRequest(username, password, accessCode);
       if (transitionEpoch !== authEpochRef.current) return;
+      freshSessionRef.current = true;
       await resetCacheTo(user);
     },
     [advanceAuthEpoch, resetCacheTo],
@@ -112,11 +115,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const transitionEpoch = advanceAuthEpoch();
     const { user } = await signInRequest("test", "test");
     if (transitionEpoch !== authEpochRef.current) return;
+    freshSessionRef.current = true;
     await resetCacheTo(user);
   }, [advanceAuthEpoch, resetCacheTo]);
 
   const signOut = useCallback(async () => {
     const transitionEpoch = advanceAuthEpoch();
+    freshSessionRef.current = false;
     try {
       await signOutRequest();
     } finally {
@@ -130,8 +135,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // the cache to prevent cross-user leakage.
   const forceSignedOut = useCallback(() => {
     advanceAuthEpoch();
+    freshSessionRef.current = false;
     qc.setQueryData(["me"], null);
   }, [advanceAuthEpoch, qc]);
+
+  const consumeFreshSession = useCallback(() => {
+    const wasFresh = freshSessionRef.current;
+    freshSessionRef.current = false;
+    return wasFresh;
+  }, []);
 
   const revalidate = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["me"] });
@@ -239,6 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInAsTest,
         signOut,
         forceSignedOut,
+        consumeFreshSession,
         revalidate,
         changePassword,
         markOnboardingSeen,

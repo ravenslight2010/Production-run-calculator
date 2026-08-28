@@ -51,6 +51,7 @@ function makeAuthValue(
     signInAsTest: vi.fn(),
     signOut: vi.fn(),
     forceSignedOut: vi.fn(),
+    consumeFreshSession: vi.fn(() => false),
     revalidate: vi.fn(),
     changePassword: vi.fn(),
     markOnboardingSeen: vi.fn(),

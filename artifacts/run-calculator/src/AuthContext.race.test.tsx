@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import type { StaffMember } from "./inventoryShared";
 
 const mocks = vi.hoisted(() => ({
@@ -59,12 +60,20 @@ function deferred<T>() {
 }
 
 function IdentityProbe() {
-  const { me, signIn } = useAuth();
+  const { me, signIn, consumeFreshSession } = useAuth();
+  const [consumed, setConsumed] = useState<string>("not-consumed");
   return (
     <>
       <output data-testid="identity">{me?.userId ?? "signed-out"}</output>
+      <output data-testid="fresh-session">{consumed}</output>
       <button type="button" onClick={() => void signIn("manager", "password")}>
         Sign in
+      </button>
+      <button
+        type="button"
+        onClick={() => setConsumed(String(consumeFreshSession()))}
+      >
+        Consume fresh session
       </button>
     </>
   );
@@ -116,5 +125,32 @@ describe("AuthProvider session transition", () => {
       expect(screen.getByTestId("identity").textContent).toBe("manager-1"),
     );
     expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a successful sign-in as fresh exactly once", async () => {
+    mocks.fetchMe.mockResolvedValue(null);
+    mocks.signInRequest.mockResolvedValue({ token: "ignored", user: manager });
+
+    renderAuth();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await screen.findByText("manager-1");
+
+    const consume = screen.getByRole("button", { name: "Consume fresh session" });
+    await userEvent.click(consume);
+    expect(screen.getByTestId("fresh-session").textContent).toBe("true");
+    await userEvent.click(consume);
+    expect(screen.getByTestId("fresh-session").textContent).toBe("false");
+  });
+
+  it("does not mark a session restored by the cold /me probe as fresh", async () => {
+    mocks.fetchMe.mockResolvedValue(manager);
+
+    renderAuth();
+    await screen.findByText("manager-1");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Consume fresh session" }),
+    );
+
+    expect(screen.getByTestId("fresh-session").textContent).toBe("false");
   });
 });

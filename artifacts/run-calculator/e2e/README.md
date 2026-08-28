@@ -14,11 +14,27 @@ classification, and bounded coverage gaps, see
 | `playwright.visual.config.ts` | isolated account, non-destructive | no global setup; the visual suite creates unique accounts and removes them in `afterAll` |
 | `playwright.management-performance.config.ts` | isolated account, non-destructive | authenticated startup and deferred staff-management budgets; created accounts are removed in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
+| `playwright.pwa-morning.config.ts` | isolated account, disposable database | tablet-sized stale-day → one sign-in → mount-time rollover smoke; attaches request and browser-log evidence |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
 
 The phone and PWA configs intentionally do not extend the main config. This
 prevents destructive live-day setup from being inherited by independent layout
 and service-worker checks.
+
+Run the tablet-sized PWA morning-login smoke with an approved disposable
+database:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:pwa-morning
+```
+
+The smoke captures the single sign-in, authenticated Home result, relevant
+auth/sync responses, and browser errors in
+`pwa-morning-login-evidence.json`. It does not replace the physical iPad
+follow-up: launch the app from the iPad Home Screen after a stale local-day
+rollover, confirm one sign-in reaches Home and stays there, then separately
+confirm an already-active session still requires the next day's sign-in.
 
 ## Database safety
 
