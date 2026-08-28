@@ -366,4 +366,63 @@ describe("auto-track freezer-drain phase", () => {
     });
     expect(total(values)).toBe(afterRunning + 2);
   });
+
+  it("preserves the freezer baseline when End Run changes the lifecycle stamp", () => {
+    const t0 = 1_700_000_000_000;
+    const { form, values } = makeForm({
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 0,
+      batchesReady: 0,
+    });
+
+    const { rerender } = renderHook(
+      (props: Props & { runGeneration?: string }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runGeneration: props.runGeneration,
+          runStatus: props.runStatus,
+          endedAt: props.endedAt,
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: props.calc,
+          v: props.v,
+          form,
+        }),
+      {
+        initialProps: {
+          nowTime: new Date(t0),
+          elapsedBatchSec: 30 * 60,
+          v: makeV({ casesNeeded: 1000 }),
+          calc: { ...baseCalc, casesInFreezer: 40 },
+          runStatus: "running" as const,
+          endedAt: null,
+          runGeneration: "running-1",
+        },
+      },
+    );
+
+    rerender({
+      nowTime: new Date(t0 + 1000),
+      elapsedBatchSec: 30 * 60 + 1,
+      v: makeV({ casesNeeded: 1000 }),
+      calc: { ...baseCalc, casesInFreezer: 40 },
+      runStatus: "ended" as const,
+      endedAt: t0 + 1000,
+      runGeneration: "ended-2",
+    });
+    rerender({
+      nowTime: new Date(t0 + 10_000),
+      elapsedBatchSec: 30 * 60 + 10,
+      v: makeV({ casesNeeded: 1000 }),
+      calc: { ...baseCalc, casesInFreezer: 37 },
+      runStatus: "ended" as const,
+      endedAt: t0 + 1000,
+      runGeneration: "ended-2",
+    });
+
+    // The 3 cases that exited after End Run are applied. If the generation
+    // effect reset the drain baseline, this would incorrectly stay at 60.
+    expect(total(values)).toBe(63);
+  });
 });

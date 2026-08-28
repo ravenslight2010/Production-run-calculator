@@ -32,6 +32,9 @@ describe("auto-track coordination", () => {
     expect(parseAutoTrackClaim(claim({
       mutations: [{ field: "batchesReady", from: 1, to: 0 }],
     }), NOW)).toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      nextDueAt: NOW + 60 * 60_000 + 1,
+    }), NOW)).toBeNull();
   });
 
   it("commits once and makes an identical retry idempotent", () => {
@@ -125,5 +128,84 @@ describe("auto-track coordination", () => {
     const result = applyAutoTrackClaim(stored, claim(), NOW);
     expect(result.outcome).toBe("conflict");
     expect(result.values.traysOnLine).toBe(10);
+  });
+
+  it("anchors an ahead-clock claim deadline to server time", () => {
+    const clockAhead = 4 * 60 * 60_000;
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: { "run-1": { traysOnLine: 10 } },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      dueAt: NOW + clockAhead,
+      nextDueAt: NOW + clockAhead + 1_000,
+    }), NOW);
+    expect(result.outcome).toBe("accepted");
+    expect(result.channelState.nextDueAt).toBe(NOW + 1_000);
+  });
+
+  it("rejects a delayed case claim after an ended line is empty", () => {
+    const endedAt = NOW - 5 * 60_000;
+    const stored = {
+      dayState: {
+        runs: [{ id: "run-1", startedAt: NOW - 20 * 60_000, endedAt, metaUpdatedAt: 2 }],
+      },
+      runValues: {
+        "run-1": {
+          freezerTime: 5,
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 10,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+      packagingProgress: {
+        "run-1": {
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 10,
+          correctionGeneration: 0,
+          manualOverrideUntil: 0,
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "case",
+      correctionGeneration: 0,
+      mutations: [{ field: "casesOnCurrentSkid", from: 10, to: 11 }],
+    }), NOW);
+    expect(result.outcome).toBe("stale");
+    expect(result.values.casesOnCurrentSkid).toBe(10);
+  });
+
+  it("accepts a case claim while an ended line is still draining", () => {
+    const endedAt = NOW - 4 * 60_000;
+    const stored = {
+      dayState: {
+        runs: [{ id: "run-1", startedAt: NOW - 20 * 60_000, endedAt, metaUpdatedAt: 2 }],
+      },
+      runValues: {
+        "run-1": {
+          freezerTime: 5,
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 10,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+      packagingProgress: {
+        "run-1": {
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 10,
+          correctionGeneration: 0,
+          manualOverrideUntil: 0,
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "case",
+      correctionGeneration: 0,
+      mutations: [{ field: "casesOnCurrentSkid", from: 10, to: 11 }],
+    }), NOW);
+    expect(result.outcome).toBe("accepted");
+    expect(result.values.casesOnCurrentSkid).toBe(11);
   });
 });

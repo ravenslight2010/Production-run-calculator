@@ -46,6 +46,13 @@ export function lineHasProduct(phases: LinePhases): boolean {
   );
 }
 
+/** True only while product is actively leaving one of the modeled stages. */
+export function lineHasPackagingDrain(phases: LinePhases): boolean {
+  return [phases.stage1, phases.stage2, phases.stage3].some(
+    (phase) => phase.state === "draining",
+  );
+}
+
 export interface ComputeLinePhasesArgs {
   /** Virtual elapsed time (pause-excluded), in seconds. */
   elapsedBatchSec: number;
@@ -293,6 +300,50 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     stage2: mk(S2, "empty"),
     stage3: mk(S3, "empty"),
   };
+}
+
+/**
+ * Wall-clock seconds during which product has been eligible to exit the line
+ * after a pause. This is deliberately not the raw pause duration:
+ *
+ * - With a powered tunnel, product drains continuously through all stages.
+ * - With the safe stop-tunnel policy, Stage 1 drains first, then the stopped
+ *   tunnel holds product, then Stage 3 drains. The stopped interval must not
+ *   become packaging output when Stage 3 resumes.
+ *
+ * Keeping this pure and derived from the same stage timings as
+ * computeLinePhases makes wake/reload devices agree on the exact baseline.
+ */
+export function computePackagingDrainElapsedSec(args: ComputeLinePhasesArgs): number {
+  if (args.runStatus !== "paused" || args.pausedAt == null || args.elapsedBatchSec <= 0) {
+    return 0;
+  }
+
+  let preTunnelMin = Number(args.preTunnelMin);
+  let postTunnelMin = Number(args.postTunnelMin);
+  const freezerTime = Number(args.freezerTime);
+  if (!Number.isFinite(preTunnelMin) || !Number.isFinite(postTunnelMin) || !Number.isFinite(freezerTime)) {
+    return 0;
+  }
+  preTunnelMin = Math.max(0, preTunnelMin);
+  postTunnelMin = Math.max(0, postTunnelMin);
+  if (freezerTime > 0 && preTunnelMin + postTunnelMin > freezerTime) {
+    const total = preTunnelMin + postTunnelMin;
+    preTunnelMin = (preTunnelMin / total) * freezerTime;
+    postTunnelMin = (postTunnelMin / total) * freezerTime;
+  }
+
+  const elapsedMin = Math.max(0, (args.nowMs - args.pausedAt) / 60000);
+  if (args.pauseStopsTunnel === false) {
+    return Math.min(elapsedMin, Math.max(0, freezerTime)) * 60;
+  }
+
+  const stage1DrainMin = Math.min(elapsedMin, preTunnelMin);
+  const stage3DrainMin = Math.min(
+    Math.max(0, elapsedMin - preTunnelMin),
+    postTunnelMin,
+  );
+  return (stage1DrainMin + stage3DrainMin) * 60;
 }
 
 // ── Ended-run elapsed helper ─────────────────────────────────────────────────

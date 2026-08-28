@@ -91,9 +91,29 @@ export type AutoTrackEventClaim = {
 
 export type AutoTrackEventResult = {
   outcome: "accepted" | "duplicate" | "stale" | "conflict";
-  state: { generation: string; sequence: number; nextDueAt: number };
+  state: { generation: string; sequence: number; nextDueAt: number; updatedAt: number };
   values: Partial<FormValues>;
 };
+
+export function localAutoTrackDueAt(
+  state: Pick<AutoTrackEventResult["state"], "nextDueAt" | "updatedAt">,
+  localNow = Date.now(),
+): number {
+  return localNow + Math.max(0, state.nextDueAt - state.updatedAt);
+}
+
+export function shouldAdoptAutoTrackCoordinationDeadline(
+  currentGeneration: string,
+  incomingGeneration: string,
+  previousSequence: number,
+  incomingSequence: number,
+): boolean {
+  return incomingGeneration === currentGeneration && incomingSequence > previousSequence;
+}
+
+export function hasAutoTrackCoordinationClockAnchor(updatedAt: unknown): updatedAt is number {
+  return typeof updatedAt === "number" && Number.isFinite(updatedAt);
+}
 
 interface AutoTrackParams {
   runId: string;
@@ -414,11 +434,19 @@ export function useAutoTrack({
   const packagingDrainElapsedSecRef = useRef<number>(0);
   const packagingDrainWallMsRef = useRef<number>(0);
   const previousPackagingDrainActiveRef = useRef(false);
+  const previousPackagingRunStatusRef = useRef<RunStatus | null>(null);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   const [coordinationPendingCount, setCoordinationPendingCount] = useState(0);
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
+  const previousLifecycleRunIdRef = useRef<string | null>(null);
+  const previousLifecycleStatusRef = useRef<RunStatus | null>(null);
+  // The lifecycle effect runs before the generation effect. Preserve the
+  // prior committed status so same-run pause/resume stamps do not look like a
+  // new run after the status effect has already re-armed the timers.
+  const lifecycleStatusBeforeRenderRef = useRef<RunStatus | null>(null);
+  const preserveEndDrainOnGenerationRef = useRef(false);
 
   useEffect(() => {
     const adopt = (event: Event) => {
@@ -427,35 +455,39 @@ export function useAutoTrack({
           generation: string;
           sequence: number;
           nextDueAt: number;
+          updatedAt?: number;
         }>>>;
       }>).detail;
       const channels = coordination?.runs?.[runId];
       if (!channels) return;
       for (const [channel, state] of Object.entries(channels) as Array<[
         AutoTrackChannel,
-        { generation: string; sequence: number; nextDueAt: number },
+        { generation: string; sequence: number; nextDueAt: number; updatedAt?: number },
       ]>) {
         const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
         if (state.generation !== generation) {
           coordinationSequenceRef.current[channel] = 0;
-          const dueRef = channel === "case"
-            ? caseNextDueMsRef
-            : channel === "tray-consume"
-              ? trayNextDueMsRef
-              : channel === "tray-produce"
-                ? trayProdNextDueMsRef
-                : channel === "batch-consume"
-                  ? batchNextDueMsRef
-                  : channel === "batch-produce"
-                    ? batchProdNextDueMsRef
-                    : hopperProdNextDueMsRef;
-          dueRef.current = state.nextDueAt;
+          // The server retains prior-generation coordination until this
+          // lifecycle emits its first claim. Never restart current timers from
+          // that stale snapshot: periodic sync would otherwise keep long
+          // tray/batch/hopper cadences perpetually just short of due.
           continue;
         }
+        const previousSequence = coordinationSequenceRef.current[channel] ?? 0;
+        if (!shouldAdoptAutoTrackCoordinationDeadline(
+          generation,
+          state.generation,
+          previousSequence,
+          state.sequence,
+        )) continue;
         coordinationSequenceRef.current[channel] = Math.max(
-          coordinationSequenceRef.current[channel] ?? 0,
+          previousSequence,
           state.sequence,
         );
+        // Legacy persisted coordination predates the server clock anchor.
+        // Preserve the sequence for the successor claim, but keep the current
+        // local deadline so a NaN translation cannot disable the channel.
+        if (!hasAutoTrackCoordinationClockAnchor(state.updatedAt)) continue;
         const dueRef = channel === "case"
           ? caseNextDueMsRef
           : channel === "tray-consume"
@@ -467,7 +499,12 @@ export function useAutoTrack({
                 : channel === "batch-produce"
                   ? batchProdNextDueMsRef
                   : hopperProdNextDueMsRef;
-        dueRef.current = state.nextDueAt;
+        if (channel !== "case") {
+          dueRef.current = localAutoTrackDueAt({
+            nextDueAt: state.nextDueAt,
+            updatedAt: state.updatedAt,
+          });
+        }
       }
     };
     window.addEventListener(AUTO_TRACK_COORDINATION_EVENT, adopt);
@@ -552,6 +589,7 @@ export function useAutoTrack({
     packagingDrainElapsedSecRef.current = 0;
     packagingDrainWallMsRef.current = 0;
     previousPackagingDrainActiveRef.current = false;
+    previousPackagingRunStatusRef.current = null;
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
@@ -613,10 +651,19 @@ export function useAutoTrack({
     nextDueAt: number,
     mutations: AutoTrackMutation[],
   ) => {
-    const applyValues = (values: Partial<FormValues>) => {
+    const applyValues = (values: Partial<FormValues>, canonical = false) => {
       const nextSkids = values.skidsCompleted;
       const nextCases = values.casesOnCurrentSkid;
       if (typeof nextSkids === "number" && typeof nextCases === "number") {
+        if (canonical && channel === "case") {
+          // A duplicate/stale claim returns the canonical register, which may
+          // include another device's accepted progress. Adopt that value before
+          // the next local tick; otherwise the old expected-case baseline would
+          // add the same interval a second time on top of the canonical count.
+          lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+          drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
+          formResetSkippedRef.current = false;
+        }
         if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) === false) return;
         form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
         form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
@@ -671,9 +718,9 @@ export function useAutoTrack({
               : channel === "batch-produce"
                 ? batchProdNextDueMsRef
                 : hopperProdNextDueMsRef;
-      dueRef.current = result.state.nextDueAt;
+      dueRef.current = localAutoTrackDueAt(result.state);
       coordinationRetryEventRef.current[channel] = undefined;
-      applyValues(result.values);
+      applyValues(result.values, true);
     }).catch(() => {
       const dueRef = channel === "case"
         ? caseNextDueMsRef
@@ -696,6 +743,8 @@ export function useAutoTrack({
     claimAutoTrackEvent,
     endedAt,
     form,
+    autoTrackSuggestion?.expectedCasesRaw,
+    calc.casesInFreezer,
     onPackagingProgressAutoAdvance,
     runGeneration,
     runId,
@@ -769,15 +818,43 @@ export function useAutoTrack({
   // once the drain finishes (drainActive flips false) or immediately when
   // there is no drain window at all.
   useEffect(() => {
-    if (runStatus === "pending" || (runStatus === "ended" && !drainActive)) {
+    const sameRun = previousLifecycleRunIdRef.current === runId;
+    lifecycleStatusBeforeRenderRef.current = sameRun
+      ? previousLifecycleStatusRef.current
+      : null;
+    const preservingEndDrain =
+      sameRun &&
+      previousLifecycleStatusRef.current !== null &&
+      previousLifecycleStatusRef.current !== "ended" &&
+      runStatus === "ended" &&
+      drainActive;
+    preserveEndDrainOnGenerationRef.current = preservingEndDrain;
+    if (
+      !preservingEndDrain &&
+      (runStatus === "pending" || (runStatus === "ended" && !drainActive))
+    ) {
       resetBookkeeping();
     }
-  }, [runStatus, drainActive, resetBookkeeping]);
+    previousLifecycleRunIdRef.current = runId;
+    previousLifecycleStatusRef.current = runStatus;
+  }, [drainActive, resetBookkeeping, runId, runStatus]);
 
   // Re-baseline when the active run changes (switching runs / first mount) so the
   // incremental delta is never computed against another run's numbers, and a run
   // we switch or reload into is not double-counted.
   useEffect(() => {
+    if (preserveEndDrainOnGenerationRef.current && runStatus === "ended" && drainActive) {
+      preserveEndDrainOnGenerationRef.current = false;
+      return;
+    }
+    const sameRun = previousLifecycleRunIdRef.current === runId;
+    const continuingSameRun =
+      sameRun
+      && lifecycleStatusBeforeRenderRef.current !== null
+      && lifecycleStatusBeforeRenderRef.current !== "pending"
+      && runStatus !== "pending"
+      && !(runStatus === "ended" && !drainActive);
+    if (continuingSameRun) return;
     resetBookkeeping();
   }, [runGeneration, runId, resetBookkeeping]);
 
@@ -812,8 +889,10 @@ export function useAutoTrack({
   // interval once, then switch the shared case baseline to the normal clock.
   useEffect(() => {
     const wasPackagingDrainActive = previousPackagingDrainActiveRef.current;
+    const resumedFromPausedRun =
+      previousPackagingRunStatusRef.current === "paused" && runStatus === "running";
     const resumedFromPackagingDrain =
-      wasPackagingDrainActive && runStatus === "running" && !packagingDrainActive;
+      runStatus === "running" && (wasPackagingDrainActive || resumedFromPausedRun);
 
     if (packagingDrainActive) {
       packagingDrainElapsedSecRef.current = Math.max(0, packagingDrainElapsedSec);
@@ -822,7 +901,9 @@ export function useAutoTrack({
 
     if (resumedFromPackagingDrain) {
       const finalDrainExpected =
-        packagingDrainWallMsRef.current > 0 && v.pizzasPerCase > 0
+        wasPackagingDrainActive &&
+        packagingDrainWallMsRef.current > 0 &&
+        v.pizzasPerCase > 0
           ? Math.floor(
             ((packagingDrainElapsedSecRef.current
               + Math.max(0, Date.now() - packagingDrainWallMsRef.current) / 1000)
@@ -852,6 +933,7 @@ export function useAutoTrack({
     }
 
     previousPackagingDrainActiveRef.current = packagingDrainActive;
+    previousPackagingRunStatusRef.current = runStatus;
   }, [
     applyPackagingCaseIncrement,
     autoTrackBlocked,
@@ -889,8 +971,12 @@ export function useAutoTrack({
   // turn hidden time into a new counter write.
   const previouslyBlockedRef = useRef(autoTrackBlocked);
   const foregroundRebaseRequestedRef = useRef(false);
+  const foregroundRebaseSignalConsumedRef = useRef(false);
   const rebaseAfterForegroundSync = useCallback(() => {
-    const nowMs = nowTime.getTime();
+    // This callback may run from the barrier-release effect one render after
+    // the wake clock was snapped. Read the clock at execution time rather than
+    // using the callback's captured display-clock value.
+    const nowMs = Date.now();
     const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
     caseNextDueMsRef.current = timing.caseMs > 0 ? nowMs + timing.caseMs : 0;
     trayNextDueMsRef.current = timing.trayMs > 0 ? nowMs + timing.trayMs : 0;
@@ -921,9 +1007,13 @@ export function useAutoTrack({
   ]);
 
   useEffect(() => {
+    if (!autoTrackRebaseAfterBlock) {
+      foregroundRebaseSignalConsumedRef.current = false;
+    }
     if (autoTrackBlocked) {
-      if (autoTrackRebaseAfterBlock) {
+      if (autoTrackRebaseAfterBlock && !foregroundRebaseSignalConsumedRef.current) {
         foregroundRebaseRequestedRef.current = true;
+        foregroundRebaseSignalConsumedRef.current = true;
         resetBookkeeping();
       }
     } else if (previouslyBlockedRef.current && foregroundRebaseRequestedRef.current) {
@@ -1058,6 +1148,13 @@ export function useAutoTrack({
         }
       }
     }
+
+    // Packaging may continue draining occupied line phases while a run is
+    // paused or ended, but the upstream dough crew does not. The outer effect
+    // is also allowed to run for packaging drain so the case channel can
+    // advance; keep every dough production/consumption channel explicitly
+    // limited to a live running run.
+    if (runStatus !== "running") return;
 
     // Trays / batches: incremental decrement, each at its own cadence.
     // Works after page reloads and naturally handles mid-run replenishments.

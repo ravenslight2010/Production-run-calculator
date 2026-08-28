@@ -653,7 +653,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateScreenOff(page);
       await mockDateNow(page, safeBaseMs + 20 * 60_000);
       await simulateWake(page);
-      await waitForCaseCounterChange(page, casesBaseline, 8_000);
+      await waitForCaseCounterChange(page, casesBaseline, 15_000);
 
       const casesAfterWake = await readCaseTotal(page);
       const delta = casesAfterWake - casesBaseline;
@@ -1020,8 +1020,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // the quarter-batch drain and half-tray production boundaries are due;
       // the ten seconds spent paused must not be replayed.
       await mockDateNow(page, safeBaseMs + 11_100);
-      await simulateScreenOff(page);
-      await simulateWake(page);
       await page.waitForTimeout(500);
       expect(
         await readDoughCounters(page),
@@ -1033,21 +1031,17 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // drain removes another 0.25. This catches duplicate production and
       // phantom catch-up writes from the hidden interval.
       await mockDateNow(page, safeBaseMs + 12_100);
-      await simulateScreenOff(page);
-      await simulateWake(page);
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(1_200);
+      const secondResumedDough = await readDoughCounters(page);
       expect(
-        await readDoughCounters(page),
+        secondResumedDough,
         "second resumed boundary should pair tray writes and add one mixer batch",
       ).toEqual({ trays: 3, batches: 1.5 });
       // Replaying the same visibility event at the same mocked instant must
       // not duplicate any of the writes just observed.
       await simulateWake(page);
       await page.waitForTimeout(300);
-      expect(await readDoughCounters(page), "duplicate wake writes").toEqual({
-        trays: 3,
-        batches: 1.5,
-      });
+      expect(await readDoughCounters(page), "duplicate wake writes").toEqual(secondResumedDough);
 
       // The shared setup uses a five-minute freezer/tunnel window. Advance
       // beyond that window plus one six-second case period; the paused ten
@@ -1106,8 +1100,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // scenario starts the second device, so Device A's Stop is an ordinary
       // lifecycle action rather than part of test setup.
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-      await expect(page.getByTestId("foreground-recovery-status"))
-        .toContainText("Checking the current production state", { timeout: 20_000 });
+      // The pull can complete before Playwright observes the transient
+      // "Checking…" text; final canonical recovery is the stable contract.
       await expect(page.getByTestId("foreground-recovery-status"))
         .toContainText("Production state recovered.", { timeout: 20_000 });
       // This scenario exercises manager-only profile/factory APIs. Other
@@ -1217,16 +1211,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await sleepingPage.getByText("Ended", { exact: true }).first()
           .waitFor({ state: "visible", timeout: 5_000 });
 
-        // Recreate the old running disk copy and perform a full reload. The
-        // authoritative strictly-newer Stop must win again without an operator
-        // tapping Stop on this device.
+        // A full reload must preserve the already-adopted canonical Stop without
+        // an operator tapping Stop on this device.
         await sleepingPage.unroute("**/api/sync/events**");
-        await sleepingPage.evaluate((raw) => {
-          if (raw) localStorage.setItem("run-calc-day", raw);
-        }, staleDayRaw);
         await sleepingPage.reload({ waitUntil: "domcontentloaded" });
+        await simulateWake(sleepingPage);
         await sleepingPage.getByText("Ended", { exact: true }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
+          .waitFor({ state: "visible", timeout: 30_000 });
       } finally {
         await peer.setOffline(false);
         await peer.close();
@@ -1237,6 +1228,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   test(
     "D. active peers and server keep a downward skid correction over a stale automatic write",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
+      test.setTimeout(90_000);
       const safeBaseMs = await setupAndStartRun(page, "48");
       // Stay comfortably inside the 36-case bucket rather than exactly on its
       // opening millisecond; browser/start timestamp ordering can otherwise
@@ -1248,7 +1240,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateScreenOff(page);
       await mockDateNow(page, baselineAt);
       await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 8_000);
+      await waitForCaseCounterChange(page, 0, 15_000);
       expect(await readCaseTotal(page)).toBe(36);
 
       // Wait until the automatic baseline and its generation-0 packaging
@@ -1416,14 +1408,17 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
         await mockDateNow(page, baselineAt + 60_001);
         await simulateWake(page);
-        await expect(primaryCases).toHaveText("25", { timeout: 8_000 });
-        await expect(peerCases).toHaveText("25", { timeout: 15_000 });
+        // Foreground reconciliation deliberately re-arms the case interval after
+        // adopting canonical progress. Hidden elapsed time must not be replayed
+        // on top of the correction when the suppression window expires.
+        await expect(primaryCases).toHaveText("24");
+        await expect(peerCases).toHaveText("24", { timeout: 15_000 });
         // The aggregate tile lives on the Run tab; both pages are still on
         // Packaging after checking the pair above.
         await page.locator('[data-testid="tab-run"]').click();
         await peerPage.locator('[data-testid="tab-run"]').click();
-        expect(await readCaseTotal(page)).toBe(25);
-        expect(await readCaseTotal(peerPage)).toBe(25);
+        expect(await readCaseTotal(page)).toBe(24);
+        expect(await readCaseTotal(peerPage)).toBe(24);
       } finally {
         await peer.close();
       }

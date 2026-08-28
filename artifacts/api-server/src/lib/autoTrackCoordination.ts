@@ -62,6 +62,8 @@ const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["fi
   "batch-produce": new Set(["batchesReady"]),
   hopper: new Set(),
 };
+const MAX_CLAIM_CLOCK_SKEW_MS = 24 * 60 * 60_000;
+const MAX_AUTO_TRACK_PERIOD_MS = 60 * 60_000;
 
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -90,10 +92,15 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     || !finiteNumber(body.nextDueAt)
     || !finiteNumber(body.baseUpdatedAt)
     || body.baseUpdatedAt < 0
-    || body.dueAt < now - 24 * 60 * 60_000
-    || body.dueAt > now + 5_000
+    || body.dueAt < now - MAX_CLAIM_CLOCK_SKEW_MS
+    // A sleeping device can wake with a clock ahead of the API process (and
+    // browser/device clocks are not guaranteed to be identical). The claim is
+    // still bounded to the same day-sized window as nextDueAt; dueAt is only
+    // coordination metadata and is not used as an authorization timestamp.
+    || body.dueAt > now + MAX_CLAIM_CLOCK_SKEW_MS
     || body.nextDueAt <= body.dueAt
-    || body.nextDueAt > now + 24 * 60 * 60_000
+    || body.nextDueAt - body.dueAt > MAX_AUTO_TRACK_PERIOD_MS
+    || body.nextDueAt > now + MAX_CLAIM_CLOCK_SKEW_MS + MAX_AUTO_TRACK_PERIOD_MS
     || !Array.isArray(body.mutations)
     || body.mutations.length > 2
   ) return null;
@@ -152,6 +159,46 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function caseLifecycleAllowsClaim(
+  runMeta: Record<string, unknown>,
+  values: Record<string, unknown>,
+  now: number,
+): boolean {
+  const startedAt = Number(runMeta.startedAt) || 0;
+  if (startedAt <= 0) return false;
+
+  const pausedAt = Number(runMeta.pausedAt) || 0;
+  const endedAt = Number(runMeta.endedAt) || 0;
+  if (pausedAt <= 0 && endedAt <= 0) return true;
+
+  const freezerTime = Math.max(0, Number(values.freezerTime) || 0);
+  if (freezerTime <= 0) return false;
+  const boundaryAt = endedAt > 0 ? endedAt : pausedAt;
+  if (boundaryAt <= startedAt) return false;
+
+  let drainWindowMin = freezerTime;
+  if (pausedAt > 0 && endedAt <= 0) {
+    const stoppages = Array.isArray(runMeta.stoppages) ? runMeta.stoppages : [];
+    const openPause = [...stoppages].reverse().find((candidate) => {
+      const stoppage = object(candidate);
+      return stoppage.type === "pause" && !finiteNumber(stoppage.endedAt);
+    });
+    const stopsTunnel = object(openPause).stopTunnel !== false;
+    if (stopsTunnel) {
+      let preTunnelMin = Math.max(0, Number(values.preTunnelMin) || 2.5);
+      let postTunnelMin = Math.max(0, Number(values.postTunnelMin) || 2.5);
+      if (preTunnelMin + postTunnelMin > freezerTime) {
+        const scale = freezerTime / (preTunnelMin + postTunnelMin);
+        preTunnelMin *= scale;
+        postTunnelMin *= scale;
+      }
+      drainWindowMin = preTunnelMin + postTunnelMin;
+    }
+  }
+
+  return now < boundaryAt + drainWindowMin * 60_000;
+}
+
 export function applyAutoTrackClaim(
   stored: unknown,
   claim: AutoTrackClaim,
@@ -178,7 +225,11 @@ export function applyAutoTrackClaim(
   const lifecycleValid =
     expectedGeneration === claim.generation
     && finiteNumber(runMeta.startedAt)
-    && (isCaseChannel || (!finiteNumber(runMeta.pausedAt) && !finiteNumber(runMeta.endedAt)));
+    && (
+      isCaseChannel
+        ? caseLifecycleAllowsClaim(runMeta, values, now)
+        : (!finiteNumber(runMeta.pausedAt) && !finiteNumber(runMeta.endedAt))
+    );
 
   let outcome: AutoTrackClaimOutcome = lifecycleValid ? "accepted" : "stale";
   if (outcome === "accepted" && previous.generation === claim.generation) {
@@ -237,7 +288,10 @@ export function applyAutoTrackClaim(
   const channelState: AutoTrackChannelState = {
     generation: claim.generation,
     sequence: claim.sequence,
-    nextDueAt: claim.nextDueAt,
+    // Preserve the requested cadence, but anchor it to server time. Client
+    // clocks may be hours apart; persisting their absolute deadline would let
+    // one ahead-clock device postpone every peer until its clock catches up.
+    nextDueAt: now + Math.min(MAX_AUTO_TRACK_PERIOD_MS, claim.nextDueAt - claim.dueAt),
     acceptedEventId: claim.eventId,
     acceptedRunValuesUpdatedAt,
     updatedAt: now,

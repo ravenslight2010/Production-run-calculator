@@ -32,7 +32,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { UseFormReturn } from "react-hook-form";
-import { useAutoTrack } from "../useAutoTrack";
+import {
+  hasAutoTrackCoordinationClockAnchor,
+  localAutoTrackDueAt,
+  shouldAdoptAutoTrackCoordinationDeadline,
+  useAutoTrack,
+} from "../useAutoTrack";
 import type { FormValues } from "../../types";
 
 // ── Fake form ─────────────────────────────────────────────────────────────────
@@ -92,6 +97,34 @@ function ms(t: number): Date {
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
 describe("useAutoTrack — post-screen-wake / long-timeout counter correctness", () => {
+  it("translates a server deadline onto an ahead client's local clock", () => {
+    expect(localAutoTrackDueAt({
+      updatedAt: 1_800_000_000_000,
+      nextDueAt: 1_800_000_006_000,
+    }, 1_800_014_400_000)).toBe(1_800_014_406_000);
+  });
+
+  it("ignores repeated prior-lifecycle coordination deadlines", () => {
+    expect(shouldAdoptAutoTrackCoordinationDeadline(
+      "run-1:resume",
+      "run-1:pause",
+      0,
+      4,
+    )).toBe(false);
+    expect(shouldAdoptAutoTrackCoordinationDeadline(
+      "run-1:resume",
+      "run-1:resume",
+      0,
+      1,
+    )).toBe(true);
+  });
+
+  it("keeps local timing for legacy coordination without a server clock anchor", () => {
+    expect(hasAutoTrackCoordinationClockAnchor(undefined)).toBe(false);
+    expect(hasAutoTrackCoordinationClockAnchor(Number.NaN)).toBe(false);
+    expect(hasAutoTrackCoordinationClockAnchor(1_800_000_000_000)).toBe(true);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(T0);
@@ -544,6 +577,65 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       }));
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
+  });
+
+  it("rebases the case baseline when a duplicate/stale claim returns canonical packaging", async () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+    });
+    const claimAutoTrackEvent = vi.fn(async (claim: {
+      dueAt: number;
+      nextDueAt: number;
+    }) => ({
+      outcome: "stale" as const,
+      state: {
+        generation: "canonical",
+        sequence: 8,
+        nextDueAt: claim.nextDueAt,
+      },
+      values: {
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 4,
+      },
+    }));
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number, elapsedSec: number): Props => ({
+      runId: "wake-canonical-packaging-7",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      claimAutoTrackEvent,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, 780) },
+    );
+
+    const wakeAt = T0 + 20 * 60_000;
+    await act(async () => {
+      vi.setSystemTime(wakeAt);
+      rerender(props(wakeAt, 780 + 20 * 60));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      claimAutoTrackEvent.mock.calls.filter(([claim]) => claim.channel === "case"),
+    ).toHaveLength(1);
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(4);
+
+    // The canonical response was accepted into the form, so the next due
+    // interval must not replay the old 30→100 hidden-time delta.
+    act(() => {
+      vi.setSystemTime(wakeAt + CASE_PERIOD_MS + 1);
+      rerender(props(wakeAt + CASE_PERIOD_MS + 1, 780 + 20 * 60 + CASE_PERIOD_MS / 1000 + 1));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(4);
   });
 
   it("7. fences the form write when the packaging register rejects a raced automatic tick", () => {

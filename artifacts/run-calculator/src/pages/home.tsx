@@ -7456,13 +7456,59 @@ export default function Home() {
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
       .then(async (): Promise<AutoTrackEventResult> => {
-    if (!navigator.onLine || foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current) {
+    if (!navigator.onLine || foregroundSyncBarrierRef.current) {
       throw new Error("Automatic tracking is waiting for shared sync");
+    }
+    // A wake can cancel the just-started run's in-flight push and queue it
+    // again after the canonical pull. Do not drop the first visible
+    // screen-off catch-up tick just because that replacement PUT has not
+    // acknowledged yet; wait briefly for the same shared-sync gate that
+    // protects automatic claims. Use performance time because browser tests
+    // and sleeping devices may deliberately mock Date.now().
+    if (!pushAcknowledgedRef.current) {
+      const waitStartedAt = typeof performance === "undefined" ? 0 : performance.now();
+      while (!pushAcknowledgedRef.current) {
+        if (!navigator.onLine || foregroundSyncBarrierRef.current) {
+          throw new Error("Automatic tracking is waiting for shared sync");
+        }
+        const waitedMs = typeof performance === "undefined"
+          ? 0
+          : Math.max(0, performance.now() - waitStartedAt);
+        if (waitedMs >= 5_000) {
+          throw new Error("Automatic tracking is waiting for shared sync");
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      }
     }
     const currentBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const previousQueuedClaimWon =
       currentBaseUpdatedAt !== enqueuedBaseUpdatedAt
       && lastAcceptedAutoTrackStampRef.current[claim.runId] === currentBaseUpdatedAt;
+    const localValues = claim.runId === currentRunIdRef.current
+      ? { ...loadRunValues(claim.runId), ...form.getValues() }
+      : loadRunValues(claim.runId);
+    const localEditReplacedQueuedClaim =
+      !previousQueuedClaimWon
+      && claim.mutations.some((mutation) =>
+        Number(localValues[mutation.field]) !== mutation.from
+      );
+    if (localEditReplacedQueuedClaim) {
+      // An automatic event can be waiting behind a sync acknowledgment while
+      // the operator enters a new baseline (for example during filling).
+      // Never replay that old zero/value snapshot on top of the edit. Return
+      // the local register as a non-committing coordination result so the hook
+      // re-arms from the corrected value without advancing the server sequence.
+      return {
+        outcome: "stale",
+        state: {
+          generation: claim.generation,
+          sequence: 0,
+          nextDueAt: claim.nextDueAt,
+          updatedAt: claim.dueAt,
+        },
+        values: localValues,
+      };
+    }
     const currentValues = previousQueuedClaimWon
       ? loadRunValues(claim.runId)
       : null;
@@ -7722,11 +7768,29 @@ export default function Home() {
         packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart);
       if (packagingFenceRaised) {
         const accepted = packagingMerge.merged[packagingRunAtApplyStart];
+        const localRegister = localPackaging[packagingRunAtApplyStart];
+        const casesPerSkid = Number(form.getValues("casesPerSkid")) || 0;
+        const localTotal =
+          (Number(form.getValues("skidsCompleted")) || 0) * casesPerSkid
+          + (Number(form.getValues("casesOnCurrentSkid")) || 0);
+        const acceptedTotal =
+          (accepted?.skidsCompleted ?? 0) * casesPerSkid
+          + (accepted?.casesOnCurrentSkid ?? 0);
+        const packagingNeedsRebase =
+          acceptedTotal !== localTotal
+          || accepted?.correctionGeneration !== localRegister?.correctionGeneration;
         autoSuppressUntilRef.current = Math.max(
           autoSuppressUntilRef.current,
           accepted?.manualOverrideUntil ?? 0,
         );
-        setAutoTrackBlocked(true);
+        // Packaging is its own causal register. Even when the run lifecycle
+        // stamp did not change, adopting a newer canonical packaging entry
+        // must release through the hook's rebase path before another automatic
+        // case delta can be published.
+        if (packagingNeedsRebase) {
+          setAutoTrackRebaseAfterBlock(true);
+          setAutoTrackBlocked(true);
+        }
       }
 
       // ── Run values (only accept if we're taking the remote day) ──
