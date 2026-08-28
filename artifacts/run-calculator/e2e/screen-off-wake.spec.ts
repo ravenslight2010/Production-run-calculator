@@ -722,6 +722,46 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "wake recovery queues one Stop tap and applies it to the same run",
+    async ({ page }) => {
+      const safeBaseMs = await setupAndStartRun(page);
+      let heldWakePulls = 0;
+      let releaseWakePull!: () => void;
+      const wakePullReleased = new Promise<void>((resolve) => {
+        releaseWakePull = resolve;
+      });
+
+      await page.route("**/api/sync/today**", async (route) => {
+        if (route.request().method() === "GET" && heldWakePulls === 0) {
+          heldWakePulls += 1;
+          await wakePullReleased;
+        }
+        await route.continue();
+      });
+
+      await simulateScreenOff(page);
+      await mockDateNow(page, safeBaseMs + 30_000);
+      await simulateWake(page);
+      await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBe(1);
+
+      const stopButton = page.getByRole("button", { name: /^stop.?run$/i }).first();
+      await stopButton.click();
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Stop requested");
+      await expect(page.getByRole("button", { name: /stop.?requested/i }))
+        .toBeDisabled();
+
+      // The single tap is now held as a run-bound intent. Releasing the
+      // canonical pull must apply it once, not require a second tap.
+      releaseWakePull();
+      await expect(page.getByText("Ended", { exact: true }).first())
+        .toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Stop applied after recovery");
+    },
+  );
+
+  test(
     "responsive display matches shared line occupancy while running, paused, and draining",
     async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 });
@@ -1061,6 +1101,15 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       };
 
       const safeBaseMs = await setupAndStartRun(page);
+      // setupAndStartRun deliberately exercises the same focus path used by a
+      // returning PWA. Let that initial reconciliation settle before this
+      // scenario starts the second device, so Device A's Stop is an ordinary
+      // lifecycle action rather than part of test setup.
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Checking the current production state", { timeout: 20_000 });
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Production state recovered.", { timeout: 20_000 });
       // This scenario exercises manager-only profile/factory APIs. Other
       // screen-wake cases intentionally run as floor staff.
       await promoteCurrentPageUserToManager(page);

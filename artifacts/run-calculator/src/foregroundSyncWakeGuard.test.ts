@@ -103,11 +103,17 @@ describe("foreground wake sync barrier", () => {
   });
 
   it("fences stale lifecycle taps until foreground adoption completes", () => {
-    const starts = homeSource.match(/function (?:startRun|pauseRun|resumeRun|endRun)\(\) \{[\s\S]{0,260}?foregroundSyncBarrierRef\.current/g) ?? [];
-    expect(starts).toHaveLength(4);
+    for (const name of ["startRun", "pauseRun", "resumeRun", "endRun"]) {
+      const start = homeSource.indexOf(`function ${name}(`);
+      expect(start, `${name} exists`).toBeGreaterThan(-1);
+      expect(homeSource.slice(start, start + 700)).toContain("foregroundSyncBarrierRef.current");
+    }
+    expect(homeSource).toContain("foregroundStopIntentRef.current = { action: \"stop\", runId: activeRun.id }");
+    expect(homeSource).toContain("resolveForegroundStopIntent(");
+    expect(homeSource).toContain("No other run was stopped.");
   });
 
-  it("holds queued pushes, retries normally after a failed pull, and does not mark failure as reconciled", () => {
+  it("holds queued pushes and keeps recovery fenced after a failed pull", () => {
     expect(homeSource).toContain("if (foregroundSyncBarrierRef.current)");
     expect(homeSource).toContain("foregroundPushPendingRef.current = true");
     expect(homeSource).toContain("syncPushGenerationRef.current += 1");
@@ -115,7 +121,10 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain("generation !== syncPushGenerationRef.current");
     expect(homeSource).toContain("if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`)");
     expect(homeSource).toContain("reconciled = true");
-    expect(homeSource).toContain("if (shouldPush || !reconciled)");
+    expect(homeSource).toContain("if (shouldPush)");
+    expect(homeSource).toContain("foregroundRecoveryNotice");
+    expect(homeSource).toContain("Retry recovery");
+    expect(homeSource).toContain("tracking is paused");
 
     const catchBlock = homeSource.match(
       /catch \{\s*\/\/ Failed pulls are not successful reconciliation[\s\S]*?return false;\s*\}/,

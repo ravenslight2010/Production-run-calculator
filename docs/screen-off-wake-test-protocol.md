@@ -1,7 +1,7 @@
 # Screen-Off / Wake Case-Counter Catch-Up — Manual Test Protocol
 
-**Task reference:** Task 727  
-**Validates:** After the 2-case-per-tick cap was removed from `useAutoTrack.ts`, the case counter on a real tablet catches up to the correct expected total in a single wake tick — not capped at `priorValue + 2`.  
+**Task reference:** Screen-off / wake recovery
+**Validates:** The case counter catches up safely after wake, and a single Stop Run tap during foreground recovery is retained, resolved against the original run, and persisted to peers/reload.
 **Relevant code:** `artifacts/run-calculator/src/hooks/useAutoTrack.ts`, `useClock.ts`  
 **Unit test coverage:** `useAutoTrack.pauseResume.test.ts` (tests 7 & 8 pass the math; this protocol proves the lifecycle in a real browser).
 
@@ -120,10 +120,42 @@ setTimeout(() => {
 
 ---
 
+## Scenario D — One-tap Stop Run while recovery is in progress
+
+This is the critical Android installed-PWA and iPad Safari/PWA journey. The
+foreground pull must be allowed to finish before the lifecycle command is
+applied; do not tap Stop a second time.
+
+### Steps
+
+| # | Action | How |
+|---|---|---|
+| 1 | Open the app in an installed Android PWA, or Safari/PWA on iPad, and use the Run tab | Log in on the same account on a second browser/device for the peer checks |
+| 2 | Start a configured run and confirm the run identity | Record the brand/flavor and run ID if available |
+| 3 | Leave the app idle or lock the screen for at least 2 minutes | Prefer a real screen-off interval; DevTools visibility simulation is acceptable for repeatability |
+| 4 | Return to the app and immediately tap **STOP RUN once** | Do not repeat the tap |
+| 5 | Observe the recovery status | It must show **Stop requested** / **STOP REQUESTED**, then either **Stop applied after recovery** or a clear remote outcome |
+| 6 | If a peer changes the original run during recovery, repeat with a remote PAUSE or STOP | The local result must say the run was already paused/ended/changed; it must not stop the peer's newly selected run |
+| 7 | Reload the recovering device after the result is shown | The original run's final lifecycle must remain unchanged |
+| 8 | Inspect the connected peer | It must converge to the same ended/paused/canonical result; no duplicate inventory finalization should appear |
+
+### Required observations
+
+| Observation | Expected value | Pass / Fail |
+|---|---|---|
+| **D1.** First Stop tap feedback | Visible pending recovery state; no silent no-op | |
+| **D2.** Same-run completion | If the run remains running, it ends once after the pull | |
+| **D3.** Remote lifecycle outcome | Pause/end/switch is adopted and explained; no different run is ended | |
+| **D4.** Failed pull | Local work is retained, tracking/lifecycle writes stay fenced, and **Retry recovery** is visible | |
+| **D5.** Persistence | Reload and peer show the same final lifecycle and counters/skids | |
+| **D6.** Diagnostics | Sync status/history shows the recovery attempt and any failure/ack without payload details | |
+
+---
+
 ## Result recording template
 
 ```
-Protocol version: 2025-08 (task 727)
+Protocol version: 2026-08 (foreground recovery)
 Device: _______________________________
 Browser: _______________________________
 App URL: _______________________________
@@ -154,6 +186,17 @@ Scenario C (DevTools)
   30-second simulated screen-off delta: _______
   Expected (≥ 5, old cap = 2): PASS/FAIL: _______
 
+Scenario D (one-tap Stop Run recovery)
+  Device/browser (Android PWA or iPad Safari/PWA): _______
+  Run identity: _______
+  Stop tapped once at: _______
+  Pending recovery shown? Y/N: _______
+  Final recovery outcome: applied / remote-paused / remote-ended / changed / failed: _______
+  Retry recovery shown after failure? Y/N/NA: _______
+  Reload retained final lifecycle? Y/N: _______
+  Connected peer converged? Y/N: _______
+  Diagnostics exported/reviewed? Y/N: _______
+
 Overall result: PASS / FAIL
 Notes: _______________________________
 ```
@@ -166,6 +209,7 @@ Notes: _______________________________
 - **A4**: Second wake delta ≥ 40 cases in a single tick (not capped at 2).  
 - **B1**: Paused run counter is exactly unchanged after wake.  
 - **C** (or A4): A DevTools-simulated 30-s screen-off produces ≥ 5-case single-tick delta (not 2).
+- **D1–D5**: A single Stop tap is visible, run-bound, safely resolved, and retained across reload/peer sync.
 
 ---
 

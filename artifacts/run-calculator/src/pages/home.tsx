@@ -2,6 +2,10 @@ import { createContext, lazy, memo, Profiler, useCallback, useEffect, useMemo, u
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import {
+  resolveForegroundStopIntent,
+  type ForegroundStopIntent,
+} from "../foregroundLifecycleIntent";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
 import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
@@ -7212,6 +7216,16 @@ export default function Home() {
   // blocked until the date-scoped shared row has been pulled and applied.
   const foregroundSyncBarrierRef = useRef(false);
   const foregroundPushPendingRef = useRef(false);
+  // A lifecycle tap made during wake recovery is bound to the run visible at
+  // tap time. It must not be replayed against whatever run becomes current.
+  const foregroundStopIntentRef = useRef<ForegroundStopIntent | null>(null);
+  const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
+  const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // React Strict Mode can tear down and re-run this effect while an initial
+  // reconciliation is still settling. The owner token prevents the old
+  // promise from releasing a newer recovery barrier, while still allowing a
+  // cancelled first pass to release the fence it raised.
+  const foregroundRecoveryOwnerRef = useRef(0);
   // Every foreground reconciliation starts a new push generation and aborts
   // requests built before wake. The server's metaUpdatedAt merge is still the
   // durable last line of defense if an already-received request completes, but
@@ -7284,6 +7298,28 @@ export default function Home() {
   // from ordinary live updates.
   const lastSyncedHistorySigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
+  const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
+  const [foregroundRecoveryNotice, setForegroundRecoveryNotice] = useState<{
+    kind: "recovering" | "failed" | "outcome";
+    message: string;
+  } | null>(null);
+  function showForegroundRecoveryNotice(
+    kind: "recovering" | "failed" | "outcome",
+    message: string,
+  ) {
+    if (foregroundRecoveryNoticeTimerRef.current) {
+      clearTimeout(foregroundRecoveryNoticeTimerRef.current);
+      foregroundRecoveryNoticeTimerRef.current = null;
+    }
+    setForegroundRecoveryNotice({ kind, message });
+  }
+  function dismissForegroundRecoveryNotice() {
+    if (foregroundRecoveryNoticeTimerRef.current) {
+      clearTimeout(foregroundRecoveryNoticeTimerRef.current);
+      foregroundRecoveryNoticeTimerRef.current = null;
+    }
+    setForegroundRecoveryNotice(null);
+  }
   const syncStatus: SyncStatus = syncPushFailed
     ? "failed"
     : syncRetryWaiting
@@ -8369,7 +8405,15 @@ export default function Home() {
     let cancelled = false;
 
     const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
+      const recoveryOwner = ++foregroundRecoveryOwnerRef.current;
       foregroundSyncBarrierRef.current = true;
+      const queuedStop = foregroundStopIntentRef.current;
+      showForegroundRecoveryNotice(
+        "recovering",
+        queuedStop
+          ? "Stop requested. Checking the current run state before applying it…"
+          : "Checking the current production state…",
+      );
       // Raise both the synchronous ref fence and its rendered companion before
       // the wake clock can publish hidden-time progress. A normal unchanged
       // pull releases without rebasing, preserving ordinary screen-off catch-up.
@@ -8480,27 +8524,95 @@ export default function Home() {
           reconciled = true;
           return true;
         } catch {
-          // Failed pulls are not successful reconciliation. Release the
-          // barrier so local tracking continues, and let the existing retry /
-          // stamped push behavior handle connectivity recovery.
+           // Failed pulls are not successful reconciliation. Keep the barrier
+           // raised: releasing it here would let hidden-time auto-track or a
+           // queued lifecycle write publish stale state. The wake guard clears
+           // its in-flight promise, so the visible retry button (or the next
+           // focus/online event) can safely try again.
+           recordSyncEvent(
+             "failure",
+             "Foreground recovery failed; local work and lifecycle writes remain fenced",
+             "foreground-recovery",
+             foregroundStopIntentRef.current?.runId,
+           );
+           setSyncFailedCount((count) => count + 1);
+           showForegroundRecoveryNotice(
+             "failed",
+             "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
+           );
           return false;
         } finally {
-          if (!cancelled) {
-            foregroundSyncBarrierRef.current = false;
-            // No-op if this wake did not adopt lifecycle state. If it did, the
-            // hook sees the true→false transition and re-baselines safely.
-            setAutoTrackBlocked(false);
-            const shouldPush = foregroundPushPendingRef.current;
-            foregroundPushPendingRef.current = false;
-            if (shouldPush || !reconciled) {
-              requestAnimationFrame(() => {
-                if (!cancelled) schedulePush(dayStateRef.current, 0);
-              });
+          if (foregroundRecoveryOwnerRef.current === recoveryOwner) {
+            if (reconciled) {
+               // Resolve the tap while the barrier is still raised. This keeps
+               // the canonical adoption and the same-run Stop in one fenced
+               // handoff; endRun's resulting push remains queued until below.
+               const intent = foregroundStopIntentRef.current;
+               if (intent) {
+                 const recoveredState = dayStateRef.current;
+                 const displayedRun = recoveredState.runs[recoveredState.currentIndex];
+                 const resolution = resolveForegroundStopIntent(
+                   intent,
+                   displayedRun?.id,
+                   displayedRun,
+                 );
+                 foregroundStopIntentRef.current = null;
+                 setPendingForegroundStopRunId(null);
+                 if (resolution.kind === "apply") {
+                   endRun(resolution.runId, true);
+                   showForegroundRecoveryNotice(
+                     "outcome",
+                     "Stop applied after recovery. The run was still running.",
+                   );
+                 } else {
+                   const outcome = resolution.reason === "paused"
+                     ? "already paused on another device"
+                     : resolution.reason === "ended"
+                       ? "already ended on another device"
+                       : resolution.reason === "changed"
+                         ? "changed on another device"
+                         : "no longer running";
+                   showForegroundRecoveryNotice(
+                     "outcome",
+                     `Stop was not applied: this run was ${outcome}. No other run was stopped.`,
+                   );
+                 }
+               } else {
+                 showForegroundRecoveryNotice("outcome", "Production state recovered.");
+               }
+              foregroundSyncBarrierRef.current = false;
+              // No-op if this wake did not adopt lifecycle state. If it did,
+              // the hook sees the true→false transition and re-baselines safely.
+              if (!cancelled) {
+                setAutoTrackBlocked(false);
+                const shouldPush = foregroundPushPendingRef.current;
+                foregroundPushPendingRef.current = false;
+                if (shouldPush) {
+                  requestAnimationFrame(() => {
+                    if (!cancelled) schedulePush(dayStateRef.current, 0);
+                  });
+                }
+              } else {
+                // The first Strict Mode pass can be cancelled after doing the
+                // work but before its state updates. Do not strand the
+                // synchronous fence in the second pass.
+                setAutoTrackBlocked(false);
+                foregroundPushPendingRef.current = false;
+              }
+            } else if (cancelled) {
+              // A cancelled first Strict Mode pass has no live owner that can
+              // surface its failure or service a retry button. Release only
+              // that pass's fence; a real mounted recovery failure remains
+              // fenced and retryable through the visible notice above.
+              foregroundSyncBarrierRef.current = false;
+              setAutoTrackBlocked(false);
+              foregroundPushPendingRef.current = false;
             }
           }
         }
       })();
     });
+    foregroundRecoveryRetryRef.current = reconcileForeground;
 
     function onVisibility() {
       if (document.visibilityState === "visible") void reconcileForeground();
@@ -11078,15 +11190,37 @@ export default function Home() {
     return null;
   }
 
-  function endRun() {
+  function endRun(expectedRunId?: string, fromForegroundRecovery = false) {
     // Guard: a run that was never started cannot be ended. Every UI call-site
     // is already gated (STOP RUN only shows when runStatus==="running"), but
     // this makes the function itself safe against future or unexpected paths.
-    if (foregroundSyncBarrierRef.current) return;
     const base = dayStateRef.current;
     const index = base.currentIndex;
     const activeRun = base.runs[index];
+    if (foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
+      if (
+        activeRun?.startedAt &&
+        !activeRun.endedAt &&
+        (!foregroundStopIntentRef.current || foregroundStopIntentRef.current.runId === activeRun.id)
+      ) {
+        foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
+        setPendingForegroundStopRunId(activeRun.id);
+        showForegroundRecoveryNotice(
+          "recovering",
+          "Stop requested. Checking the current run state before applying it…",
+        );
+        recordSyncEvent("local", "Stop request queued behind foreground recovery", undefined, activeRun.id);
+      }
+      return;
+    }
     if (!activeRun?.startedAt || activeRun.endedAt) return;
+    if (expectedRunId && activeRun.id !== expectedRunId) {
+      showForegroundRecoveryNotice(
+        "outcome",
+        "Stop was not applied because the displayed run changed elsewhere. No other run was stopped.",
+      );
+      return;
+    }
     const activeRunId = activeRun.id;
     const cur = form.getValues();
     saveRunValues(activeRunId, cur);
@@ -14262,7 +14396,7 @@ export default function Home() {
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
     nameConsolidationRef, namedPoolSnapRef, newPin, newPinConfirm, newReasonInput, nextRunDieType,
-    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseDecisionRunId, pauseRun, pendingMixPushRef,
+    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseDecisionRunId, pauseRun, pendingForegroundStopRunId, pendingMixPushRef,
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
@@ -14366,7 +14500,7 @@ export default function Home() {
     mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
     mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
-    noFacilityPin, pep1ShowB, pep2ShowB, pendingResetCount, pepTypes,
+    noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingResetCount, pepTypes,
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
     premixImportPrepared, premixImportProgress, proactiveAlert, productionRules,
@@ -16263,6 +16397,42 @@ export default function Home() {
                 >
                   Dismiss
                 </button>
+              </div>
+            )}
+            {foregroundRecoveryNotice && (
+              <div
+                className={`print:hidden mb-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
+                  foregroundRecoveryNotice.kind === "failed"
+                    ? "border-red-500/40 bg-red-500/10 text-red-200"
+                    : foregroundRecoveryNotice.kind === "outcome"
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                      : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+                }`}
+                role="status"
+                aria-live="polite"
+                data-testid="foreground-recovery-status"
+              >
+                <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1">{foregroundRecoveryNotice.message}</span>
+                {foregroundRecoveryNotice.kind === "failed" && (
+                  <button
+                    type="button"
+                    onClick={() => { void foregroundRecoveryRetryRef.current?.(); }}
+                    className="shrink-0 rounded border border-current/40 px-2 py-1 text-xs font-semibold hover:bg-black/10"
+                    data-testid="button-retry-foreground-recovery"
+                  >
+                    Retry recovery
+                  </button>
+                )}
+                {foregroundRecoveryNotice.kind === "outcome" && (
+                  <button
+                    type="button"
+                    onClick={dismissForegroundRecoveryNotice}
+                    className="shrink-0 text-xs font-semibold opacity-80 hover:opacity-100"
+                  >
+                    Dismiss
+                  </button>
+                )}
               </div>
             )}
             <ProactiveAlertBanner
@@ -19921,7 +20091,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
     initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
     logStop, nextRunDieType, pauseRun, removeBlankRuns, removeBrand,
-    removeFlavor, removeRun, pauseDecisionRunId, resumeRun, ruleViolations,
+    removeFlavor, removeRun, pauseDecisionRunId, pendingForegroundStopRunId, resumeRun, ruleViolations,
     runStatus, setBrandInput, setConfirmDeleteBrand, setConfirmDeleteFlavor,
     setConfirmRemoveBlanks, setConfirmRemoveRun, setDayState, setDoughSubTab,
     setFlavorInput, setManageCategory, setManageInput, setPinChangeMsg,
@@ -20288,10 +20458,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       </button>
                       <button
                         type="button"
-                        onClick={endRun}
+                        onClick={() => endRun()}
+                        disabled={pendingForegroundStopRunId === currentRun?.id}
                         className="bg-red-700 hover:bg-red-600 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
                       >
-                        <Square className="w-5 h-5 fill-current" /> STOP RUN
+                        <Square className="w-5 h-5 fill-current" /> {pendingForegroundStopRunId === currentRun?.id ? "STOP REQUESTED" : "STOP RUN"}
                       </button>
                       {activeStopId ? (
                         <button
