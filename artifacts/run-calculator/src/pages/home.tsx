@@ -107,17 +107,7 @@ import {
   shouldClosePauseDecision,
 } from "../pausePolicy";
 import {
-  acceptPackagingSpeedNudge,
-  canDetectPackagingSpeedNudge,
-  createPackagingSpeedNudgeTracking,
-  dismissPackagingSpeedNudge,
-  evaluatePackagingSpeedNudge,
-  recordPackagingSpeedCorrection,
-  type PackagingSpeedNudge,
-} from "../packagingSpeedNudge";
-import {
   PackagingSpeedNudgeFeedback,
-  type PackagingSpeedNudgeFeedbackStatus,
 } from "../components/PackagingSpeedNudgeFeedback";
 import {
   freshDayState,
@@ -21428,67 +21418,9 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     calc, nowTime, liveFreezerMin, elapsedBatchSec,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs, packagingDrainActive, coordinationStatus,
+    speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
+    acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
   } = useLiveRun();
-
-  // ── Speed drift detection ─────────────────────────────────────────────────
-  // Tracks manual case/skid corrections and suggests a Speed Adjustment (or
-  // Approximate Line Speed for crust mode) when the line consistently runs
-  // faster or slower than the configured prediction.
-  const speedNudgeTrackingRef = useRef(createPackagingSpeedNudgeTracking(""));
-  const [speedNudge, setSpeedNudge] = useState<PackagingSpeedNudge | null>(null);
-  const [speedNudgeStatus, setSpeedNudgeStatus] =
-    useState<PackagingSpeedNudgeFeedbackStatus>(null);
-
-  // Reset detection bookkeeping synchronously (ref mutations are fine in render)
-  // and clear the nudge card state via effect (must not call setState during render).
-  if (speedNudgeTrackingRef.current.runId !== currentRunId) {
-    speedNudgeTrackingRef.current = createPackagingSpeedNudgeTracking(currentRunId);
-  }
-  useEffect(() => {
-    setSpeedNudge(null);
-    setSpeedNudgeStatus(null);
-  }, [currentRunId]);
-
-  function detectSpeedDrift(correctionDeltaCases: number) {
-    const now = Date.now();
-    const tracking = speedNudgeTrackingRef.current;
-    if (!canDetectPackagingSpeedNudge(tracking, now)) return;
-    if (!autoTrackProgress) {
-      setSpeedNudge(null);
-      setSpeedNudgeStatus("auto-disabled");
-      return;
-    }
-    if (runStatus !== "running") {
-      setSpeedNudge(null);
-      setSpeedNudgeStatus("run-not-running");
-      return;
-    }
-    const elapsedNetMin = elapsedBatchSec / 60;
-    // Cases don't exit the tunnel until freezerTime minutes into the run, so
-    // measure observed PPM over the output window only — the same subtraction
-    // autoTrackSuggestion uses. Without this, early-run suggestions are wildly
-    // low because the full elapsed time is in the denominator but only a
-    // fraction of it has produced packaged output.
-    const elapsedOutputMin = Math.max(0, elapsedNetMin - Number(v.freezerTime));
-    const nextTracking = recordPackagingSpeedCorrection(tracking, correctionDeltaCases);
-    speedNudgeTrackingRef.current = nextTracking;
-    if (nextTracking.corrections.length === 0) {
-      setSpeedNudge(null);
-      setSpeedNudgeStatus(null);
-      return;
-    }
-    const evaluation = evaluatePackagingSpeedNudge({
-      elapsedOutputMin,
-      configuredPpm: calc.ppm,
-      pizzasPerCase: v.pizzasPerCase,
-      casesPerSkid: v.casesPerSkid,
-      speedAdjustment: v.speedAdjustment,
-      isCrust: doughSubTab === "crusts",
-      corrections: nextTracking.corrections,
-    });
-    setSpeedNudge(evaluation.nudge);
-    setSpeedNudgeStatus(evaluation.reason);
-  }
 
   // ── Auto-tick skid/case counter for the prior run draining through the
   // freezer tunnel while the NEXT run is already active on the form.
@@ -21914,7 +21846,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -21928,7 +21860,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -21949,7 +21881,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -21968,7 +21900,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -21991,19 +21923,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   markRunValuesUpdated(currentRunId, now);
                                   hx.lastLocalEditRef.current = now;
                                   hx.schedulePush(hx.dayStateRef.current, 0);
-                                  speedNudgeTrackingRef.current = acceptPackagingSpeedNudge(
-                                    speedNudgeTrackingRef.current,
-                                    now,
-                                  );
-                                  setSpeedNudge(null);
-                                  setSpeedNudgeStatus(null);
+                                  acceptPackagingSpeedNudge(now);
                                 }}
                                 onDismiss={() => {
-                                  speedNudgeTrackingRef.current = dismissPackagingSpeedNudge(
-                                    speedNudgeTrackingRef.current,
-                                  );
-                                  setSpeedNudge(null);
-                                  setSpeedNudgeStatus(null);
+                                  dismissPackagingSpeedNudge();
                                 }}
                               />
 
@@ -22034,7 +21957,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                     form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                                     const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids;
                                     const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid : ns;
-                                    detectSpeedDrift(nextTotal - currentTotal);
+                                    detectPackagingSpeedDrift(nextTotal - currentTotal);
                                   }}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"
@@ -22282,7 +22205,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
-  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive } = useLiveRun();
+  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
 
   // ── Barrel timer state: backed by module-level store so it survives Radix ──
   // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
@@ -22599,6 +22522,11 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
         const packOnPace = packGapCases <= 2;
         const packBehindSec = packGapCases * casePeriodSec;
+        const recordQuickCheckCorrection = (nextSkids: number, nextCases: number) => {
+          const currentTotal = hasCps ? packedTotal : packedSkids;
+          const nextTotal = hasCps ? nextSkids * cps + nextCases : nextSkids;
+          detectPackagingSpeedDrift(nextTotal - currentTotal);
+        };
         const setPackedTotal = (t: number) => {
           const total = Math.max(0, t);
           const nextSkids = Math.floor(total / cps);
@@ -22606,16 +22534,19 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
           form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
           form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+          recordQuickCheckCorrection(nextSkids, nextCases);
         };
         const bumpSkids = (d: number) => {
           const nextSkids = Math.max(0, packedSkids + d);
           persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
           form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+          recordQuickCheckCorrection(nextSkids, packedCasesOnSkid);
         };
         const bumpCases = (d: number) => {
           const nextCases = Math.max(0, packedCasesOnSkid + d);
           persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
           form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+          recordQuickCheckCorrection(packedSkids, nextCases);
         };
         const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
         return (
@@ -22973,7 +22904,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     autoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
-    nextRunPrepActive, packagingDrainActive,
+    nextRunPrepActive, packagingDrainActive, detectPackagingSpeedDrift,
   } = useLiveRun();
 
   // ── Shift prep phase (pre-production batch tracking) ─────────────────────
@@ -23427,6 +23358,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
                           const packOnPace = packGapCases <= 2;
                           const packBehindSec = packGapCases * casePeriodSec;
+                          const recordQuickCheckCorrection = (nextSkids: number, nextCases: number) => {
+                            const currentTotal = hasCps ? packedTotal : packedSkids;
+                            const nextTotal = hasCps ? nextSkids * cps + nextCases : nextSkids;
+                            detectPackagingSpeedDrift(nextTotal - currentTotal);
+                          };
                           const setPackedTotal = (t: number) => {
                             // No upper cap: manual counts can exceed the planned
                             // need (run may over-produce). Auto-track still stops
@@ -23437,6 +23373,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
                             form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                             form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                            recordQuickCheckCorrection(nextSkids, nextCases);
                           };
                           // Without a cases-per-skid setting the two counters
                           // can't be combined into one total — bump each field
@@ -23445,11 +23382,13 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             const nextSkids = Math.max(0, packedSkids + d);
                             persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
                             form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                            recordQuickCheckCorrection(nextSkids, packedCasesOnSkid);
                           };
                           const bumpCases = (d: number) => {
                             const nextCases = Math.max(0, packedCasesOnSkid + d);
                             persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
                             form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                            recordQuickCheckCorrection(packedSkids, nextCases);
                           };
                           const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
                           return (

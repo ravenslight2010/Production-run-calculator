@@ -1,13 +1,7 @@
 import type {
   PackagingSpeedNudge,
-  PackagingSpeedNudgeIneligibility,
+  PackagingSpeedNudgeFeedbackStatus,
 } from "../packagingSpeedNudge";
-
-export type PackagingSpeedNudgeFeedbackStatus =
-  | PackagingSpeedNudgeIneligibility
-  | "auto-disabled"
-  | "run-not-running"
-  | null;
 
 type PackagingSpeedNudgeFeedbackProps = {
   nudge: PackagingSpeedNudge | null;

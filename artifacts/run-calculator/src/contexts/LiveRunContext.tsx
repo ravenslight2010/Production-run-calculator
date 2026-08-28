@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -32,6 +33,16 @@ import { recordPerformance } from "../performanceDiagnostics";
 import { calcRef } from "../liveRunCalc";
 import { computeLinePhases, lineHasProduct } from "../linePhases";
 import { pauseStopsTunnel } from "../pausePolicy";
+import {
+  acceptPackagingSpeedNudge,
+  canDetectPackagingSpeedNudge,
+  createPackagingSpeedNudgeTracking,
+  dismissPackagingSpeedNudge,
+  evaluatePackagingSpeedNudge,
+  recordPackagingSpeedCorrection,
+  type PackagingSpeedNudge,
+  type PackagingSpeedNudgeFeedbackStatus,
+} from "../packagingSpeedNudge";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -112,6 +123,11 @@ export interface LiveRunContextValue {
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
   coordinationStatus: ReturnType<typeof useAutoTrack>["coordinationStatus"];
+  speedNudge: PackagingSpeedNudge | null;
+  speedNudgeStatus: PackagingSpeedNudgeFeedbackStatus;
+  detectPackagingSpeedDrift: (correctionDeltaCases: number) => void;
+  acceptPackagingSpeedNudge: (nowMs?: number) => void;
+  dismissPackagingSpeedNudge: () => void;
   isDoughTimerPaused: boolean;
   pauseDoughTimers: () => void;
   resumeDoughTimers: () => void;
@@ -578,6 +594,97 @@ export function LiveRunProvider({
       claimAutoTrackEvent,
     });
 
+  // Packaging speed feedback is shared by the Packaging tab and the quick
+  // check cards on Dough/Sauce. Keep the lifecycle in this always-mounted
+  // provider so switching tabs cannot discard correction evidence.
+  const speedNudgeTrackingRef = useRef(createPackagingSpeedNudgeTracking(""));
+  const [speedNudge, setSpeedNudge] = useState<PackagingSpeedNudge | null>(null);
+  const [speedNudgeStatus, setSpeedNudgeStatus] =
+    useState<PackagingSpeedNudgeFeedbackStatus>(null);
+
+  if (speedNudgeTrackingRef.current.runId !== currentRunId) {
+    speedNudgeTrackingRef.current = createPackagingSpeedNudgeTracking(currentRunId);
+  }
+
+  useEffect(() => {
+    setSpeedNudge(null);
+    setSpeedNudgeStatus(null);
+  }, [currentRunId]);
+
+  const detectPackagingSpeedDrift = useCallback((correctionDeltaCases: number) => {
+    const now = Date.now();
+    const tracking = speedNudgeTrackingRef.current;
+    if (!canDetectPackagingSpeedNudge(tracking, now)) return;
+    if (!autoTrackProgress) {
+      setSpeedNudge(null);
+      setSpeedNudgeStatus("auto-disabled");
+      return;
+    }
+    if (runStatus !== "running") {
+      setSpeedNudge(null);
+      setSpeedNudgeStatus("run-not-running");
+      return;
+    }
+
+    const elapsedOutputMin = Math.max(
+      0,
+      elapsedBatchSec / 60 - Number(ve.freezerTime),
+    );
+    const nextTracking = recordPackagingSpeedCorrection(
+      tracking,
+      correctionDeltaCases,
+    );
+    speedNudgeTrackingRef.current = nextTracking;
+    if (nextTracking.corrections.length === 0) {
+      setSpeedNudge(null);
+      setSpeedNudgeStatus(null);
+      return;
+    }
+
+    const evaluation = evaluatePackagingSpeedNudge({
+      elapsedOutputMin,
+      configuredPpm: calc.ppm,
+      pizzasPerCase: v.pizzasPerCase,
+      casesPerSkid: v.casesPerSkid,
+      speedAdjustment: v.speedAdjustment,
+      isCrust: doughSubTab === "crusts",
+      corrections: nextTracking.corrections,
+    });
+    setSpeedNudge(evaluation.nudge);
+    setSpeedNudgeStatus(evaluation.reason);
+  }, [
+    autoTrackProgress,
+    calc.ppm,
+    doughSubTab,
+    elapsedBatchSec,
+    runStatus,
+    v.casesPerSkid,
+    v.pizzasPerCase,
+    v.speedAdjustment,
+    ve.freezerTime,
+  ]);
+
+  const acceptSharedPackagingSpeedNudge = useCallback((nowMs = Date.now()) => {
+    if (speedNudge) {
+      const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
+      form.setValue(field, speedNudge.value, { shouldDirty: true });
+    }
+    speedNudgeTrackingRef.current = acceptPackagingSpeedNudge(
+      speedNudgeTrackingRef.current,
+      nowMs,
+    );
+    setSpeedNudge(null);
+    setSpeedNudgeStatus(null);
+  }, [form, speedNudge]);
+
+  const dismissSharedPackagingSpeedNudge = useCallback(() => {
+    speedNudgeTrackingRef.current = dismissPackagingSpeedNudge(
+      speedNudgeTrackingRef.current,
+    );
+    setSpeedNudge(null);
+    setSpeedNudgeStatus(null);
+  }, []);
+
   // ── Pre-seed next run's dough counters when this run's press is done ─────
   const nextRunSeededRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -620,6 +727,9 @@ export function LiveRunProvider({
       autoTrackProgress, setAutoTrackProgress,
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       coordinationStatus,
+      speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
+      acceptPackagingSpeedNudge: acceptSharedPackagingSpeedNudge,
+      dismissPackagingSpeedNudge: dismissSharedPackagingSpeedNudge,
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
@@ -634,6 +744,8 @@ export function LiveRunProvider({
       autoTrackProgress, setAutoTrackProgress,
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       coordinationStatus,
+      speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
+      acceptSharedPackagingSpeedNudge, dismissSharedPackagingSpeedNudge,
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,

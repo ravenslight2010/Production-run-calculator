@@ -14,13 +14,14 @@
 //                        isolation test above is meaningful).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act, cleanup } from "@testing-library/react";
+import { render, act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { useForm } from "react-hook-form";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
+import { mockAutoTrackState } from "../../hooks/__mocks__/useAutoTrack";
 // ── Stub hooks that are not under test ──────────────────────────────────────
 // useNotifications uses browser Audio / Notification APIs unavailable in jsdom;
 // useAutoTrack does form writes and localStorage that add noise. Both are
@@ -74,6 +75,7 @@ describe("LiveRunProvider — clock isolation", () => {
   });
 
   afterEach(() => {
+    mockAutoTrackState.enabled = false;
     vi.useRealTimers();
     cleanup();
   });
@@ -111,6 +113,84 @@ describe("LiveRunProvider — clock isolation", () => {
     // HomeCtx value) will break this assertion and surface the regression
     // immediately.
     expect(renderCount).toBe(1);
+  });
+
+  it("keeps speed feedback alive when the active live tab changes", async () => {
+    const activeValues: FormValues = {
+      ...DEFAULT_VALUES,
+      crustsPerCycle: 10,
+      cycleSpeed: 1,
+      pizzasPerCase: 10,
+      casesPerSkid: 100,
+    };
+    mockAutoTrackState.enabled = true;
+
+    function SpeedFeedbackProbe() {
+      const {
+        detectPackagingSpeedDrift,
+        speedNudge,
+        speedNudgeStatus,
+      } = useLiveRun();
+      return (
+        <button
+          type="button"
+          data-testid="speed-feedback-probe"
+          data-status={speedNudgeStatus ? "pending-feedback" : "no-feedback"}
+          data-has-nudge={speedNudge ? "yes" : "no"}
+          onClick={() => detectPackagingSpeedDrift(5)}
+        />
+      );
+    }
+
+    function SpeedFeedbackTabs() {
+      const [tab, setTab] = useState<"packaging" | "sauce">("packaging");
+      return (
+        <>
+          <button type="button" onClick={() => setTab("sauce")}>Sauce</button>
+          <span data-testid="active-speed-tab">{tab}</span>
+          <SpeedFeedbackProbe />
+        </>
+      );
+    }
+
+    const currentRun = { id: "speed-run", startedAt: 1_700_000_000_000 } as any;
+    function SpeedFeedbackProvider({ children }: { children: ReactNode }) {
+      const form = useForm<FormValues>({ defaultValues: activeValues });
+      return (
+        <LiveRunProvider
+          v={activeValues}
+          ve={activeValues}
+          runStatus="running"
+          currentRun={currentRun}
+          currentRunId={currentRun.id}
+          form={form}
+          dayState={{ runs: [], currentIndex: 0 }}
+          doughSubTab="dough"
+          upcomingRunLabels={[]}
+          prefs={undefined}
+          screenMode={null}
+          machine={{ spinSec: 0, hopperSec: 0 }}
+        >
+          {children}
+        </LiveRunProvider>
+      );
+    }
+
+    render(
+      <SpeedFeedbackProvider>
+        <SpeedFeedbackTabs />
+      </SpeedFeedbackProvider>,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    fireEvent.click(screen.getByTestId("speed-feedback-probe"));
+    expect(screen.getByTestId("speed-feedback-probe").getAttribute("data-has-nudge")).toBe("yes");
+
+    fireEvent.click(screen.getByText("Sauce"));
+    expect(screen.getByTestId("active-speed-tab").textContent).toBe("sauce");
+    expect(screen.getByTestId("speed-feedback-probe").getAttribute("data-has-nudge")).toBe("yes");
   });
 
   it("a component that DOES call useLiveRun() IS re-rendered when the clock ticks (counter-proof)", async () => {

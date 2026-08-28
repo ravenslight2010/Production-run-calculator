@@ -60,6 +60,8 @@ export const mockAutoSuppressUntilRef: UseAutoTrackReturn["autoSuppressUntilRef"
 /** Exported so stability-contract tests can pin it via the explicit-chain assertion. */
 export const mockFireAutoTrackNow: UseAutoTrackReturn["fireAutoTrackNow"] = vi.fn();
 
+/** Exported for provider tests that need to exercise the enabled lifecycle. */
+export const mockAutoTrackState = { enabled: false };
 /** Exported so tests can assert on dough-timer pause/resume calls. */
 export const mockPauseDoughTimers: UseAutoTrackReturn["pauseDoughTimers"] = vi.fn();
 
@@ -70,7 +72,7 @@ export const mockResumeDoughTimers: UseAutoTrackReturn["resumeDoughTimers"] = vi
 
 export function useAutoTrack(): UseAutoTrackReturn {
   return {
-    autoTrackProgress:    false,
+    autoTrackProgress:    mockAutoTrackState.enabled,
     setAutoTrackProgress: mockSetAutoTrackProgress,
     autoTrackSuggestion:  null,
     autoSuppressUntilRef: mockAutoSuppressUntilRef,

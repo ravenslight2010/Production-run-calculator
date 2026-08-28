@@ -41,6 +41,12 @@ export type PackagingSpeedNudgeEvaluation = {
   reason: PackagingSpeedNudgeIneligibility | null;
 };
 
+export type PackagingSpeedNudgeFeedbackStatus =
+  | PackagingSpeedNudgeIneligibility
+  | "auto-disabled"
+  | "run-not-running"
+  | null;
+
 export type PackagingSpeedNudgeTracking = {
   runId: string;
   corrections: PackagingSpeedCorrection[];

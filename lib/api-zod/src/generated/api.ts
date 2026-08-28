@@ -30,6 +30,7 @@ export const signUpBodyOnePasswordMax = 200;
 export const signUpBodyTwoAccessCodeMax = 200;
 
 
+
 export const SignUpBody = zod.object({
   "username": zod.string().min(signUpBodyOneUsernameMin).max(signUpBodyOneUsernameMax),
   "password": zod.string().min(signUpBodyOnePasswordMin).max(signUpBodyOnePasswordMax)
@@ -63,6 +64,7 @@ export const SignUpResponse = zod.object({
 export const checkUsernameAvailableQueryUsernameMax = 64;
 
 
+
 export const CheckUsernameAvailableQueryParams = zod.object({
   "username": zod.coerce.string().min(1).max(checkUsernameAvailableQueryUsernameMax)
 })
@@ -80,6 +82,7 @@ export const signInBodyUsernameMax = 64;
 
 export const signInBodyPasswordMin = 6;
 export const signInBodyPasswordMax = 200;
+
 
 
 export const SignInBody = zod.object({
@@ -122,6 +125,7 @@ export const changePasswordBodyNewPasswordMin = 6;
 export const changePasswordBodyNewPasswordMax = 200;
 
 
+
 export const ChangePasswordBody = zod.object({
   "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
   "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
@@ -153,6 +157,7 @@ export const ChangePasswordResponse = zod.object({
 export const forgotPasswordBodyUsernameMax = 64;
 
 
+
 export const ForgotPasswordBody = zod.object({
   "username": zod.string().min(1).max(forgotPasswordBodyUsernameMax)
 })
@@ -172,6 +177,7 @@ export const resetPasswordBodyCodeMax = 64;
 
 export const resetPasswordBodyNewPasswordMin = 6;
 export const resetPasswordBodyNewPasswordMax = 200;
+
 
 
 export const ResetPasswordBody = zod.object({
@@ -771,6 +777,7 @@ export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 
 
+
 export const IdentifyInventoryPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
   "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
@@ -850,6 +857,7 @@ export const ProductionSheetPhotoResponse = zod.object({
  * @summary Read photographed spec sheets into workbook text (AI vision); read-only
  */
 export const parseSpecImagesBodyImagesMax = 10;
+
 
 
 export const ParseSpecImagesBody = zod.object({
@@ -974,6 +982,7 @@ export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 
 export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
+
 
 
 export const WasteInsightBody = zod.object({
@@ -1512,6 +1521,7 @@ export const UpdateProactiveAlertSettingsResponse = zod.object({
 export const aiForecastBodyHorizonDaysMax = 7;
 
 
+
 export const AiForecastBody = zod.object({
   "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the first upcoming day to forecast'),
   "horizonDays": zod.number().int().min(1).max(aiForecastBodyHorizonDaysMax).optional().describe('How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday\'s history.'),
@@ -1617,6 +1627,7 @@ export const AiSummaryResponse = zod.object({
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReportBodyRunsMax = 600;
+
 
 
 export const ExportOperationalReportBody = zod.object({
@@ -4255,6 +4266,7 @@ export const ListImportHistoryQueryParams = zod.object({
 export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
 
 
+
 export const ListImportHistoryResponse = zod.object({
   "imports": zod.array(zod.object({
   "id": zod.number().int(),
@@ -4285,6 +4297,7 @@ export const ListImportHistoryResponse = zod.object({
 export const recordImportHistoryBodySummaryCountsMinOne = 0;
 
 
+
 export const RecordImportHistoryBody = zod.object({
   "importType": zod.enum(['spec', 'premix', 'cheese', 'sauce', 'dough', 'schedule', 'shipping', 'recipe']),
   "sourceKey": zod.string().optional(),
@@ -4304,6 +4317,7 @@ export const RecordImportHistoryBody = zod.object({
 })
 
 export const recordImportHistoryResponseImportSummaryCountsMinOne = 0;
+
 
 
 export const RecordImportHistoryResponse = zod.object({
@@ -4481,6 +4495,7 @@ export const reportIncidentBodyErrorMessageMax = 4000;
 export const reportIncidentBodyErrorStackMax = 8000;
 
 export const reportIncidentBodyUserAgentMax = 500;
+
 
 
 export const ReportIncidentBody = zod.object({
@@ -4787,6 +4802,7 @@ export const updateManagerActionItemBodyDeferReasonMax = 2000;
 export const updateManagerActionItemBodyResolutionNoteMax = 2000;
 
 
+
 export const UpdateManagerActionItemBody = zod.object({
   "version": zod.number().int(),
   "status": zod.enum(['open', 'in_progress', 'deferred', 'resolved']).optional(),
@@ -4827,6 +4843,7 @@ export const UpdateIncidentWorkflowParams = zod.object({
 })
 
 export const updateIncidentWorkflowBodyNoteMax = 2000;
+
 
 
 export const UpdateIncidentWorkflowBody = zod.object({
@@ -5005,6 +5022,7 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 export const createRoleBodyNameMax = 60;
 
 
+
 export const CreateRoleBody = zod.object({
   "name": zod.string().min(1).max(createRoleBodyNameMax),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
@@ -5025,6 +5043,7 @@ export const UpdateRoleParams = zod.object({
 })
 
 export const updateRoleBodyNameMax = 60;
+
 
 
 export const UpdateRoleBody = zod.object({
@@ -5107,6 +5126,7 @@ export const resetStaffPasswordBodyNewPasswordMin = 6;
 export const resetStaffPasswordBodyNewPasswordMax = 200;
 
 
+
 export const ResetStaffPasswordBody = zod.object({
   "newPassword": zod.string().min(resetStaffPasswordBodyNewPasswordMin).max(resetStaffPasswordBodyNewPasswordMax)
 })
@@ -5153,6 +5173,7 @@ export const GetSyncTodayResponse = zod.union([zod.object({
 export const putSyncTodayQueryEpochMin = 0;
 
 
+
 export const PutSyncTodayQueryParams = zod.object({
   "today": zod.date().optional(),
   "epoch": zod.coerce.number().int().min(putSyncTodayQueryEpochMin).optional()
@@ -5192,6 +5213,7 @@ export const PutSyncTodayResponse = zod.object({
 export const claimAutoTrackEventQueryEpochMin = 0;
 
 
+
 export const ClaimAutoTrackEventQueryParams = zod.object({
   "today": zod.date().optional(),
   "epoch": zod.coerce.number().int().min(claimAutoTrackEventQueryEpochMin).optional()
@@ -5218,6 +5240,7 @@ export const claimAutoTrackEventBodyClaimMutationsItemToMin = 0;
 export const claimAutoTrackEventBodyClaimMutationsItemToMax = 1000000;
 
 export const claimAutoTrackEventBodyClaimMutationsMax = 2;
+
 
 
 export const ClaimAutoTrackEventBody = zod.object({
@@ -5264,3 +5287,5 @@ export const ClaimAutoTrackEventResponse = zod.object({
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp)
 })
+
+

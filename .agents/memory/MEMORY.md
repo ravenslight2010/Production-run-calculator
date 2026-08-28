@@ -7,6 +7,7 @@
 - [Near-exact link profile propagation](near-exact-link-profile-propagation.md) — linkSpecImportNamedRecipesToExisting profile field pass uses matchCleaned (layer-1 only); near-exact auto-renames need a separate nearExactApplied map or profile doughName/sauceName stays stale.
 - [SSE meta stamp source](sse-meta-stamp-source.md) — SSE LWW must use overlayRunMetaStamps(prev.runs) not raw React state; saveDayState stamps localStorage only, React state keeps old stamp, so startRun's startedAt gets erased by a stale SSE echo.
 - [LiveRunContext clock isolation](live-run-context-clock-isolation.md) — Home must not hold nowTime; clock + calc + auto-track live in LiveRunProvider; 11 sub-components call useLiveRun(); transform_home.py gotchas inside.
+- [Packaging speed feedback scope](packaging-speed-feedback.md) — correction evidence is provider-owned so Packaging, Dough, and Sauce quick checks share one lifecycle across tab switches.
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
@@ -65,7 +66,6 @@
 - [Premix sheet import](premix-import.md) — premix .xlsx → Mixes (deterministic parse lib, AI name-only matcher); per-mix include/exclude review; invalidate `["mixes"]` after commit; web+mobile parity.
 - [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
 - [Scheduled recipe-setup warning](scheduled-recipe-check.md) + [move runs](schedule-move.md) — manager card flags runs missing a profile; per-run move MUST key on run id, not list index.
-- [Browser sync workflow startup](browser-sync-workflow-startup.md) — schedule-move browser fixtures need both the web and API workflows running before auth setup.
 - [Scheduled-day client date](scheduled-day-client-date.md) — ALL sync endpoints must key on client `?today=` not server UTC, or evening live pushes clobber scheduled rows; SSE date-scoped too.
 - [Scheduled-day response validation](scheduled-day-response-validation.md) — never cast scheduled-sync JSON into state; a 401 `{error}` envelope otherwise becomes `scheduledDays` and crashes `.flatMap()` on reload.
 - [AI model routing + streaming](ai-model-routing-and-streaming.md) — pickModel is the only model source; vi.mock MUST export pickModel/AI_MODELS or routes 502; ask/recipe SSE opt-in.
@@ -142,16 +142,12 @@
 - [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa `autoUpdate` reloads clients; interactive “Reload now” UI requires `prompt` so `needRefresh` fires.
 - [AI memory health audits](ai-memory-health-audits.md) — historic aliases are evidence, not stale records; safe cleanup must rely on canonical merge/import maps and never touch facility facts or user conversations.
 - [Master-data health ownership](master-data-health-ownership.md) — legacy setup rows and purchased crusts stay protected as owned review warnings, not automatic launch blockers.
-- [Mounted AI cost paths](mounted-ai-cost-paths.md) — Express strips mount prefixes from req.path; cost lookups keyed by public API paths must recombine baseUrl + path.
-- [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual/release browser evidence](visual-regression-baselines.md) + [release isolation](release-browser-evidence.md) + [accessibility gate](a11y-coverage-gate.md) + [a11y fixtures](a11y-dialog-browser-fixtures.md) — browser evidence needs isolated setup, masked dynamic content, retained artifacts, and explicit review of shell debt/snapshot updates.
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release evidence timing and revision](release-check-shard-budget.md) + [revision-bound-release-evidence](revision-bound-release-evidence.md) — shard runtime and managed rebases both affect whether release reports remain valid.
-- [Skill trigger runtime](skill-trigger-runtime.md) — trigger benchmarks need an authenticated Claude CLI; evaluator subprocess failures are synthetic non-triggers, not model evidence.
 - [Source-audit reports](large-source-audit-captures.md) + [versions](source-audit-report-versions.md) — keep hashed source captures shard-safe and dispatch persisted comparisons by supported read version.
 - [Development esbuild override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
-- [Queue history cursor precision](queue-history-cursor-precision.md) — keyset cursors must use a stable database key when PostgreSQL timestamps exceed JavaScript Date precision.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
