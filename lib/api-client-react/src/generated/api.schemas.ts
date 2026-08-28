@@ -3028,6 +3028,83 @@ export interface DeleteFreezerPullItemsInput {
   ids: string[];
 }
 
+export interface FreezerSurplusLot {
+  id: string;
+  brand: string;
+  flavor: string;
+  productKey: string;
+  productionDate: string;
+  /** @minimum 1 */
+  totalCases: number;
+  /** @minimum 0 */
+  remainingCases: number;
+}
+
+export interface FreezerSurplusAllocation {
+  id: string;
+  lotId: string;
+  runId: string;
+  runDate: string;
+  brand: string;
+  flavor: string;
+  productKey: string;
+  /** @minimum 1 */
+  cases: number;
+}
+
+export interface FreezerSurplusLedger {
+  lots: FreezerSurplusLot[];
+  allocations: FreezerSurplusAllocation[];
+}
+
+export interface ConfirmFreezerSurplusInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  brand: string;
+  /** @maxLength 120 */
+  flavor: string;
+  productionDate: string;
+  /**
+     * @minimum 1
+     * @maximum 1000000
+     */
+  cases: number;
+}
+
+export interface FreezerSurplusAllocationSelection {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  lotId: string;
+  /**
+     * @minimum 1
+     * @maximum 1000000
+     */
+  cases: number;
+}
+
+export interface ReplaceFreezerSurplusAllocationInput {
+  runDate: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  brand: string;
+  /** @maxLength 120 */
+  flavor: string;
+  /** @maxItems 500 */
+  allocations: FreezerSurplusAllocationSelection[];
+}
+
+export interface FreezerSurplusMutationResponse {
+  lots: FreezerSurplusLot[];
+  allocations: FreezerSurplusAllocation[];
+  createdLot?: FreezerSurplusLot | null;
+}
+
 /**
  * The full factory-wide die-type master list (display names).
  */

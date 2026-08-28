@@ -1934,6 +1934,73 @@ paths:
         "403":
           description: Manager role required
 
+  /freezer-surplus:
+    get:
+      operationId: listFreezerSurplus
+      tags: [freezerSurplus]
+      summary: List dated finished-case freezer surplus
+      description: >-
+        Returns scoped finished-case freezer lots and explicit run allocations.
+        Lots remain separately dated and only their remaining balance can be
+        allocated.
+      responses:
+        "200":
+          description: Current scoped freezer surplus ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusLedger"
+    post:
+      operationId: confirmFreezerSurplus
+      tags: [freezerSurplus]
+      summary: Confirm a new dated finished-case surplus lot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmFreezerSurplusInput"
+      responses:
+        "201":
+          description: The created lot and current ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusMutationResponse"
+        "400":
+          description: Invalid or non-positive surplus
+
+  /freezer-surplus/allocations/{runId}:
+    put:
+      operationId: replaceFreezerSurplusAllocation
+      tags: [freezerSurplus]
+      summary: Apply or revise dated surplus for an unstarted run
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceFreezerSurplusAllocationInput"
+      responses:
+        "200":
+          description: Updated allocations and current ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusMutationResponse"
+        "400":
+          description: Invalid input, mismatch, or unavailable surplus
+        "409":
+          description: Run has started or the requested lot balance changed
+
   /die-line-defaults:
     get:
       operationId: listDieLineDefaults
@@ -8736,6 +8803,162 @@ components:
           description: The ids of the freezer-pull items to delete
           items:
             type: string
+
+    FreezerSurplusLot:
+      type: object
+      required:
+        - id
+        - brand
+        - flavor
+        - productKey
+        - productionDate
+        - totalCases
+        - remainingCases
+      properties:
+        id:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        productKey:
+          type: string
+        productionDate:
+          type: string
+          format: date
+        totalCases:
+          type: integer
+          minimum: 1
+        remainingCases:
+          type: integer
+          minimum: 0
+
+    FreezerSurplusAllocation:
+      type: object
+      required:
+        - id
+        - lotId
+        - runId
+        - runDate
+        - brand
+        - flavor
+        - productKey
+        - cases
+      properties:
+        id:
+          type: string
+        lotId:
+          type: string
+        runId:
+          type: string
+        runDate:
+          type: string
+          format: date
+        brand:
+          type: string
+        flavor:
+          type: string
+        productKey:
+          type: string
+        cases:
+          type: integer
+          minimum: 1
+
+    FreezerSurplusLedger:
+      type: object
+      required:
+        - lots
+        - allocations
+      properties:
+        lots:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerSurplusLot"
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerSurplusAllocation"
+
+    ConfirmFreezerSurplusInput:
+      type: object
+      required:
+        - brand
+        - flavor
+        - productionDate
+        - cases
+      properties:
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 120
+        flavor:
+          type: string
+          maxLength: 120
+        productionDate:
+          type: string
+          format: date
+        cases:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+
+    FreezerSurplusAllocationSelection:
+      type: object
+      required:
+        - lotId
+        - cases
+      properties:
+        lotId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        cases:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+
+    ReplaceFreezerSurplusAllocationInput:
+      type: object
+      required:
+        - runDate
+        - brand
+        - flavor
+        - allocations
+      properties:
+        runDate:
+          type: string
+          format: date
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 120
+        flavor:
+          type: string
+          maxLength: 120
+        allocations:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/FreezerSurplusAllocationSelection"
+
+    FreezerSurplusMutationResponse:
+      type: object
+      required:
+        - lots
+        - allocations
+      properties:
+        lots:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerSurplusLot"
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerSurplusAllocation"
+        createdLot:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FreezerSurplusLot"
 
     DieTypeList:
       type: object

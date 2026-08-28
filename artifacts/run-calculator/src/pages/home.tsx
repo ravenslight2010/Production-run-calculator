@@ -321,7 +321,17 @@ import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
 import { updateSupervisorPin } from "../supervisorPinApi";
-import { buildFreezerPullPlan } from "@workspace/freezer-pull";
+import {
+  buildFreezerPullPlan,
+  isMatchingSurplusProduct,
+  summarizeSurplusForRun,
+  type FreezerSurplusLedger,
+} from "@workspace/freezer-pull";
+import {
+  confirmFreezerSurplus,
+  fetchFreezerSurplus,
+  replaceFreezerSurplusAllocation,
+} from "../freezerSurplus";
 import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
@@ -3744,6 +3754,75 @@ export default function Home() {
     });
   }
 
+  // Finished-case surplus is authoritative server data, not a day-state
+  // overlay. Load it for every signed-in web session so Packaging can record a
+  // new dated lot and Warehouse can explicitly allocate one before a run.
+  const [freezerSurplus, setFreezerSurplus] = useState<FreezerSurplusLedger>({
+    lots: [],
+    allocations: [],
+  });
+  const [freezerSurplusLoaded, setFreezerSurplusLoaded] = useState(false);
+  const [freezerSurplusBusy, setFreezerSurplusBusy] = useState(false);
+  const [freezerSurplusError, setFreezerSurplusError] = useState<string | null>(null);
+  const refreshFreezerSurplus = useCallback(async () => {
+    try {
+      const next = await fetchFreezerSurplus();
+      setFreezerSurplus(next);
+      setFreezerSurplusError(null);
+      setFreezerSurplusLoaded(true);
+    } catch (error) {
+      setFreezerSurplusError(error instanceof Error ? error.message : "Couldn't load freezer surplus.");
+    }
+  }, []);
+  useEffect(() => {
+    void refreshFreezerSurplus();
+  }, [refreshFreezerSurplus]);
+
+  async function confirmRunSurplus(run: RunMeta, cases: number, productionDate: string) {
+    setFreezerSurplusBusy(true);
+    setFreezerSurplusError(null);
+    try {
+      const next = await confirmFreezerSurplus({
+        brand: run.brand,
+        flavor: run.flavor,
+        productionDate,
+        cases,
+      });
+      setFreezerSurplus(next);
+    } catch (error) {
+      setFreezerSurplusError(error instanceof Error ? error.message : "Couldn't confirm this surplus.");
+      throw error;
+    } finally {
+      setFreezerSurplusBusy(false);
+    }
+  }
+
+  async function replaceRunSurplus(
+    run: RunMeta,
+    allocations: Array<{ lotId: string; cases: number }>,
+  ) {
+    setFreezerSurplusBusy(true);
+    setFreezerSurplusError(null);
+    try {
+      const next = await replaceFreezerSurplusAllocation({
+        runId: run.id,
+        runDate:
+          typeof (run as RunMeta & { runDate?: unknown }).runDate === "string"
+            ? (run as RunMeta & { runDate: string }).runDate
+            : todayStr(),
+        brand: run.brand,
+        flavor: run.flavor,
+        allocations,
+      });
+      setFreezerSurplus(next);
+    } catch (error) {
+      setFreezerSurplusError(error instanceof Error ? error.message : "Couldn't apply this surplus pull.");
+      throw error;
+    } finally {
+      setFreezerSurplusBusy(false);
+    }
+  }
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: (() => {
@@ -3754,6 +3833,26 @@ export default function Home() {
   });
 
   const v = form.watch();
+
+  const effectiveValuesForRun = useCallback(
+    (run: RunMeta | undefined, values: FormValues): FormValues => {
+      if (!run?.brand && !run?.flavor) return values;
+      const summary = summarizeSurplusForRun(
+        {
+          lots: freezerSurplus.lots,
+          allocations: freezerSurplus.allocations,
+          runId: run.id,
+          brand: run.brand ?? "",
+          flavor: run.flavor ?? "",
+          originalTarget: Number(values.casesNeeded) || 0,
+        },
+      );
+      return summary.carriedInCases > 0
+        ? { ...values, casesNeeded: summary.productionCases }
+        : values;
+    },
+    [freezerSurplus],
+  );
 
   // Server ingredient catalog (Task #102): factory-wide, stable ids that
   // recipe rows reference. Migrating local option lists into it once, and
@@ -5083,6 +5182,10 @@ export default function Home() {
     window.addEventListener("offline", off);
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
+
+  // Finished-case surplus is authoritative server data, not a day-state
+  // overlay. Load it for every signed-in web session so Packaging can record a
+  // new dated lot and Warehouse can explicitly allocate one before a run.
 
   // ── Server-write failure surface ───────────────────────────────────────────
   // The sync push and the inventory-consume write are both best-effort/optimistic
@@ -7051,6 +7154,22 @@ export default function Home() {
     const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
     if (idMap.length === 0) {
       setScheduleError("There were no runs to move. Refresh and try again.");
+      return false;
+    }
+    // A destination collision regenerates the moved run id. An explicit
+    // freezer allocation is keyed by that id, so moving it under a new id
+    // would make the carried-in cases disappear from the destination. Keep
+    // the move reversible and actionable instead of silently orphaning the
+    // warehouse decision; a non-colliding move keeps the id and allocation.
+    const allocatedRunWithCollision = idMap.find(
+      ({ from, to }) =>
+        from !== to &&
+        freezerSurplus.allocations.some((allocation) => allocation.runId === from),
+    );
+    if (allocatedRunWithCollision) {
+      setScheduleError(
+        "This run has a freezer pull and cannot move onto a duplicate run. Release the pull first, then move it.",
+      );
       return false;
     }
     const vals = relocateValues(
@@ -10887,8 +11006,33 @@ export default function Home() {
     // from its stored values) before marking it ended.
     for (const r of base.runs) {
       if (r.id !== activeRunId && r.startedAt && !r.endedAt) {
-        void consumeRun(r.id, computeRunConsumptionLines(loadRunValues(r.id))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+        const runValues = loadRunValues(r.id);
+        void consumeRun(r.id, computeRunConsumptionLines(effectiveValuesForRun(r, runValues))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
       }
+    }
+    // An explicit Warehouse allocation is carried into the live packaging
+    // register once, so the operator sees the confirmed opening count while
+    // the original casesNeeded target remains intact in the run form.
+    const carried = summarizeSurplusForRun({
+      runId: activeRunId,
+      brand: activeRun.brand,
+      flavor: activeRun.flavor,
+      originalTarget: Number(form.getValues("casesNeeded")) || 0,
+      lots: freezerSurplus.lots,
+      allocations: freezerSurplus.allocations,
+    }).carriedInCases;
+    const openingValues = form.getValues();
+    const openingCases =
+      (Number(openingValues.skidsCompleted) || 0) * (Number(openingValues.casesPerSkid) || 0) +
+      (Number(openingValues.casesOnCurrentSkid) || 0);
+    if (carried > 0 && openingCases === 0) {
+      const casesPerSkid = Number(openingValues.casesPerSkid) || 0;
+      const seededSkids = casesPerSkid > 0 ? Math.floor(carried / casesPerSkid) : 0;
+      const seededCases = casesPerSkid > 0 ? carried % casesPerSkid : carried;
+      form.setValue("skidsCompleted", seededSkids, { shouldDirty: true });
+      form.setValue("casesOnCurrentSkid", seededCases, { shouldDirty: true });
+      persistManualPackagingProgress(activeRunId, seededSkids, seededCases);
+      saveRunValues(activeRunId, form.getValues());
     }
     // Carry over prep batches into the starting run (once, guarded by prepCarriedOver).
     // Adds dough prep batches to the run form's batchesReady field so the live
@@ -11233,7 +11377,7 @@ export default function Home() {
     }
     // Auto-deduct this run's materials from inventory (idempotent by runId;
     // no-op for any material that has no inventory item).
-    void consumeRun(activeRunId, computeRunConsumptionLines(cur)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+    void consumeRun(activeRunId, computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
     const endedAt = Date.now();
     const newRuns = base.runs.map((r, i) =>
       i === index ? { ...r, pausedAt: undefined, endedAt } : r
@@ -14213,9 +14357,10 @@ export default function Home() {
   );
   const activeRunValues = useMemo(
     () => needsWarehouseSnapshot
-      ? activeRunIds.map((id) => runValuesById.get(id)).filter((values): values is FormValues => !!values)
+      ? activeRuns
+        .map((run) => effectiveValuesForRun(run, runValuesById.get(run.id) ?? DEFAULT_VALUES))
       : [],
-    [needsWarehouseSnapshot, activeRunIds, runValuesById],
+    [needsWarehouseSnapshot, activeRuns, runValuesById, effectiveValuesForRun],
   );
   const activeWarehouseRows = useMemo(
     () => needsWarehouseSnapshot ? aggregateNeedRows(activeRunValues, {
@@ -14229,7 +14374,7 @@ export default function Home() {
   );
   const activeRunNeedDetails = useMemo(
     () => needsWarehouseSnapshot ? new Map(activeRuns.map((run) => {
-      const values = runValuesById.get(run.id) ?? DEFAULT_VALUES;
+      const values = effectiveValuesForRun(run, runValuesById.get(run.id) ?? DEFAULT_VALUES);
       return {
         id: run.id,
         summary: runSummaryStatsById.get(run.id) ?? computeSummaryStats(values),
@@ -14241,7 +14386,7 @@ export default function Home() {
         ],
       };
     }).map((detail) => [detail.id, detail] as const)) : new Map(),
-    [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById],
+    [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById, effectiveValuesForRun],
   );
   const scheduledWarehouseRuns = useMemo(
     () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
@@ -14249,11 +14394,19 @@ export default function Home() {
         .filter((run) => run.brand)
         .map((run) => {
           const profile = loadProfile(run.brand, run.flavor);
-          const values: FormValues = {
+          const originalValues: FormValues = {
             ...(profile ?? DEFAULT_VALUES),
             casesNeeded: run.casesNeeded,
             ...(run.dieType ? { dieType: run.dieType } : {}),
           };
+          const values = effectiveValuesForRun(
+            {
+              id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}`,
+              brand: run.brand,
+              flavor: run.flavor,
+            },
+            originalValues,
+          );
           const needRows = [
             ...aggregateNeedRows([values], {
               warehouse: true,
@@ -14272,7 +14425,7 @@ export default function Home() {
           };
         }),
     ) : [],
-    [needsWarehouseSnapshot, scheduledDays],
+    [needsWarehouseSnapshot, scheduledDays, effectiveValuesForRun],
   );
   const freezerPullPlan = useMemo(
     () => needsWarehouseSnapshot ? buildFreezerPullPlan({
@@ -14287,12 +14440,18 @@ export default function Home() {
       (day.runs ?? [])
         .filter((run) => run.brand)
         .map((run) => ({
-          ...((loadProfile(run.brand, run.flavor) ?? DEFAULT_VALUES)),
-          casesNeeded: run.casesNeeded,
+          ...effectiveValuesForRun(
+            {
+              id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}`,
+              brand: run.brand,
+              flavor: run.flavor,
+            },
+            { ...((loadProfile(run.brand, run.flavor) ?? DEFAULT_VALUES)), casesNeeded: run.casesNeeded },
+          ),
           ...(run.dieType ? { dieType: run.dieType } : {}),
         } as FormValues)),
     ) : [],
-    [needsWarehouseSnapshot, scheduledDays],
+    [needsWarehouseSnapshot, scheduledDays, effectiveValuesForRun],
   );
   const todayScheduledValues = useMemo(() => {
     if (!needsWarehouseSnapshot) return [];
@@ -14303,17 +14462,24 @@ export default function Home() {
         (day.runs ?? [])
           .filter((run) => run.brand)
           .map((run) => ({
-            ...((loadProfile(run.brand, run.flavor) ?? DEFAULT_VALUES)),
-            casesNeeded: run.casesNeeded,
+            ...effectiveValuesForRun(
+              {
+                id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}`,
+                brand: run.brand,
+                flavor: run.flavor,
+              },
+              { ...((loadProfile(run.brand, run.flavor) ?? DEFAULT_VALUES)), casesNeeded: run.casesNeeded },
+            ),
             ...(run.dieType ? { dieType: run.dieType } : {}),
           } as FormValues)),
       );
-  }, [needsWarehouseSnapshot, scheduledDays]);
+  }, [needsWarehouseSnapshot, scheduledDays, effectiveValuesForRun]);
   const inventoryRunValues = useMemo(
     () => needsInventorySnapshot
-      ? dayState.runs.map((run) => runValuesById.get(run.id) ?? DEFAULT_VALUES)
+      ? dayState.runs.map((run) =>
+        effectiveValuesForRun(run, runValuesById.get(run.id) ?? DEFAULT_VALUES))
       : [],
-    [needsInventorySnapshot, dayState.runs, runValuesById],
+    [needsInventorySnapshot, dayState.runs, runValuesById, effectiveValuesForRun],
   );
   const inventoryCandidates = useMemo(
     () => needsInventorySnapshot ? deriveCandidateItems(inventoryRunValues) : [],
@@ -14351,6 +14517,8 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const homeCtxValue = useMemo(() => ({
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, addBrand,
+    freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
@@ -14468,6 +14636,7 @@ export default function Home() {
     // constants are intentionally omitted: they are either stable by React
     // contract or their correctness is guaranteed by the state deps below.
     activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
+    freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
     batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
     canApproveResets, canEditRules, canManageInventory, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
@@ -14556,6 +14725,7 @@ export default function Home() {
     [
       // ── Production / run state ──
       activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
+      freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
       batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brands,
       canApproveResets, canEditRules, canManageInventory, canManageStaff,
       caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
@@ -16670,6 +16840,37 @@ export default function Home() {
                     Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
                   </p>
                 </div>
+                <FreezerSurplusPanel
+                  mode="warehouse"
+                  ledger={freezerSurplus}
+                  loaded={freezerSurplusLoaded}
+                  busy={freezerSurplusBusy}
+                  error={freezerSurplusError}
+                  pendingRuns={[
+                    ...dayState.runs.filter((run) => !run.startedAt && !run.endedAt && !!run.brand),
+                    ...scheduledDays.flatMap((day) =>
+                      day.date === todayStr()
+                        ? []
+                        : (day.runs ?? [])
+                          .filter((run) => !!run.brand)
+                          .map((run, index) => ({
+                            ...run,
+                            id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}:${index}`,
+                            brand: run.brand,
+                            flavor: run.flavor,
+                            runDate: day.date,
+                          } as RunMeta & { runDate: string; casesNeeded?: number })),
+                    ),
+                  ]}
+                  getOriginalTarget={(run) =>
+                    Number((run as RunMeta & { casesNeeded?: number }).casesNeeded) ||
+                    Number(loadRunValues(run.id).casesNeeded) || 0}
+                  onConfirm={async () => {}}
+                  onAllocate={async (run, allocations) => {
+                    await replaceRunSurplus(run, allocations);
+                    await refreshFreezerSurplus();
+                  }}
+                />
                 {/* Pull Out Freezer: for each upcoming scheduled run within an
                     item's days-early window whose recipe uses a tagged
                     freezer-pull ingredient, show what to pull now, grouped by
@@ -17043,7 +17244,10 @@ export default function Home() {
                     const liveRunsForMixes = dayState.runs
                       .filter((r) => r.brand && !r.endedAt)
                       .map((r) => {
-                        const runVals = r.id === currentRunId ? form.getValues() : loadRunValues(r.id);
+                        const runVals = effectiveValuesForRun(
+                          r,
+                          r.id === currentRunId ? form.getValues() : loadRunValues(r.id),
+                        );
                         return valsToMixRun(todayDateStr, r.brand, r.flavor ?? "", runVals);
                       });
                     const runs = [
@@ -17058,7 +17262,19 @@ export default function Home() {
                               casesNeeded: r.casesNeeded,
                               ...(r.dieType ? { dieType: r.dieType } : {}),
                             };
-                            return valsToMixRun(day.date, r.brand, r.flavor, vals);
+                            return valsToMixRun(
+                              day.date,
+                              r.brand,
+                              r.flavor,
+                              effectiveValuesForRun(
+                                {
+                                  id: (r as typeof r & { id?: string }).id ?? `${day.date}:${r.brand}:${r.flavor}`,
+                                  brand: r.brand,
+                                  flavor: r.flavor,
+                                },
+                                vals,
+                              ),
+                            );
                           }),
                       ),
                     ];
@@ -21577,12 +21793,236 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   );
 });
 
+function FreezerSurplusPanel({
+  mode,
+  ledger,
+  loaded,
+  busy,
+  error,
+  completedRun,
+  pendingRuns,
+  getOriginalTarget,
+  onConfirm,
+  onAllocate,
+}: {
+  mode: "packaging" | "warehouse";
+  ledger: FreezerSurplusLedger;
+  loaded: boolean;
+  busy: boolean;
+  error: string | null;
+  completedRun?: RunMeta | null;
+  pendingRuns?: RunMeta[];
+  getOriginalTarget: (run: RunMeta) => number;
+  onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
+  onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
+}) {
+  const [cases, setCases] = useState("");
+  const [productionDate, setProductionDate] = useState(todayStr());
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const runs = pendingRuns ?? [];
+
+  async function confirmLot() {
+    const count = Number(cases);
+    if (!completedRun || !Number.isSafeInteger(count) || count <= 0) {
+      setLocalMessage("Enter a positive whole number of excess cases.");
+      return;
+    }
+    if (!productionDate) {
+      setLocalMessage("Choose the production date for this freezer lot.");
+      return;
+    }
+    try {
+      await onConfirm(completedRun, count, productionDate);
+      setCases("");
+      setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
+    } catch {
+      // The parent exposes the server's actionable error.
+    }
+  }
+
+  async function saveSelection(run: RunMeta) {
+    const byLot = selections[run.id] ?? {};
+    const allocations = Object.entries(byLot)
+      .filter(([, count]) => count > 0)
+      .map(([lotId, count]) => ({ lotId, cases: count }));
+    try {
+      await onAllocate(run, allocations);
+      setSelectedRunId(null);
+      setLocalMessage(
+        allocations.length > 0
+          ? `Applied ${allocations.reduce((sum, item) => sum + item.cases, 0)} carried-in cases to ${run.brand}${run.flavor ? ` — ${run.flavor}` : ""}.`
+          : "Pull released. The run keeps its full original target.",
+      );
+    } catch {
+      // The parent exposes the server's actionable error.
+    }
+  }
+
+  if (mode === "packaging") {
+    if (!completedRun?.brand && !completedRun?.flavor) return null;
+    return (
+      <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
+        <div className="flex items-start gap-3">
+          <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-bold">Confirm finished-case freezer surplus</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Record excess cases from the completed run as a separate dated lot. This does not change any future run until Warehouse explicitly pulls it.
+            </p>
+            <p className="mt-2 text-sm font-semibold">
+              {completedRun.brand}{completedRun.flavor ? ` — ${completedRun.flavor}` : ""}
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[8rem_10rem_auto]">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Excess cases
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={cases}
+                  onChange={(event) => setCases(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  aria-label="Excess finished cases"
+                />
+              </label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Production date
+                <input
+                  type="date"
+                  value={productionDate}
+                  onChange={(event) => setProductionDate(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  aria-label="Freezer lot production date"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void confirmLot()}
+                disabled={busy}
+                className="self-end rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Confirm surplus"}
+              </button>
+            </div>
+            {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
+            {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const lots = ledger.lots.filter((lot) => lot.remainingCases > 0);
+  return (
+    <section className="mb-4 rounded-xl border border-sky-500/30 bg-sky-500/5 p-4" data-testid="freezer-surplus-warehouse">
+      <div className="flex items-start gap-3">
+        <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-bold">Dated freezer surplus</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Select a dated lot and case count before the matching run starts. Unselected lots stay available; no selection means the full target is produced.
+          </p>
+          {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
+          {!loaded && <p className="mt-3 text-xs text-muted-foreground">Loading server-confirmed lots…</p>}
+          {loaded && runs.length === 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">No unstarted matching runs are waiting for a freezer pull.</p>
+          )}
+          <div className="mt-3 space-y-3">
+            {runs.map((run) => {
+              const summary = summarizeSurplusForRun({
+                runId: run.id,
+                brand: run.brand,
+                flavor: run.flavor,
+                originalTarget: getOriginalTarget(run),
+                lots: ledger.lots,
+                allocations: ledger.allocations,
+              });
+              const productLots = lots.filter((lot) => isMatchingSurplusProduct(lot, run));
+              const current = selections[run.id] ?? Object.fromEntries(
+                summary.selected.map((allocation) => [allocation.lotId, allocation.cases]),
+              );
+              const isEditing = selectedRunId === run.id;
+              return (
+                <div
+                  key={run.id}
+                  className="rounded-lg border border-border/50 bg-background/60 p-3"
+                  data-testid={`freezer-surplus-run-${run.id}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">{run.brand}{run.flavor ? ` — ${run.flavor}` : ""}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Original target <strong className="text-foreground">{summary.originalTarget}</strong>
+                        {" · "}Carried in <strong className="text-sky-300">{summary.carriedInCases}</strong>
+                        {" · "}Still to produce <strong className="text-foreground">{summary.productionCases}</strong>
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRunId(isEditing ? null : run.id)}
+                      className="rounded-md border border-sky-500/40 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/10"
+                    >
+                      {isEditing ? "Close pull" : summary.carriedInCases > 0 ? "Revise pull" : "Choose pull"}
+                    </button>
+                  </div>
+                  {isEditing && (
+                    <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
+                      {productLots.length === 0 ? (
+                        <p className="text-xs italic text-muted-foreground">No available dated lot matches this brand and flavor.</p>
+                      ) : productLots.map((lot) => (
+                        <label key={lot.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span>
+                            {lot.productionDate} · {lot.remainingCases} available
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            max={lot.remainingCases + (current[lot.id] ?? 0)}
+                            step="1"
+                            value={current[lot.id] ?? 0}
+                            onChange={(event) => {
+                              const next = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                              setSelections((prev) => ({
+                                ...prev,
+                                [run.id]: { ...(prev[run.id] ?? current), [lot.id]: next },
+                              }));
+                            }}
+                            className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right font-mono text-sm"
+                            aria-label={`Cases from freezer lot dated ${lot.productionDate}`}
+                          />
+                        </label>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => void saveSelection(run)}
+                        disabled={busy}
+                        className="mt-2 rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        {busy ? "Saving…" : "Confirm pull"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {localMessage && <p className="mt-2 text-xs font-medium text-sky-300" role="status">{localMessage}</p>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
     lastEndedRun, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
-    ve,
+    ve, freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+    confirmRunSurplus, refreshFreezerSurplus,
   } = hx;
 
   const {
@@ -21677,6 +22117,20 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
 
   return (
     <>
+                <FreezerSurplusPanel
+                  mode="packaging"
+                  ledger={freezerSurplus}
+                  loaded={freezerSurplusLoaded}
+                  busy={freezerSurplusBusy}
+                  error={freezerSurplusError}
+                  completedRun={lastEndedRun}
+                  getOriginalTarget={(run) => run.id === currentRunId ? Number(v.casesNeeded) || 0 : Number(loadRunValues(run.id).casesNeeded) || 0}
+                  onConfirm={async (run, count, date) => {
+                    await confirmRunSurplus(run, count, date);
+                    await refreshFreezerSurplus();
+                  }}
+                  onAllocate={async () => {}}
+                />
                 <div className="flex flex-col">
                 {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
                 {(() => {

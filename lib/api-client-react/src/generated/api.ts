@@ -41,6 +41,7 @@ import type {
   CheeseRecipeList,
   ClaimAutoTrackEventParams,
   CommandInput,
+  ConfirmFreezerSurplusInput,
   ConsumeInput,
   ConsumeResult,
   ConversationHistory,
@@ -74,6 +75,8 @@ import type {
   ForecastResult,
   ForgotPasswordRequest,
   FreezerPullItemList,
+  FreezerSurplusLedger,
+  FreezerSurplusMutationResponse,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
   GetSyncTodayParams,
@@ -152,6 +155,7 @@ import type {
   QualityCheckResult,
   RecipeAssistInput,
   RecipeAssistResult,
+  ReplaceFreezerSurplusAllocationInput,
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
@@ -6221,6 +6225,241 @@ export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
+    }
+
+export const getListFreezerSurplusUrl = () => {
+
+
+
+
+  return `/api/freezer-surplus`
+}
+
+/**
+ * Returns scoped finished-case freezer lots and explicit run allocations. Lots remain separately dated and only their remaining balance can be allocated.
+ * @summary List dated finished-case freezer surplus
+ */
+export const listFreezerSurplus = async ( options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusLedger> => {
+
+  return customFetch<FreezerSurplusLedger>(getListFreezerSurplusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFreezerSurplusQueryKey = () => {
+    return [
+    `/api/freezer-surplus`
+    ] as const;
+    }
+
+
+export const getListFreezerSurplusQueryOptions = <TData = Awaited<ReturnType<typeof listFreezerSurplus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFreezerSurplusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFreezerSurplus>>> = ({ signal }) => listFreezerSurplus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFreezerSurplusQueryResult = NonNullable<Awaited<ReturnType<typeof listFreezerSurplus>>>
+export type ListFreezerSurplusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List dated finished-case freezer surplus
+ */
+
+export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFreezerSurplus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFreezerSurplusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getConfirmFreezerSurplusUrl = () => {
+
+
+
+
+  return `/api/freezer-surplus`
+}
+
+/**
+ * @summary Confirm a new dated finished-case surplus lot
+ */
+export const confirmFreezerSurplus = async (confirmFreezerSurplusInput: ConfirmFreezerSurplusInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FreezerSurplusMutationResponse>(getConfirmFreezerSurplusUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(confirmFreezerSurplusInput)
+  }
+);}
+
+
+
+
+
+export const getConfirmFreezerSurplusMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmFreezerSurplus>>, TError,ConfirmFreezerSurplusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmFreezerSurplus>>, TError,ConfirmFreezerSurplusMutationVariables, TContext> => {
+
+const mutationKey = ['confirmFreezerSurplus'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmFreezerSurplus>>, ConfirmFreezerSurplusMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmFreezerSurplus(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmFreezerSurplusMutationResult = NonNullable<Awaited<ReturnType<typeof confirmFreezerSurplus>>>
+    export type ConfirmFreezerSurplusMutationBody = BodyType<ConfirmFreezerSurplusInput>
+    export type ConfirmFreezerSurplusMutationError = ErrorType<void>
+    export type ConfirmFreezerSurplusMutationVariables = {data: BodyType<ConfirmFreezerSurplusInput>}
+
+    /**
+ * @summary Confirm a new dated finished-case surplus lot
+ */
+export const useConfirmFreezerSurplus = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmFreezerSurplus>>, TError,ConfirmFreezerSurplusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmFreezerSurplus>>,
+        TError,
+        ConfirmFreezerSurplusMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmFreezerSurplusMutationOptions(options));
+    }
+
+export const getReplaceFreezerSurplusAllocationUrl = (runId: string,) => {
+
+
+
+
+  return `/api/freezer-surplus/allocations/${runId}`
+}
+
+/**
+ * @summary Apply or revise dated surplus for an unstarted run
+ */
+export const replaceFreezerSurplusAllocation = async (runId: string,
+    replaceFreezerSurplusAllocationInput: ReplaceFreezerSurplusAllocationInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FreezerSurplusMutationResponse>(getReplaceFreezerSurplusAllocationUrl(runId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(replaceFreezerSurplusAllocationInput)
+  }
+);}
+
+
+
+
+
+export const getReplaceFreezerSurplusAllocationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>, TError,ReplaceFreezerSurplusAllocationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>, TError,ReplaceFreezerSurplusAllocationMutationVariables, TContext> => {
+
+const mutationKey = ['replaceFreezerSurplusAllocation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>, ReplaceFreezerSurplusAllocationMutationVariables> = (props) => {
+          const {runId,data} = props ?? {};
+
+          return  replaceFreezerSurplusAllocation(runId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceFreezerSurplusAllocationMutationResult = NonNullable<Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>>
+    export type ReplaceFreezerSurplusAllocationMutationBody = BodyType<ReplaceFreezerSurplusAllocationInput>
+    export type ReplaceFreezerSurplusAllocationMutationError = ErrorType<void>
+    export type ReplaceFreezerSurplusAllocationMutationVariables = {runId: string;data: BodyType<ReplaceFreezerSurplusAllocationInput>}
+
+    /**
+ * @summary Apply or revise dated surplus for an unstarted run
+ */
+export const useReplaceFreezerSurplusAllocation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>, TError,ReplaceFreezerSurplusAllocationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>,
+        TError,
+        ReplaceFreezerSurplusAllocationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReplaceFreezerSurplusAllocationMutationOptions(options));
     }
 
 export const getListDieLineDefaultsUrl = () => {

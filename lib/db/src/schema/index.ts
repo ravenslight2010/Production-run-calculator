@@ -30,6 +30,7 @@ export * from "./facilityKnowledge";
 export * from "./aiConversationTurns";
 export * from "./productionRules";
 export * from "./freezerPullItems";
+export * from "./freezerSurplus";
 export * from "./mixes";
 export * from "./cheeseRecipes";
 export * from "./doughRecipes";

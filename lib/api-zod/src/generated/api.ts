@@ -2457,6 +2457,172 @@ export const DeleteFreezerPullItemsResponse = zod.object({
 
 
 /**
+ * Returns scoped finished-case freezer lots and explicit run allocations. Lots remain separately dated and only their remaining balance can be allocated.
+ * @summary List dated finished-case freezer surplus
+ */
+
+export const listFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
+
+
+
+
+export const ListFreezerSurplusResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(listFreezerSurplusResponseLotsItemRemainingCasesMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "cases": zod.number().int().min(1)
+}))
+})
+
+
+/**
+ * @summary Confirm a new dated finished-case surplus lot
+ */
+export const confirmFreezerSurplusBodyBrandMax = 120;
+
+export const confirmFreezerSurplusBodyFlavorMax = 120;
+
+export const confirmFreezerSurplusBodyCasesMax = 1000000;
+
+
+
+export const ConfirmFreezerSurplusBody = zod.object({
+  "brand": zod.string().min(1).max(confirmFreezerSurplusBodyBrandMax),
+  "flavor": zod.string().max(confirmFreezerSurplusBodyFlavorMax),
+  "productionDate": zod.coerce.date(),
+  "cases": zod.number().int().min(1).max(confirmFreezerSurplusBodyCasesMax)
+})
+
+
+export const confirmFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
+
+
+
+export const confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin = 0;
+
+
+
+export const ConfirmFreezerSurplusResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(confirmFreezerSurplusResponseLotsItemRemainingCasesMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "cases": zod.number().int().min(1)
+})),
+  "createdLot": zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
+}).nullish()
+})
+
+
+/**
+ * @summary Apply or revise dated surplus for an unstarted run
+ */
+export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
+
+
+
+export const ReplaceFreezerSurplusAllocationParams = zod.object({
+  "runId": zod.coerce.string().min(1).max(replaceFreezerSurplusAllocationPathRunIdMax)
+})
+
+export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
+
+export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
+
+export const replaceFreezerSurplusAllocationBodyAllocationsItemLotIdMax = 120;
+
+export const replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax = 1000000;
+
+export const replaceFreezerSurplusAllocationBodyAllocationsMax = 500;
+
+
+
+export const ReplaceFreezerSurplusAllocationBody = zod.object({
+  "runDate": zod.coerce.date(),
+  "brand": zod.string().min(1).max(replaceFreezerSurplusAllocationBodyBrandMax),
+  "flavor": zod.string().max(replaceFreezerSurplusAllocationBodyFlavorMax),
+  "allocations": zod.array(zod.object({
+  "lotId": zod.string().min(1).max(replaceFreezerSurplusAllocationBodyAllocationsItemLotIdMax),
+  "cases": zod.number().int().min(1).max(replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax)
+})).max(replaceFreezerSurplusAllocationBodyAllocationsMax)
+})
+
+
+export const replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin = 0;
+
+
+
+export const replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin = 0;
+
+
+
+export const ReplaceFreezerSurplusAllocationResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "cases": zod.number().int().min(1)
+})),
+  "createdLot": zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
+}).nullish()
+})
+
+
+/**
  * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
  * @summary List manager-set per-die line-setting defaults
  */

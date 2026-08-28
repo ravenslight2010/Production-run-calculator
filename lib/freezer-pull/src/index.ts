@@ -18,6 +18,8 @@
 
 export const DEFAULT_DAYS_EARLY = 3;
 
+export * from "./surplus";
+
 // A single manager-tagged freezer-pull ingredient. Flat shape so it serializes
 // cleanly to the API/DB and is easy to edit field-by-field in the UI.
 export interface FreezerPullItem {
