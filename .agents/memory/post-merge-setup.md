@@ -1,6 +1,6 @@
 ---
 name: post-merge setup script
-description: Why scripts/post-merge.sh must use push-force and needs a generous timeout.
+description: Package-manager, non-interactive schema-push, and timeout rules for reliable post-merge recovery.
 ---
 
 # Post-merge setup (scripts/post-merge.sh)
@@ -13,6 +13,9 @@ The post-merge script runs `pnpm install --frozen-lockfile` then a Drizzle schem
   - **Why:** post-merge runs non-interactively with stdin closed. Plain `drizzle-kit push` opens an interactive column-rename resolver (`promptColumnsConflicts`) whenever the live DB drifts from the schema (common: isolated task-agent DBs still carry pre-migration columns). With no TTY it renders forever and the setup times out.
 - Keep the post-merge timeout generous (set to 180000ms).
   - **Why:** install (~30s, even when "Already up to date") + schema push (~40s) totals ~70s on this monorepo. The original 20000ms ceiling killed the run before push even started. Measured a clean run at ~71s.
+- Keep the root `packageManager`/pnpm engine compatible with the pnpm binary used by configured workflows, and disable pnpm's package-manager auto-management inside the post-merge hook.
+  - **Why:** pinning a newer pnpm than Replit's workflow binary caused pnpm to recursively run `pnpm add pnpm@...`; the process tree exhausted thread/process limits and broke every workflow before its real command started.
+  - **How to apply:** verify the actual workflow pnpm version before changing the root pin. Using Corepack for a newer version is safe only if every workflow command and nested package script consistently uses Corepack too.
 
 ## The `promptColumnsConflicts` stderr is a REAL failure, not noise
 
