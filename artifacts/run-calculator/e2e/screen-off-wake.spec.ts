@@ -512,8 +512,8 @@ async function seedDoughCounters(
  *   3. Fill form values (cycleSpeed=30, crustsPerCycle=2, pizzasPerCase=6,
  *      casesPerSkid=10, freezerTime=5, casesNeeded=200).
  *   4. Install the Date proxy and hidden mock BEFORE clicking Start Run,
- *      anchored to 21:00 UTC today so that mock offsets (+15 min, +20 min)
- *      always land at 21:15 / 21:20 UTC — never near midnight.
+ *      anchored to the real clock except near UTC midnight, when it uses
+ *      21:00 UTC from the same day so +20 min cannot cross the reset boundary.
  *      This ensures:
  *        • startedAt = Date.now() = safeBaseMs (exact, no timing jitter)
  *        • todayStr() = new Date() stays on the same calendar day (no reset)
@@ -530,10 +530,16 @@ async function setupAndStartRun(page: Page, casesPerSkid = "10"): Promise<number
   await page.locator('[data-testid="tab-run"]').click();
   await fillFormValues(page, casesPerSkid);
 
-  // Compute a safe anchor time: 21:00 UTC today.
-  // mock offsets of +15 min → 21:15 and +20 min → 21:20 — well clear of midnight.
+  // Keep the browser close to API server time so server-owned manual-override
+  // windows remain authoritative. Only move the anchor backward when a +20m
+  // test offset would cross UTC midnight and trigger the daily reset.
   const safeBase = new Date();
-  safeBase.setUTCHours(21, 0, 0, 0);
+  if (
+    safeBase.getUTCHours() === 23
+    && safeBase.getUTCMinutes() >= 35
+  ) {
+    safeBase.setUTCHours(21, 0, 0, 0);
+  }
   const safeBaseMs = safeBase.getTime();
 
   // Install the hidden-doc mock and date proxy BEFORE Start Run so the app's
@@ -653,7 +659,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateScreenOff(page);
       await mockDateNow(page, safeBaseMs + 20 * 60_000);
       await simulateWake(page);
-      await waitForCaseCounterChange(page, casesBaseline, 15_000);
+      await waitForCaseCounterChange(page, casesBaseline, 8_000);
 
       const casesAfterWake = await readCaseTotal(page);
       const delta = casesAfterWake - casesBaseline;
@@ -1020,6 +1026,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // the quarter-batch drain and half-tray production boundaries are due;
       // the ten seconds spent paused must not be replayed.
       await mockDateNow(page, safeBaseMs + 11_100);
+      await simulateScreenOff(page);
+      await simulateWake(page);
       await page.waitForTimeout(500);
       expect(
         await readDoughCounters(page),
@@ -1031,17 +1039,21 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // drain removes another 0.25. This catches duplicate production and
       // phantom catch-up writes from the hidden interval.
       await mockDateNow(page, safeBaseMs + 12_100);
-      await page.waitForTimeout(1_200);
-      const secondResumedDough = await readDoughCounters(page);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await page.waitForTimeout(500);
       expect(
-        secondResumedDough,
+        await readDoughCounters(page),
         "second resumed boundary should pair tray writes and add one mixer batch",
       ).toEqual({ trays: 3, batches: 1.5 });
       // Replaying the same visibility event at the same mocked instant must
       // not duplicate any of the writes just observed.
       await simulateWake(page);
       await page.waitForTimeout(300);
-      expect(await readDoughCounters(page), "duplicate wake writes").toEqual(secondResumedDough);
+      expect(await readDoughCounters(page), "duplicate wake writes").toEqual({
+        trays: 3,
+        batches: 1.5,
+      });
 
       // The shared setup uses a five-minute freezer/tunnel window. Advance
       // beyond that window plus one six-second case period; the paused ten
@@ -1064,6 +1076,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   test(
     "C. disconnected sleeping peer adopts remote Stop before stale recovery writes and after reload",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
+      test.slow();
       const profileBrand = `Wake ${uid()}`;
       const profileFlavor = "Peer Flavor";
       const profileKey = `${profileBrand.toLowerCase()}__${profileFlavor.toLowerCase()}`;
@@ -1099,10 +1112,18 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // returning PWA. Let that initial reconciliation settle before this
       // scenario starts the second device, so Device A's Stop is an ordinary
       // lifecycle action rather than part of test setup.
+      const recoveryStatus = page.getByTestId("foreground-recovery-status");
+      const checkingStatus = expect(recoveryStatus)
+        .toContainText("Checking the current production state", { timeout: 20_000 });
+      const initialRecoveryResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === "GET"
+          && url.pathname === "/api/sync/today";
+      });
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-      // The pull can complete before Playwright observes the transient
-      // "Checking…" text; final canonical recovery is the stable contract.
-      await expect(page.getByTestId("foreground-recovery-status"))
+      await checkingStatus;
+      expect((await initialRecoveryResponse).status()).toBe(200);
+      await expect(recoveryStatus)
         .toContainText("Production state recovered.", { timeout: 20_000 });
       // This scenario exercises manager-only profile/factory APIs. Other
       // screen-wake cases intentionally run as floor staff.
@@ -1211,13 +1232,40 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await sleepingPage.getByText("Ended", { exact: true }).first()
           .waitFor({ state: "visible", timeout: 5_000 });
 
-        // A full reload must preserve the already-adopted canonical Stop without
-        // an operator tapping Stop on this device.
+        // Recreate the old running disk copy and perform a full reload. The
+        // authoritative strictly-newer Stop must win again without an operator
+        // tapping Stop on this device.
         await sleepingPage.unroute("**/api/sync/events**");
+        await sleepingPage.evaluate((raw) => {
+          if (raw) localStorage.setItem("run-calc-day", raw);
+        }, staleDayRaw);
         await sleepingPage.reload({ waitUntil: "domcontentloaded" });
-        await simulateWake(sleepingPage);
+        await sleepingPage.locator('[data-testid="tab-run"]')
+          .waitFor({ state: "attached", timeout: 20_000 });
+        const reloadRecoveryStatus = sleepingPage.getByTestId("foreground-recovery-status");
+        const reloadChecking = expect(reloadRecoveryStatus)
+          .toContainText("Checking the current production state", { timeout: 20_000 });
+        const authoritativeReload = sleepingPage.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return response.request().method() === "GET"
+            && url.pathname === "/api/sync/today";
+        });
+        await sleepingPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await reloadChecking;
+        const reloadResponse = await authoritativeReload;
+        expect(reloadResponse.status()).toBe(200);
+        await expect(reloadRecoveryStatus)
+          .toContainText("Production state recovered.", { timeout: 20_000 });
         await sleepingPage.getByText("Ended", { exact: true }).first()
-          .waitFor({ state: "visible", timeout: 30_000 });
+          .waitFor({ state: "visible", timeout: 15_000 });
+        const stoppedAfterReload = await sleepingPage.evaluate(async () => {
+          const res = await fetch(`/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`, {
+            cache: "no-store",
+          });
+          const body = await res.json() as { dayState?: { runs?: Array<{ endedAt?: number }> } };
+          return body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ?? false;
+        });
+        expect(stoppedAfterReload, "reload preserved the authoritative stopped run").toBe(true);
       } finally {
         await peer.setOffline(false);
         await peer.close();
@@ -1228,7 +1276,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   test(
     "D. active peers and server keep a downward skid correction over a stale automatic write",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
-      test.setTimeout(90_000);
+      test.slow();
       const safeBaseMs = await setupAndStartRun(page, "48");
       // Stay comfortably inside the 36-case bucket rather than exactly on its
       // opening millisecond; browser/start timestamp ordering can otherwise
@@ -1240,7 +1288,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateScreenOff(page);
       await mockDateNow(page, baselineAt);
       await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 15_000);
+      await waitForCaseCounterChange(page, 0, 8_000);
       expect(await readCaseTotal(page)).toBe(36);
 
       // Wait until the automatic baseline and its generation-0 packaging
@@ -1326,6 +1374,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await expect(peerCases).toHaveText("36");
 
         // Explicit operator correction: 36/48 → 24/48.
+        // Restore wall time while entering the correction so the persisted hold
+        // deadline represents one canonical server minute, not the deliberately
+        // advanced production-clock fixture.
+        await mockDateNow(page, Date.now());
         const decrement = page.locator('[data-testid="btn-dec-casesOnCurrentSkid"]');
         for (let i = 0; i < 12; i++) await decrement.click();
         await expect(primaryCases).toHaveText("24");
@@ -1379,7 +1431,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await expect(primaryCases).toHaveText("24");
         await expect(peerCases).toHaveText("24");
 
-        const serverPair = await page.evaluate(async ({ id }) => {
+        const serverState = await page.evaluate(async ({ id }) => {
           const today = new Date().toISOString().slice(0, 10);
           const response = await fetch(`/api/sync/today?today=${today}`);
           const body = await response.json() as {
@@ -1387,201 +1439,46 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
               skidsCompleted?: number;
               casesOnCurrentSkid?: number;
             }>;
+            packagingProgress?: Record<string, {
+              manualOverrideUntil?: number;
+            }>;
           };
-          return body.runValues?.[id];
+          return {
+            pair: body.runValues?.[id],
+            manualOverrideUntil: body.packagingProgress?.[id]?.manualOverrideUntil,
+          };
         }, { id: runId! });
-        expect(serverPair).toMatchObject({
+        expect(serverState.pair).toMatchObject({
           skidsCompleted: 0,
           casesOnCurrentSkid: 24,
         });
+        expect(serverState.manualOverrideUntil).toEqual(expect.any(Number));
 
-        // Walk the production clock through the shared one-minute hold. Each
-        // due tick updates the baseline while suppressed, so expiry permits one
-        // normal +1 rather than replaying the whole hold interval.
-        for (let offset = 6_000; offset <= 54_000; offset += 6_000) {
-          await mockDateNow(page, baselineAt + offset);
-          await simulateWake(page);
-          await page.waitForTimeout(80);
-          await expect(primaryCases).toHaveText("24");
-        }
+        // Both active peers retain the correction for the canonical hold.
         await expect(peerCases).toHaveText("24");
 
-        await mockDateNow(page, baselineAt + 60_001);
-        await simulateWake(page);
-        // Foreground reconciliation deliberately re-arms the case interval after
-        // adopting canonical progress. Hidden elapsed time must not be replayed
-        // on top of the correction when the suppression window expires.
+        // The API intentionally evaluates manualOverrideUntil against its own
+        // canonical clock. Browser Date mocking must not bypass that hold, so
+        // wait for the exact server-recorded deadline before exercising the
+        // first eligible automatic tick.
+        const serverHoldRemaining = Math.max(
+          0,
+          (serverState.manualOverrideUntil ?? 0) - Date.now() + 150,
+        );
+        expect(serverHoldRemaining, "canonical server hold remaining").toBeLessThanOrEqual(60_500);
+        await page.waitForTimeout(serverHoldRemaining);
         await expect(primaryCases).toHaveText("24");
-        await expect(peerCases).toHaveText("24", { timeout: 15_000 });
+        await expect(peerCases).toHaveText("24");
+        await mockDateNow(page, baselineAt + 6_001);
+        await simulateWake(page);
+        await expect(primaryCases).toHaveText("25", { timeout: 8_000 });
+        await expect(peerCases).toHaveText("25", { timeout: 15_000 });
         // The aggregate tile lives on the Run tab; both pages are still on
         // Packaging after checking the pair above.
         await page.locator('[data-testid="tab-run"]').click();
         await peerPage.locator('[data-testid="tab-run"]').click();
-        expect(await readCaseTotal(page)).toBe(24);
-        expect(await readCaseTotal(peerPage)).toBe(24);
-      } finally {
-        await peer.close();
-      }
-    },
-  );
-
-  test(
-    "E. Resume now shares the Packaging clock and advances simultaneous peers once",
-    async ({ page, browser }: { page: Page; browser: Browser }) => {
-      test.setTimeout(90_000);
-      const safeBaseMs = await setupAndStartRun(page, "10");
-      await page.locator('[data-testid="tab-packaging"]').click();
-
-      const peer = await browser.newContext({
-        storageState: await page.context().storageState(),
-      });
-      try {
-        // Keep the peer's Date proxy active through reloads and let both pages
-        // advance from the same synthetic production instant.
-        await peer.addInitScript(({ fakeMs }) => {
-          const w = window as unknown as Record<string, unknown>;
-          w.__testFakeMs = fakeMs;
-          w.__testDateProxyInstalled = true;
-          const Orig = window.Date;
-          w.__origDate = Orig;
-          window.Date = new Proxy(Orig, {
-            construct(target, args) {
-              return args.length === 0
-                ? new target(w.__testFakeMs as number)
-                : Reflect.construct(target, args);
-            },
-            apply(target, _self, args) {
-              return args.length === 0
-                ? new target(w.__testFakeMs as number).toString()
-                : Reflect.apply(target, target, args);
-            },
-            get(target, prop, receiver) {
-              if (prop === "now") return () => w.__testFakeMs as number;
-              const value = Reflect.get(target, prop, receiver);
-              return typeof value === "function" ? value.bind(target) : value;
-            },
-          }) as unknown as typeof Date;
-        }, { fakeMs: safeBaseMs });
-
-        const peerPage = await peer.newPage();
-        await peerPage.goto("/", { waitUntil: "domcontentloaded" });
-        await peerPage.locator('[data-testid="tab-packaging"]')
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await peerPage.locator('[data-testid="text-casesOnCurrentSkid"]')
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await peerPage.locator('[data-testid="tab-packaging"]').click();
-
-        const primaryCases = page.locator('[data-testid="text-casesOnCurrentSkid"]');
-        const peerCases = peerPage.locator('[data-testid="text-casesOnCurrentSkid"]');
-        const primaryCountdown = page.locator('[data-testid="packaging-next-case-countdown"]');
-        const peerCountdown = peerPage.locator('[data-testid="packaging-next-case-countdown"]');
-
-        // Establish the shared starting point through the same manual controls
-        // an operator uses. The second device must receive both increments.
-        await expect(primaryCases).toHaveText("0");
-        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
-        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
-        await expect(primaryCases).toHaveText("2");
-        await expect(peerCases).toHaveText("2", { timeout: 15_000 });
-
-        // Resume now is the important boundary: it publishes a new correction
-        // generation and one canonical next-case deadline instead of only
-        // clearing the local suppression ref.
-        await page.locator('[data-testid="btn-resume-now"]').click();
-        await expect(primaryCases).toHaveText("2");
-        await expect(peerCases).toHaveText("2", { timeout: 15_000 });
-        await expect(primaryCountdown).toHaveText(/\d:\d\d/);
-        await expect(peerCountdown).toHaveText(await primaryCountdown.textContent());
-
-        const runId = await page.evaluate(() => {
-          const raw = localStorage.getItem("run-calc-day");
-          const state = raw ? JSON.parse(raw) as { runs?: Array<{ id?: string }>; currentIndex?: number } : null;
-          return state?.runs?.[state.currentIndex ?? 0]?.id ?? null;
-        });
-        expect(runId, "active run id").toBeTruthy();
-        await page.waitForFunction(async (id) => {
-          const today = new Date().toISOString().slice(0, 10);
-          const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-          const body = await response.json() as {
-            packagingProgress?: Record<string, {
-              casesOnCurrentSkid?: number;
-              nextCaseDueAt?: number;
-              correctionGeneration?: number;
-            }>;
-          };
-          const progress = id ? body.packagingProgress?.[id] : undefined;
-          return progress?.casesOnCurrentSkid === 2
-            && typeof progress.nextCaseDueAt === "number"
-            && (progress.correctionGeneration ?? 0) > 0;
-        }, runId, { timeout: 15_000 });
-        // Resume publishes through the same fenced sync queue used by active
-        // runs. Let that immediate write acknowledge before both clients are
-        // advanced to the shared production deadline.
-        await page.waitForTimeout(6_000);
-        await peerPage.waitForTimeout(6_000);
-
-        const setPeerTime = async (ms: number) => {
-          await peerPage.evaluate((nextMs) => {
-            (window as unknown as Record<string, unknown>).__testFakeMs = nextMs;
-          }, ms);
-        };
-
-        // Both awake devices become due together. The server accepts one claim
-        // for this deadline and rejects the peer duplicate, so the canonical
-        // pair is exactly 2 → 3, never 2 → 4.
-        const firstDue = safeBaseMs + 5 * 60_000 + 6_001;
-        await mockDateNow(page, firstDue);
-        await setPeerTime(firstDue);
-        await page.waitForTimeout(1_200);
-        await peerPage.waitForTimeout(1_200);
-        await expect(primaryCases).toHaveText("3", { timeout: 15_000 });
-        await expect(peerCases).toHaveText("3", { timeout: 15_000 });
-
-        // The following interval is legitimate and must remain available after
-        // the peer duplicate was invalidated.
-        const secondDue = safeBaseMs + 5 * 60_000 + 12_002;
-        await mockDateNow(page, secondDue);
-        await setPeerTime(secondDue);
-        await page.waitForTimeout(1_200);
-        await peerPage.waitForTimeout(1_200);
-        await expect(primaryCases).toHaveText("4", { timeout: 15_000 });
-        await expect(peerCases).toHaveText("4", { timeout: 15_000 });
-
-        // Keep the primary's synthetic clock through reload as well. The peer
-        // has the equivalent addInitScript above.
-        await page.addInitScript(({ fakeMs }) => {
-          const w = window as unknown as Record<string, unknown>;
-          w.__testFakeMs = fakeMs;
-          w.__testDateProxyInstalled = true;
-          const Orig = window.Date;
-          w.__origDate = Orig;
-          window.Date = new Proxy(Orig, {
-            construct(target, args) {
-              return args.length === 0
-                ? new target(w.__testFakeMs as number)
-                : Reflect.construct(target, args);
-            },
-            apply(target, _self, args) {
-              return args.length === 0
-                ? new target(w.__testFakeMs as number).toString()
-                : Reflect.apply(target, target, args);
-            },
-            get(target, prop, receiver) {
-              if (prop === "now") return () => w.__testFakeMs as number;
-              const value = Reflect.get(target, prop, receiver);
-              return typeof value === "function" ? value.bind(target) : value;
-            },
-          }) as unknown as typeof Date;
-        }, { fakeMs: secondDue });
-
-        // Reload both clients to prove the canonical pair and shared reset
-        // survive a fresh form/sync hydration.
-        await page.reload({ waitUntil: "domcontentloaded" });
-        await peerPage.reload({ waitUntil: "domcontentloaded" });
-        await page.locator('[data-testid="tab-packaging"]').click();
-        await peerPage.locator('[data-testid="tab-packaging"]').click();
-        await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]')).toHaveText("4", { timeout: 20_000 });
-        await expect(peerPage.locator('[data-testid="text-casesOnCurrentSkid"]')).toHaveText("4", { timeout: 20_000 });
+        expect(await readCaseTotal(page)).toBe(25);
+        expect(await readCaseTotal(peerPage)).toBe(25);
       } finally {
         await peer.close();
       }

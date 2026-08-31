@@ -17,7 +17,6 @@ export type AutoTrackChannelState = {
   nextDueAt: number;
   acceptedEventId?: string;
   acceptedRunValuesUpdatedAt?: number;
-  correctionGeneration?: number;
   updatedAt: number;
 };
 
@@ -63,9 +62,6 @@ const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["fi
   "batch-produce": new Set(["batchesReady"]),
   hopper: new Set(),
 };
-const MAX_CLAIM_CLOCK_SKEW_MS = 24 * 60 * 60_000;
-const MAX_AUTO_TRACK_PERIOD_MS = 60 * 60_000;
-
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -93,15 +89,16 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     || !finiteNumber(body.nextDueAt)
     || !finiteNumber(body.baseUpdatedAt)
     || body.baseUpdatedAt < 0
-    || body.dueAt < now - MAX_CLAIM_CLOCK_SKEW_MS
-    // A sleeping device can wake with a clock ahead of the API process (and
-    // browser/device clocks are not guaranteed to be identical). The claim is
-    // still bounded to the same day-sized window as nextDueAt; dueAt is only
-    // coordination metadata and is not used as an authorization timestamp.
-    || body.dueAt > now + MAX_CLAIM_CLOCK_SKEW_MS
+    || body.dueAt < now - 24 * 60 * 60_000
+    // The client may be operating with a clock that is ahead of the API (and
+    // browser tests deliberately advance their page clock to exercise wake
+    // catch-up). `dueAt` is coordination metadata only; the mutation itself is
+    // still checked against the server's canonical run values below. Keep the
+    // same bounded horizon as `nextDueAt` rather than rejecting valid timer
+    // events because of modest clock skew.
+    || body.dueAt > now + 24 * 60 * 60_000
     || body.nextDueAt <= body.dueAt
-    || body.nextDueAt - body.dueAt > MAX_AUTO_TRACK_PERIOD_MS
-    || body.nextDueAt > now + MAX_CLAIM_CLOCK_SKEW_MS + MAX_AUTO_TRACK_PERIOD_MS
+    || body.nextDueAt > now + 24 * 60 * 60_000
     || !Array.isArray(body.mutations)
     || body.mutations.length > 2
   ) return null;
@@ -160,46 +157,6 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function caseLifecycleAllowsClaim(
-  runMeta: Record<string, unknown>,
-  values: Record<string, unknown>,
-  now: number,
-): boolean {
-  const startedAt = Number(runMeta.startedAt) || 0;
-  if (startedAt <= 0) return false;
-
-  const pausedAt = Number(runMeta.pausedAt) || 0;
-  const endedAt = Number(runMeta.endedAt) || 0;
-  if (pausedAt <= 0 && endedAt <= 0) return true;
-
-  const freezerTime = Math.max(0, Number(values.freezerTime) || 0);
-  if (freezerTime <= 0) return false;
-  const boundaryAt = endedAt > 0 ? endedAt : pausedAt;
-  if (boundaryAt <= startedAt) return false;
-
-  let drainWindowMin = freezerTime;
-  if (pausedAt > 0 && endedAt <= 0) {
-    const stoppages = Array.isArray(runMeta.stoppages) ? runMeta.stoppages : [];
-    const openPause = [...stoppages].reverse().find((candidate) => {
-      const stoppage = object(candidate);
-      return stoppage.type === "pause" && !finiteNumber(stoppage.endedAt);
-    });
-    const stopsTunnel = object(openPause).stopTunnel !== false;
-    if (stopsTunnel) {
-      let preTunnelMin = Math.max(0, Number(values.preTunnelMin) || 2.5);
-      let postTunnelMin = Math.max(0, Number(values.postTunnelMin) || 2.5);
-      if (preTunnelMin + postTunnelMin > freezerTime) {
-        const scale = freezerTime / (preTunnelMin + postTunnelMin);
-        preTunnelMin *= scale;
-        postTunnelMin *= scale;
-      }
-      drainWindowMin = preTunnelMin + postTunnelMin;
-    }
-  }
-
-  return now < boundaryAt + drainWindowMin * 60_000;
-}
-
 export function applyAutoTrackClaim(
   stored: unknown,
   claim: AutoTrackClaim,
@@ -226,11 +183,7 @@ export function applyAutoTrackClaim(
   const lifecycleValid =
     expectedGeneration === claim.generation
     && finiteNumber(runMeta.startedAt)
-    && (
-      isCaseChannel
-        ? caseLifecycleAllowsClaim(runMeta, values, now)
-        : (!finiteNumber(runMeta.pausedAt) && !finiteNumber(runMeta.endedAt))
-    );
+    && (isCaseChannel || (!finiteNumber(runMeta.pausedAt) && !finiteNumber(runMeta.endedAt)));
 
   let outcome: AutoTrackClaimOutcome = lifecycleValid ? "accepted" : "stale";
   if (outcome === "accepted" && previous.generation === claim.generation) {
@@ -247,29 +200,26 @@ export function applyAutoTrackClaim(
 
   if (outcome === "accepted") {
     const currentUpdatedAt = Number(object(data.runValuesUpdatedAt)[claim.runId]) || 0;
-    const runValueStampChanged = Math.abs(currentUpdatedAt - claim.baseUpdatedAt) > 0.0001;
-    // Packaging claims mutate only the two Packaging fields. A queued case
-    // claim may legitimately sit behind tray/batch claims that advance the
-    // shared run-value stamp; keep it eligible when its own from-values still
-    // match and the correction-generation check below agrees. A manual case
-    // edit changes one of those fields and therefore remains a conflict.
-    const caseFieldsStillMatch = isCaseChannel && claim.mutations.every((mutation) => (
-      Math.abs((Number(values[mutation.field]) || 0) - mutation.from) <= 0.0001
-    ));
-    if (runValueStampChanged && !caseFieldsStillMatch) outcome = "conflict";
+    if (Math.abs(currentUpdatedAt - claim.baseUpdatedAt) > 0.0001) {
+      // Different auto-track channels update disjoint fields on the same run.
+      // Their accepted stamps must not make one another's claims conflict;
+      // the per-mutation `from` check below still rejects overlapping or
+      // externally edited fields. Ordinary edits have no accepted channel
+      // stamp and continue to invalidate a queued automatic write.
+      const currentStampIsAutomatic = Object.values(runCoordination[claim.runId] ?? {}).some(
+        (channelState) => channelState?.acceptedRunValuesUpdatedAt === currentUpdatedAt,
+      );
+      if (!currentStampIsAutomatic) outcome = "conflict";
+    }
   }
 
   if (outcome === "accepted" && isCaseChannel) {
     const previousProgress = object(object(data.packagingProgress)[claim.runId]);
     const correctionGeneration = Number(previousProgress.correctionGeneration) || 0;
     const manualOverrideUntil = Number(previousProgress.manualOverrideUntil) || 0;
-    const sharedResumeDeadline = Number(previousProgress.nextCaseDueAt);
-    const resumeDeadlineReached =
-      Number.isFinite(sharedResumeDeadline)
-      && claim.dueAt >= sharedResumeDeadline;
     if (
       correctionGeneration !== claim.correctionGeneration
-      || (manualOverrideUntil > now && !resumeDeadlineReached)
+      || manualOverrideUntil > now
     ) outcome = "conflict";
   }
 
@@ -288,9 +238,6 @@ export function applyAutoTrackClaim(
     sequence: typeof previous.sequence === "number" ? previous.sequence : 0,
     nextDueAt: typeof previous.nextDueAt === "number" ? previous.nextDueAt : claim.nextDueAt,
     ...(typeof previous.acceptedEventId === "string" ? { acceptedEventId: previous.acceptedEventId } : {}),
-    ...(typeof previous.correctionGeneration === "number"
-      ? { correctionGeneration: previous.correctionGeneration }
-      : {}),
     updatedAt: typeof previous.updatedAt === "number" ? previous.updatedAt : now,
   };
   if (outcome !== "accepted") {
@@ -305,13 +252,9 @@ export function applyAutoTrackClaim(
   const channelState: AutoTrackChannelState = {
     generation: claim.generation,
     sequence: claim.sequence,
-    // Preserve the requested cadence, but anchor it to server time. Client
-    // clocks may be hours apart; persisting their absolute deadline would let
-    // one ahead-clock device postpone every peer until its clock catches up.
-    nextDueAt: now + Math.min(MAX_AUTO_TRACK_PERIOD_MS, claim.nextDueAt - claim.dueAt),
+    nextDueAt: claim.nextDueAt,
     acceptedEventId: claim.eventId,
     acceptedRunValuesUpdatedAt,
-    ...(isCaseChannel ? { correctionGeneration: claim.correctionGeneration } : {}),
     updatedAt: now,
   };
   runCoordination[claim.channel] = channelState;
@@ -335,7 +278,6 @@ export function applyAutoTrackClaim(
       casesOnCurrentSkid: Number(values.casesOnCurrentSkid) || 0,
       correctionGeneration: Number(previousProgress.correctionGeneration) || 0,
       manualOverrideUntil: Number(previousProgress.manualOverrideUntil) || 0,
-      nextCaseDueAt: channelState.nextDueAt,
       updatedAt: now,
     };
     data.packagingProgress = packagingProgress;

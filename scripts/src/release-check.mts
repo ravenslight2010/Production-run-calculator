@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -53,16 +54,66 @@ export type BrowserDurationRegression = {
 const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 const API_SHARD_WARNING_MS = 6 * 60_000;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 100 cases can exceed
+// reset or observe shared disposable live-day state. Its 108 cases can exceed
 // the API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
 // retries.
-const FULL_BROWSER_TIMEOUT_MS = 20 * 60_000;
-const FULL_BROWSER_WARNING_MS = 15 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 100;
+const FULL_BROWSER_TIMEOUT_MS = 30 * 60_000;
+const FULL_BROWSER_WARNING_MS = 25 * 60_000;
+const FULL_BROWSER_EXPECTED_CASES = 108;
+const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
 const rootDir = new URL("../../", import.meta.url).pathname;
+const STATEFUL_RELEASE_LOCK_DIR =
+  "/tmp/run-calculator-release-stateful-gates.lock";
+const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
 const fullRun = process.argv.includes("--full");
+
+async function acquireStatefulReleaseLock(): Promise<() => Promise<void>> {
+  let announcedWait = false;
+  const owner = `${process.pid}-${Date.now()}`;
+  for (;;) {
+    try {
+      await mkdir(STATEFUL_RELEASE_LOCK_DIR);
+      await writeFile(
+        resolve(STATEFUL_RELEASE_LOCK_DIR, "owner"),
+        `${owner}\n`,
+        "utf8",
+      );
+      if (announcedWait) {
+        console.log("Acquired shared stateful release-gate lock.");
+      }
+      return async () => {
+        const currentOwner = await readFile(
+          resolve(STATEFUL_RELEASE_LOCK_DIR, "owner"),
+          "utf8",
+        ).catch(() => "");
+        if (currentOwner.trim() === owner) {
+          await rm(STATEFUL_RELEASE_LOCK_DIR, { recursive: true, force: true });
+        }
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const lock = await lstat(STATEFUL_RELEASE_LOCK_DIR).catch(
+        () => undefined,
+      );
+      if (
+        lock &&
+        Date.now() - lock.mtimeMs > STATEFUL_RELEASE_LOCK_STALE_MS
+      ) {
+        await rm(STATEFUL_RELEASE_LOCK_DIR, { recursive: true, force: true });
+        continue;
+      }
+      if (!announcedWait) {
+        console.log(
+          "Another release check is running stateful gates; waiting to preserve database and port isolation.",
+        );
+        announcedWait = true;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
+    }
+  }
+}
 function cliOptionValue(option: string): string | undefined {
   const inlineValue = process.argv.find((argument) =>
     argument.startsWith(`${option}=`),
@@ -271,7 +322,7 @@ const steps: ReleaseStep[] = [
 
 if (fullRun) {
   steps.push({
-    label: "full browser E2E suite",
+    label: FULL_BROWSER_GATE_LABEL,
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e"],
     env: {
       E2E_TEST_DB: "1",
@@ -281,6 +332,27 @@ if (fullRun) {
     timeoutMs: FULL_BROWSER_TIMEOUT_MS,
     warningMs: FULL_BROWSER_WARNING_MS,
   });
+}
+
+export function releaseGateLabelsForMode(
+  mode: "standard" | "full",
+): string[] {
+  const labels = steps
+    .filter((step) =>
+      mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL
+    )
+    .map((step) => step.label);
+  // A verifier can be pointed at a full evidence directory without starting
+  // this process with --full. Derive the contract from the report's mode, not
+  // from the command that happened to launch verification.
+  if (
+    mode === "full"
+    && process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined
+    && !labels.includes(FULL_BROWSER_GATE_LABEL)
+  ) {
+    labels.push(FULL_BROWSER_GATE_LABEL);
+  }
+  return labels;
 }
 
 // The disposable resume integration test supplies a tiny step list so it can
@@ -449,12 +521,7 @@ export async function verifyReleaseEvidence(
     );
   }
   const revision =
-    options.currentRevision ??
-    (await new Promise<string>((resolveRevision, reject) => {
-      execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
-        error ? reject(error) : resolveRevision(stdout.trim()),
-      );
-    }));
+    options.currentRevision ?? (await currentRevision());
   validateReleaseReport(report, {
     currentRevision: revision,
     expectedMode: options.expectedMode,
@@ -499,9 +566,22 @@ export function validateFullBrowserReport(
   const completedCases = Number(
     report.match(/^Completed cases:\s*(\d+)\s*$/m)?.[1],
   );
+  const passedCases = Number(report.match(/^Passed cases:\s*(\d+)\s*$/m)?.[1]);
+  const skippedCases = Number(report.match(/^Skipped cases:\s*(\d+)\s*$/m)?.[1]);
+  const failedCases = Number(report.match(/^Failed cases:\s*(\d+)\s*$/m)?.[1]);
+  const notRunCases = Number(report.match(/^Not-run cases:\s*(\d+)\s*$/m)?.[1]);
   const coverage = report.match(/^Coverage:\s*(COMPLETE|INCOMPLETE)\s*$/m)?.[1];
   const durationMs = Number(report.match(/^Duration:\s*(\d+)ms\s*$/m)?.[1]);
-  if (!result || !Number.isInteger(expectedCases) || !coverage || !Number.isInteger(durationMs)) {
+  if (
+    !result
+    || !Number.isInteger(expectedCases)
+    || !Number.isInteger(passedCases)
+    || !Number.isInteger(skippedCases)
+    || !Number.isInteger(failedCases)
+    || !Number.isInteger(notRunCases)
+    || !coverage
+    || !Number.isInteger(durationMs)
+  ) {
     throw new Error(
       "Full browser report is malformed: result, case counts, coverage, and duration are required.",
     );
@@ -526,10 +606,13 @@ export function validateFullBrowserReport(
     options.requirePass &&
     (result !== "PASS" ||
       coverage !== "COMPLETE" ||
-      completedCases !== expectedCases)
+      completedCases !== expectedCases ||
+      failedCases !== 0 ||
+      notRunCases !== 0 ||
+      passedCases + skippedCases !== expectedCases)
   ) {
     throw new Error(
-      "Full browser report cannot support GO unless all expected cases passed.",
+      "Full browser report cannot support GO unless every expected case passed or was explicitly skipped.",
     );
   }
 
@@ -576,6 +659,10 @@ export function validateFullBrowserReport(
   if (
     totals.cases !== enumeratedCases ||
     totals.completed !== completedCases ||
+    totals.passed !== passedCases ||
+    totals.skipped !== skippedCases ||
+    totals.failed !== failedCases ||
+    totals.notRun !== notRunCases ||
     totals.passed + totals.skipped + totals.failed !== completedCases ||
     totals.passed + totals.skipped + totals.failed + totals.notRun !==
       totals.cases ||
@@ -617,7 +704,10 @@ export function validateReleaseReport(
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
-  const mode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1];
+  const mode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
+    | "standard"
+    | "full"
+    | undefined;
   const decision = report.match(/^Decision:\s*(GO|NO-GO)\s*$/m)?.[1];
   if (!revision || revision !== options.currentRevision) {
     throw new Error(
@@ -648,9 +738,7 @@ export function validateReleaseReport(
     .map((match) => ({ label: match[1], status: match[2] }));
   const expectedLabels =
     options.expectedLabels ??
-    steps
-      .filter((step) => mode === "full" || !step.label.includes("full browser E2E"))
-      .map((step) => step.label);
+    releaseGateLabelsForMode(mode);
   const labels = new Set(rows.map((row) => row.label));
   const missing = expectedLabels.filter((label) => !labels.has(label));
   if (missing.length > 0) {
@@ -928,6 +1016,15 @@ async function writeReleaseReport(
         file !== undefined,
     ),
   );
+  try {
+    await access(
+      resolve(rootDir, releaseEvidenceDir, "browser-full/FINAL-REPORT.md"),
+    );
+    availableEvidenceFiles.add("browser-full/FINAL-REPORT.md");
+  } catch {
+    // Full browser evidence validation below reports a missing file when the
+    // full release decision requires it.
+  }
   let browserDurationRegressions: BrowserDurationRegression[] | undefined;
   if (fullRun) {
     try {
@@ -1023,8 +1120,22 @@ async function readCheckpoint(
 
 async function currentRevision(): Promise<string> {
   return new Promise((resolveRevision, reject) => {
-    execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
-      error ? reject(error) : resolveRevision(stdout.trim()),
+    execFile(
+      "git",
+      [
+        "log",
+        "-1",
+        "--format=%H",
+        "--",
+        ".",
+        ":(exclude)release-evidence",
+        ":(exclude)release-evidence/**",
+        ":(exclude)release-evidence-full",
+        ":(exclude)release-evidence-full/**",
+      ],
+      { cwd: rootDir },
+      (error, stdout) =>
+        error ? reject(error) : resolveRevision(stdout.trim()),
     );
   });
 }
@@ -1098,33 +1209,50 @@ async function main(): Promise<void> {
     );
   }
   let failedGroup: string | undefined;
+  let releaseStatefulLock: (() => Promise<void>) | undefined;
 
-  for (const [index, step] of steps.entries()) {
-    if (results.some((result) => result.label === step.label)) continue;
-    if (failedGroup !== undefined && step.group !== failedGroup) {
-      break;
-    }
-    console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-    const { exitCode, elapsedMs, status } = await runStep(step, { logPath });
-    const passed = exitCode === 0;
-    results.push({ label: step.label, passed, status, elapsedMs });
-    await writeCheckpoint(checkpointPath, {
-      revision,
-      mode: fullRun ? "full" : "standard",
-      results,
-    });
-    console.log(`${status} ${step.label}`);
-    if (!passed) {
-      if (step.group !== undefined) {
-        failedGroup = step.group;
-        console.error(
-          `\n${step.group} has a failed shard; running the remaining shards.`,
-        );
-        continue;
+  try {
+    for (const [index, step] of steps.entries()) {
+      if (results.some((result) => result.label === step.label)) continue;
+      if (failedGroup !== undefined && step.group !== failedGroup) {
+        break;
       }
-      console.error("\nRelease check stopped at the first failed gate.");
-      break;
+      if (step.label === "clean-start smoke" && !releaseStatefulLock) {
+        releaseStatefulLock = await acquireStatefulReleaseLock();
+      }
+      console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
+      const effectiveStep =
+        step.label === FULL_BROWSER_GATE_LABEL
+          ? {
+              ...step,
+              env: { ...step.env, RELEASE_REVISION: revision },
+            }
+          : step;
+      const { exitCode, elapsedMs, status } = await runStep(effectiveStep, {
+        logPath,
+      });
+      const passed = exitCode === 0;
+      results.push({ label: step.label, passed, status, elapsedMs });
+      await writeCheckpoint(checkpointPath, {
+        revision,
+        mode: fullRun ? "full" : "standard",
+        results,
+      });
+      console.log(`${status} ${step.label}`);
+      if (!passed) {
+        if (step.group !== undefined) {
+          failedGroup = step.group;
+          console.error(
+            `\n${step.group} has a failed shard; running the remaining shards.`,
+          );
+          continue;
+        }
+        console.error("\nRelease check stopped at the first failed gate.");
+        break;
+      }
     }
+  } finally {
+    await releaseStatefulLock?.();
   }
 
   console.log("\nRelease check summary:");

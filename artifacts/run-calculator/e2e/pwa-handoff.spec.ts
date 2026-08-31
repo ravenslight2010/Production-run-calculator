@@ -185,13 +185,16 @@ test.describe("PWA update handoff", () => {
       await page.goto(server.baseUrl, { waitUntil: "networkidle" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(async () => {
-        const registration = await navigator.serviceWorker.getRegistration();
-        return Boolean(registration?.active);
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
       });
       // The very first install does not control its already-open page. Reload
       // into the old revision before publishing the new one so the test models
       // a staff tab that genuinely has an older deployed worker in control.
-      await page.reload({ waitUntil: "networkidle" });
+      // Leave the scope before opening the controlled document so Chromium
+      // cannot reuse the initial uncontrolled navigation during activation.
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
 

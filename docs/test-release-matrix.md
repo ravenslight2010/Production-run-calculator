@@ -11,10 +11,10 @@ reported gap, not evidence of coverage.
 | --- | --- | --- | --- |
 | Pure calculations and shared decision logic | Library package owning the function | Package `test` scripts; especially `inventory-math`, `production-rules`, `spec-reconcile`, `scheduled-recipe-check`, and `spec-export` | Required when the library or its consumers change |
 | API route, validation, auth, and persistence contracts | API server route or shared API contract | `@workspace/api-server` unit and integration suites; `test:release:*` shards | Required for server, schema, auth, sync, and contract changes |
-| Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, `multi-device-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
+| Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
 | Concurrent sync and inventory mutations | Disposable-Postgres integration tests for live and scheduled-day sync merge retries, cross-date scheduled-write isolation, plus inventory row-lock/idempotency boundaries | `@workspace/api-server run test:release:concurrency` | Required only when sync conflict/retry (including future scheduled-day writes and cross-date isolation), inventory locking, consumption idempotency, or related transaction boundaries change; bounded to 180 seconds |
 | Web rendering and client state | Run Calculator components/hooks | `@workspace/run-calculator test`, typecheck, and focused rendered tests | Required for client or shared UI/state changes |
-| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, sync-convergence, and multi-device commands | Required when navigation, reload, auth, persistence, or user-visible behavior changes |
+| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, and sync-convergence commands | Required when navigation, reload, auth, persistence, or user-visible behavior changes |
 | Accessibility | `accessibility-smoke.spec.ts` and axe checks | `test:e2e:a11y` | Required for interactive UI, semantic, focus, or layout changes |
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
 | PWA/service-worker handoff | `pwa-handoff.spec.ts` self-contained fixture | `test:pwa-handoff` | Required for PWA, service-worker, cache, or update-prompt changes |
@@ -30,7 +30,7 @@ release check when publishing:
 | --- | --- |
 | Server-only route or middleware | API typecheck; API unit tests; relevant API integration test (or release integration shards) |
 | Client-only component or pure client logic | Run Calculator typecheck; Run Calculator unit tests; browser smoke when the behavior is user-visible |
-| Sync, SSE, reset, day-state, wake, or live counters | API sync and SSE release suites; focused client sync/wake/state tests; sync-convergence and multi-device browser journeys; use the sync and state-accuracy checklists |
+| Sync, SSE, reset, day-state, wake, or live counters | API sync and SSE release suites; focused client sync/wake/state tests; sync-convergence browser journey; use the sync and state-accuracy checklists |
 | Import, alias, recipe linking, or export | Relevant deterministic package tests; corpus test when routing/chunk/merge behavior changes; API integration when persistence is involved |
 | Database schema or persisted field | Shared/library and API typechecks; schema/integration coverage for the owning route; disposable database release integration shards |
 | Sync or inventory concurrency boundary | API typecheck; relevant route integration suite; `test:release:concurrency` (180-second budget, including disposable same-date convergence and cross-date scheduled-day isolation races) |
@@ -38,13 +38,6 @@ release check when publishing:
 | UI semantics, focus, or responsive layout | Client tests; accessibility suite; visual suite only when geometry is the acceptance criterion |
 | PWA, service worker, or cache/update behavior | PWA handoff suite; client build/typecheck; clean-start if workflow/build configuration changed |
 | Workflow, port, or run-command changes | Clean-start; relevant browser smoke; inspect startup and browser logs before interpreting failures |
-
-The multi-device lane is required when correctness depends on two independent
-client copies converging: simultaneous writes/claims, shared live counters or
-timers, SSE or foreground wake adoption, offline/reconnect replay, reload
-recovery, or deletion/reset resurrection protection. A responsive-only change,
-single-user flow, pure calculation, or endpoint contract can stay in its
-focused lane unless it also changes one of those boundaries.
 
 ## Isolation and fixture contract
 

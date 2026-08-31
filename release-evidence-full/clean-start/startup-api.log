@@ -1,0 +1,145 @@
+
+> @workspace/api-server@0.0.0 dev /home/runner/workspace/artifacts/api-server
+> export NODE_ENV=development && pnpm run build && exec pnpm run start
+
+
+> @workspace/api-server@0.0.0 build /home/runner/workspace/artifacts/api-server
+> node ./build.mjs
+
+
+  dist/index.mjs                       3.5mb ⚠️
+  dist/pino-worker.mjs               153.5kb
+  dist/pino-file.mjs                 142.1kb
+  dist/pino-pretty.mjs               114.7kb
+  dist/thread-stream-worker.mjs        7.4kb
+  dist/index.mjs.map                   7.1mb
+  dist/pino-worker.mjs.map           256.9kb
+  dist/pino-file.mjs.map             229.0kb
+  dist/pino-pretty.mjs.map           204.0kb
+  dist/thread-stream-worker.mjs.map   12.0kb
+
+⚡ Done in 2475ms
+
+> @workspace/api-server@0.0.0 start /home/runner/workspace/artifacts/api-server
+> node --enable-source-maps ./dist/index.mjs
+
+[17:21:50.397] [32mINFO[39m (88970): [36mServer listening[39m
+    [35mport[39m: 18081
+[17:21:50.398] [32mINFO[39m (88970): [36moperation completed[39m
+    [35mevent[39m: "operation"
+    [35mcorrelationId[39m: "startup-88970"
+    [35moperationType[39m: "startup"
+    [35mdurationMs[39m: 239
+    [35moutcome[39m: "success"
+    [35msafeCounts[39m: {
+      "port": 18081
+    }
+[17:21:50.467] [32mINFO[39m (88970): [36mhealth check completed[39m
+    [35mevent[39m: "health_check"
+    [35moutcome[39m: "success"
+    [35mchecks[39m: {
+      "process": "ok",
+      "database": "ok",
+      "dependencies": "ok"
+    }
+[17:21:50.471] [32mINFO[39m (88970): [36mrequest completed[39m
+    [35mreq[39m: {
+      "id": 1,
+      "method": "GET",
+      "url": "/api/healthz"
+    }
+    [35mres[39m: {
+      "statusCode": 200
+    }
+    [35mresponseTime[39m: 17
+[17:21:50.471] [32mINFO[39m (88970): [36moperation completed[39m
+    [35mreq[39m: {
+      "id": 1,
+      "method": "GET",
+      "url": "/api/healthz"
+    }
+    [35mevent[39m: "operation"
+    [35mcorrelationId[39m: "3886bd69-a4a6-4d8d-af9b-8d1f023671bb"
+    [35moperationType[39m: "request"
+    [35mdurationMs[39m: 17
+    [35moutcome[39m: "success"
+    [35mstatusCode[39m: 200
+    [35msafeCounts[39m: {
+      "responseBytes": 116
+    }
+[17:21:52.842] [32mINFO[39m (88970): [36mhealth check completed[39m
+    [35mevent[39m: "health_check"
+    [35moutcome[39m: "success"
+    [35mchecks[39m: {
+      "process": "ok",
+      "database": "ok",
+      "dependencies": "ok"
+    }
+[17:21:52.843] [32mINFO[39m (88970): [36mrequest completed[39m
+    [35mreq[39m: {
+      "id": 2,
+      "method": "GET",
+      "url": "/api/healthz"
+    }
+    [35mres[39m: {
+      "statusCode": 200
+    }
+    [35mresponseTime[39m: 3
+[17:21:52.843] [32mINFO[39m (88970): [36moperation completed[39m
+    [35mreq[39m: {
+      "id": 2,
+      "method": "GET",
+      "url": "/api/healthz"
+    }
+    [35mevent[39m: "operation"
+    [35mcorrelationId[39m: "c428b262-6af4-42b3-ad1c-9b5271a8239c"
+    [35moperationType[39m: "request"
+    [35mdurationMs[39m: 3
+    [35moutcome[39m: "success"
+    [35mstatusCode[39m: 200
+    [35msafeCounts[39m: {
+      "responseBytes": 116
+    }
+[17:22:00.404] [32mINFO[39m (88970): [36mmaster-data health scan completed[39m
+    [35mevent[39m: "master_data_health_scan"
+    [35menvironment[39m: "development"
+    [35moutcome[39m: "success"
+    [35msafeCounts[39m: {
+      "findings": 0,
+      "errors": 0,
+      "warnings": 0
+    }
+[17:22:00.405] [32mINFO[39m (88970): [36mmaster-data health scan completed[39m
+    [35mevent[39m: "master_data_health_scan"
+    [35menvironment[39m: "live"
+    [35moutcome[39m: "success"
+    [35msafeCounts[39m: {
+      "findings": 8,
+      "errors": 0,
+      "warnings": 8
+    }
+[17:22:04.250] [32mINFO[39m (88970): [36mrequest completed[39m
+    [35mreq[39m: {
+      "id": 3,
+      "method": "GET",
+      "url": "/api/me"
+    }
+    [35mres[39m: {
+      "statusCode": 401
+    }
+    [35mresponseTime[39m: 1
+[17:22:04.250] [32mINFO[39m (88970): [36moperation completed[39m
+    [35mreq[39m: {
+      "id": 3,
+      "method": "GET",
+      "url": "/api/me"
+    }
+    [35mevent[39m: "operation"
+    [35mcorrelationId[39m: "e1fa6ebe-60be-4e47-8229-90fe2d6f07b4"
+    [35moperationType[39m: "request"
+    [35mdurationMs[39m: 1
+    [35moutcome[39m: "degraded"
+    [35mstatusCode[39m: 401
+    [35msafeCounts[39m: {
+      "responseBytes": 24
+    }

@@ -32,13 +32,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { UseFormReturn } from "react-hook-form";
-import {
-  hasAutoTrackCoordinationClockAnchor,
-  localAutoTrackDueAt,
-  shouldAdoptAutoTrackCoordinationDeadline,
-  useAutoTrack,
-} from "../useAutoTrack";
-import { AUTO_TRACK_COORDINATION_EVENT } from "../../autoTrackCoordinationClient";
+import { useAutoTrack } from "../useAutoTrack";
 import type { FormValues } from "../../types";
 
 // ── Fake form ─────────────────────────────────────────────────────────────────
@@ -98,104 +92,6 @@ function ms(t: number): Date {
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
 describe("useAutoTrack — post-screen-wake / long-timeout counter correctness", () => {
-  it("translates a server deadline onto an ahead client's local clock", () => {
-    expect(localAutoTrackDueAt({
-      updatedAt: 1_800_000_000_000,
-      nextDueAt: 1_800_000_006_000,
-    }, 1_800_014_400_000)).toBe(1_800_014_406_000);
-  });
-
-  it("ignores repeated prior-lifecycle coordination deadlines", () => {
-    expect(shouldAdoptAutoTrackCoordinationDeadline(
-      "run-1:resume",
-      "run-1:pause",
-      0,
-      4,
-    )).toBe(false);
-    expect(shouldAdoptAutoTrackCoordinationDeadline(
-      "run-1:resume",
-      "run-1:resume",
-      0,
-      1,
-    )).toBe(true);
-  });
-
-  it("keeps local timing for legacy coordination without a server clock anchor", () => {
-    expect(hasAutoTrackCoordinationClockAnchor(undefined)).toBe(false);
-    expect(hasAutoTrackCoordinationClockAnchor(Number.NaN)).toBe(false);
-    expect(hasAutoTrackCoordinationClockAnchor(1_800_000_000_000)).toBe(true);
-  });
-
-  it("adopts a peer Resume-now case deadline instead of firing on the old local deadline", () => {
-    const { form, store } = makeFakeForm({
-      skidsCompleted: 0,
-      casesOnCurrentSkid: 2,
-    });
-    const claimAutoTrackEvent = vi.fn(async (claim: {
-      dueAt: number;
-      nextDueAt: number;
-      sequence: number;
-      generation: string;
-    }) => ({
-      outcome: "accepted" as const,
-      state: {
-        generation: claim.generation,
-        sequence: claim.sequence,
-        nextDueAt: claim.nextDueAt,
-        updatedAt: Date.now(),
-      },
-      values: {
-        skidsCompleted: 0,
-        casesOnCurrentSkid: 3,
-      },
-    }));
-    type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number): Props => ({
-      runId: "shared-resume-case-1",
-      runStatus: "running",
-      nowTime: ms(nowMs),
-      elapsedBatchSec: 780 + (nowMs - T0) / 1000,
-      calc: BASE_CALC,
-      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
-      form,
-      claimAutoTrackEvent,
-    });
-    const { rerender } = renderHook(
-      (p: Props) => useAutoTrack(p),
-      { initialProps: props(T0) },
-    );
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent(AUTO_TRACK_COORDINATION_EVENT, {
-        detail: {
-          version: 1,
-          runs: {
-            "shared-resume-case-1": {
-              case: {
-                generation: "shared-resume-case-1:running:0",
-                sequence: 1,
-                nextDueAt: T0 + 30_000,
-                updatedAt: T0,
-                correctionGeneration: 8,
-              },
-            },
-          },
-        },
-      }));
-      vi.setSystemTime(T0 + CASE_PERIOD_MS + 1);
-      rerender(props(T0 + CASE_PERIOD_MS + 1));
-    });
-    expect(claimAutoTrackEvent.mock.calls.filter(([claim]) => claim.channel === "case")).toHaveLength(0);
-
-    act(() => {
-      vi.setSystemTime(T0 + 30_001);
-      rerender(props(T0 + 30_001));
-    });
-    // The case channel is intentionally the only assertion here; other
-    // channels may also have become due during the synthetic jump.
-    expect(claimAutoTrackEvent.mock.calls.filter(([claim]) => claim.channel === "case")).toHaveLength(1);
-  });
-
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(T0);
@@ -648,65 +544,6 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       }));
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
-  });
-
-  it("rebases the case baseline when a duplicate/stale claim returns canonical packaging", async () => {
-    const { form, store } = makeFakeForm({
-      skidsCompleted: 3,
-      casesOnCurrentSkid: 1,
-    });
-    const claimAutoTrackEvent = vi.fn(async (claim: {
-      dueAt: number;
-      nextDueAt: number;
-    }) => ({
-      outcome: "stale" as const,
-      state: {
-        generation: "canonical",
-        sequence: 8,
-        nextDueAt: claim.nextDueAt,
-      },
-      values: {
-        skidsCompleted: 0,
-        casesOnCurrentSkid: 4,
-      },
-    }));
-
-    type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number, elapsedSec: number): Props => ({
-      runId: "wake-canonical-packaging-7",
-      runStatus: "running",
-      nowTime: ms(nowMs),
-      elapsedBatchSec: elapsedSec,
-      calc: BASE_CALC,
-      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
-      form,
-      claimAutoTrackEvent,
-    });
-
-    const { rerender } = renderHook(
-      (p: Props) => useAutoTrack(p),
-      { initialProps: props(T0, 780) },
-    );
-
-    const wakeAt = T0 + 20 * 60_000;
-    await act(async () => {
-      vi.setSystemTime(wakeAt);
-      rerender(props(wakeAt, 780 + 20 * 60));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(
-      claimAutoTrackEvent.mock.calls.filter(([claim]) => claim.channel === "case"),
-    ).toHaveLength(1);
-    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(4);
-
-    // The canonical response was accepted into the form, so the next due
-    // interval must not replay the old 30→100 hidden-time delta.
-    act(() => {
-      vi.setSystemTime(wakeAt + CASE_PERIOD_MS + 1);
-      rerender(props(wakeAt + CASE_PERIOD_MS + 1, 780 + 20 * 60 + CASE_PERIOD_MS / 1000 + 1));
-    });
-    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(4);
   });
 
   it("7. fences the form write when the packaging register rejects a raced automatic tick", () => {

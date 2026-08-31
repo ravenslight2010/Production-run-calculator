@@ -207,6 +207,12 @@ for (const viewport of [
       await db.connect();
       await createManager(request, db, fixture.username);
       await signIn(page, fixture.username);
+      // daily_sync is factory-wide rather than user-scoped. A preceding
+      // browser journey can leave a newer day snapshot that wins during the
+      // reload in seedRuns, replacing this fixture with an unrelated run.
+      // Reset today's disposable snapshot immediately before seeding so the
+      // server cannot overwrite the browser-owned fixture.
+      await db.query("DELETE FROM daily_sync WHERE date = $1", [localDate()]);
       await seedRuns(page, fixture);
 
       await page.getByTestId("tab-packaging").click();

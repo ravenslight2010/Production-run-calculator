@@ -62,22 +62,32 @@ function uid(): string {
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 
+async function closeOnboardingIfVisible(page: Page): Promise<void> {
+  const welcome = page.getByRole("dialog", {
+    name: /welcome to production run calculator/i,
+  });
+  if (!(await welcome.isVisible().catch(() => false))) return;
+
+  const seen = page
+    .waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+      { timeout: 10_000 },
+    )
+    .catch(() => undefined);
+  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+  const response = await seen;
+  if (response) await expect(response.status()).toBe(200);
+  await expect(welcome).toBeHidden({ timeout: 10_000 });
+}
+
 async function waitForAppAfterNavigation(page: Page): Promise<void> {
   await page
     .locator('[data-testid="tab-run"]')
     .waitFor({ state: "attached", timeout: 25_000 });
 
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
-  }
+  await closeOnboardingIfVisible(page);
 
   // The tab can mount before the authenticated shell has finished restoring
   // its controls. Waiting for the menu makes the next navigation deterministic
@@ -90,29 +100,11 @@ async function waitForAppAfterNavigation(page: Page): Promise<void> {
   // On a reload the onboarding dialog can finish mounting just after the
   // shell controls become visible. Check once more immediately before using
   // the menu so a late dialog cannot intercept the click.
-  if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
-  }
+  await closeOnboardingIfVisible(page);
 }
 
 async function dismissOnboarding(page: Page): Promise<void> {
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (!(await welcome.isVisible().catch(() => false))) return;
-  const seen = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/me/onboarding-seen") &&
-      response.request().method() === "POST",
-  );
-  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-  await expect((await seen).status()).toBe(200);
-  await expect(welcome).toBeHidden({ timeout: 10_000 });
+  await closeOnboardingIfVisible(page);
 }
 
 async function signUpAndDismissOnboarding(

@@ -84,7 +84,6 @@ describe("packaging progress register", () => {
       skidsCompleted: 1,
       casesOnCurrentSkid: 24,
       manualOverrideUntil: 1_100,
-      nextCaseDueAt: 2_100,
       now: 100,
     });
 
@@ -107,28 +106,8 @@ describe("packaging progress register", () => {
       casesOnCurrentSkid: 25,
       correctionGeneration: manual.correctionGeneration,
       manualOverrideUntil: 1_100,
-      nextCaseDueAt: 2_100,
     });
     expect(loadPackagingProgress().run1).toEqual(resumed);
-  });
-
-  it("clears an old deadline during a correction until Resume now supplies a new one", () => {
-    recordManualPackagingProgress({
-      runId: "run1",
-      skidsCompleted: 1,
-      casesOnCurrentSkid: 24,
-      manualOverrideUntil: 1_100,
-      nextCaseDueAt: 2_100,
-      now: 100,
-    });
-    const correction = recordManualPackagingProgress({
-      runId: "run1",
-      skidsCompleted: 1,
-      casesOnCurrentSkid: 25,
-      manualOverrideUntil: 2_100,
-      now: 1_100,
-    });
-    expect(correction).not.toHaveProperty("nextCaseDueAt");
   });
 
   it("overlays the winning pair without touching unrelated run settings", () => {

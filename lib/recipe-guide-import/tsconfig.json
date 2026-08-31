@@ -9,6 +9,7 @@
     "lib": ["es2022"]
   },
   "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../../lib/spec-import" },
     { "path": "../../lib/name-match" }

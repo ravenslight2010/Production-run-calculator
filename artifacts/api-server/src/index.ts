@@ -5,6 +5,7 @@ import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
+import { spawnSync } from "node:child_process";
 
 const rawPort = process.env["PORT"];
 
@@ -15,6 +16,26 @@ if (!rawPort) {
 }
 
 const port = Number(rawPort);
+
+function applyDatabaseSchema(): void {
+  if (process.env.NODE_ENV !== "production") return;
+
+  logger.info("Applying database schema (drizzle push-force)…");
+  const result = spawnSync(
+    "pnpm",
+    ["--filter", "@workspace/db", "run", "push-force"],
+    { stdio: "inherit", env: process.env, cwd: process.cwd() },
+  );
+  if (result.error) {
+    logger.error({ err: result.error }, "Failed to run database schema push");
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    logger.error({ status: result.status }, "Database schema push failed");
+    process.exit(1);
+  }
+  logger.info("Database schema is up to date");
+}
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -117,7 +138,7 @@ async function startServer(): Promise<void> {
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
-
+applyDatabaseSchema();
 startServer().catch((err) => {
   logger.error({ err }, "Failed to start server");
   process.exit(1);

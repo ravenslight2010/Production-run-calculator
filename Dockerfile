@@ -5,7 +5,7 @@ FROM node:24-slim AS builder
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git python3 build-essential \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm
+RUN npm install -g pnpm@11.5.2  # keep in sync with packageManager in package.json
 WORKDIR /app
 
 # Copy the whole workspace and install every package (this is a pnpm monorepo).
@@ -18,7 +18,7 @@ RUN pnpm install --frozen-lockfile
 # empty/local identifier from a production Docker build.
 ARG VITE_APP_VERSION
 ARG REPLIT_DEPLOYMENT_ID
-RUN BASE_PATH=/ \
+RUN PORT=3000 BASE_PATH=/ \
     VITE_APP_VERSION="${VITE_APP_VERSION:-${REPLIT_DEPLOYMENT_ID:-docker-$(date -u +%Y%m%d%H%M%S)}}" \
     pnpm --filter @workspace/run-calculator run build \
   && pnpm --filter @workspace/api-server run build

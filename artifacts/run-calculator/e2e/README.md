@@ -16,7 +16,6 @@ classification, and bounded coverage gaps, see
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.pwa-morning.config.ts` | isolated account, disposable database | tablet-sized stale-day → one sign-in → mount-time rollover smoke; attaches request and browser-log evidence |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
-| `playwright.multi-device.config.ts` | two-context convergence lane | one throwaway account is cloned into independent desktop and phone contexts for simultaneous edits, offline wake, deletion, reset, reload, and canonical-state checks |
 
 The phone and PWA configs intentionally do not extend the main config. This
 prevents destructive live-day setup from being inherited by independent layout
@@ -99,30 +98,6 @@ This matrix verifies deletion tombstones, reload persistence, reset epochs,
 client-date-scoped reads, and conditional unchanged responses in both desktop
 and phone-sized Chromium contexts.
 
-Run the standard two-context convergence lane when a change can be affected by
-independent client state, shared counters/timers, collaborative actions,
-offline recovery, or reset/deletion ordering:
-
-```sh
-E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
-  pnpm --filter @workspace/run-calculator run test:e2e:multi-device
-```
-
-The lane is serialized and has a 180-second suite budget. Device A is a
-desktop-sized Chromium context and device B is a phone-sized Chromium context,
-both using the same throwaway account, facility scope, local date, and run.
-The contexts retain separate cookies/localStorage, and the harness can hold a
-specific sync write, toggle one device offline, and coordinate wake/reload from
-observable state. Every scenario checks both device views/local state and the
-canonical `/api/sync/today` response. Failures retain labeled diagnostics and
-one screenshot per device.
-
-Use focused unit/API tests first for pure math, merge, or endpoint contracts;
-add this lane when the risk is independent client convergence. It is not a
-responsive-layout substitute (one context at two widths), a multi-user
-authorization test, a load test, or a replacement for the existing
-`test:e2e:sync-convergence` suite.
-
 The smoke config uses the same disposable-database safety guard as the
 destructive browser suite. It runs one test in each project: Desktop Chrome
 and a 390×844 phone-sized Chromium layout. The test creates and removes its
@@ -142,7 +117,7 @@ rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
-The main config enumerates 100 cases and retains
+The main config enumerates 108 cases and retains
 `release-evidence/browser-full/FINAL-REPORT.md` after a real full-suite run.
 The report includes the revision, completion counts, total duration, and
 per-file test-result durations. Discovery (`--list`) and focused runs do not

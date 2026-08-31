@@ -145,7 +145,7 @@ describe("costLimitMiddleware", () => {
     expect(blocked.res.status).toHaveBeenCalledWith(429);
     expect(blocked.headers).toMatchObject({
       "X-Cost-Limit": "25",
-      "X-Cost-Used": "33",
+      "X-Cost-Used": "25",
       "X-Cost-Remaining": "0",
       "X-Cost-Requested": "12",
       "X-Cost-Reset": "60",
@@ -153,7 +153,7 @@ describe("costLimitMiddleware", () => {
     });
     expect(blocked.res.json).toHaveBeenCalledWith({
       error:
-        "Cost limit exceeded. Budget: 25, used: 33, requested: 12. Retry after 60s.",
+        "Cost limit exceeded. Budget: 25, used: 25, requested: 12. Retry after 60s.",
     });
 
     vi.advanceTimersByTime(windowMs + 1);

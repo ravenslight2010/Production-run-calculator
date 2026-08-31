@@ -32,7 +32,8 @@ export function costLimitMiddleware(options: CostLimitOptions) {
 
   return (_req: Request, res: any, next: any) => {
     const req = _req as any;
-    const key = `cost-limit:${req.ip}`;
+    const actor = req.userId ?? req.ip ?? "unknown";
+    const key = `cost-limit:${actor}`;
     const cost = costFn(req);
     const now = Date.now();
 
@@ -44,7 +45,8 @@ export function costLimitMiddleware(options: CostLimitOptions) {
           now,
           cost,
         );
-        const totalCost = result.count;
+        const attemptedCost = result.count;
+        const totalCost = Math.min(attemptedCost, options.maxCost);
         const remaining = Math.max(0, options.maxCost - totalCost);
         const resetInSec = Math.ceil((result.resetAt - now) / 1000);
 
@@ -56,7 +58,7 @@ export function costLimitMiddleware(options: CostLimitOptions) {
         res.setHeader("X-Cost-Requested", String(cost));
         res.setHeader("X-Cost-Reset", String(resetInSec));
 
-        if (totalCost > options.maxCost) {
+        if (attemptedCost > options.maxCost) {
           res.setHeader("Retry-After", String(resetInSec));
           req.log?.warn(
             { key, totalCost, maxCost: options.maxCost, cost },

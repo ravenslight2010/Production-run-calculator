@@ -11,7 +11,7 @@ import type {
   TestResult,
 } from "@playwright/test/reporter";
 
-const EXPECTED_CASES = 100;
+const EXPECTED_CASES = 108;
 const repositoryRoot = fileURLToPath(
   new URL("../../../", import.meta.url),
 );
@@ -441,7 +441,7 @@ export default class ReleaseDurationReporter implements Reporter {
     }
     if (!canRetainFullBrowserReport(this.cases.values(), result.status)) {
       console.log(
-        "Retained full browser duration report unchanged: run was not a complete passing 100-case suite.",
+        `Retained full browser duration report unchanged: run was not a complete passing ${EXPECTED_CASES}-case suite.`,
       );
       return;
     }

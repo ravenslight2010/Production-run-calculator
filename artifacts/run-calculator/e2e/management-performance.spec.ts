@@ -73,6 +73,21 @@ async function promoteToManager(username: string): Promise<void> {
   const database = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await database.connect();
+    await database.query(
+      `UPDATE roles
+       SET capabilities = $1::jsonb, updated_at = NOW()
+       WHERE name = 'manager'`,
+      [JSON.stringify([
+        "manage-staff",
+        "manage-inventory",
+        "edit-production-rules",
+        "approve-password-resets",
+        "review-incidents",
+        "use-ai-tools",
+        "manage-factory-settings",
+        "manage-profiles",
+      ])],
+    );
     const user = await database.query("SELECT id FROM users WHERE username = $1", [username]);
     expect(user.rows).toHaveLength(1);
     await database.query(

@@ -1,0 +1,50 @@
+# Render Blueprint — deploy with one click:
+#   1. Go to https://dashboard.render.com/blueprints
+#   2. Click "New Blueprint Instance"
+#   3. Connect your GitHub repo (this file is auto-detected)
+#   4. Render provisions the database + service from the Docker image
+#   5. Add the secrets in the service's "Environment" tab
+#
+# The API applies the DB schema itself at boot (drizzle push-force), so no
+# separate migrate service is needed — Render's fresh Postgres gets its tables
+# on the first deploy automatically.
+
+databases:
+  - name: runcalc-db
+    plan: free
+    databaseName: runcalc
+
+services:
+  - type: web
+    name: runcalc
+    runtime: image
+    image:
+      url: ghcr.io/ravenslight2010/runcalc-api:latest
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      # ---- Database (auto-linked by Render) ----
+      - key: DATABASE_URL
+        fromDatabase:
+          name: runcalc-db
+          property: connectionString
+      # ---- Application ----
+      - key: NODE_ENV
+        value: production
+      # ---- Auth (set these in Render's dashboard) ----
+      - key: STAFF_SIGNUP_CODE
+        sync: false
+      - key: INITIAL_MANAGER_USERNAME
+        sync: false
+      - key: INITIAL_MANAGER_ACCESS_CODE
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: AUTH_TOKEN_SECRET
+        generateValue: true
+      # ---- AI (set this in Render's dashboard) ----
+      - key: GOOGLE_API_KEY
+        sync: false
+      # ---- Web / CORS (optional; leave blank when web + API share the same domain) ----
+      - key: REPLIT_DOMAINS
+        sync: false

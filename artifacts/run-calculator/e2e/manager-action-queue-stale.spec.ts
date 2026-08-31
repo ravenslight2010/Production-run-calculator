@@ -142,6 +142,11 @@ test.beforeAll(async () => {
     fixtureDedupKey = `e2e:${uniqueTestId("manager_queue_source")}`;
     staleWriteDedupKey = `e2e:${uniqueTestId("manager_queue_stale")}`;
     largeHistoryPrefix = `e2e:${uniqueTestId("manager_queue_history")}`;
+    // Recover fixtures left by an interrupted browser run before creating the
+    // new bounded history corpus. The marker is exclusive to this scenario.
+    await db.query(
+      "DELETE FROM action_items WHERE dedup_key LIKE 'e2e:%manager_queue_history%:%'",
+    );
     await db.query(
       `INSERT INTO incidents
         (id, scope, source, reporter_name, reporter_role, screen, app_platform, context, diagnosis, workaround, status, priority, workflow_state, notes, activity)
@@ -242,6 +247,11 @@ test.afterAll(async () => {
 });
 
 test("loads the active view without hiding large queue history", async ({ page }, testInfo: TestInfo) => {
+  // Rendering and paging the intentionally large history fixture is a bounded
+  // performance scenario, not a unit-sized interaction. Keep the timeout
+  // explicit so the release gate does not fail at Playwright's generic 60s
+  // limit while retaining every response, rendering, and browser assertion.
+  test.setTimeout(180_000);
   const username = uniqueTestId("e2e_manager_queue_scale");
   testUsernames.add(username);
   const browserErrors: string[] = [];
@@ -297,9 +307,23 @@ test("loads the active view without hiding large queue history", async ({ page }
   ).toBeVisible();
   await expect(page.getByText("Historical queue item 1", { exact: true })).toHaveCount(0);
   const oldestHistoryItem = page.getByText("Historical queue item 1", { exact: true });
-  for (let pageNumber = 0; pageNumber < 10 && !(await oldestHistoryItem.isVisible().catch(() => false)); pageNumber += 1) {
+  // Visibility is viewport-dependent: after a page append the oldest row can
+  // already be mounted just below the viewport while the paging button has
+  // correctly disappeared. Check attachment to decide whether another cursor
+  // request is needed, then keep the actual visibility assertion below.
+  for (let pageNumber = 0; pageNumber < 10 && (await oldestHistoryItem.count()) === 0; pageNumber += 1) {
     await page.getByRole("button", { name: "Load older history", exact: true }).click();
+    // The click starts an async cursor request. Do not issue the next click
+    // while this one is disabled: on the final page the button is removed as
+    // soon as item 1 mounts, which can strand a pending Playwright click.
+    await expect.poll(async () => {
+      if (await oldestHistoryItem.count() > 0) return "item-loaded";
+      const button = page.getByRole("button", { name: "Load older history", exact: true });
+      if (await button.count() === 0) return "button-missing";
+      return await button.isEnabled() ? "ready" : "loading";
+    }, { timeout: 10_000 }).toMatch(/^(item-loaded|ready)$/);
   }
+  await oldestHistoryItem.scrollIntoViewIfNeeded();
   await expect(oldestHistoryItem).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("queue-large-history-all.png") });
   expect(browserErrors).toEqual([]);

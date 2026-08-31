@@ -1,0 +1,17 @@
+# Keep production dependencies (web app + API server + shared libs) up to date
+# and patched against advisories. The mobile app (Expo) is pinned to SDK 54 and
+# is deliberately NOT auto-updated here.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    ignore:
+      # Expo SDK and its toolchain are version-locked; bump manually.
+      - dependency-name: "expo"
+      - dependency-name: "@expo/*"
+      - dependency-name: "expo-*"
+      - dependency-name: "react-native"

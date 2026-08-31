@@ -91,7 +91,11 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: canView,
     staleTime: 10_000,
-    refetchInterval: 30_000,
+    // History is cursor-paginated. Polling while a manager is loading older
+    // pages refetches every loaded page and can reset the cursor before the
+    // manager reaches the oldest item. Active queues remain live; historical
+    // views are refreshed explicitly with the existing Refresh action.
+    refetchInterval: filter === "all" || filter === "resolved" ? false : 30_000,
   });
   const assignees = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canView });
   const mutation = useMutation({

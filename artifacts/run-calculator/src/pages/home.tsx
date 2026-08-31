@@ -2998,8 +2998,6 @@ export default function Home() {
     skidsCompleted: number,
     casesOnCurrentSkid: number,
     manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
-    nextCaseDueAt?: number,
-    publishNow = false,
   ) => {
     const now = Date.now();
     recordManualPackagingProgress({
@@ -3007,7 +3005,6 @@ export default function Home() {
       skidsCompleted,
       casesOnCurrentSkid,
       manualOverrideUntil,
-      nextCaseDueAt,
       now,
     });
     markRunValuesUpdated(runId, now);
@@ -3018,10 +3015,6 @@ export default function Home() {
         manualOverrideUntil,
       );
     }
-    // Resume-now has no form mutation to wake the normal autosave watcher.
-    // Publish its corrected baseline immediately so a peer cannot reach its
-    // old deadline before it receives the shared reset.
-    if (publishNow) schedulePush(dayStateRef.current, 0, "edit");
   }, []);
   const persistAutomaticPackagingProgress = useCallback((
     skidsCompleted: number,
@@ -3289,7 +3282,7 @@ export default function Home() {
         cycleCountQc.setQueryData(["ingredients"], items),
       );
       void cycleCountQc.invalidateQueries({ queryKey: ["ingredients"] });
-    } catch {
+         } catch {
       // Best-effort: the local merge above already succeeded; the catalog will
       // self-heal next time these names are touched.
     }
@@ -3799,7 +3792,7 @@ export default function Home() {
     } catch (error) {
       setFreezerSurplusError(error instanceof Error ? error.message : "Couldn't confirm this surplus.");
       throw error;
-    } finally {
+         } finally {
       setFreezerSurplusBusy(false);
     }
   }
@@ -7463,67 +7456,21 @@ export default function Home() {
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
       .then(async (): Promise<AutoTrackEventResult> => {
-    if (!navigator.onLine || foregroundSyncBarrierRef.current) {
-      throw new Error("Automatic tracking is waiting for shared sync");
+    const waitStartedAt = typeof performance === "undefined" ? 0 : performance.now();
+    while (
+      navigator.onLine
+      && (foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current)
+      && (typeof performance === "undefined" || performance.now() - waitStartedAt < 2_000)
+    ) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
-    // A wake can cancel the just-started run's in-flight push and queue it
-    // again after the canonical pull. Do not drop the first visible
-    // screen-off catch-up tick just because that replacement PUT has not
-    // acknowledged yet; wait briefly for the same shared-sync gate that
-    // protects automatic claims. Use performance time because browser tests
-    // and sleeping devices may deliberately mock Date.now().
-    const sharedCaseResetIsFenced =
-      claim.channel === "case"
-      && (() => {
-        const progress = loadPackagingProgress()[claim.runId];
-        return typeof progress?.correctionGeneration === "number"
-          && typeof progress.nextCaseDueAt === "number"
-          && claim.dueAt >= progress.nextCaseDueAt;
-      })();
-    if (!pushAcknowledgedRef.current && !sharedCaseResetIsFenced) {
-      const waitStartedAt = typeof performance === "undefined" ? 0 : performance.now();
-      while (!pushAcknowledgedRef.current) {
-        if (!navigator.onLine || foregroundSyncBarrierRef.current) {
-          throw new Error("Automatic tracking is waiting for shared sync");
-        }
-        const waitedMs = typeof performance === "undefined"
-          ? 0
-          : Math.max(0, performance.now() - waitStartedAt);
-        if (waitedMs >= 5_000) {
-          throw new Error("Automatic tracking is waiting for shared sync");
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 50));
-      }
+    if (!navigator.onLine || foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current) {
+      throw new Error("Automatic tracking is waiting for shared sync");
     }
     const currentBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const previousQueuedClaimWon =
       currentBaseUpdatedAt !== enqueuedBaseUpdatedAt
       && lastAcceptedAutoTrackStampRef.current[claim.runId] === currentBaseUpdatedAt;
-    const localValues = claim.runId === currentRunIdRef.current
-      ? { ...loadRunValues(claim.runId), ...form.getValues() }
-      : loadRunValues(claim.runId);
-    const localEditReplacedQueuedClaim =
-      !previousQueuedClaimWon
-      && claim.mutations.some((mutation) =>
-        Number(localValues[mutation.field]) !== mutation.from
-      );
-    if (localEditReplacedQueuedClaim) {
-      // An automatic event can be waiting behind a sync acknowledgment while
-      // the operator enters a new baseline (for example during filling).
-      // Never replay that old zero/value snapshot on top of the edit. Return
-      // the local register as a non-committing coordination result so the hook
-      // re-arms from the corrected value without advancing the server sequence.
-      return {
-        outcome: "stale",
-        state: {
-          generation: claim.generation,
-          sequence: 0,
-          nextDueAt: claim.nextDueAt,
-          updatedAt: claim.dueAt,
-        },
-        values: localValues,
-      };
-    }
     const currentValues = previousQueuedClaimWon
       ? loadRunValues(claim.runId)
       : null;
@@ -7783,34 +7730,11 @@ export default function Home() {
         packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart);
       if (packagingFenceRaised) {
         const accepted = packagingMerge.merged[packagingRunAtApplyStart];
-        const localRegister = localPackaging[packagingRunAtApplyStart];
-        const casesPerSkid = Number(form.getValues("casesPerSkid")) || 0;
-        const localTotal =
-          (Number(form.getValues("skidsCompleted")) || 0) * casesPerSkid
-          + (Number(form.getValues("casesOnCurrentSkid")) || 0);
-        const acceptedTotal =
-          (accepted?.skidsCompleted ?? 0) * casesPerSkid
-          + (accepted?.casesOnCurrentSkid ?? 0);
-        const packagingNeedsRebase =
-          acceptedTotal !== localTotal
-          || accepted?.correctionGeneration !== localRegister?.correctionGeneration;
-        const receivedNewCorrection =
-          (accepted?.correctionGeneration ?? 0)
-          > (localRegister?.correctionGeneration ?? 0);
-        autoSuppressUntilRef.current = receivedNewCorrection
-          ? (accepted?.manualOverrideUntil ?? 0)
-          : Math.max(
-              autoSuppressUntilRef.current,
-              accepted?.manualOverrideUntil ?? 0,
-            );
-        // Packaging is its own causal register. Even when the run lifecycle
-        // stamp did not change, adopting a newer canonical packaging entry
-        // must release through the hook's rebase path before another automatic
-        // case delta can be published.
-        if (packagingNeedsRebase) {
-          setAutoTrackRebaseAfterBlock(true);
-          setAutoTrackBlocked(true);
-        }
+        autoSuppressUntilRef.current = Math.max(
+          autoSuppressUntilRef.current,
+          accepted?.manualOverrideUntil ?? 0,
+        );
+        setAutoTrackBlocked(true);
       }
 
       // ── Run values (only accept if we're taking the remote day) ──
@@ -8661,6 +8585,7 @@ export default function Home() {
            const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string } | null;
            if (body && "unchanged" in body && body.unchanged === true) {
              if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
+             pushAcknowledgedRef.current = true;
              reconciled = true;
              return true;
            }
@@ -8706,28 +8631,42 @@ export default function Home() {
             }
             applySyncCallbackRef.current(payload);
           }
-          // The live row is the authority that must land first. Profile and
-          // factory pools are intentionally outside that payload, so hydrate
-          // them only after the day-state LWW merge is safely applied.
-          const profileResult = await reconcileProfilesFromServerDetailed();
-          if (profileResult.changed) {
-            setDieTypes(healDieTypesFromProfiles());
-            applyProfileReconcileRef.current(profileResult);
-          }
-          try {
-            const factoryData = await fetchFactoryData();
-            hydrateFromServer(factoryData);
-            refreshFactoryDataConsumers();
-            await flushFactoryQueue();
-          } catch {
-            // Factory data is independent of the live row. A failed factory
-            // pull leaves the local cache and durable queue intact; the next
-            // foreground/reconnect attempt will retry it.
-          }
+           // A successful canonical pull supersedes the canceled pre-wake push.
+           // Keep the pending flag so any local delta is replayed after release,
+           // but let automatic claims use the canonical baseline immediately.
+           pushAcknowledgedRef.current = true;
+           // The live row is the authority that must land first. Profile and
+           // factory pools are intentionally outside that payload, so begin
+           // hydrating them only after the day-state LWW merge is safely applied.
+           // They must not hold the live auto-track barrier: a large or slow
+           // master-data response would otherwise leave a due production tick
+           // blocked after a sleeping device wakes.
+           void (async () => {
+             try {
+               const profileResult = await reconcileProfilesFromServerDetailed();
+               if (profileResult.changed) {
+                 setDieTypes(healDieTypesFromProfiles());
+                 applyProfileReconcileRef.current(profileResult);
+               }
+             } catch {
+               // Profile data is independent of the live row. A failed pull
+               // leaves the local cache intact and the next wake retries it.
+             }
+             try {
+               const factoryData = await fetchFactoryData();
+               hydrateFromServer(factoryData);
+               refreshFactoryDataConsumers();
+               await flushFactoryQueue();
+             } catch {
+               // Factory data is independent of the live row. A failed factory
+               // pull leaves the local cache and durable queue intact; the next
+               // foreground/reconnect attempt will retry it.
+             }
+           })();
           reconciled = true;
           return true;
-        } catch {
-           // Failed pulls are not successful reconciliation. Keep the barrier
+         } catch {
+            // Failed pulls are not successful reconciliation. Keep the barrier
            // raised: releasing it here would let hidden-time auto-track or a
            // queued lifecycle write publish stale state. The wake guard clears
            // its in-flight promise, so the visible retry button (or the next
@@ -8744,8 +8683,8 @@ export default function Home() {
              "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
            );
           return false;
-        } finally {
-          if (foregroundRecoveryOwnerRef.current === recoveryOwner) {
+         } finally {
+           if (foregroundRecoveryOwnerRef.current === recoveryOwner) {
             if (reconciled) {
                // Resolve the tap while the barrier is still raised. This keeps
                // the canonical adoption and the same-run Stop in one fenced
@@ -8791,6 +8730,10 @@ export default function Home() {
                 const shouldPush = foregroundPushPendingRef.current;
                 foregroundPushPendingRef.current = false;
                 if (shouldPush) {
+                   // The canceled pre-wake write must be replayed before an
+                   // automatic claim can use the pulled baseline. Keep the
+                   // claim queue behind that replay's acknowledgment.
+                   pushAcknowledgedRef.current = false;
                   requestAnimationFrame(() => {
                     if (!cancelled) schedulePush(dayStateRef.current, 0);
                   });
@@ -20809,7 +20752,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         return (
                           <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
                             Next case in{" "}
-                                       <span className="text-orange-400 font-bold tabular-nums" data-testid="packaging-next-case-countdown">{fmtMS(secLeft)}</span>
+                            <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
                           </div>
                         );
                       })()}
@@ -22506,16 +22449,12 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                             nextSkids: number,
                             nextCases: number,
                             manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
-                             nextCaseDueAt?: number,
-                             publishNow = false,
                           ) => {
                             persistManualPackagingProgress(
                               currentRunId,
                               nextSkids,
                               nextCases,
                               manualOverrideUntil,
-                               nextCaseDueAt,
-                               publishNow,
                             );
                           };
                           const skidNearlyFull =
@@ -22530,19 +22469,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 minsLeft={suppressedMinsLeft}
                                 onResume={() => {
                                   const now = Date.now();
-                                   const caseMs = getAutoTrackTiming(
-                                     calc.ppm,
-                                     v.pizzasPerCase,
-                                     calc.perTray,
-                                     calc.perBatch,
-                                   ).caseMs;
-                                   onManual(
-                                     skids,
-                                     casesOnSkid,
-                                     now,
-                                     caseMs > 0 ? now + caseMs : undefined,
-                                     true,
-                                   );
+                                  onManual(skids, casesOnSkid, now);
                                   autoSuppressUntilRef.current = 0;
                                   fireAutoTrackNow("case");
                                 }}
@@ -22561,12 +22488,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <div className="flex items-center justify-center">
                                     <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
                                       Next case in{" "}
-                                      <span
-                                        className="text-orange-400 font-bold tabular-nums"
-                                        data-testid="packaging-next-case-countdown"
-                                      >
-                                        {fmtMS(secLeft)}
-                                      </span>
+                                      <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
                                     </div>
                                   </div>
                                 );
@@ -23321,9 +23243,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
                 <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
-                  <span data-testid="packaging-next-case-countdown">
-                    {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
-                  </span>
+                  {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
                 </p>
               </div>
             </div>

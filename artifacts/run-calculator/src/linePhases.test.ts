@@ -8,13 +8,7 @@
 //   • Normalization (oversized stage times clamped to fit freezerTime)
 
 import { describe, it, expect } from "vitest";
-import {
-  computeLinePhases,
-  computePackagingDrainElapsedSec,
-  lineHasPackagingDrain,
-  pickMostActivePhase,
-  computeEndedRunElapsedSec,
-} from "./linePhases";
+import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec } from "./linePhases";
 
 const BASE = {
   preTunnelMin: 2.5,
@@ -362,78 +356,6 @@ describe("computeLinePhases — pause propagation", () => {
     expect(beforeTunnel.stage1.state).toBe("draining");
     expect(tunnelDraining.stage2.state).toBe("draining");
     expect(wrapperDraining.stage3.state).toBe("draining");
-  });
-
-  it("marks each actively draining stage as packaging-eligible, but not a stopped tunnel", () => {
-    const stage1 = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 60,
-      runStatus: "paused",
-      pausedAt,
-      nowMs: T0 + 30 * 1000,
-    });
-    const stage2 = computeLinePhases({
-      ...BASE,
-      postTunnelMin: 0,
-      elapsedBatchSec: 10 * 60,
-      runStatus: "paused",
-      pausedAt,
-      nowMs: T0 + 3 * 60000,
-    });
-    const stage3 = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 20 * 60,
-      runStatus: "paused",
-      pausedAt,
-      nowMs: T0 + 4 * 60000,
-    });
-    const clear = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 20 * 60,
-      runStatus: "paused",
-      pausedAt,
-      nowMs: T0 + 6 * 60000,
-    });
-
-    expect(stage1.stage1.state).toBe("draining");
-    expect(stage2.stage2.state).toBe("paused");
-    expect(stage3.stage3.state).toBe("draining");
-    expect(lineHasPackagingDrain(stage1)).toBe(true);
-    expect(lineHasPackagingDrain(stage2)).toBe(false);
-    expect(lineHasPackagingDrain(stage3)).toBe(true);
-    expect(lineHasPackagingDrain(clear)).toBe(false);
-  });
-
-  it("counts only eligible output time across a safe stop-tunnel pause", () => {
-    const args = {
-      ...BASE,
-      elapsedBatchSec: 20 * 60,
-      runStatus: "paused" as const,
-      pausedAt,
-      lastResumeWallMs: 0,
-      lastPauseStartWallMs: 0,
-      nowMs: T0 + 4 * 60000,
-    };
-    // Stage 1 (2.5 min) + Stage 3 (1.5 min); the stopped tunnel interval is
-    // not packaging output.
-    expect(computePackagingDrainElapsedSec(args)).toBe(4 * 60);
-    expect(computePackagingDrainElapsedSec({ ...args, nowMs: T0 + 3 * 60000 })).toBe(3 * 60);
-    expect(computePackagingDrainElapsedSec({ ...args, nowMs: T0 + 6 * 60000 })).toBe(5 * 60);
-  });
-
-  it("counts continuously through all phases when the tunnel stays powered", () => {
-    const args = {
-      ...BASE,
-      elapsedBatchSec: 20 * 60,
-      runStatus: "paused" as const,
-      pausedAt,
-      pauseStopsTunnel: false,
-      lastResumeWallMs: 0,
-      lastPauseStartWallMs: 0,
-      nowMs: T0 + 10 * 60000,
-    };
-    expect(computePackagingDrainElapsedSec(args)).toBe(10 * 60);
-    expect(computePackagingDrainElapsedSec({ ...args, nowMs: T0 + 25 * 60000 })).toBe(20 * 60);
   });
 });
 

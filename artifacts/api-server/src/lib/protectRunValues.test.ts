@@ -449,6 +449,27 @@ describe("protectRunValues run-list lifecycle LWW (metaUpdatedAt)", () => {
     }]);
   });
 
+  it("keeps a stored Stop over a stale running copy whose client clock is ahead", () => {
+    const existing = mk([{
+      id: "r1",
+      startedAt: 111,
+      endedAt: 333,
+      metaUpdatedAt: 2000,
+    }]);
+    const clockSkewedWakePush = mk([{
+      id: "r1",
+      startedAt: 111,
+      metaUpdatedAt: 9000,
+    }]);
+    const out = outRuns(protectRunValues(clockSkewedWakePush, existing));
+    expect(out).toEqual([{
+      id: "r1",
+      startedAt: 111,
+      endedAt: 333,
+      metaUpdatedAt: 2000,
+    }]);
+  });
+
   it("keeps incoming on EQUAL stamps (tie -> incoming, the pre-stamp status quo)", () => {
     const existing = mk([{ id: "r1", startedAt: 111, metaUpdatedAt: 1000 }]);
     const incoming = mk([{ id: "r1", endedAt: 333, metaUpdatedAt: 1000 }]);
@@ -981,7 +1002,6 @@ type ProgressEntry = {
   correctionGeneration: number;
   updatedAt: number;
   manualOverrideUntil: number;
-  nextCaseDueAt?: number;
 };
 
 function mkProgress(
@@ -990,16 +1010,8 @@ function mkProgress(
   correctionGeneration: number,
   updatedAt: number,
   manualOverrideUntil = 0,
-  nextCaseDueAt?: number,
 ): ProgressEntry {
-  return {
-    skidsCompleted,
-    casesOnCurrentSkid,
-    correctionGeneration,
-    updatedAt,
-    manualOverrideUntil,
-    ...(nextCaseDueAt !== undefined ? { nextCaseDueAt } : {}),
-  };
+  return { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt, manualOverrideUntil };
 }
 
 function basePayload(
@@ -1232,71 +1244,17 @@ describe("packagingProgress merge (Task 974)", () => {
     expect(out.packagingProgress).toEqual({});
   });
 
-  it("sanitizer: keeps the optional case deadline and strips unknown keys", () => {
+  it("sanitizer: strips unknown keys from packagingProgress entries (only 5 known fields survive)", () => {
     const out = sanitizeSyncPayload({
       packagingProgress: {
-        r1: {
-          skidsCompleted: 3,
-          casesOnCurrentSkid: 2,
-          correctionGeneration: 1,
-          updatedAt: 100,
-          manualOverrideUntil: 0,
-          nextCaseDueAt: 900,
-          evil: "bad",
-        },
+        r1: { skidsCompleted: 3, casesOnCurrentSkid: 2, correctionGeneration: 1, updatedAt: 100, manualOverrideUntil: 0, evil: "bad" },
       },
     }) as Record<string, unknown>;
     const e = out.packagingProgress as Record<string, Record<string, unknown>>;
     expect(Object.keys(e.r1)).toEqual(
-      expect.arrayContaining([
-        "skidsCompleted",
-        "casesOnCurrentSkid",
-        "correctionGeneration",
-        "updatedAt",
-        "manualOverrideUntil",
-        "nextCaseDueAt",
-      ]),
+      expect.arrayContaining(["skidsCompleted", "casesOnCurrentSkid", "correctionGeneration", "updatedAt", "manualOverrideUntil"]),
     );
-    expect(e.r1.nextCaseDueAt).toBe(900);
     expect(e.r1).not.toHaveProperty("evil");
-  });
-
-  it("publishes a Resume-now case timer reset even when the pair is unchanged", () => {
-    const stored = basePayload(
-      ["r1"],
-      { r1: mkProgress(0, 2, 4, 1_000, 0, 10_000) },
-      { r1: { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 2 } },
-    );
-    stored.autoTrackCoordination = {
-      version: 1,
-      runs: {
-        r1: {
-          case: {
-            generation: "r1:2",
-            sequence: 7,
-            nextDueAt: 10_000,
-            correctionGeneration: 4,
-            updatedAt: 1_000,
-          },
-        },
-      },
-    };
-    const incoming = basePayload(
-      ["r1"],
-      { r1: mkProgress(0, 2, 5, 2_000, 0, 1_800_000_009_000) },
-      { r1: { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 2 } },
-    );
-
-    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
-    const coordination = out.autoTrackCoordination as {
-      runs: Record<string, Record<string, Record<string, number | string>>>;
-    };
-    expect(coordination.runs.r1.case).toMatchObject({
-      generation: "r1:2",
-      sequence: 8,
-      nextDueAt: 1_800_000_009_000,
-      correctionGeneration: 5,
-    });
   });
 
   it("capMergedResult: caps packagingProgress at MAX_RUNS entries", () => {

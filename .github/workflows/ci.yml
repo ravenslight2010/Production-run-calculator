@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck (workspace + libs)
+        run: pnpm run typecheck
+
+  test:
+    name: Unit tests (web + libs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run web unit tests
+        run: pnpm --filter @workspace/run-calculator test
+      - name: Run shared-library unit tests
+        run: pnpm -r --filter "./lib/**" --if-present test
+
+  test-db:
+    name: API tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: runcalc_ci
+          POSTGRES_USER: runcalc
+          POSTGRES_PASSWORD: ci-secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U runcalc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://runcalc:ci-secret@localhost:5432/runcalc_ci
+      STAFF_SIGNUP_CODE: ci-signup-code
+      INITIAL_MANAGER_USERNAME: cimanager
+      INITIAL_MANAGER_ACCESS_CODE: ci-manager-code
+      SESSION_SECRET: ci-session-secret
+      AUTH_TOKEN_SECRET: ci-auth-token-secret
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply schema
+        run: pnpm --filter @workspace/db run push-force
+      - name: Run API server tests
+        run: pnpm --filter @workspace/api-server test
+
+
+  security-audit:
+    name: Security audit (prod deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        # Reports known advisories without blocking: what remains is Expo/Metro
+        # (mobile) dev tooling only. Web app + API production paths are clean.
+        continue-on-error: true
+        run: pnpm audit --prod --audit-level high --ignore-registry-errors
+
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU (multi-arch builds)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push api image (schema + runtime)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/runcalc-api:latest
+            ghcr.io/${{ github.repository_owner }}/runcalc-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build + push web image (caddy static)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/runcalc-web:latest
+            ghcr.io/${{ github.repository_owner }}/runcalc-web:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build:
+    name: Build (web + API)
+    runs-on: ubuntu-latest
+    env:
+      # vite.config.ts requires both PORT and BASE_PATH at config-load time;
+      # PORT is unused for the static build output but must be present.
+      PORT: 3000
+      BASE_PATH: /
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build web app
+        run: pnpm --filter @workspace/run-calculator run build
+      - name: Build API server bundle
+        run: pnpm --filter @workspace/api-server run build

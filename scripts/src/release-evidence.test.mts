@@ -7,6 +7,7 @@ import {
   defaultReleaseEvidenceDir,
   formatReleaseReport,
   parseBrowserDurationRegressions,
+  releaseGateLabelsForMode,
   runStep,
   resolveReleaseEvidenceDir,
   validateFullBrowserReport,
@@ -45,6 +46,11 @@ async function run(): Promise<void> {
     defaultReleaseEvidenceDir("standard"),
     defaultReleaseEvidenceDir("full"),
     "standard and full release checks must not share default evidence paths",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("full").at(-1),
+    "full browser E2E suite",
+    "full evidence verification must derive the full browser gate from report mode",
   );
   assert.equal(
     resolveReleaseEvidenceDir("standard", "release-evidence-single-run"),
@@ -316,22 +322,41 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 100",
-      "Enumerated cases: 100",
+      "Expected cases: 108",
+      "Enumerated cases: 108",
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 100",
+      "Not-run cases: 108",
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 100 | 0 | 0 | 0 | 0 | 100 | 0ms |",
+      "| `e2e/example.spec.ts` | 108 | 0 | 0 | 0 | 0 | 108 | 0ms |",
       "",
     ].join("\n");
+    const invalidPassingBrowserReport = validBrowserReport
+      .replace("Result: FAIL", "Result: PASS")
+      .replace("Completed cases: 0", "Completed cases: 108")
+      .replace("Passed cases: 0", "Passed cases: 107")
+      .replace("Failed cases: 0", "Failed cases: 1")
+      .replace("Not-run cases: 108", "Not-run cases: 0")
+      .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
+      .replace(
+        "| `e2e/example.spec.ts` | 108 | 0 | 0 | 0 | 0 | 108 | 0ms |",
+        "| `e2e/example.spec.ts` | 108 | 108 | 107 | 0 | 1 | 0 | 0ms |",
+      );
+    assert.throws(
+      () => validateFullBrowserReport(invalidPassingBrowserReport, {
+        currentRevision: "current-revision",
+        requirePass: true,
+      }),
+      /passed or was explicitly skipped/,
+      "GO verification must reject a browser report containing failed cases",
+    );
     await mkdir(join(fullRoot, "browser-full"), { recursive: true });
     await writeFile(
       join(fullRoot, "browser-full/FINAL-REPORT.md"),

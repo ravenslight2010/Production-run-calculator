@@ -81,9 +81,9 @@ describe("POST /api/ai/optimize cost budget", () => {
     expect(provider.create).not.toHaveBeenCalled();
     expect(response.headers.get("x-cost-limit")).toBe("11");
     expect(response.headers.get("x-cost-requested")).toBe("12");
-    expect(response.headers.get("x-cost-used")).toBe("12");
+    expect(response.headers.get("x-cost-used")).toBe("11");
     expect(await response.json()).toEqual({
-      error: "Cost limit exceeded. Budget: 11, used: 12, requested: 12. Retry after 60s.",
+      error: "Cost limit exceeded. Budget: 11, used: 11, requested: 12. Retry after 60s.",
     });
   });
 });
