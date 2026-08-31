@@ -38,6 +38,7 @@ import {
   shouldAdoptAutoTrackCoordinationDeadline,
   useAutoTrack,
 } from "../useAutoTrack";
+import { AUTO_TRACK_COORDINATION_EVENT } from "../../autoTrackCoordinationClient";
 import type { FormValues } from "../../types";
 
 // ── Fake form ─────────────────────────────────────────────────────────────────
@@ -123,6 +124,76 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
     expect(hasAutoTrackCoordinationClockAnchor(undefined)).toBe(false);
     expect(hasAutoTrackCoordinationClockAnchor(Number.NaN)).toBe(false);
     expect(hasAutoTrackCoordinationClockAnchor(1_800_000_000_000)).toBe(true);
+  });
+
+  it("adopts a peer Resume-now case deadline instead of firing on the old local deadline", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 2,
+    });
+    const claimAutoTrackEvent = vi.fn(async (claim: {
+      dueAt: number;
+      nextDueAt: number;
+      sequence: number;
+      generation: string;
+    }) => ({
+      outcome: "accepted" as const,
+      state: {
+        generation: claim.generation,
+        sequence: claim.sequence,
+        nextDueAt: claim.nextDueAt,
+        updatedAt: Date.now(),
+      },
+      values: {
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 3,
+      },
+    }));
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number): Props => ({
+      runId: "shared-resume-case-1",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: 780 + (nowMs - T0) / 1000,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      claimAutoTrackEvent,
+    });
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0) },
+    );
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(AUTO_TRACK_COORDINATION_EVENT, {
+        detail: {
+          version: 1,
+          runs: {
+            "shared-resume-case-1": {
+              case: {
+                generation: "shared-resume-case-1:running:0",
+                sequence: 1,
+                nextDueAt: T0 + 30_000,
+                updatedAt: T0,
+                correctionGeneration: 8,
+              },
+            },
+          },
+        },
+      }));
+      vi.setSystemTime(T0 + CASE_PERIOD_MS + 1);
+      rerender(props(T0 + CASE_PERIOD_MS + 1));
+    });
+    expect(claimAutoTrackEvent.mock.calls.filter(([claim]) => claim.channel === "case")).toHaveLength(0);
+
+    act(() => {
+      vi.setSystemTime(T0 + 30_001);
+      rerender(props(T0 + 30_001));
+    });
+    // The case channel is intentionally the only assertion here; other
+    // channels may also have become due during the synthetic jump.
+    expect(claimAutoTrackEvent.mock.calls.filter(([claim]) => claim.channel === "case")).toHaveLength(1);
   });
 
   beforeEach(() => {

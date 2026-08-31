@@ -17,6 +17,7 @@ export type AutoTrackChannelState = {
   nextDueAt: number;
   acceptedEventId?: string;
   acceptedRunValuesUpdatedAt?: number;
+  correctionGeneration?: number;
   updatedAt: number;
 };
 
@@ -246,16 +247,29 @@ export function applyAutoTrackClaim(
 
   if (outcome === "accepted") {
     const currentUpdatedAt = Number(object(data.runValuesUpdatedAt)[claim.runId]) || 0;
-    if (Math.abs(currentUpdatedAt - claim.baseUpdatedAt) > 0.0001) outcome = "conflict";
+    const runValueStampChanged = Math.abs(currentUpdatedAt - claim.baseUpdatedAt) > 0.0001;
+    // Packaging claims mutate only the two Packaging fields. A queued case
+    // claim may legitimately sit behind tray/batch claims that advance the
+    // shared run-value stamp; keep it eligible when its own from-values still
+    // match and the correction-generation check below agrees. A manual case
+    // edit changes one of those fields and therefore remains a conflict.
+    const caseFieldsStillMatch = isCaseChannel && claim.mutations.every((mutation) => (
+      Math.abs((Number(values[mutation.field]) || 0) - mutation.from) <= 0.0001
+    ));
+    if (runValueStampChanged && !caseFieldsStillMatch) outcome = "conflict";
   }
 
   if (outcome === "accepted" && isCaseChannel) {
     const previousProgress = object(object(data.packagingProgress)[claim.runId]);
     const correctionGeneration = Number(previousProgress.correctionGeneration) || 0;
     const manualOverrideUntil = Number(previousProgress.manualOverrideUntil) || 0;
+    const sharedResumeDeadline = Number(previousProgress.nextCaseDueAt);
+    const resumeDeadlineReached =
+      Number.isFinite(sharedResumeDeadline)
+      && claim.dueAt >= sharedResumeDeadline;
     if (
       correctionGeneration !== claim.correctionGeneration
-      || manualOverrideUntil > now
+      || (manualOverrideUntil > now && !resumeDeadlineReached)
     ) outcome = "conflict";
   }
 
@@ -274,6 +288,9 @@ export function applyAutoTrackClaim(
     sequence: typeof previous.sequence === "number" ? previous.sequence : 0,
     nextDueAt: typeof previous.nextDueAt === "number" ? previous.nextDueAt : claim.nextDueAt,
     ...(typeof previous.acceptedEventId === "string" ? { acceptedEventId: previous.acceptedEventId } : {}),
+    ...(typeof previous.correctionGeneration === "number"
+      ? { correctionGeneration: previous.correctionGeneration }
+      : {}),
     updatedAt: typeof previous.updatedAt === "number" ? previous.updatedAt : now,
   };
   if (outcome !== "accepted") {
@@ -294,6 +311,7 @@ export function applyAutoTrackClaim(
     nextDueAt: now + Math.min(MAX_AUTO_TRACK_PERIOD_MS, claim.nextDueAt - claim.dueAt),
     acceptedEventId: claim.eventId,
     acceptedRunValuesUpdatedAt,
+    ...(isCaseChannel ? { correctionGeneration: claim.correctionGeneration } : {}),
     updatedAt: now,
   };
   runCoordination[claim.channel] = channelState;
@@ -317,6 +335,7 @@ export function applyAutoTrackClaim(
       casesOnCurrentSkid: Number(values.casesOnCurrentSkid) || 0,
       correctionGeneration: Number(previousProgress.correctionGeneration) || 0,
       manualOverrideUntil: Number(previousProgress.manualOverrideUntil) || 0,
+      nextCaseDueAt: channelState.nextDueAt,
       updatedAt: now,
     };
     data.packagingProgress = packagingProgress;

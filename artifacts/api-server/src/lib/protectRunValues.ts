@@ -384,12 +384,15 @@ function preserveAndInvalidateAutoTrackCoordination(
   existingCoordination: unknown,
   existingPayload: Record<string, unknown>,
 ): unknown {
-  if (!isPlainObject(protectedPayload) || !isPlainObject(existingCoordination)) return protectedPayload;
+  if (!isPlainObject(protectedPayload)) return protectedPayload;
   const priorValues = isPlainObject(existingPayload.runValues) ? existingPayload.runValues : {};
   const nextValues = isPlainObject(protectedPayload.runValues) ? protectedPayload.runValues : {};
-  const coordinationRuns = isPlainObject(existingCoordination.runs)
-    ? { ...existingCoordination.runs }
+  const existingRuns = isPlainObject(existingCoordination)
+    && isPlainObject(existingCoordination.runs)
+    ? existingCoordination.runs
     : {};
+  const coordinationRuns = { ...existingRuns };
+  let coordinationChanged = false;
   const now = Date.now();
 
   for (const [runId, rawNext] of Object.entries(nextValues)) {
@@ -400,6 +403,28 @@ function preserveAndInvalidateAutoTrackCoordination(
       ? { ...coordinationRuns[runId] }
       : {};
     const changedChannels = new Set<string>();
+    const incomingProgressMap = isPlainObject(protectedPayload.packagingProgress)
+      ? protectedPayload.packagingProgress
+      : {};
+    const existingProgressMap = isPlainObject(existingPayload.packagingProgress)
+      ? existingPayload.packagingProgress
+      : {};
+    const incomingProgress = isPlainObject(incomingProgressMap[runId])
+      ? incomingProgressMap[runId]
+      : {};
+    const existingProgress = isPlainObject(existingProgressMap[runId])
+      ? existingProgressMap[runId]
+      : {};
+    // Resume-now is allowed to reset the deadline without changing the
+    // already-corrected counter pair. Detect that register transition
+    // independently of runValues.
+    if (
+      asNumber(incomingProgress.nextCaseDueAt) > 0
+      && asNumber(incomingProgress.correctionGeneration)
+        > asNumber(existingProgress.correctionGeneration)
+    ) {
+      changedChannels.add("case");
+    }
     if (
       asNumber(rawNext.skidsCompleted) !== asNumber(rawPrior.skidsCompleted)
       || asNumber(rawNext.casesOnCurrentSkid) !== asNumber(rawPrior.casesOnCurrentSkid)
@@ -419,6 +444,52 @@ function preserveAndInvalidateAutoTrackCoordination(
         : now,
     );
     for (const channel of changedChannels) {
+      if (channel === "case") {
+        // A normal Packaging edit must invalidate an in-flight claim through
+        // the value/correction stamps, but it must not become a new timer
+        // event. Resume-now is the explicit action that supplies a next-case
+        // anchor. Its anchor and correction generation travel together in the
+        // independent packaging register.
+        const progress = incomingProgress;
+        const nextCaseDueAt = asNumber(progress.nextCaseDueAt);
+        const correctionGeneration = asNumber(progress.correctionGeneration);
+        const previousCase = isPlainObject(runCoordination.case)
+          ? runCoordination.case
+          : {};
+        const previousCorrectionGeneration = asNumber(previousCase.correctionGeneration);
+        if (
+          nextCaseDueAt <= 0
+          || correctionGeneration <= previousCorrectionGeneration
+        ) {
+          continue;
+        }
+        const dayState = isPlainObject(protectedPayload.dayState)
+          ? protectedPayload.dayState
+          : existingPayload.dayState;
+        const runMeta = isPlainObject(dayState)
+          && Array.isArray(dayState.runs)
+          ? dayState.runs.find((candidate) =>
+              isPlainObject(candidate) && candidate.id === runId)
+          : undefined;
+        const generation = typeof previousCase.generation === "string"
+          && previousCase.generation.startsWith(`${runId}:`)
+          ? previousCase.generation
+          : `${runId}:${String(
+              isPlainObject(runMeta)
+                ? runMeta.metaUpdatedAt ?? runMeta.startedAt ?? 0
+                : 0,
+            )}`.slice(0, 160);
+        runCoordination.case = {
+          generation,
+          sequence: Math.max(0, asNumber(previousCase.sequence)) + 1,
+          nextDueAt: nextCaseDueAt,
+          correctionGeneration,
+          acceptedRunValuesUpdatedAt: stamp,
+          updatedAt: asNumber(progress.updatedAt) || now,
+        };
+        coordinationChanged = true;
+        continue;
+      }
       if (!Object.prototype.hasOwnProperty.call(runCoordination, channel)) continue;
       runCoordination[channel] = {
         generation: `manual:${stamp}`,
@@ -426,13 +497,15 @@ function preserveAndInvalidateAutoTrackCoordination(
         nextDueAt: now,
         updatedAt: now,
       };
+      coordinationChanged = true;
     }
     coordinationRuns[runId] = runCoordination;
   }
+  if (!coordinationChanged && !isPlainObject(existingCoordination)) return protectedPayload;
   return {
     ...protectedPayload,
     autoTrackCoordination: {
-      ...existingCoordination,
+      ...(isPlainObject(existingCoordination) ? existingCoordination : { version: 1 }),
       runs: coordinationRuns,
     },
   };
@@ -449,7 +522,10 @@ function preserveAndInvalidateAutoTrackCoordination(
 export function protectRunValues(
   incoming: unknown,
   existing: unknown,
-  options: { allowRunListReplacement?: boolean } = {},
+  options: {
+    allowRunListReplacement?: boolean;
+    skipCoordinationProtection?: boolean;
+  } = {},
 ): unknown {
   if (!isPlainObject(incoming)) return incoming;
   // Nothing stored yet (first write for this scope+date): the payload was
@@ -483,13 +559,13 @@ export function protectRunValues(
     options.allowRunListReplacement
     && asNumber(existingDayForCoordination?.resetAt) > 0
     && asNumber(incomingDayForCoordination?.resetAt) > asNumber(existingDayForCoordination?.resetAt);
-  if (
-    !replacesCoordinatedDay
-    && Object.prototype.hasOwnProperty.call(existing, "autoTrackCoordination")
-  ) {
+  if (!replacesCoordinatedDay && !options.skipCoordinationProtection) {
     const existingWithoutCoordination = { ...existing };
     delete existingWithoutCoordination.autoTrackCoordination;
-    const protectedPayload = protectRunValues(incoming, existingWithoutCoordination, options);
+    const protectedPayload = protectRunValues(incoming, existingWithoutCoordination, {
+      ...options,
+      skipCoordinationProtection: true,
+    });
     return preserveAndInvalidateAutoTrackCoordination(
       protectedPayload,
       existing.autoTrackCoordination,
@@ -829,7 +905,8 @@ export function protectRunValues(
 // ── packagingProgress merge ───────────────────────────────────────────────────
 // Optional top-level map: Record<runId, PackagingProgressEntry>.
 // Each entry records live packaging counters for one run:
-//   { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt, manualOverrideUntil }
+  //   { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt,
+  //     manualOverrideUntil, nextCaseDueAt? }
 // Precedence rules (independent of runValues LWW stamps):
 //   - Higher correctionGeneration always wins regardless of updatedAt.
 //   - Same generation: higher updatedAt wins.
@@ -846,6 +923,7 @@ export interface PackagingProgressEntry {
   correctionGeneration: number;
   updatedAt: number;
   manualOverrideUntil: number;
+  nextCaseDueAt?: number;
 }
 
 function sanitizePackagingProgressEntry(v: unknown): PackagingProgressEntry | null {
@@ -857,7 +935,8 @@ function sanitizePackagingProgressEntry(v: unknown): PackagingProgressEntry | nu
     !fin(v.casesOnCurrentSkid) ||
     !fin(v.correctionGeneration) ||
     !fin(v.updatedAt) ||
-    !fin(v.manualOverrideUntil)
+    !fin(v.manualOverrideUntil) ||
+    (v.nextCaseDueAt !== undefined && !fin(v.nextCaseDueAt))
   ) {
     return null;
   }
@@ -867,6 +946,7 @@ function sanitizePackagingProgressEntry(v: unknown): PackagingProgressEntry | nu
     correctionGeneration: v.correctionGeneration,
     updatedAt: v.updatedAt,
     manualOverrideUntil: v.manualOverrideUntil,
+    ...(v.nextCaseDueAt !== undefined ? { nextCaseDueAt: v.nextCaseDueAt } : {}),
   };
 }
 

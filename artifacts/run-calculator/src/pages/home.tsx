@@ -2998,6 +2998,8 @@ export default function Home() {
     skidsCompleted: number,
     casesOnCurrentSkid: number,
     manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
+    nextCaseDueAt?: number,
+    publishNow = false,
   ) => {
     const now = Date.now();
     recordManualPackagingProgress({
@@ -3005,6 +3007,7 @@ export default function Home() {
       skidsCompleted,
       casesOnCurrentSkid,
       manualOverrideUntil,
+      nextCaseDueAt,
       now,
     });
     markRunValuesUpdated(runId, now);
@@ -3015,6 +3018,10 @@ export default function Home() {
         manualOverrideUntil,
       );
     }
+    // Resume-now has no form mutation to wake the normal autosave watcher.
+    // Publish its corrected baseline immediately so a peer cannot reach its
+    // old deadline before it receives the shared reset.
+    if (publishNow) schedulePush(dayStateRef.current, 0, "edit");
   }, []);
   const persistAutomaticPackagingProgress = useCallback((
     skidsCompleted: number,
@@ -7465,7 +7472,15 @@ export default function Home() {
     // acknowledged yet; wait briefly for the same shared-sync gate that
     // protects automatic claims. Use performance time because browser tests
     // and sleeping devices may deliberately mock Date.now().
-    if (!pushAcknowledgedRef.current) {
+    const sharedCaseResetIsFenced =
+      claim.channel === "case"
+      && (() => {
+        const progress = loadPackagingProgress()[claim.runId];
+        return typeof progress?.correctionGeneration === "number"
+          && typeof progress.nextCaseDueAt === "number"
+          && claim.dueAt >= progress.nextCaseDueAt;
+      })();
+    if (!pushAcknowledgedRef.current && !sharedCaseResetIsFenced) {
       const waitStartedAt = typeof performance === "undefined" ? 0 : performance.now();
       while (!pushAcknowledgedRef.current) {
         if (!navigator.onLine || foregroundSyncBarrierRef.current) {
@@ -7779,10 +7794,15 @@ export default function Home() {
         const packagingNeedsRebase =
           acceptedTotal !== localTotal
           || accepted?.correctionGeneration !== localRegister?.correctionGeneration;
-        autoSuppressUntilRef.current = Math.max(
-          autoSuppressUntilRef.current,
-          accepted?.manualOverrideUntil ?? 0,
-        );
+        const receivedNewCorrection =
+          (accepted?.correctionGeneration ?? 0)
+          > (localRegister?.correctionGeneration ?? 0);
+        autoSuppressUntilRef.current = receivedNewCorrection
+          ? (accepted?.manualOverrideUntil ?? 0)
+          : Math.max(
+              autoSuppressUntilRef.current,
+              accepted?.manualOverrideUntil ?? 0,
+            );
         // Packaging is its own causal register. Even when the run lifecycle
         // stamp did not change, adopting a newer canonical packaging entry
         // must release through the hook's rebase path before another automatic
@@ -20789,7 +20809,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         return (
                           <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
                             Next case in{" "}
-                            <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
+                                       <span className="text-orange-400 font-bold tabular-nums" data-testid="packaging-next-case-countdown">{fmtMS(secLeft)}</span>
                           </div>
                         );
                       })()}
@@ -22486,12 +22506,16 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                             nextSkids: number,
                             nextCases: number,
                             manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
+                             nextCaseDueAt?: number,
+                             publishNow = false,
                           ) => {
                             persistManualPackagingProgress(
                               currentRunId,
                               nextSkids,
                               nextCases,
                               manualOverrideUntil,
+                               nextCaseDueAt,
+                               publishNow,
                             );
                           };
                           const skidNearlyFull =
@@ -22506,7 +22530,19 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 minsLeft={suppressedMinsLeft}
                                 onResume={() => {
                                   const now = Date.now();
-                                  onManual(skids, casesOnSkid, now);
+                                   const caseMs = getAutoTrackTiming(
+                                     calc.ppm,
+                                     v.pizzasPerCase,
+                                     calc.perTray,
+                                     calc.perBatch,
+                                   ).caseMs;
+                                   onManual(
+                                     skids,
+                                     casesOnSkid,
+                                     now,
+                                     caseMs > 0 ? now + caseMs : undefined,
+                                     true,
+                                   );
                                   autoSuppressUntilRef.current = 0;
                                   fireAutoTrackNow("case");
                                 }}
@@ -22525,7 +22561,12 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <div className="flex items-center justify-center">
                                     <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
                                       Next case in{" "}
-                                      <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
+                                      <span
+                                        className="text-orange-400 font-bold tabular-nums"
+                                        data-testid="packaging-next-case-countdown"
+                                      >
+                                        {fmtMS(secLeft)}
+                                      </span>
                                     </div>
                                   </div>
                                 );
@@ -23280,7 +23321,9 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
                 <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
-                  {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
+                  <span data-testid="packaging-next-case-countdown">
+                    {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
+                  </span>
                 </p>
               </div>
             </div>

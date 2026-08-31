@@ -1424,4 +1424,167 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }
     },
   );
+
+  test(
+    "E. Resume now shares the Packaging clock and advances simultaneous peers once",
+    async ({ page, browser }: { page: Page; browser: Browser }) => {
+      test.setTimeout(90_000);
+      const safeBaseMs = await setupAndStartRun(page, "10");
+      await page.locator('[data-testid="tab-packaging"]').click();
+
+      const peer = await browser.newContext({
+        storageState: await page.context().storageState(),
+      });
+      try {
+        // Keep the peer's Date proxy active through reloads and let both pages
+        // advance from the same synthetic production instant.
+        await peer.addInitScript(({ fakeMs }) => {
+          const w = window as unknown as Record<string, unknown>;
+          w.__testFakeMs = fakeMs;
+          w.__testDateProxyInstalled = true;
+          const Orig = window.Date;
+          w.__origDate = Orig;
+          window.Date = new Proxy(Orig, {
+            construct(target, args) {
+              return args.length === 0
+                ? new target(w.__testFakeMs as number)
+                : Reflect.construct(target, args);
+            },
+            apply(target, _self, args) {
+              return args.length === 0
+                ? new target(w.__testFakeMs as number).toString()
+                : Reflect.apply(target, target, args);
+            },
+            get(target, prop, receiver) {
+              if (prop === "now") return () => w.__testFakeMs as number;
+              const value = Reflect.get(target, prop, receiver);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as unknown as typeof Date;
+        }, { fakeMs: safeBaseMs });
+
+        const peerPage = await peer.newPage();
+        await peerPage.goto("/", { waitUntil: "domcontentloaded" });
+        await peerPage.locator('[data-testid="tab-packaging"]')
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await peerPage.locator('[data-testid="text-casesOnCurrentSkid"]')
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await peerPage.locator('[data-testid="tab-packaging"]').click();
+
+        const primaryCases = page.locator('[data-testid="text-casesOnCurrentSkid"]');
+        const peerCases = peerPage.locator('[data-testid="text-casesOnCurrentSkid"]');
+        const primaryCountdown = page.locator('[data-testid="packaging-next-case-countdown"]');
+        const peerCountdown = peerPage.locator('[data-testid="packaging-next-case-countdown"]');
+
+        // Establish the shared starting point through the same manual controls
+        // an operator uses. The second device must receive both increments.
+        await expect(primaryCases).toHaveText("0");
+        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+        await expect(primaryCases).toHaveText("2");
+        await expect(peerCases).toHaveText("2", { timeout: 15_000 });
+
+        // Resume now is the important boundary: it publishes a new correction
+        // generation and one canonical next-case deadline instead of only
+        // clearing the local suppression ref.
+        await page.locator('[data-testid="btn-resume-now"]').click();
+        await expect(primaryCases).toHaveText("2");
+        await expect(peerCases).toHaveText("2", { timeout: 15_000 });
+        await expect(primaryCountdown).toHaveText(/\d:\d\d/);
+        await expect(peerCountdown).toHaveText(await primaryCountdown.textContent());
+
+        const runId = await page.evaluate(() => {
+          const raw = localStorage.getItem("run-calc-day");
+          const state = raw ? JSON.parse(raw) as { runs?: Array<{ id?: string }>; currentIndex?: number } : null;
+          return state?.runs?.[state.currentIndex ?? 0]?.id ?? null;
+        });
+        expect(runId, "active run id").toBeTruthy();
+        await page.waitForFunction(async (id) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+          const body = await response.json() as {
+            packagingProgress?: Record<string, {
+              casesOnCurrentSkid?: number;
+              nextCaseDueAt?: number;
+              correctionGeneration?: number;
+            }>;
+          };
+          const progress = id ? body.packagingProgress?.[id] : undefined;
+          return progress?.casesOnCurrentSkid === 2
+            && typeof progress.nextCaseDueAt === "number"
+            && (progress.correctionGeneration ?? 0) > 0;
+        }, runId, { timeout: 15_000 });
+        // Resume publishes through the same fenced sync queue used by active
+        // runs. Let that immediate write acknowledge before both clients are
+        // advanced to the shared production deadline.
+        await page.waitForTimeout(6_000);
+        await peerPage.waitForTimeout(6_000);
+
+        const setPeerTime = async (ms: number) => {
+          await peerPage.evaluate((nextMs) => {
+            (window as unknown as Record<string, unknown>).__testFakeMs = nextMs;
+          }, ms);
+        };
+
+        // Both awake devices become due together. The server accepts one claim
+        // for this deadline and rejects the peer duplicate, so the canonical
+        // pair is exactly 2 → 3, never 2 → 4.
+        const firstDue = safeBaseMs + 5 * 60_000 + 6_001;
+        await mockDateNow(page, firstDue);
+        await setPeerTime(firstDue);
+        await page.waitForTimeout(1_200);
+        await peerPage.waitForTimeout(1_200);
+        await expect(primaryCases).toHaveText("3", { timeout: 15_000 });
+        await expect(peerCases).toHaveText("3", { timeout: 15_000 });
+
+        // The following interval is legitimate and must remain available after
+        // the peer duplicate was invalidated.
+        const secondDue = safeBaseMs + 5 * 60_000 + 12_002;
+        await mockDateNow(page, secondDue);
+        await setPeerTime(secondDue);
+        await page.waitForTimeout(1_200);
+        await peerPage.waitForTimeout(1_200);
+        await expect(primaryCases).toHaveText("4", { timeout: 15_000 });
+        await expect(peerCases).toHaveText("4", { timeout: 15_000 });
+
+        // Keep the primary's synthetic clock through reload as well. The peer
+        // has the equivalent addInitScript above.
+        await page.addInitScript(({ fakeMs }) => {
+          const w = window as unknown as Record<string, unknown>;
+          w.__testFakeMs = fakeMs;
+          w.__testDateProxyInstalled = true;
+          const Orig = window.Date;
+          w.__origDate = Orig;
+          window.Date = new Proxy(Orig, {
+            construct(target, args) {
+              return args.length === 0
+                ? new target(w.__testFakeMs as number)
+                : Reflect.construct(target, args);
+            },
+            apply(target, _self, args) {
+              return args.length === 0
+                ? new target(w.__testFakeMs as number).toString()
+                : Reflect.apply(target, target, args);
+            },
+            get(target, prop, receiver) {
+              if (prop === "now") return () => w.__testFakeMs as number;
+              const value = Reflect.get(target, prop, receiver);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as unknown as typeof Date;
+        }, { fakeMs: secondDue });
+
+        // Reload both clients to prove the canonical pair and shared reset
+        // survive a fresh form/sync hydration.
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await peerPage.reload({ waitUntil: "domcontentloaded" });
+        await page.locator('[data-testid="tab-packaging"]').click();
+        await peerPage.locator('[data-testid="tab-packaging"]').click();
+        await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]')).toHaveText("4", { timeout: 20_000 });
+        await expect(peerPage.locator('[data-testid="text-casesOnCurrentSkid"]')).toHaveText("4", { timeout: 20_000 });
+      } finally {
+        await peer.close();
+      }
+    },
+  );
 });

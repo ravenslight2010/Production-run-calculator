@@ -208,4 +208,108 @@ describe("auto-track coordination", () => {
     expect(result.outcome).toBe("accepted");
     expect(result.values.casesOnCurrentSkid).toBe(11);
   });
+
+  it("consumes a simultaneous case deadline once, then permits the next leg", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: { "run-1": { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 2 } },
+      runValuesUpdatedAt: { "run-1": 10 },
+      packagingProgress: {
+        "run-1": {
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 2,
+          correctionGeneration: 5,
+          manualOverrideUntil: 0,
+          nextCaseDueAt: NOW,
+          updatedAt: NOW - 1,
+        },
+      },
+      autoTrackCoordination: {
+        version: 1 as const,
+        runs: {
+          "run-1": {
+            case: {
+              generation: "run-1:2",
+              sequence: 4,
+              correctionGeneration: 5,
+              nextDueAt: NOW,
+              updatedAt: NOW - 1,
+            },
+          },
+        },
+      },
+    };
+    const first = applyAutoTrackClaim(stored, claim({
+      channel: "case",
+      generation: "run-1:2",
+      sequence: 5,
+      eventId: "client-a:case:5",
+      dueAt: NOW,
+      nextDueAt: NOW + 5_000,
+      correctionGeneration: 5,
+      mutations: [{ field: "casesOnCurrentSkid", from: 2, to: 3 }],
+    }), NOW);
+    expect(first.outcome).toBe("accepted");
+    expect(first.values.casesOnCurrentSkid).toBe(3);
+    expect(first.channelState.nextDueAt).toBe(NOW + 5_000);
+
+    const peer = applyAutoTrackClaim(first.data, claim({
+      channel: "case",
+      generation: "run-1:2",
+      sequence: 5,
+      eventId: "client-b:case:5",
+      dueAt: NOW,
+      nextDueAt: NOW + 5_000,
+      correctionGeneration: 5,
+      mutations: [{ field: "casesOnCurrentSkid", from: 2, to: 3 }],
+    }), NOW + 1);
+    expect(peer.outcome).toBe("stale");
+    expect(peer.values.casesOnCurrentSkid).toBe(3);
+
+    const next = applyAutoTrackClaim(first.data, claim({
+      channel: "case",
+      generation: "run-1:2",
+      sequence: 6,
+      eventId: "client-b:case:6",
+      dueAt: NOW + 5_000,
+      nextDueAt: NOW + 10_000,
+      baseUpdatedAt: NOW,
+      correctionGeneration: 5,
+      mutations: [{ field: "casesOnCurrentSkid", from: 3, to: 4 }],
+    }), NOW + 5_000);
+    expect(next.outcome).toBe("accepted");
+    expect(next.values.casesOnCurrentSkid).toBe(4);
+  });
+
+  it("allows a resumed case through unrelated value-stamp changes", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: { "run-1": { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 2 } },
+      // A tray/batch claim advanced this stamp after Resume-now queued the
+      // Packaging claim. The Packaging fields themselves are still unchanged.
+      runValuesUpdatedAt: { "run-1": NOW + 25 },
+      packagingProgress: {
+        "run-1": {
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 2,
+          correctionGeneration: 8,
+          manualOverrideUntil: NOW + 1_000,
+          nextCaseDueAt: NOW + 500,
+          updatedAt: NOW,
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "case",
+      generation: "run-1:2",
+      dueAt: NOW + 500,
+      nextDueAt: NOW + 6_500,
+      baseUpdatedAt: NOW,
+      correctionGeneration: 8,
+      mutations: [{ field: "casesOnCurrentSkid", from: 2, to: 3 }],
+    }), NOW);
+
+    expect(result.outcome).toBe("accepted");
+    expect(result.values.casesOnCurrentSkid).toBe(3);
+  });
 });

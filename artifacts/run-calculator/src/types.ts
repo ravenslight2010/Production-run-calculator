@@ -424,7 +424,8 @@ export type SyncPayload = {
         sequence: number;
         nextDueAt: number;
         acceptedEventId?: string;
-            acceptedRunValuesUpdatedAt?: number;
+        acceptedRunValuesUpdatedAt?: number;
+        correctionGeneration?: number;
         updatedAt: number;
       }
     >>>;
@@ -479,6 +480,10 @@ export type PackagingProgress = {
   correctionGeneration: number;
   updatedAt: number;
   manualOverrideUntil: number;
+  // Optional wall-clock deadline for the next Packaging case. The timestamp
+  // is paired with updatedAt so another device can translate it onto its own
+  // clock when it adopts a Resume-now correction.
+  nextCaseDueAt?: number;
 };
 
 export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };

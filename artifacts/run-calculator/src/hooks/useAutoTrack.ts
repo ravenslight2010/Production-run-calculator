@@ -91,7 +91,13 @@ export type AutoTrackEventClaim = {
 
 export type AutoTrackEventResult = {
   outcome: "accepted" | "duplicate" | "stale" | "conflict";
-  state: { generation: string; sequence: number; nextDueAt: number; updatedAt: number };
+  state: {
+    generation: string;
+    sequence: number;
+    nextDueAt: number;
+    updatedAt: number;
+    correctionGeneration?: number;
+  };
   values: Partial<FormValues>;
 };
 
@@ -399,6 +405,9 @@ export function useAutoTrack({
   // skids/cases delta is measured from. -1 = "not baselined yet" (first tick
   // after a mount/reset).
   const lastExpectedCasesRef = useRef<number>(-1);
+  // Stable event listeners need the current elapsed-production baseline when
+  // they adopt a peer's Resume-now reset; do not close over an old render.
+  const latestExpectedCasesRawRef = useRef<number>(-1);
   // Fractional tray consumption carried between ticks so sub-unit depletion
   // per tick accumulates instead of being lost to Math.floor (which would
   // freeze a slow-depleting counter at its start value). Batches don't need a
@@ -455,6 +464,7 @@ export function useAutoTrack({
           generation: string;
           sequence: number;
           nextDueAt: number;
+          correctionGeneration?: number;
           updatedAt?: number;
         }>>>;
       }>).detail;
@@ -484,6 +494,13 @@ export function useAutoTrack({
           previousSequence,
           state.sequence,
         );
+        if (channel === "case") {
+          // A shared Resume-now reset establishes the current production
+          // expectation as the baseline for every client. Without this, a
+          // peer whose first local tick is the reset deadline sees -1 and
+          // only seeds bookkeeping, losing the first legitimate case.
+          lastExpectedCasesRef.current = latestExpectedCasesRawRef.current;
+        }
         // Legacy persisted coordination predates the server clock anchor.
         // Preserve the sequence for the successor claim, but keep the current
         // local deadline so a NaN translation cannot disable the channel.
@@ -499,12 +516,10 @@ export function useAutoTrack({
                 : channel === "batch-produce"
                   ? batchProdNextDueMsRef
                   : hopperProdNextDueMsRef;
-        if (channel !== "case") {
-          dueRef.current = localAutoTrackDueAt({
-            nextDueAt: state.nextDueAt,
-            updatedAt: state.updatedAt,
-          });
-        }
+        dueRef.current = localAutoTrackDueAt({
+          nextDueAt: state.nextDueAt,
+          updatedAt: state.updatedAt,
+        });
       }
     };
     window.addEventListener(AUTO_TRACK_COORDINATION_EVENT, adopt);
@@ -570,6 +585,7 @@ export function useAutoTrack({
     v.freezerTime,
     elapsedBatchSec,
   ]);
+  latestExpectedCasesRawRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
 
   const resetBookkeeping = useCallback(() => {
     caseNextDueMsRef.current = 0;
@@ -638,12 +654,20 @@ export function useAutoTrack({
   const fireAutoTrackNow = useCallback((scope: "case" | "dough" | "all" = "all") => {
     const nowMs = Date.now();
     if (scope === "case" || scope === "all") {
+      // Resume-now is an explicit baseline action. Preserve the current
+      // production expectation so the next full case interval is counted
+      // rather than treated as the hook's initial seed tick.
+      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
       rearmCaseTimer(nowMs);
     }
     if (scope === "dough" || scope === "all") {
       rearmDoughTimers(nowMs);
     }
-  }, [rearmCaseTimer, rearmDoughTimers]);
+  }, [
+    autoTrackSuggestion?.expectedCasesRaw,
+    rearmCaseTimer,
+    rearmDoughTimers,
+  ]);
 
   const commitAutomatic = useCallback((
     channel: AutoTrackChannel,
@@ -660,7 +684,7 @@ export function useAutoTrack({
           // include another device's accepted progress. Adopt that value before
           // the next local tick; otherwise the old expected-case baseline would
           // add the same interval a second time on top of the canonical count.
-          lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+          lastExpectedCasesRef.current = latestExpectedCasesRawRef.current;
           drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
           formResetSkippedRef.current = false;
         }

@@ -16,12 +16,16 @@ export function normalizePackagingProgress(value: unknown): PackagingProgress | 
   const correctionGeneration = finiteNonNegative(raw.correctionGeneration);
   const updatedAt = finiteNonNegative(raw.updatedAt);
   const manualOverrideUntil = finiteNonNegative(raw.manualOverrideUntil);
+  const nextCaseDueAt = raw.nextCaseDueAt === undefined
+    ? undefined
+    : finiteNonNegative(raw.nextCaseDueAt);
   if (
     skidsCompleted === null ||
     casesOnCurrentSkid === null ||
     correctionGeneration === null ||
     updatedAt === null ||
-    manualOverrideUntil === null
+    manualOverrideUntil === null ||
+    (raw.nextCaseDueAt !== undefined && nextCaseDueAt === null)
   ) {
     return null;
   }
@@ -31,6 +35,7 @@ export function normalizePackagingProgress(value: unknown): PackagingProgress | 
     correctionGeneration,
     updatedAt,
     manualOverrideUntil,
+    ...(nextCaseDueAt !== undefined && nextCaseDueAt !== null ? { nextCaseDueAt } : {}),
   };
 }
 
@@ -78,6 +83,7 @@ export function recordManualPackagingProgress(args: {
   skidsCompleted: number;
   casesOnCurrentSkid: number;
   manualOverrideUntil: number;
+  nextCaseDueAt?: number;
   now?: number;
 }): PackagingProgress {
   const map = loadPackagingProgress();
@@ -89,6 +95,9 @@ export function recordManualPackagingProgress(args: {
     correctionGeneration: nextTimestamp(now, previous?.correctionGeneration),
     updatedAt: nextTimestamp(now, previous?.updatedAt),
     manualOverrideUntil: Math.max(now, args.manualOverrideUntil),
+    ...(args.nextCaseDueAt !== undefined
+      ? { nextCaseDueAt: Math.max(0, args.nextCaseDueAt) }
+      : {}),
   };
   map[args.runId] = progress;
   savePackagingProgress(map);
@@ -111,6 +120,7 @@ export function recordAutomaticPackagingProgress(args: {
     correctionGeneration: previous?.correctionGeneration ?? 0,
     updatedAt: nextTimestamp(now, previous?.updatedAt),
     manualOverrideUntil: previous?.manualOverrideUntil ?? 0,
+    ...(previous?.nextCaseDueAt !== undefined ? { nextCaseDueAt: previous.nextCaseDueAt } : {}),
   };
   map[args.runId] = progress;
   savePackagingProgress(map);
