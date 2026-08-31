@@ -15,6 +15,7 @@
     "test:e2e:management-performance": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.management-performance.config.ts",
     "test:e2e:smoke": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.smoke.config.ts",
     "test:e2e:sync-convergence": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.sync-convergence.config.ts",
+    "test:e2e:multi-device": "E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.multi-device.config.ts",
     "test:e2e:department": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.department.config.ts",
     "test:e2e:a11y": "E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.a11y.config.ts",
     "test:e2e:phone": "E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.phone.config.ts",

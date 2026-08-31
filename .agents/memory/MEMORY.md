@@ -152,3 +152,4 @@
 - [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Phone E2E form overrides](phone-e2e-form-overrides.md) — server-backed reloads can overwrite local numeric fixtures; reapply values through controlled inputs after reload.
+- [Playwright offline SSE fixtures](playwright-offline-sse.md) — navigate a stale context to a same-origin inert route before offline; setOffline alone may leave EventSource connected.

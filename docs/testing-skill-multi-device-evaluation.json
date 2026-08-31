@@ -1,0 +1,57 @@
+{
+  "skill": ".local/skills/testing/SKILL.md",
+  "comparison": {
+    "prior_guidance": "Used Playwright for user-visible flows but did not explicitly distinguish responsive viewports from independent browser state or require convergence coverage.",
+    "revised_guidance": "Triggers a deterministic two-context plan when shared client copies, live counters/timers, collaboration, offline recovery, wake/reconnect, reload, deletion, or reset can diverge."
+  },
+  "prompts": [
+    {
+      "id": "shared-counter-race",
+      "query": "Two operators can tap the same live packaging counter at once; add a regression that proves one result persists and both screens converge.",
+      "should_select_multi_device": true,
+      "reason": "Simultaneous shared-state action."
+    },
+    {
+      "id": "offline-wake-reload",
+      "query": "The SSE client now reconciles after Android wakes from background; test a stale offline browser and a receiving browser through reconnect and reload.",
+      "should_select_multi_device": true,
+      "reason": "Independent stale client and wake recovery."
+    },
+    {
+      "id": "reset-tombstone",
+      "query": "A reset tombstone must not be resurrected by a sleeping tab; create the isolated two-context browser scenario and retain device-labeled evidence.",
+      "should_select_multi_device": true,
+      "reason": "Destructive reset and resurrection boundary."
+    },
+    {
+      "id": "auto-manual-race",
+      "query": "The timer and autosave changed, and the bug only appears when an auto tick races a manual edit from another station; plan the smallest multi-device coverage.",
+      "should_select_multi_device": true,
+      "reason": "Timer/autosave race across independent clients."
+    },
+    {
+      "id": "responsive-only",
+      "query": "Make the settings card responsive at 390px and 1280px; no shared state or second session is involved.",
+      "should_select_multi_device": false,
+      "reason": "Viewport coverage only."
+    },
+    {
+      "id": "pure-math",
+      "query": "Add a unit test for the pure cases-per-skid calculation.",
+      "should_select_multi_device": false,
+      "reason": "Pure logic belongs in a focused unit test."
+    },
+    {
+      "id": "manager-browser",
+      "query": "Verify that a manager can open the schedule dialog; only one signed-in browser and authorization are under test.",
+      "should_select_multi_device": false,
+      "reason": "Single-user authorization workflow."
+    },
+    {
+      "id": "load-test",
+      "query": "Load-test sync with 500 clients and measure throughput.",
+      "should_select_multi_device": false,
+      "reason": "Load testing is outside the browser convergence lane."
+    }
+  ]
+}
