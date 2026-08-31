@@ -7,12 +7,17 @@ set -e
 # broad port-owner killing because developers may have unrelated services.
 node scripts/src/stop-artifact-workflows.mjs
 
-pnpm install --frozen-lockfile
+# The Replit-provided pnpm launcher can try to self-install the version from
+# package.json before running a command. Post-merge runs with stdin closed and
+# can also overlap with resource-heavy validation jobs, so that bootstrap may
+# abort before the real install starts. Use the installed pnpm binary for this
+# hook; the lockfile remains authoritative for workspace dependencies.
+pnpm --config.manage-package-manager-versions=false install --frozen-lockfile
 
 # drizzle push can hit transient "too many clients already" on the dev DB
 # (leftover backends from killed test/validation runs). Retry a few times.
 attempts=0
-until pnpm --filter db push-force; do
+until pnpm --config.manage-package-manager-versions=false --filter db push-force; do
   attempts=$((attempts + 1))
   if [ "$attempts" -ge 4 ]; then
     echo "db push-force failed after $attempts attempts" >&2
