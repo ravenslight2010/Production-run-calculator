@@ -297,6 +297,14 @@ export const PROGRESS_FIELDS = [
   "skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady",
 ] as const;
 
+// Physical dough staging is arranged as three tray sections. These values are
+// advisory only: traysOnLine remains one aggregate persisted counter because
+// existing runs do not record which section holds each tray.
+export const DOUGH_TRAY_SECTION_CAPACITY = 20;
+export const DOUGH_TRAY_SECTION_COUNT = 3;
+export const DOUGH_TRAY_ADVISORY_TOTAL =
+  DOUGH_TRAY_SECTION_CAPACITY * DOUGH_TRAY_SECTION_COUNT;
+
 export type Stoppage = {
   id: string;
   reason: string;

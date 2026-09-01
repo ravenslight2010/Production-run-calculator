@@ -168,6 +168,62 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.traysOnLine).toBe(49);
   });
 
+  it("keeps auto-producing trays past the three-section advisory total", () => {
+    const { form, values } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 74,
+      batchesReady: 10,
+    });
+    const t0 = 1_700_000_000_000;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc,
+          v: props.v,
+          form,
+        }),
+      {
+        initialProps: {
+          nowTime: new Date(t0),
+          elapsedBatchSec: 10 * 60,
+          v: makeV({ traysOnLine: 74, batchesReady: 10 }),
+        },
+      },
+    );
+
+    // The first consumption tick moves 74 → 73. Half a tray period later,
+    // production must add the tray back even though the aggregate is above the
+    // physical 3 × 20 advisory guide and at the old hardcoded ceiling.
+    expect(values.traysOnLine).toBe(73);
+    rerender({
+      nowTime: new Date(t0 + 18 * 1000),
+      elapsedBatchSec: 10 * 60 + 18,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+    expect(values.traysOnLine).toBe(74);
+
+    // A second production tick after an intervening consume proves 74 is no
+    // longer a ceiling: 74 → 73 → 74 is not enough, so manually preserve 74
+    // through the consumption tick and let the next production tick add to 75.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000),
+      elapsedBatchSec: 10 * 60 + 36,
+      v: makeV({ traysOnLine: 75, batchesReady: values.batchesReady }),
+    });
+    rerender({
+      nowTime: new Date(t0 + 54 * 1000),
+      elapsedBatchSec: 10 * 60 + 54,
+      v: makeV({ traysOnLine: 74, batchesReady: values.batchesReady }),
+    });
+    expect(values.traysOnLine).toBe(75);
+  });
+
   it("bumps the batch count when the mixer finishes a batch", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 1 });
     const t0 = 1_700_000_000_000;

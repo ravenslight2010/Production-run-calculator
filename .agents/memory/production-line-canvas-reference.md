@@ -23,6 +23,9 @@ Upstream support flow:
 - Standby dough → Dough mixer → Dough hopper.
 - Dough tray lifecycle: Filling dough trays → Standby dough trays → Using dough trays.
 - Each tray section holds a maximum of 20 trays.
+- The application keeps one aggregate trays-on-line counter. The 20-tray
+  section limit is an operational warning across three physical sections, not
+  a persisted per-section allocation and not an automatic production cap.
 - Sauce area feeds down to the Sauce app.
 
 Visual conventions from the reference:
@@ -34,6 +37,6 @@ Visual conventions from the reference:
 - Blue = Freeze tunnel.
 - Green = Wrapper and Packaging.
 
-**Why:** The canvas reflects the factory's physical handoffs and capacity constraints, not just the application's navigation. Preserving these relationships prevents future UI, reporting, or workflow work from implying the wrong line direction or lane width.
+**Why:** The canvas reflects the factory's physical handoffs and capacity constraints, not just the application's navigation. Existing saved runs do not identify a tray's section, so inferring an allocation or clamping the aggregate would silently discard valid staged-dough counts.
 
-**How to apply:** Use this as the source of truth when designing station views, material-flow diagrams, warehouse handoffs, production calculations, or future canvas references. Keep the right-to-left main line, the App 4-to-Freeze-tunnel handoff, the two-wide exceptions, and the single-file default explicit. Keep Freeze-tunnel work separate from freezer-pull and freezer-surplus work.
+**How to apply:** Use this as the source of truth when designing station views, material-flow diagrams, warehouse handoffs, production calculations, or future canvas references. Keep the right-to-left main line, the App 4-to-Freeze-tunnel handoff, the two-wide exceptions, and the single-file default explicit. Keep Freeze-tunnel work separate from freezer-pull and freezer-surplus work. Show three sections × 20 as advisory guidance, preserve aggregate historical/manual values, and let auto-track continue without a tray-capacity clamp.

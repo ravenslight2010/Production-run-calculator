@@ -32,9 +32,11 @@ interface AutoTrackCalc {
 /**
  * Suggested dough staging for a run — the same numbers the "Suggest" button
  * applies to the Trays on Line / Batches Ready steppers. Derived from the
- * CURRENT deficit (traysNeeded/batchesNeeded), capped to the stepper maxes
- * (74 trays / 3 batches) and to a sane staging quantity (40 trays). Kept at
- * verbatim parity with mobile RunContext's suggestedDoughStaging.
+ * CURRENT deficit (traysNeeded/batchesNeeded), capped to a sane staging
+ * quantity (40 trays / 3 batches). This suggestion is not a persisted tray
+ * capacity: traysOnLine remains an uncapped aggregate so automatic tracking
+ * never discards valid staged dough. Kept at verbatim parity with mobile
+ * RunContext's suggestedDoughStaging.
  */
 export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
 
@@ -44,7 +46,7 @@ export function suggestedDoughStaging(
 ): SuggestedDoughStagingReturn {
   return {
     trays: traysNeeded > 0
-      ? Math.min(74, Math.max(1, Math.round(Math.min(40, traysNeeded))))
+      ? Math.max(1, Math.round(Math.min(40, traysNeeded)))
       : null,
     batches: batchesNeeded > 0
       ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, batchesNeeded))))
@@ -1198,11 +1200,10 @@ export function useAutoTrack({
       }
 
       if (!traySeededThisTick && delta !== 0) {
-        // Production never pushes past the stepper max (74) — but must never
-        // clamp an already-higher value DOWN either.
-        let next = v.traysOnLine + delta;
-        if (delta > 0) next = Math.min(next, Math.max(v.traysOnLine, 74));
-        next = Math.max(0, next);
+        // traysOnLine is the aggregate across all physical tray sections.
+        // Section capacity is advisory in the UI, so production must not stop
+        // or rewrite this count at an arbitrary display threshold.
+        const next = Math.max(0, v.traysOnLine + delta);
         if (next !== v.traysOnLine) {
           commitAutomatic(delta > 0 ? "tray-produce" : "tray-consume", nowMs, delta > 0
             ? trayProdNextDueMsRef.current

@@ -79,6 +79,9 @@ import {
   type PrepPhase,
   withTempOverrides,
   PRE_POST_TUNNEL_DEFAULT_MIN,
+  DOUGH_TRAY_SECTION_CAPACITY,
+  DOUGH_TRAY_SECTION_COUNT,
+  DOUGH_TRAY_ADVISORY_TOTAL,
 } from "../types";
 import {
   fmtElapsed,
@@ -23938,15 +23941,27 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               label={trayAutoActive
                                 ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
                                 : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
-                              max={74}
                               suggestion={!trayAutoActive ? suggestedTrays : null}
                               onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true }); }}
                               onManualChange={onManual}
                             />
-                            {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
-                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
-                                <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
-                              </p>
+                            {doughSubTab !== "crusts" && (
+                              <div className="mt-1.5 space-y-1" data-testid="tray-section-capacity-guide">
+                                <p className="text-[10px] text-muted-foreground">
+                                  Physical guide: {DOUGH_TRAY_SECTION_COUNT} sections × {DOUGH_TRAY_SECTION_CAPACITY} trays
+                                  {" "}({DOUGH_TRAY_ADVISORY_TOTAL} total). This aggregate count is not capped.
+                                </p>
+                                {v.traysOnLine > DOUGH_TRAY_ADVISORY_TOTAL && (
+                                  <p
+                                    className="text-[11px] text-amber-400 font-semibold flex items-start gap-1"
+                                    role="status"
+                                    data-testid="tray-section-capacity-warning"
+                                  >
+                                    <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" aria-hidden="true" />
+                                    Above the three-section guide — confirm tray placement; auto-track will keep the full count.
+                                  </p>
+                                )}
+                              </div>
                             )}
                             {doughSubTab !== "crusts" && (trayAutoActive && trayPeriodSec > 0 ? (
                               <>
