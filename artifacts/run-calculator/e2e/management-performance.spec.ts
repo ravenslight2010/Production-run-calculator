@@ -141,6 +141,41 @@ async function capturedDiagnostics(page: Page): Promise<CapturedDiagnostic[]> {
   });
 }
 
+async function expectInteractiveStaffControls(page: Page, username: string): Promise<void> {
+  await expect(page.getByText("Staff & Roles", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Actions for ${username}`, exact: true }),
+  ).toBeVisible();
+
+  // Waiting for a role action, rather than only the card heading, proves that
+  // the deferred RolesManager has mounted and finished loading its catalog.
+  const editManager = page.getByRole("button", { name: "Edit manager", exact: true });
+  await expect(editManager).toBeVisible({ timeout: 20_000 });
+  await expect(editManager).toBeEnabled();
+
+  const newRole = page.getByRole("button", { name: "New role", exact: true });
+  await expect(newRole).toBeVisible();
+  await expect(newRole).toBeEnabled();
+  await newRole.click();
+
+  const dialog = page.getByRole("dialog", { name: "New role" });
+  await expect(dialog).toBeVisible();
+  const roleName = dialog.getByLabel("Role name");
+  await expect(roleName).toBeVisible();
+  await expect(roleName).toBeEnabled();
+
+  const capability = dialog.getByRole("checkbox").first();
+  await expect(capability).toBeVisible();
+  await expect(capability).toBeEnabled();
+  await capability.click();
+  await expect(capability).toHaveAttribute("data-state", "checked");
+
+  const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+  await expect(cancel).toBeEnabled();
+  await cancel.click();
+  await expect(dialog).toBeHidden();
+}
+
 test("keeps signed-out cold and warm startup within the budget", async ({ page }, testInfo: TestInfo) => {
   await page.addInitScript(() => {
     (window as Window & { __calculatorPerformance?: CapturedDiagnostic[] }).__calculatorPerformance = [];
@@ -309,6 +344,15 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   ]);
   await expect(page.getByText("Staff & Roles", { exact: true })).toBeVisible();
   await expect(page.getByText("Roles", { exact: true })).toBeVisible();
+  await expectInteractiveStaffControls(page, username);
+
+  // Return through the management menu after leaving the surface. This covers
+  // the already-preloaded chunk path as well as the progressive remount.
+  await page.getByTestId("tab-run").click();
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Staff roster", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Staff Roster" })).toBeVisible({ timeout: 20_000 });
+  await expectInteractiveStaffControls(page, username);
 
   const diagnostics = await capturedDiagnostics(page);
   const staffApiEvidence = apiEvidence.filter(
