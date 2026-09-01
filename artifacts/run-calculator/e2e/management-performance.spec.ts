@@ -18,6 +18,7 @@ import {
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
+const testRoleNames = new Set<string>();
 
 type CapturedDiagnostic = {
   name: string;
@@ -95,6 +96,29 @@ async function promoteToManager(username: string): Promise<void> {
       `INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager')
        ON CONFLICT (user_id) DO UPDATE SET role = 'manager'`,
       [user.rows[0].id],
+    );
+  } finally {
+    await database.end().catch(() => {});
+  }
+}
+
+async function grantPasswordResetApprover(username: string, roleName: string): Promise<void> {
+  const database = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await database.connect();
+    await database.query(
+      `INSERT INTO roles (name, capabilities, builtin)
+       VALUES ($1, $2::jsonb, false)
+       ON CONFLICT (name) DO UPDATE
+       SET capabilities = EXCLUDED.capabilities, builtin = false, updated_at = NOW()`,
+      [roleName, JSON.stringify(["approve-password-resets"])],
+    );
+    const user = await database.query("SELECT id FROM users WHERE username = $1", [username]);
+    expect(user.rows).toHaveLength(1);
+    await database.query(
+      `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role`,
+      [user.rows[0].id, roleName],
     );
   } finally {
     await database.end().catch(() => {});
@@ -248,9 +272,91 @@ test.afterAll(async () => {
   try {
     await database.connect();
     await cleanupTestUsers(database, testUsernames);
+    if (testRoleNames.size > 0) {
+      await database.query("DELETE FROM roles WHERE name = ANY($1::text[])", [
+        [...testRoleNames],
+      ]);
+    }
   } finally {
     await database.end().catch(() => {});
   }
+});
+
+test("keeps role-management controls unavailable to a non-manager on the staff roster", async ({
+  page,
+}, testInfo: TestInfo) => {
+  requireIsolatedTestDatabase("non-manager staff authorization e2e");
+  if (!SIGNUP_CODE) {
+    throw new Error("STAFF_SIGNUP_CODE must be configured for non-manager staff authorization e2e.");
+  }
+
+  const username = uniqueTestId("e2e_staff_authorization");
+  const roleName = uniqueTestId("e2e_reset_approver");
+  testUsernames.add(username);
+  testRoleNames.add(roleName);
+  const protectedApiResponses: Array<{ method: string; path: string; status: number }> = [];
+
+  page.on("response", (response) => {
+    const path = safePath(response.url());
+    if (
+      (path === "/api/users" || path === "/api/roles") &&
+      response.request().method() === "GET"
+    ) {
+      protectedApiResponses.push({
+        method: response.request().method(),
+        path,
+        status: response.status(),
+      });
+    }
+  });
+
+  await signUp(page, username);
+  await grantPasswordResetApprover(username, roleName);
+  await signIn(page, username);
+
+  await page.getByRole("button", { name: "More" }).click();
+  await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Staff roster", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Staff Roster" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("Staff & Roles", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Managing roles requires the Manage staff & roles capability.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+
+  await expect(page.getByRole("button", { name: "New role", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Edit / })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0);
+
+  // Deferred child components may mount after the denial state is visible. Give
+  // their disabled queries a chance to run, then ensure no protected load was
+  // presented as a successful roster or role fetch.
+  await page.waitForTimeout(300);
+  await testInfo.attach("calculator-non-manager-staff-denial.png", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await testInfo.attach("calculator-non-manager-staff-denial.json", {
+    body: JSON.stringify(
+      {
+        role: roleName,
+        capabilities: ["approve-password-resets"],
+        protectedApiResponses,
+        roleManagementMessage:
+          "Managing roles requires the Manage staff & roles capability.",
+      },
+      null,
+      2,
+    ),
+    contentType: "application/json",
+  });
+  expect(
+    protectedApiResponses.filter((response) => response.status >= 200 && response.status < 300),
+    "non-manager staff and role endpoints must never load successfully",
+  ).toEqual([]);
 });
 
 test("captures authenticated initial load and deferred staff visit budgets", async ({ page }, testInfo: TestInfo) => {
