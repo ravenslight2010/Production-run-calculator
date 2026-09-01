@@ -6,9 +6,14 @@ import { TabsContent } from "@/components/ui/tabs";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { recordPerformance } from "../performanceDiagnostics";
 
-const LazyStaffManagementSurface = lazy(() => {
+let staffSurfaceLoadPromise:
+  | Promise<typeof import("../components/StaffManagementSurface")>
+  | null = null;
+
+function loadStaffManagementSurface() {
+  if (staffSurfaceLoadPromise) return staffSurfaceLoadPromise;
   const startedAt = typeof performance === "undefined" ? null : performance.now();
-  return import("../components/StaffManagementSurface").then((module) => {
+  staffSurfaceLoadPromise = import("../components/StaffManagementSurface").then((module) => {
     if (startedAt !== null && typeof performance !== "undefined") {
       recordPerformance(
         "management:staff-chunk-load",
@@ -18,7 +23,23 @@ const LazyStaffManagementSurface = lazy(() => {
     }
     return module;
   });
-});
+  return staffSurfaceLoadPromise;
+}
+
+const LazyStaffManagementSurface = lazy(loadStaffManagementSurface);
+
+/**
+ * Start the staff bundle while the authenticated user is already choosing a
+ * management destination. This keeps the staff visit responsive without
+ * moving staff code into the authenticated startup bundle.
+ */
+export function preloadStaffManagementSurface(): void {
+  void loadStaffManagementSurface().catch(() => {
+    // The lazy boundary remains responsible for surfacing a failed import.
+    // This catch only prevents an eager prefetch from creating an unhandled
+    // rejection before the user opens the staff surface.
+  });
+}
 
 function ManagementTabFallback() {
   return (

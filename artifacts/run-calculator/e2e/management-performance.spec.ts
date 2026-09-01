@@ -30,6 +30,7 @@ type ApiEvidence = {
   path: string;
   status: number;
   durationMs: number;
+  startedAtMs: number;
 };
 
 type ResourceEvidence = {
@@ -242,6 +243,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   const apiEvidence: ApiEvidence[] = [];
   const apiStartedAt = new Map<string, number>();
   const consoleOutput: Array<{ type: string; text: string }> = [];
+  let staffNavigationStartedAt: number | null = null;
 
   page.on("request", (request) => {
     if (request.url().includes("StaffManagementSurface")) staffChunkRequests.push(request.url().split("?")[0]);
@@ -260,6 +262,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
       path: safePath(response.url()),
       status: response.status(),
       durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+      startedAtMs: Math.round(startedAt * 100) / 100,
     });
   });
   page.on("console", (message) => {
@@ -287,6 +290,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   expect(staffChunkRequests, "staff surface must stay deferred during startup").toEqual([]);
 
   await page.getByRole("button", { name: "More" }).click();
+  staffNavigationStartedAt = performance.now();
   await page.getByRole("menuitem", { name: "Staff roster", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Staff Roster" })).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => staffChunkRequests.length).toBe(1);
@@ -295,18 +299,28 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
     const diagnostics = await capturedDiagnostics(page);
     return diagnostics.filter((entry) =>
       entry.name === "management:staff-chunk-load" ||
+      entry.name === "management:staff-surface-commit" ||
       entry.name === "management:staff-first-visit",
     );
   }).toEqual([
     expect.objectContaining({ name: "management:staff-chunk-load", kind: "load" }),
+    expect.objectContaining({ name: "management:staff-surface-commit", kind: "render" }),
     expect.objectContaining({ name: "management:staff-first-visit", kind: "navigation" }),
   ]);
+  await expect(page.getByText("Staff & Roles", { exact: true })).toBeVisible();
+  await expect(page.getByText("Roles", { exact: true })).toBeVisible();
 
   const diagnostics = await capturedDiagnostics(page);
+  const staffApiEvidence = apiEvidence.filter(
+    (request) =>
+      staffNavigationStartedAt !== null &&
+      request.startedAtMs >= staffNavigationStartedAt,
+  );
   const budgetByName: Record<string, number> = {
     "browser:navigation-to-dom-content-loaded": PERFORMANCE_BUDGETS.initialLoadMs,
     "browser:navigation-to-load": PERFORMANCE_BUDGETS.initialLoadMs,
     "management:staff-chunk-load": PERFORMANCE_BUDGETS.initialLoadMs,
+    "management:staff-surface-commit": MANAGEMENT_PERFORMANCE_BUDGETS.staffSurfaceCommitMs,
     "management:staff-first-visit": MANAGEMENT_PERFORMANCE_BUDGETS.staffFirstVisitMs,
   };
   const measured = diagnostics.filter((entry) => entry.name in budgetByName);
@@ -316,6 +330,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
       entry.name === "browser:navigation-to-dom-content-loaded" ||
       entry.name === "browser:navigation-to-load" ||
       entry.name === "management:staff-chunk-load" ||
+      entry.name === "management:staff-surface-commit" ||
       entry.name === "management:staff-first-visit",
     )
     .map(({ name, durationMs, kind }) => ({
@@ -328,6 +343,16 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
     budgets: budgetByName,
     staffChunkRequests: staffChunkRequests.length,
     apiRequests: apiEvidence,
+    apiSummary: {
+      requestCount: apiEvidence.length,
+      slowestMs: apiEvidence.reduce((slowest, request) => Math.max(slowest, request.durationMs), 0),
+      staffNavigationRequestCount: staffApiEvidence.length,
+      staffNavigationSlowestMs: staffApiEvidence.reduce(
+        (slowest, request) => Math.max(slowest, request.durationMs),
+        0,
+      ),
+      note: "API timings are recorded separately from browser chunk and surface timings; a visit over budget with low staff-navigation API timings points to client or runner contention.",
+    },
     console: consoleOutput,
     environment: {
       baseURL: new URL(testInfo.project.use.baseURL ?? "http://unknown").origin,

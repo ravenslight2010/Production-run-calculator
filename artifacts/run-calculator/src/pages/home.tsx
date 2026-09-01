@@ -485,6 +485,7 @@ import {
   DepartmentProvider,
   DeferredStaffManagementSurface,
   ManagementDepartment,
+  preloadStaffManagementSurface,
   ProductionLineDepartment,
   QcDowntimeSurface,
   QcIncidentsSurface,
@@ -16441,7 +16442,13 @@ export default function Home() {
               <span className="hidden sm:inline">{isSupervisor ? "Supervisor" : "Operator"}</span>
             </button>
             {/* Header overflow menu */}
-            <DropdownMenu>
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (open && (canManageStaff || canApproveResets)) {
+                  preloadStaffManagementSurface();
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"

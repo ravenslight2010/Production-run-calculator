@@ -12,6 +12,7 @@ export const IMPORT_PERFORMANCE_BUDGETS = {
 /** Reviewed budget for the first visit to the deferred staff-management surface. */
 export const MANAGEMENT_PERFORMANCE_BUDGETS = {
   staffFirstVisitMs: 350,
+  staffSurfaceCommitMs: 350,
 } as const;
 
 /** Reviewed budget for the first authenticated calculator visit on slow 3G. */
@@ -57,6 +58,8 @@ function remember(entry: PerformanceDiagnostic): void {
     : undefined;
   const managementBudget = entry.name === "management:staff-first-visit"
     ? MANAGEMENT_PERFORMANCE_BUDGETS.staffFirstVisitMs
+    : entry.name === "management:staff-surface-commit"
+      ? MANAGEMENT_PERFORMANCE_BUDGETS.staffSurfaceCommitMs
     : undefined;
   const authenticatedStartupBudget = entry.name === "startup:home-chunk-load"
     ? AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs
