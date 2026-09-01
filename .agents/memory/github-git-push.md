@@ -23,6 +23,19 @@ the signing setup first, choose whether preserving individual local commits or a
 single signed release snapshot is preferred, then push and verify the resulting
 remote tip.
 
+When administrators are exempt from branch protection, GitHub may accept a commit
+while reporting that the required-signature violation was bypassed. A locally
+valid signature is not enough; GitHub must report `verified: true` for the exact
+commit before it becomes the protected branch tip.
+
+**Why:** An SSH signature from a key GitHub does not yet recognize can pass local
+`git verify-commit`, while an administrator push still advances `main` under the
+branch-rule bypass.
+
+**How to apply:** Push the exact signed candidate to a disposable branch first,
+read GitHub's commit verification result, and fast-forward `main` only when the
+result is valid. Delete the disposable branch afterward.
+
 When a root pnpm command forwards user arguments to a package-level script, account for pnpm's separator forwarding; a direct root wrapper keeps the documented `pnpm run ... -- --message` form unambiguous.
 
 **Why:** Nested `pnpm run` commands can pass the separator through as an extra literal argument, making an otherwise standard documented invocation fail before the script parses its options.
