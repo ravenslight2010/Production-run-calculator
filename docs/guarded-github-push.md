@@ -89,6 +89,31 @@ access tokens, passwords, and authenticated remote URLs outside the repository.
 The setting accepts only the boolean values `true` and `false`; it is unset by
 default for compatibility with existing local Git setups.
 
+## GitHub-side enforcement
+
+GitHub's native **required signed commits** rule is enabled for this repository's
+`main` branch. This server-side rule is independent of
+`push.main.requireSigned`: it rejects an unsigned commit whether it arrives from
+the guarded helper, a normal Git client, an API call, or GitHub Actions. The
+branch remains compatible with direct-to-main delivery; the policy does not
+require pull requests or status checks.
+
+Use the read-only verifier below to confirm that the live repository rule is
+still active:
+
+```sh
+pnpm --filter @workspace/scripts run check:github-signed-commit-policy -- \
+  --repo ravenslight2010/Production-run-calculator
+```
+
+The verifier uses the GitHub CLI's existing authentication and prints only the
+policy result. It does not store a GitHub token, signing key, or authenticated
+remote URL in the repository. `.github/repository-policy.md` records the
+expected live configuration, and
+`.github/signed-commit-policy-evidence.md` retains the credential-free
+activation result. A missing or inactive rule is a failure and must be repaired
+in GitHub before delivering to `main`.
+
 ## Recovery
 
 - **Validation failed:** fix the reported issue, restage the intended files,

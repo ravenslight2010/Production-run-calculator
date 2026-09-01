@@ -18,6 +18,7 @@
     "check-department-playwright-projects": "tsx ./src/check-department-playwright-projects.mts",
     "check-operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.mts",
     "check:ci-binary-provenance": "bash ./src/check-ci-binary-provenance.sh",
+    "check:github-signed-commit-policy": "bash ./src/check-github-signed-commit-policy.sh",
     "check:workflows": "bash ./src/check-workflows.sh",
     "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
