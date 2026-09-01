@@ -11,6 +11,12 @@ The production line is a U-shaped physical flow:
 - The Freeze tunnel also carries pizzas side by side.
 - Every other line section is single-file.
 
+Terminology boundary:
+
+- **Freeze tunnel** means the physical production-line tunnel after App 4.
+- **Freezer pulls**, **freezer surplus**, and **freezer-pull recovery** mean warehouse/inventory workflows for product or materials in freezer storage.
+- These are separate concepts; do not use “freezer” as shorthand for the Freeze tunnel.
+
 Upstream support flow:
 
 - Standby dough → Dough mixer → Dough hopper.
@@ -29,4 +35,4 @@ Visual conventions from the reference:
 
 **Why:** The canvas reflects the factory's physical handoffs and capacity constraints, not just the application's navigation. Preserving these relationships prevents future UI, reporting, or workflow work from implying the wrong line direction or lane width.
 
-**How to apply:** Use this as the source of truth when designing station views, material-flow diagrams, warehouse handoffs, production calculations, or future canvas references. Keep the right-to-left main line, the App 4-to-freezer handoff, the two-wide exceptions, and the single-file default explicit.
+**How to apply:** Use this as the source of truth when designing station views, material-flow diagrams, warehouse handoffs, production calculations, or future canvas references. Keep the right-to-left main line, the App 4-to-Freeze-tunnel handoff, the two-wide exceptions, and the single-file default explicit. Keep Freeze-tunnel work separate from freezer-pull and freezer-surplus work.
