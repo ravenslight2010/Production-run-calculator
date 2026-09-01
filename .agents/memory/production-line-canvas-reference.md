@@ -16,6 +16,7 @@ Terminology boundary:
 - **Freeze tunnel** means the physical production-line tunnel after App 4.
 - **Freezer pulls**, **freezer surplus**, and **freezer-pull recovery** mean warehouse/inventory workflows for product or materials in freezer storage.
 - These are separate concepts; do not use “freezer” as shorthand for the Freeze tunnel.
+- The updated map also shows Warehouse as a separate area containing Warehouse cooler and Warehouse freezer zones; those are not line stations.
 
 Upstream support flow:
 
