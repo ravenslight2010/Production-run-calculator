@@ -1,0 +1,13 @@
+{
+  "duplicateNames": [
+    {
+      "name": "skill-creator",
+      "roots": [
+        "agents",
+        "secondary"
+      ],
+      "routeTo": "agents",
+      "reason": "The project-authored skill takes precedence over the managed copy."
+    }
+  ]
+}

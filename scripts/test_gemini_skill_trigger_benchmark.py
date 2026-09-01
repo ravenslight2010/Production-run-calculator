@@ -41,6 +41,20 @@ class Fixture:
 
 
 class GeminiBenchmarkTests(unittest.TestCase):
+    def test_checked_in_benchmark_preserves_provider_boundaries(self):
+        root = Path(__file__).resolve().parents[1]
+        corpus_payload = json.loads((root / "skill-trigger-benchmark.json").read_text())
+        runtime_metrics = corpus_payload["runtime_metrics"]
+        self.assertTrue(runtime_metrics)
+        self.assertTrue(all(metric["precision"] is None for metric in runtime_metrics))
+        self.assertTrue(all("unavailable" in metric["status"] for metric in runtime_metrics))
+
+        report = (root / "skill-trigger-benchmark.md").read_text()
+        self.assertIn("not model observations", report)
+        self.assertIn("not claims that Claude would trigger", report)
+        queue = json.loads((root / "gemini-skill-trigger-review-queue.json").read_text())
+        self.assertTrue(queue["manual_decisions_excluded_from_metrics"])
+
     def test_valid_classification_and_validation(self):
         value = validate_classification({"decision": "trigger", "confidence": 0.9, "rationale": "clear"})
         self.assertEqual(value, Classification("trigger", 0.9, "clear"))
