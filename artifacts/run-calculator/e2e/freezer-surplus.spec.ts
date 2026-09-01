@@ -219,15 +219,49 @@ for (const viewport of [
       await page.getByTestId("tab-packaging").click();
       const confirmPanel = page.getByTestId("freezer-surplus-confirm");
       await expect(confirmPanel).toBeVisible();
+
+      for (const invalidValue of ["", "1.5", "0", "-1"]) {
+        await confirmPanel.getByLabel("Excess finished cases").fill(invalidValue);
+        await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
+        await expect(confirmPanel).toBeVisible();
+        await expect(confirmPanel.getByRole("status")).toContainText(
+          "Enter a positive whole number of excess cases.",
+        );
+      }
+
+      let rejectedPost = false;
+      await page.route("**/api/freezer-surplus", async (route) => {
+        if (route.request().method() === "POST" && !rejectedPost) {
+          rejectedPost = true;
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: "Freezer surplus save rejected for browser recovery check.",
+            }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
       await confirmPanel.getByLabel("Excess finished cases").fill("20");
+      await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
+      await expect(confirmPanel).toBeVisible();
+      await expect(confirmPanel.getByRole("alert")).toContainText(
+        "Freezer surplus save rejected for browser recovery check.",
+      );
+      expect(rejectedPost).toBe(true);
+
+      await page.unroute("**/api/freezer-surplus");
       await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
       await expect(confirmPanel).toBeHidden();
 
-      const lot = await db.query<{ id: string }>(
-        "SELECT id FROM freezer_surplus_lots WHERE brand = 'Freezer E2E' ORDER BY created_at DESC LIMIT 1",
+      const lots = await db.query<{ id: string }>(
+        "SELECT id FROM freezer_surplus_lots WHERE brand = 'Freezer E2E' ORDER BY created_at DESC",
       );
-      expect(lot.rows).toHaveLength(1);
-      fixture.lotId = lot.rows[0].id;
+      expect(lots.rows).toHaveLength(1);
+      fixture.lotId = lots.rows[0].id;
 
       await page.getByTestId("tab-warehouse").click();
       const warehousePanel = page.getByTestId("freezer-surplus-warehouse");
