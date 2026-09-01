@@ -13,9 +13,9 @@ The post-merge script runs `pnpm install --frozen-lockfile` then a Drizzle schem
   - **Why:** post-merge runs non-interactively with stdin closed. Plain `drizzle-kit push` opens an interactive column-rename resolver (`promptColumnsConflicts`) whenever the live DB drifts from the schema (common: isolated task-agent DBs still carry pre-migration columns). With no TTY it renders forever and the setup times out.
 - Keep the post-merge timeout generous (set to 180000ms).
   - **Why:** install (~30s, even when "Already up to date") + schema push (~40s) totals ~70s on this monorepo. The original 20000ms ceiling killed the run before push even started. Measured a clean run at ~71s.
-- Keep the root `packageManager`/pnpm engine compatible with the pnpm binary used by configured workflows, and disable pnpm's package-manager auto-management inside the post-merge hook.
-  - **Why:** pinning a newer pnpm than Replit's workflow binary caused pnpm to recursively run `pnpm add pnpm@...`; the process tree exhausted thread/process limits and broke every workflow before its real command started.
-  - **How to apply:** verify the actual workflow pnpm version before changing the root pin. Using Corepack for a newer version is safe only if every workflow command and nested package script consistently uses Corepack too.
+- When the root requires a newer pnpm than Replit's system binary, the post-merge hook must install Corepack's shim in the workspace-local bin directory and run install with `CI=true`.
+  - **Why:** direct pnpm recursively ran `pnpm add pnpm@...` until process limits were exhausted. Corepack avoided recursion, but pnpm 11 still refused to replace a pnpm-10 modules directory without an explicit non-interactive environment.
+  - **How to apply:** run `corepack enable --install-directory "$PWD/.config/npm/node_global/bin" pnpm`, then `CI=true pnpm install --frozen-lockfile`. Replit puts that directory before system pnpm, so reconciled workflows and nested scripts also stay pinned. Do not weaken the repository's required version.
 
 ## The `promptColumnsConflicts` stderr is a REAL failure, not noise
 
