@@ -1,20 +1,50 @@
 ---
 name: db-schema-change
-description: Handle any change to the Postgres schema under lib/db/src/schema/*. Use whenever modifying, adding, or removing a Drizzle table/column, or when a migration/db push is needed. Encodes the rules for this app: additive-only on populated tables, use db push (plain push hangs; push-force), re-run lib typechecks after touching the schema, and consult the relevant .agents/memory docs (e.g. data-heal-playbook) because schema changes affect stored data.
+description: Compatibility router for any Postgres schema change under lib/db/src/schema/*. Use whenever modifying, adding, or removing a Drizzle table/column, or when a migration/db push is needed. For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.
 ---
 
 # DB Schema Change
 
-Apply before and after any edit under `lib/db/src/schema/*`.
+This is the compatibility entry point for all schema work. The detailed,
+ordered procedure for adding a field or column to an existing table lives in
+`.agents/skills/schema-change-checklist/SKILL.md`; read and follow that skill
+instead of maintaining a second checklist.
 
-1. **Prefer additive-only on populated tables** — production data already exists. Adding a table, or adding a nullable/`withDefault` column, is safe. Dropping or renaming columns/tables on populated tables destroys data — design for additive first, and if a destructive change is truly required, say so in plain language to the user before doing it.
+## Route first
 
-2. **Update/regenerate zod schemas as needed** — the API contract derives zod schemas from the Drizzle schema (`createInsertSchema` / `createSelectSchema`). If a raw jsonb field breaks an inferred schema (v3/v4-type errors seen in `auditLog.ts` / `syncConflictLog.ts`), replace it with an explicit zod schema rather than leaving inferred types broken.
+- **Adding a field or column to an existing table:** use
+  `schema-change-checklist`. Its ordered steps cover the Drizzle schema,
+  additive `push-force`, both OpenAPI directions, generated clients, route
+  serialization/upserts, consumers, typechecks, and tests.
+- **Adding a new table or another schema change:** use this entry point,
+  preserve the same additive and contract rules below, and add a focused
+  checklist when the change has special data implications.
 
-3. **Run typechecks after the change** — `CI=true pnpm run typecheck` at root, plus any leaf typecheck under the touched package. DB schema changes ripple into the API server and shared libs, so a root typecheck is required.
+## Shared guardrails
 
-4. **Push the schema, don't hand-apply SQL** — use the db push flow for dev. `db push` plain can hang; use `db push-force` for the dev/CI database. Confirm the change is pushed in dev before committing. (No local Postgres: true verification happens in the CI `test-db` job with the Postgres service container.)
+1. **Prefer additive-only on populated tables.** Production data already
+   exists. Adding a table or a nullable/defaulted column is normally safe.
+   Dropping or renaming populated tables/columns destroys data; explain that
+   impact before taking a destructive approach.
 
-5. **Consult `.agents/memory` first** — this repo stores operational knowledge about how schema changes interact with stored data (see `data-heal-playbook`, `replit.md`). If a schema change invalidates already-saved rows (profiles, pools, day-state), a bug-fix alone is not enough — plan a data heal and tell the user what will change live.
+2. **Keep the API contract in sync.** Update both request and response
+   OpenAPI shapes when the field crosses the API boundary, then regenerate
+   checked-in Zod and React Query clients. Never hand-edit generated output.
+   If a raw `jsonb` field breaks an inferred Zod schema, replace the inference
+   with an explicit Zod schema rather than leaving the generated types broken.
 
-6. **Keep the OpenAPI contract in sync** — if the change alters request/response shapes, update `lib/api-spec` so the web app and API server agree. Additive columns usually need an API-visible shape only if the client consumes them.
+3. **Run typechecks after the change.** Use `CI=true pnpm run typecheck` at
+   the root and the relevant leaf checks. Schema changes ripple into the API
+   server and shared libraries.
+
+4. **Push the schema, don't hand-apply SQL.** Use
+   `pnpm --filter @workspace/db run push-force` for the dev/CI database;
+   plain `push` can hang on an interactive prompt. Verify the resulting
+   schema before committing.
+
+5. **Check stored-data impact before editing.** Read the relevant
+   `.agents/memory` guidance. If the change repairs or invalidates existing
+   profiles, pools, or day-state, route to
+   `.agents/skills/data-heal-playbook/SKILL.md`, plan a marker-guarded heal,
+   and tell the user what will change live. A schema edit alone is not a data
+   repair.

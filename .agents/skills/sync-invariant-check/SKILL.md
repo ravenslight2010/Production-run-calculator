@@ -16,10 +16,20 @@ Read this skill before shipping any change to:
 - `artifacts/api-server/src/lib/protectRunValues.ts`
 - `artifacts/run-calculator/src/storage.ts` (sync-receive helpers, stamp maps)
 - `artifacts/run-calculator/src/home.tsx` (SSE apply callback, push logic, `buildSyncPayload`, `applySyncCallbackRef`)
-- `_archived/mobile/context/sync/` (client.ts, mapping.ts)
+- the current web sync handlers and shared storage helpers listed above; any
+  separately maintained native sync client must be inspected from its current
+  checkout rather than an archived repository path
 - Any file that adds a field to `SyncPayload`, `RunMeta`, or `FormValues`/`DEFAULT_VALUES`
 - Foreground/focus/visibility/online wake handling or any code that releases
   auto-track after a sleeping-device reconciliation
+
+## Boundary with state-accuracy checks
+
+Use this skill for sync transport, persistence, LWW stamps, reset epochs,
+SSE/day-state merge, and sleeping-device adoption. Use
+`state-accuracy-check` for timer/counter math, auto-track bookkeeping,
+pause/resume, and the first post-wake counter tick. Read both when a wake
+handoff crosses those boundaries; do not duplicate timing formulas here.
 
 Out of scope: inventory SSE stream (separate invariants).
 

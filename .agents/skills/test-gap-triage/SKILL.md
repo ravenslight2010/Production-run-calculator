@@ -28,7 +28,11 @@ Do not replace specialist skills. Route to them and let their detailed invariant
 - `spec-import-guard` and `import-bug-investigation` for spec/premix/cheese/shipping imports and aliases;
 - `data-heal-playbook` when incorrect values may already be persisted;
 - `schema-change-checklist` when the proposed fix adds a persisted field/column;
-- `testing` for real-browser flows; `release-checklist` for pre-publish confidence.
+- `testing` for a general real-browser flow; `operational-browser-verification`
+  for manager operational journeys, scoped navigation, reload persistence,
+  import-history reopening, sync diagnostics, or startup evidence;
+- `release-checklist` for pre-publish evidence; `production-go` only when the
+  user asks for a release-readiness/GO-NO-GO decision.
 
 If a requested category has no dedicated local skill (for example accessibility, responsive layout, visual baselines, or operational alerts), use the closest testing/release guidance and explicitly label the recommendation as a prerequisite or manual check rather than pretending a specialist checklist exists.
 
@@ -101,6 +105,22 @@ Recommend one primary test type and explain why:
 - **Manual verification:** operational alert delivery, deployment/workflow behavior, external notification, or a cost/risk boundary that automation cannot safely reproduce. State the exact steps and evidence to collect.
 
 Use a second layer only for a demonstrated boundary: for example, a sync bug normally gets an API invariant test plus one client adoption scenario, while a pure math bug normally needs only unit coverage. “Add all test types” is not a triage result.
+
+### Composition boundaries
+
+- Choose `testing` for the smallest ordinary browser flow. Add
+  `operational-browser-verification` only when the journey needs its
+  manager/scope/navigation/reload/log/screenshot evidence contract.
+- Choose `release-checklist` to gather publish gates. Choose `production-go`
+  when the requested output is the single final GO/NO-GO decision; it composes
+  the checklist and does not replace it.
+- Choose `state-accuracy-check` for live state math and bookkeeping, and
+  `sync-invariant-check` for persistence and convergence. Read both only when
+  the reported boundary genuinely crosses them.
+- For imports, use `import-bug-investigation` and `spec-import-guard` to find
+  the first parse/link/persistence divergence. Add `data-heal-playbook` only
+  when incorrect values are already stored; it does not replace the import
+  diagnosis.
 
 ### 6. Produce a bounded plan
 

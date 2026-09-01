@@ -21,6 +21,15 @@ Use this skill **before completing any task** that touches:
 - Run pause/resume handlers (`pausedAt`, stoppage recording, `runStatus` transitions)
 - SSE sync receive or `form.reset()` call sites
 
+## Boundary with sync checks
+
+Use this skill for timer, counter, auto-track, pause/resume, and live-form
+accuracy. Use `sync-invariant-check` for transport and persistence concerns
+such as LWW stamps, SSE merge order, reset epochs, wake reconciliation, and
+server convergence. When a sync change affects the first post-wake tick, read
+both skills: sync owns adoption-before-publish, while this skill owns the
+counter rebase and timing math.
+
 ---
 
 ## Six Accuracy Categories
@@ -124,7 +133,13 @@ Use this skill **before completing any task** that touches:
 
 **Where:** `LiveRunContext.tsx` — `pressCasesLeft`, `pressDone` in the `calc` useMemo; `useAutoTrack.ts` — `doughFeedComplete`; `useNotifications` — two-stage switchover latches; `home.tsx` — next-run pre-seed effect
 
-**Both platforms.** Mobile `pressDone` is count-based (`casesCompletedTotal + casesOnLine >= casesNeeded`) matching web semantics — see `_archived/mobile/context/RunContext.tsx`. Mobile's separate `doughFeedComplete` gate (used to stop tray/batch auto-track) uses a time-based `feedCasesRaw` (elapsed with no tunnel offset), which is a distinct gate from `pressDone` — do not conflate the two.
+**Web and any separately maintained native client must be checked independently.**
+The web `pressDone` contract is count-based
+(`casesCompletedTotal + casesOnLine >= casesNeeded`). A native client's
+`doughFeedComplete` gate may use time-based feed cases with no tunnel offset;
+that is distinct from `pressDone` and must not be conflated. Verify native
+behavior from its current checkout when it is in scope rather than relying on
+an archived repository path.
 
 **Core invariant:** `pressDone = casesCompleted + casesInFreezer >= casesNeeded` (count-based, NOT elapsed-time). This is the correct trigger because the dough crew's work ends when everything is either cased or in the freezer tunnel — the physical press is done.
 

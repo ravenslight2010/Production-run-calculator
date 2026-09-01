@@ -10,6 +10,13 @@ description: >
 
 # Schema Change Checklist
 
+## Canonical ownership
+
+This is the canonical, detailed procedure for adding a field or column to an
+existing database table. `.agents/skills/db-schema-change/SKILL.md` is only a
+compatibility router for broader schema changes; do not duplicate or maintain
+an alternative ordered checklist there.
+
 ## When to use this skill
 
 Read this skill **before implementing** any task that adds a new column or field to an existing
@@ -158,7 +165,7 @@ pnpm --filter @workspace/api-zod run typecheck  # should be clean after codegen
 Search for every place the entity type is used in the web and mobile apps:
 
 ```bash
-grep -r "\.isPrep" artifacts/run-calculator/src _archived/mobile/src --include="*.ts" --include="*.tsx"
+grep -r "\.isPrep" artifacts/run-calculator/src lib --include="*.ts" --include="*.tsx"
 grep -r "Mix\b" artifacts/run-calculator/src --include="*.ts" --include="*.tsx" -l
 ```
 
@@ -166,6 +173,9 @@ grep -r "Mix\b" artifacts/run-calculator/src --include="*.ts" --include="*.tsx" 
 - If the new field drives UI behavior, add the rendering/logic here.
 - If the frontend sends the field back (e.g. via a save form), confirm the form state type includes
   it and it is included in the POST body.
+- The maintained client in this repository is the web app and shared
+  libraries. If a separately maintained native client is also in scope, verify
+  its current checkout; do not use an archived path as a source of truth.
 
 ### 10. Tests
 
@@ -222,7 +232,7 @@ This is the canonical incident this skill was written to prevent.
 | 6. toDbValues | same file — `isPrep: item.isPrep ?? false` |
 | 7. onConflictDoUpdate | same file — `isPrep: values.isPrep` in the SET clause |
 | 8. Typecheck | `pnpm --filter @workspace/api-server run typecheck` |
-| 9. Frontend | search `artifacts/run-calculator/src` and `_archived/mobile/src` for `isPrep` usage |
+| 9. Frontend | search `artifacts/run-calculator/src` and relevant `lib/*` consumers; separately verify any native client from its current checkout |
 
 ---
 
