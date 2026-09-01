@@ -15,6 +15,9 @@ one-time data heals.
 Use this as the repository-specific release gate after reviewing the changed
 surface. Compose with, rather than duplicate, `review-before-shipping` for
 security, privacy, dependency, authorization, and deployment-fit decisions.
+Use `production-go` when the user asks for a final production-readiness or
+GO/NO-GO decision; this checklist supplies the evidence and does not make
+that decision on its own.
 Do not recommend deployment until every required and applicable gate below has
 recorded evidence.
 

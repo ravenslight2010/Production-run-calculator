@@ -7,6 +7,14 @@ description: Create new skills, modify and improve existing skills, and measure 
 
 A skill for creating new skills and iteratively improving them.
 
+## Skill roots and routing
+
+For root ownership, duplicate-name precedence, and the schema checklist
+relationship, read `.agents/skills/README.md`. In this repository the editable
+`.agents/skills/skill-creator` owns maintenance and evaluation guidance, while
+`.local/secondary_skills/skill-creator` is a concise generic creation guide.
+Do not edit either the secondary or platform-managed copy to resolve overlap.
+
 For maintenance-mode guidance, read `references/maintenance.md` when improving
 an existing skill. It covers identity preservation, bounded evaluation, safety,
 and completion checks without expanding the core workflow.

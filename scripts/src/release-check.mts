@@ -25,7 +25,8 @@ type StepStatus =
   | "PASS"
   | "FAIL"
   | "INFRASTRUCTURE TIMEOUT"
-  | "INFRASTRUCTURE ERROR";
+  | "INFRASTRUCTURE ERROR"
+  | "NOT REACHED";
 
 export type ReleaseStepResult = {
   label: string;
@@ -274,6 +275,10 @@ const steps: ReleaseStep[] = [
   {
     label: "spec reconcile tests",
     args: ["--filter", "@workspace/spec-reconcile", "run", "test"],
+  },
+  {
+    label: "spec import tests",
+    args: ["--filter", "@workspace/spec-import", "run", "test"],
   },
   {
     label: "scheduled recipe check tests",
@@ -734,7 +739,7 @@ export function validateReleaseReport(
   if (!gateSection) {
     throw new Error("Release report is malformed: missing gate results.");
   }
-  const rows = [...gateSection.matchAll(/^\| (.+?) \| (PASS|FAIL|INFRASTRUCTURE TIMEOUT|INFRASTRUCTURE ERROR) \|/gm)]
+  const rows = [...gateSection.matchAll(/^\| (.+?) \| (PASS|FAIL|INFRASTRUCTURE TIMEOUT|INFRASTRUCTURE ERROR|NOT REACHED) \|/gm)]
     .map((match) => ({ label: match[1], status: match[2] }));
   const expectedLabels =
     options.expectedLabels ??
@@ -886,11 +891,9 @@ export function formatReleaseReport(
     environment?: string;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
+    expectedLabels?: readonly string[];
   } = {},
 ): string {
-  const cleanStartPassed =
-    results.find((result) => result.label === "clean-start smoke")?.status ===
-    "PASS";
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
@@ -899,6 +902,38 @@ export function formatReleaseReport(
     const step = steps.find((candidate) => candidate.label === label);
     return step ? `pnpm ${step.args.join(" ")}` : "fixture command unavailable";
   };
+  const releaseLabels = releaseGateLabelsForMode(mode);
+  const expectedLabels =
+    metadata.expectedLabels ??
+    (results.length > 0 &&
+    results.every((result) => releaseLabels.includes(result.label))
+      ? releaseLabels
+      : results.map((result) => result.label));
+  const resultByLabel = new Map(
+    results.map((result) => [result.label, result] as const),
+  );
+  const orderedResults: ReleaseStepResult[] = expectedLabels.map(
+    (label) =>
+      resultByLabel.get(label) ?? {
+        label,
+        status: "NOT REACHED",
+        elapsedMs: 0,
+      },
+  );
+  const failed = orderedResults.filter((result) => result.status === "FAIL");
+  const interrupted = orderedResults.filter((result) =>
+    result.status.startsWith("INFRASTRUCTURE"),
+  );
+  const notReached = orderedResults.filter(
+    (result) => result.status === "NOT REACHED",
+  );
+  const cleanStartResult = orderedResults.find(
+    (result) => result.label === "clean-start smoke",
+  );
+  const summarize = (items: readonly ReleaseStepResult[]): string =>
+    items.length === 0
+      ? "none"
+      : items.map((item) => `${item.label} (${item.status})`).join("; ");
   const revision = metadata.revision ?? "unknown";
   const decision =
     metadata.decision ??
@@ -920,7 +955,7 @@ export function formatReleaseReport(
     "",
     "| Gate | Result | Elapsed | Command |",
     "| --- | --- | ---: | --- |",
-    ...results.map(
+    ...orderedResults.map(
       (result) =>
         `| ${result.label} | ${result.status} | ${Math.round(
           result.elapsedMs / 1000,
@@ -929,9 +964,11 @@ export function formatReleaseReport(
     "",
     "## Preview evidence",
     "",
-    cleanStartPassed === undefined
+    cleanStartResult === undefined || cleanStartResult.status === "NOT REACHED"
       ? "- Clean-start did not run; no preview evidence was produced."
-      : `- Clean-start: **${cleanStartPassed ? "PASS" : "FAIL"}**`,
+      : `- Clean-start: **${
+          cleanStartResult.status === "PASS" ? "PASS" : "FAIL"
+        }**`,
     evidenceLink(
       "clean-start/clean-start-evidence.json",
       "Clean-start evidence",
@@ -974,10 +1011,12 @@ export function formatReleaseReport(
     "## Operational review",
     "",
     "Operational warnings: none",
+    `Failures or accepted exceptions: ${summarize(failed)}`,
+    `Interrupted gates: ${summarize(interrupted)}`,
+    `Not-reached gates: ${summarize(notReached)}`,
     "Accepted exceptions: none",
     "",
     `Decision: ${decision}`,
-    "Failures or accepted exceptions: none",
     "",
   ];
   return `${lines.join("\n")}\n`;
@@ -988,6 +1027,7 @@ async function writeReleaseReport(
   metadata: {
     revision: string;
     decision: "GO" | "NO-GO";
+    expectedLabels?: readonly string[];
   },
 ): Promise<string> {
   const reportPath = resolve(
@@ -1283,6 +1323,7 @@ async function main(): Promise<void> {
       const reportPath = await writeReleaseReport(results, {
         revision,
         decision: "GO",
+        expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
       });
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
@@ -1307,6 +1348,7 @@ async function main(): Promise<void> {
       `\nRelease report: ${await writeReleaseReport(results, {
         revision,
         decision: "NO-GO",
+        expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
       })}`,
     );
   } catch (error) {

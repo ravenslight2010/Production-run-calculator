@@ -7,8 +7,9 @@
     "audit:source-snapshot": "tsx ./src/capture-source-audit-snapshot.mts",
     "audit:source-compare": "tsx ./src/compare-source-audit.mts",
     "test:source-compare": "tsx ./src/compare-source-audit.test.mts",
+    "test:skill-catalog": "tsx ./src/skill-catalog.test.mts",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
-    "test": "bash ./src/check-model-version-bump.test.sh && pnpm run test:source-compare",
+    "test": "bash ./src/check-model-version-bump.test.sh && bash ./src/push-main.test.sh && pnpm run test:source-compare && pnpm run test:skill-catalog",
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
     "test:release-evidence": "tsx ./src/release-evidence.test.mts && tsx ../artifacts/run-calculator/e2e/release-duration-reporter.unit.mts",
     "test:release-resume": "tsx ./src/release-resume.integration.test.mts",
@@ -17,9 +18,12 @@
     "check-department-playwright-projects": "tsx ./src/check-department-playwright-projects.mts",
     "check-operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.mts",
     "check:ci-binary-provenance": "bash ./src/check-ci-binary-provenance.sh",
+    "check:github-signed-commit-policy": "bash ./src/check-github-signed-commit-policy.sh",
     "check:workflows": "bash ./src/check-workflows.sh",
+    "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
     "check:clean-start": "tsx ./src/verify-clean-start.mts",
+    "push:main": "bash ./src/push-main.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

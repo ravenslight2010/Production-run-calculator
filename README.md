@@ -73,6 +73,19 @@ pnpm run build            # typecheck + build all packages
 - CI (GitHub Actions): typecheck, unit tests, API tests with a Postgres service, web/API builds, and a non-blocking security audit.
 - Dependabot keeps npm dependencies patched; the pinned Expo (mobile) toolchain is excluded from auto-updates.
 
+### Skill catalog maintenance
+
+Run `pnpm run check:skill-catalog` to inventory the editable and managed skill
+roots. The catalog contract treats `.agents/skills` and
+`.local/custom_skills` as editable, and `.local/skills` and
+`.local/secondary_skills` as platform-managed. Editable skills must have valid
+kebab-case metadata, complete local references, and stay within the 500-line
+guidance; managed-root findings are reported as warnings because those files
+are platform-owned. The checker only follows local Markdown link targets in a
+skill folder (`SKILL.md`, `./`, `../`, `references/`, `scripts/`, or `assets/`)
+and ignores URLs, anchors, and other prose. Intentional cross-root duplicates
+belong in `skill-catalog-allowlist.json` with an explicit routing target.
+
 ## Product
 
 - Pizza production line planning, scheduling, and inventory for floor staff (web + mobile).

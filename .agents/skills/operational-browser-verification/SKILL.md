@@ -32,6 +32,15 @@ Do not use it as a substitute for:
 Responsive web behavior at a specified viewport is in scope. Real mobile hardware is
 out of scope unless the request explicitly requires device-only behavior.
 
+## Boundary with general testing
+
+Use the general `testing` skill for a focused browser flow whose evidence is
+limited to user-visible behavior. Use this skill when the flow also needs
+manager/capability authorization, facility scoping, source-workflow
+navigation, import-review reopening, sync diagnostics, reload persistence, or
+startup/log evidence. It supplements rather than replaces ordinary Playwright
+coverage and API/integration tests.
+
 ## Required test-plan contract
 
 Before asking the browser tester to run, write a plan with every field below. A plan

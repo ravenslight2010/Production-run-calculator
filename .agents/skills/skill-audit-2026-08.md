@@ -40,3 +40,15 @@ overlap, safety boundaries, and output contracts.
   measured trigger-rate regression.
 - Existing project-specific skills with valid metadata and adequate contracts
   were left unchanged to avoid needless churn.
+
+## Ownership and routing record
+
+- Root ownership, precedence for duplicate names, the `skill-creator` overlap,
+  and the schema-checklist relationship are documented in
+  `.agents/skills/README.md`.
+- `.local/secondary_skills/` and `.local/skills/` remain read-only. Findings
+  about their content are recorded as routing/documentation issues rather than
+  fixed by editing managed files.
+- The deterministic trigger preflight is not used to rewrite descriptions
+  without model-evaluation evidence; provider-specific benchmark behavior
+  remains separate from catalog maintenance.

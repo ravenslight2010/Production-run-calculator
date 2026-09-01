@@ -11,6 +11,8 @@ future work. This skill composes with the repository's detailed
 the commands and surface-specific gates. Also read
 `.local/custom_skills/review-before-shipping/SKILL.md` for shipping,
 authorization, dependency, privacy, and deployment-fit gates.
+Use `release-checklist` for evidence gathering even when the user asks only for
+the decision; do not substitute this report for the checklist's required gates.
 
 ## 1. Establish the decision contract
 
