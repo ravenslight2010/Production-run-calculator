@@ -1,9 +1,0 @@
-
-> @workspace/run-calculator@0.0.0 dev /home/runner/workspace/artifacts/run-calculator
-> exec vite --config vite.config.ts --host 0.0.0.0
-
-
-  VITE v7.3.6  ready in 2429 ms
-
-  ➜  Local:   http://localhost:18082/
-  ➜  Network: http://172.24.0.2:18082/

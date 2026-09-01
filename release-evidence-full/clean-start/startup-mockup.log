@@ -1,9 +1,0 @@
-
-> @workspace/mockup-sandbox@2.0.0 dev /home/runner/workspace/artifacts/mockup-sandbox
-> exec vite dev
-
-
-  VITE v7.3.6  ready in 923 ms
-
-  ➜  Local:   http://localhost:18180/__mockup
-  ➜  Network: http://172.24.0.2:18180/__mockup
