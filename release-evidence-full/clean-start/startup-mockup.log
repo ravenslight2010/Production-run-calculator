@@ -1,6 +1,0 @@
-$ exec vite dev
-
-  VITE v7.3.6  ready in 440 ms
-
-  ➜  Local:   http://localhost:18180/__mockup
-  ➜  Network: http://172.24.0.2:18180/__mockup
