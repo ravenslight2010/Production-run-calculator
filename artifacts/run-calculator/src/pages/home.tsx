@@ -330,6 +330,7 @@ import {
 import {
   confirmFreezerSurplus,
   fetchFreezerSurplus,
+  getFreezerSurplusRemainingMs,
   replaceFreezerSurplusAllocation,
 } from "../freezerSurplus";
 import MixesManager from "../components/MixesManager";
@@ -21834,6 +21835,8 @@ function FreezerSurplusPanel({
   busy,
   error,
   completedRun,
+  freezerTimeMin,
+  nowMs,
   pendingRuns,
   getOriginalTarget,
   onConfirm,
@@ -21845,6 +21848,8 @@ function FreezerSurplusPanel({
   busy: boolean;
   error: string | null;
   completedRun?: RunMeta | null;
+  freezerTimeMin?: number;
+  nowMs?: number;
   pendingRuns?: RunMeta[];
   getOriginalTarget: (run: RunMeta) => number;
   onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
@@ -21855,6 +21860,7 @@ function FreezerSurplusPanel({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
   const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
   const runs = pendingRuns ?? [];
 
   async function confirmLot() {
@@ -21870,6 +21876,7 @@ function FreezerSurplusPanel({
     try {
       await onConfirm(completedRun, count, productionDate);
       setCases("");
+      setConfirmedRunId(completedRun.id);
       setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
     } catch {
       // The parent exposes the server's actionable error.
@@ -21896,6 +21903,12 @@ function FreezerSurplusPanel({
 
   if (mode === "packaging") {
     if (!completedRun?.brand && !completedRun?.flavor) return null;
+    const remainingMs = getFreezerSurplusRemainingMs({
+      endedAt: completedRun.endedAt,
+      freezerTimeMin: freezerTimeMin ?? 0,
+      nowMs: nowMs ?? 0,
+    });
+    if (confirmedRunId === completedRun.id || remainingMs <= 0) return null;
     return (
       <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
         <div className="flex items-start gap-3">
@@ -22158,6 +22171,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   busy={freezerSurplusBusy}
                   error={freezerSurplusError}
                   completedRun={lastEndedRun}
+                  freezerTimeMin={lastEndedRun
+                    ? Number(withTempOverrides(loadRunValues(lastEndedRun.id)).freezerTime) || 0
+                    : 0}
+                  nowMs={nowTime.getTime()}
                   getOriginalTarget={(run) => run.id === currentRunId ? Number(v.casesNeeded) || 0 : Number(loadRunValues(run.id).casesNeeded) || 0}
                   onConfirm={async (run, count, date) => {
                     await confirmRunSurplus(run, count, date);

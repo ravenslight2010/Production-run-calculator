@@ -87,6 +87,7 @@ async function seedRuns(page: Page, fixture: Fixture): Promise<void> {
         skidsCompleted: 5,
         casesOnCurrentSkid: 0,
         pizzasPerCase: 1,
+        freezerTime: 20,
       };
       const futureValues = {
         casesNeeded: 500,
@@ -220,7 +221,7 @@ for (const viewport of [
       await expect(confirmPanel).toBeVisible();
       await confirmPanel.getByLabel("Excess finished cases").fill("20");
       await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
-      await expect(confirmPanel).toContainText(/Added 20 cases as a new freezer lot dated/);
+      await expect(confirmPanel).toBeHidden();
 
       const lot = await db.query<{ id: string }>(
         "SELECT id FROM freezer_surplus_lots WHERE brand = 'Freezer E2E' ORDER BY created_at DESC LIMIT 1",

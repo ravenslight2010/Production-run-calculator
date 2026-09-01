@@ -9,6 +9,23 @@ import {
 
 export type { FreezerSurplusAllocation, FreezerSurplusLedger, FreezerSurplusLot };
 
+export function getFreezerSurplusRemainingMs(input: {
+  endedAt?: number | null;
+  freezerTimeMin: number;
+  nowMs: number;
+}): number {
+  if (
+    typeof input.endedAt !== "number" ||
+    !Number.isFinite(input.endedAt) ||
+    !Number.isFinite(input.freezerTimeMin) ||
+    input.freezerTimeMin <= 0 ||
+    !Number.isFinite(input.nowMs)
+  ) {
+    return 0;
+  }
+  return Math.max(0, input.endedAt + input.freezerTimeMin * 60000 - input.nowMs);
+}
+
 function asDateString(value: unknown): string | null {
   if (typeof value !== "string" || !isValidSurplusDate(value)) return null;
   return value;
