@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,6 +39,21 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  const specImportPackage = JSON.parse(
+    await readFile(
+      new URL("../../lib/spec-import/package.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { scripts?: Record<string, string> };
+  assert.equal(
+    specImportPackage.scripts?.test,
+    "vitest run",
+    "spec-import must expose its Vitest suite through the package test script",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("standard").includes("spec import tests"),
+    "the bounded release gate must explicitly cover spec-import",
+  );
   assert.equal(
     defaultReleaseEvidenceDir("standard"),
     "release-evidence",
@@ -101,6 +123,74 @@ async function run(): Promise<void> {
       expectedMode: "standard",
       expectedLabels: validLabels,
     }),
+  );
+  const incompleteReport = formatReleaseReport(
+    [
+      { label: "gate one", status: "PASS", elapsedMs: 100 },
+      { label: "gate two", status: "FAIL", elapsedMs: 200 },
+      {
+        label: "gate three",
+        status: "INFRASTRUCTURE TIMEOUT",
+        elapsedMs: 300,
+      },
+    ],
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "NO-GO",
+      expectedLabels: ["gate one", "gate two", "gate three", "gate four"],
+    },
+  );
+  assert.match(incompleteReport, /\| gate four \| NOT REACHED \|/);
+  assert.match(
+    incompleteReport,
+    /Failures or accepted exceptions: gate two \(FAIL\)/,
+  );
+  assert.match(
+    incompleteReport,
+    /Interrupted gates: gate three \(INFRASTRUCTURE TIMEOUT\)/,
+  );
+  assert.match(
+    incompleteReport,
+    /Not-reached gates: gate four \(NOT REACHED\)/,
+  );
+  assert.doesNotMatch(
+    incompleteReport,
+    /Failures or accepted exceptions: none/,
+    "a non-passing report must not claim that there were no failures",
+  );
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(incompleteReport, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: ["gate one", "gate two", "gate three", "gate four"],
+      }),
+    "an incomplete report is valid evidence only when explicitly marked NO-GO",
+  );
+  assert.match(incompleteReport, /^Decision: NO-GO$/m);
+  const partialKnownContractReport = formatReleaseReport(
+    [
+      {
+        label: "production dependency audit",
+        status: "FAIL",
+        elapsedMs: 100,
+      },
+    ],
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "NO-GO",
+    },
+  );
+  assert.match(
+    partialKnownContractReport,
+    /\| spec import tests \| NOT REACHED \|/,
+    "recognized release gates should receive the ordered contract automatically",
   );
   const browserDurationReport = [
     "## Historical duration comparison",

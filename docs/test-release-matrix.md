@@ -9,16 +9,17 @@ reported gap, not evidence of coverage.
 
 | Surface | Owner / source of truth | Command or location | Release relevance |
 | --- | --- | --- | --- |
-| Pure calculations and shared decision logic | Library package owning the function | Package `test` scripts; especially `inventory-math`, `production-rules`, `spec-reconcile`, `scheduled-recipe-check`, and `spec-export` | Required when the library or its consumers change |
+| CI-wide shared-library unit tests | Every library package that exposes a `test` script | `.github/workflows/ci.yml`: `pnpm -r --filter "./lib/**" --if-present test` | Broad CI coverage; this is intentionally wider than the bounded release set |
+| Pure calculations and shared decision logic | Library package owning the function | Package `test` scripts; especially `inventory-math`, `production-rules`, `spec-reconcile`, `spec-import`, `scheduled-recipe-check`, and `spec-export` | Required when the library or its consumers change |
 | API route, validation, auth, and persistence contracts | API server route or shared API contract | `@workspace/api-server` unit and integration suites; `test:release:*` shards | Required for server, schema, auth, sync, and contract changes |
 | Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
 | Concurrent sync and inventory mutations | Disposable-Postgres integration tests for live and scheduled-day sync merge retries, cross-date scheduled-write isolation, plus inventory row-lock/idempotency boundaries | `@workspace/api-server run test:release:concurrency` | Required only when sync conflict/retry (including future scheduled-day writes and cross-date isolation), inventory locking, consumption idempotency, or related transaction boundaries change; bounded to 180 seconds |
 | Web rendering and client state | Run Calculator components/hooks | `@workspace/run-calculator test`, typecheck, and focused rendered tests | Required for client or shared UI/state changes |
-| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, and sync-convergence commands | Required when navigation, reload, auth, persistence, or user-visible behavior changes |
+| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, and sync-convergence commands; full release mode enumerates 112 cases with a 30-minute timeout and 25-minute warning | Required when navigation, reload, auth, persistence, or user-visible behavior changes |
 | Accessibility | `accessibility-smoke.spec.ts` and axe checks | `test:e2e:a11y` | Required for interactive UI, semantic, focus, or layout changes |
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
 | PWA/service-worker handoff | `pwa-handoff.spec.ts` self-contained fixture | `test:pwa-handoff` | Required for PWA, service-worker, cache, or update-prompt changes |
-| Import and export pipelines | Import/export libraries and corpus fixtures | `test:spec-reconcile`, `test:spec-export`, `test:corpus`, package-specific import tests | Required for import parsing, linking, aliases, merge, or export changes |
+| Import and export pipelines | Import/export libraries and corpus fixtures | `pnpm --filter @workspace/spec-import run test`, `test:spec-reconcile`, `test:spec-export`, `test:corpus`, package-specific import tests | Required for import parsing, linking, aliases, merge, or export changes |
 | Startup and preview health | Workflow startup and clean-start harness | `check:clean-start` | Required before browser evidence and for run-command, proxy, or workflow changes |
 
 ## Required release sets by change category
@@ -26,12 +27,17 @@ reported gap, not evidence of coverage.
 Run the smallest row that crosses the changed boundary, then run the standard
 release check when publishing:
 
+The standard release check is intentionally bounded. Its explicit shared-library
+test gates are `run-calculator`, `production-rules`, `inventory-math`,
+`spec-reconcile`, `spec-import`, `scheduled-recipe-check`, `spec-export`, and
+`corpus-harness`; it does not claim to replace the CI-wide library sweep above.
+
 | Change category | Required checks |
 | --- | --- |
 | Server-only route or middleware | API typecheck; API unit tests; relevant API integration test (or release integration shards) |
 | Client-only component or pure client logic | Run Calculator typecheck; Run Calculator unit tests; browser smoke when the behavior is user-visible |
 | Sync, SSE, reset, day-state, wake, or live counters | API sync and SSE release suites; focused client sync/wake/state tests; sync-convergence browser journey; use the sync and state-accuracy checklists |
-| Import, alias, recipe linking, or export | Relevant deterministic package tests; corpus test when routing/chunk/merge behavior changes; API integration when persistence is involved |
+| Import, alias, recipe linking, or export | `@workspace/spec-import` and other relevant deterministic package tests; corpus test when routing/chunk/merge behavior changes; API integration when persistence is involved |
 | Database schema or persisted field | Shared/library and API typechecks; schema/integration coverage for the owning route; disposable database release integration shards |
 | Sync or inventory concurrency boundary | API typecheck; relevant route integration suite; `test:release:concurrency` (180-second budget, including disposable same-date convergence and cross-date scheduled-day isolation races) |
 | Auth or capability boundary | API auth/role integration coverage plus an authenticated browser smoke or operational journey for the visible consequence |
