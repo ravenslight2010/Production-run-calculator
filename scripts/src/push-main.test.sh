@@ -39,6 +39,7 @@ make_repo() {
   git -C "$repo" init -q -b main
   git -C "$repo" config user.email "guard-test@example.invalid"
   git -C "$repo" config user.name "Guard test"
+  git -C "$repo" config commit.gpgsign false
   git -C "$repo" remote add origin "$remote"
   printf 'base\n' > "${repo}/tracked.txt"
   cp "$PUSH_SCRIPT" "${repo}/push-main.sh"
@@ -175,6 +176,56 @@ test_success_commits_and_targets_origin_main() {
   [[ "$(cat "$validation_log")" == "validated" ]]
 }
 
+configure_ssh_signing() {
+  local repo="$1"
+  local key="${TEST_ROOT}/guard-signing-key"
+  local allowed_signers="${TEST_ROOT}/guard-allowed-signers"
+
+  ssh-keygen -q -t ed25519 -N '' -C "guard-test@example.invalid" -f "$key"
+  printf 'guard-test@example.invalid namespaces="git" ' > "$allowed_signers"
+  cat "${key}.pub" >> "$allowed_signers"
+
+  git -C "$repo" config push.main.requireSigned true
+  git -C "$repo" config gpg.format ssh
+  git -C "$repo" config user.signingkey "$key"
+  git -C "$repo" config commit.gpgsign true
+  git -C "$repo" config gpg.ssh.allowedSignersFile "$allowed_signers"
+}
+
+test_signed_commit_is_accepted_when_signing_is_required() {
+  local repo
+  repo=$(make_repo signed-required)
+  configure_ssh_signing "$repo"
+  printf 'signed change\n' >> "${repo}/tracked.txt"
+  git -C "$repo" add tracked.txt
+
+  run_push "$repo" bash push-main.sh --message "signed guarded push"
+  assert_status 0
+  assert_contains "$PUSH_OUTPUT" "Guarded push complete"
+  assert_commit_count "$repo" 2
+  git -C "$repo" verify-commit HEAD >/dev/null 2>&1
+  [[ "$(git --git-dir="${TEST_ROOT}/signed-required.git" rev-parse refs/heads/main)" == "$(git -C "$repo" rev-parse main)" ]]
+}
+
+test_unsigned_commit_is_rejected_when_signing_is_required() {
+  local repo
+  repo=$(make_repo unsigned-required)
+  git -C "$repo" config push.main.requireSigned true
+  printf 'unsigned change\n' >> "${repo}/tracked.txt"
+  git -C "$repo" add tracked.txt
+
+  run_push "$repo" bash push-main.sh --message "unsigned guarded push"
+  assert_status 1
+  assert_contains "$PUSH_OUTPUT" "signed commit required by push.main.requireSigned"
+  assert_not_contains "$PUSH_OUTPUT" "Guarded push complete"
+  assert_commit_count "$repo" 2
+  if git -C "$repo" verify-commit HEAD >/dev/null 2>&1; then
+    printf 'The unsigned test unexpectedly created a verifiable signature.\n' >&2
+    return 1
+  fi
+  [[ "$(git --git-dir="${TEST_ROOT}/unsigned-required.git" rev-parse refs/heads/main)" != "$(git -C "$repo" rev-parse main)" ]]
+}
+
 test_rejects_known_remote_divergence_before_commit() {
   local repo remote diverged
   repo=$(make_repo divergence)
@@ -225,6 +276,8 @@ test_rejects_branch_and_unstaged_work
 test_rejects_missing_origin
 test_validation_failure_does_not_commit_or_push
 test_success_commits_and_targets_origin_main
+test_signed_commit_is_accepted_when_signing_is_required
+test_unsigned_commit_is_rejected_when_signing_is_required
 test_rejects_known_remote_divergence_before_commit
 test_rejected_push_redacts_credentials
 printf 'All guarded GitHub push tests passed.\n'

@@ -16,6 +16,7 @@ Requires:
   - explicitly staged changes and no unstaged worktree changes
   - a configured origin remote
   - credentials that can push origin/main
+  - when push.main.requireSigned=true, a working Git commit-signing setup
 
 The command runs `pnpm run typecheck` before creating the commit.
 EOF
@@ -85,6 +86,21 @@ remote_url=$(git remote get-url origin 2>/dev/null) \
 [[ -n "$remote_url" ]] \
   || fail "the origin remote is empty"
 
+require_signed_commit=0
+signing_policy=$(git config --get push.main.requireSigned 2>/dev/null || true)
+case "$signing_policy" in
+  '')
+    ;;
+  true)
+    require_signed_commit=1
+    ;;
+  false)
+    ;;
+  *)
+    fail "push.main.requireSigned must be set to true or false"
+    ;;
+esac
+
 status_lines=$(git status --porcelain=v1 --untracked-files=all)
 if [[ -n "$status_lines" ]]; then
   while IFS= read -r status_line; do
@@ -140,6 +156,12 @@ if ! commit_output=$(git commit -m "$message" 2>&1); then
   fail "git commit failed; no push was attempted"
 fi
 print_git_output "$commit_output"
+
+if [[ "$require_signed_commit" -eq 1 ]]; then
+  if ! git verify-commit HEAD >/dev/null 2>&1; then
+    fail "signed commit required by push.main.requireSigned; the new commit is unsigned or could not be verified (no push was attempted)"
+  fi
+fi
 
 push_output=''
 if ! push_output=$(git push --porcelain origin HEAD:main 2>&1); then
