@@ -73,6 +73,18 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # Security overrides formerly stored in package.json. Keep them here because
+  # pnpm 11 reads workspace overrides and ignores package.json.pnpm.
+  image-size: ">=2.0.2"
+  body-parser: "2.3.0"
+  protobufjs: "7.6.5"
+  "minimatch@5>brace-expansion": "2.1.4"
+  "minimatch@10>brace-expansion": "5.0.9"
+  fast-uri: "3.1.5"
+  js-yaml: "4.3.1"
+  undici: "7.29.0"
+  "@esbuild-kit/esm-loader": "npm:tsx@^4.23.12"
+  esbuild: "^0.28.1"
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
   "esbuild>@esbuild/darwin-x64": "-"
@@ -158,9 +170,11 @@ overrides:
   # qs.stringify can crash with a TypeError on malformed comma-format arrays (DoS)
   qs: "^6.15.2"
   # postcss has an XSS via unescaped </style> in stringified output
-  postcss: "^8.5.14"
+  postcss: "8.5.23"
   # @babel/core allows arbitrary file read via sourceMappingURL comments
   "@babel/core": "^7.29.6"
 
 allowBuilds:
-  esbuild: set this to true or false
+  '@google/genai': true
+  esbuild: true
+  protobufjs: true

@@ -253,7 +253,8 @@ async function signUp(page: Page): Promise<void> {
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 60_000 });
   await page.waitForTimeout(500);
   const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (await welcome.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  await welcome.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
+  if (await welcome.isVisible().catch(() => false)) {
     const seen = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/me/onboarding-seen") &&
@@ -359,7 +360,8 @@ async function openSettings(page: Page): Promise<Locator> {
 
 async function dismissUnexpectedDialog(page: Page): Promise<void> {
   const getStarted = page.getByRole("dialog").last().getByRole("button", { name: "Get started", exact: true });
-  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  await getStarted.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+  if (await getStarted.isVisible().catch(() => false)) {
     await getStarted.click();
     await expect(getStarted).toBeHidden();
   }

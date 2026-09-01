@@ -54,14 +54,14 @@ export type BrowserDurationRegression = {
 const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 const API_SHARD_WARNING_MS = 6 * 60_000;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 108 cases can exceed
+// reset or observe shared disposable live-day state. Its 112 cases can exceed
 // the API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
 // retries.
 const FULL_BROWSER_TIMEOUT_MS = 30 * 60_000;
 const FULL_BROWSER_WARNING_MS = 25 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 108;
+const FULL_BROWSER_EXPECTED_CASES = 112;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
 const rootDir = new URL("../../", import.meta.url).pathname;
 const STATEFUL_RELEASE_LOCK_DIR =

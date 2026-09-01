@@ -312,7 +312,18 @@ test("loads the active view without hiding large queue history", async ({ page }
   // correctly disappeared. Check attachment to decide whether another cursor
   // request is needed, then keep the actual visibility assertion below.
   for (let pageNumber = 0; pageNumber < 10 && (await oldestHistoryItem.count()) === 0; pageNumber += 1) {
+    const nextPageResponse = page.waitForResponse(
+      (response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname.endsWith("/api/manager-action-queue") &&
+          url.searchParams.has("cursor")
+        );
+      },
+    );
     await page.getByRole("button", { name: "Load older history", exact: true }).click();
+    await expect((await nextPageResponse).ok()).toBe(true);
     // The click starts an async cursor request. Do not issue the next click
     // while this one is disabled: on the final page the button is removed as
     // soon as item 1 mounts, which can strand a pending Playwright click.

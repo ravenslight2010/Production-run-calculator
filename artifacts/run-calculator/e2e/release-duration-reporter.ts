@@ -11,7 +11,7 @@ import type {
   TestResult,
 } from "@playwright/test/reporter";
 
-const EXPECTED_CASES = 108;
+const EXPECTED_CASES = 112;
 const repositoryRoot = fileURLToPath(
   new URL("../../../", import.meta.url),
 );

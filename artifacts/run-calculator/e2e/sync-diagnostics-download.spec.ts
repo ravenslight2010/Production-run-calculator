@@ -85,15 +85,22 @@ async function signUp(page: Page, username: string): Promise<void> {
     state: "attached",
     timeout: 25_000,
   });
-  const onboarding = page.getByRole("dialog");
-  await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  // Authenticated startup can finish in stages: the tab shell may attach
+  // before the first-login overview is rendered. Wait briefly for that
+  // delayed overlay so it cannot appear later and block the diagnostics
+  // controls during the journey.
+  await page.waitForTimeout(500);
+  const onboarding = page.getByRole("dialog", {
+    name: /welcome to production run calculator/i,
+  });
+  await onboarding.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: "Close" }).click();
-    await page
-      .locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 })
-      .catch(() => {});
+    await onboarding.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect(onboarding).toBeHidden({ timeout: 10_000 });
+  } else {
+    await page.keyboard.press("Escape");
   }
+  await page.keyboard.press("Escape");
 }
 
 test("downloads a date-scoped sync diagnostic JSON report", async ({ page }) => {
