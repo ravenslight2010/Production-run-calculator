@@ -1,5 +1,18 @@
 import { AlertTriangle, Coffee, Zap, X } from "lucide-react";
 import type { ProactiveAlert } from "../aiProactive";
+import {
+  ADVISORY_AUTO_DISMISS_MS,
+  useAutoDismissNotice,
+} from "../hooks/useAutoDismissNotice";
+
+export const PROACTIVE_NOTICE_NON_URGENT_MS = ADVISORY_AUTO_DISMISS_MS.nonUrgent;
+export const PROACTIVE_NOTICE_URGENT_MS = ADVISORY_AUTO_DISMISS_MS.urgent;
+
+export function proactiveNoticeDurationMs(impact: ProactiveAlert["impact"]): number {
+  return impact === "high"
+    ? PROACTIVE_NOTICE_URGENT_MS
+    : PROACTIVE_NOTICE_NON_URGENT_MS;
+}
 
 // Non-intrusive, dismissible banner for a single proactive shift nudge. Renders
 // nothing when there's no alert. Mirrors the mobile banner (replit.md parity).
@@ -15,6 +28,12 @@ export default function ProactiveAlertBanner({
   // the banner (same as dismiss). Absent on alerts with no suggestedAction.
   onApply?: () => void;
 }) {
+  const autoDismiss = useAutoDismissNotice({
+    identity: alert?.key ?? null,
+    durationMs: alert ? proactiveNoticeDurationMs(alert.impact) : 0,
+    onDismiss,
+  });
+
   if (!alert) return null;
 
   const Icon =
@@ -41,7 +60,9 @@ export default function ProactiveAlertBanner({
       role="status"
       aria-live="polite"
       data-testid="proactive-alert"
+      data-auto-dismiss-ms={proactiveNoticeDurationMs(alert.impact)}
       className={`mx-3 mt-3 flex items-start gap-3 rounded-lg border px-3 py-2.5 print:hidden ${tone}`}
+      {...autoDismiss}
     >
       <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${iconTone}`} />
       <div className="min-w-0 flex-1">

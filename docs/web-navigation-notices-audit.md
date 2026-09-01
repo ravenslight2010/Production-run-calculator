@@ -26,7 +26,7 @@ instruction remaining visible when staff are already in the application:
 | Condition | Primary notice | Browser escalation | Expected action |
 | --- | --- | --- | --- |
 | Dough batch due | Persistent Dough action card | Only while the app is out of view; controlled by **Dough batch due** preference | Dough station: start the next batch, then acknowledge the card |
-| Behind pace | Persistent Run-station action banner plus the pace KPI | None | Run station: investigate throughput before the projected shortfall grows |
+| Behind pace | Run-station action banner plus the pace KPI | None | Run station: investigate throughput before the projected shortfall grows |
 | Manual auto-track override | Persistent Dough or Packaging station banner | None | Resume auto tracking now, or deliberately allow the scheduled resume |
 | Packaging lag | Packaging station inline quick check | None | Update packed cases or clear the packaging backlog |
 | Run time / freezer completion | Existing Run or Pack status | Only while the app is out of view; controlled by the matching notification preference | End the run when time is complete; transition once the freezer is clear |
@@ -130,7 +130,7 @@ section pills are assembled from the current user’s available tabs.
 | --- | --- | --- | --- | --- |
 | Sandbox mode banner | Sandbox users | Current session is in a sandbox scope | Understand that data is isolated; reset only when intended | Persistent above tab content; advisory |
 | Sync/write failure banner | All signed-in users | A day-state sync or inventory write failed | Retry sync; do not assume other devices received changes. The local change remains on this device until acknowledged. | Persistent top-level banner with a retry action; the sync failure cannot be dismissed as resolved without acknowledgment |
-| Proactive alert banner | Relevant shift users; often manager-facing correction | A proactive shift alert is available | Read the nudge; optionally **Apply** its proposed correction or **Dismiss** | Persistent top-level banner above tabs; advisory, one alert shown at a time |
+| Proactive alert banner | Relevant shift users; often manager-facing correction | A proactive shift alert is available | Read the nudge; optionally **Apply** its proposed correction or **Dismiss** | Top-level banner above tabs; low/medium impact auto-dismisses after 10 seconds, high impact after 30 seconds, and pointer/focus interaction pauses the timer |
 | Alert preferences | All signed-in users | User opens Alert & Floor Mode | Toggle account-level browser/in-app alert preferences and Floor Mode | Header menu → dialog; not an operational warning |
 | Browser permission state | All signed-in users | Notification permission is not granted/available | Grant permission if browser alerts are desired | Alert & Floor Mode dialog; preference/setup notice |
 | Saved / sync status | All signed-in users | Ongoing connection and save state | Reassurance or connection awareness; open Sync status for recovery | Header; informational and actionable |
@@ -165,7 +165,7 @@ does not mark an unsent write as delivered.
 | Flexible production-rule violations | Operator/supervisor | A flexible rule is violated | Review/correct when appropriate; start remains possible | Run / setup flow; advisory warning |
 | Missing line setup banner | Active run user | Speed, cycle, pizzas-per-case, or line-time values needed for live calculations are absent | Enter missing line settings | Run surface near operational controls; advisory but calculation-critical |
 | Auto-detected stall prompt | Active run user | Line appears behind with no stoppage logged | **Log stoppage** or **Dismiss** | Run surface; advisory, explicitly actionable/dismissible |
-| Behind-pace alert | Active run user | Pace alert condition is reached | Investigate pace; **Dismiss** after acknowledging | Run surface; red advisory banner |
+| Behind-pace alert | Active run user | Pace alert condition is reached | Investigate pace; **Dismiss** after acknowledging | Run surface; red advisory banner auto-dismisses after 30 seconds when untouched, with pointer/focus interaction pausing the timer |
 | Pace status / catch-up PPM | Active run user | Pace can be calculated | Adjust line pace as needed | Run KPI card; persistent, informational/advisory |
 | Estimated-finish drift | Active run user | Projected finish moves materially from initial estimate | Use the changed finish estimate to plan staffing/hand-off | Run KPI card; advisory |
 | Target reached | Active run user | Completed cases meet or exceed target | End or transition the run when operationally ready | Run completion KPI badge; informational |
