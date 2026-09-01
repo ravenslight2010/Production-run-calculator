@@ -9,6 +9,20 @@ The installed GitHub API connection can read and modify GitHub REST resources, b
 
 **How to apply:** Use the secure secret flow for `GIT_URL`; never print or request its value in chat. Prefer `--force-with-lease` with an explicitly verified expected remote SHA when replacing a diverged branch.
 
+Task-agent merge commits may be unsigned even after GitHub enables required signed
+commits. Configuring signing only affects future commits; delivery must re-sign
+or recreate the local-only history (or create one signed release snapshot) before
+updating protected `main`.
+
+**Why:** GitHub's required-signatures rule evaluates the commits being added to
+the protected branch, while Replit task merges can already exist locally without
+a cryptographic signature.
+
+**How to apply:** Never weaken the GitHub policy to make a push work. Establish
+the signing setup first, choose whether preserving individual local commits or a
+single signed release snapshot is preferred, then push and verify the resulting
+remote tip.
+
 When a root pnpm command forwards user arguments to a package-level script, account for pnpm's separator forwarding; a direct root wrapper keeps the documented `pnpm run ... -- --message` form unambiguous.
 
 **Why:** Nested `pnpm run` commands can pass the separator through as an extra literal argument, making an otherwise standard documented invocation fail before the script parses its options.
