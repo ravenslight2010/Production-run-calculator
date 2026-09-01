@@ -45,8 +45,8 @@ export const NOTIFICATION_KINDS: Array<{
   },
   {
     kind: "freezerEmpty",
-    label: "Freezer empty",
-    description: "When an ended run's freezer has fully drained.",
+    label: "Freeze tunnel empty",
+    description: "When an ended run's Freeze tunnel has fully drained.",
   },
 ];
 

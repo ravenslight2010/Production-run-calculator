@@ -1,5 +1,5 @@
 // Regression tests: after End Run the case/skid auto-track keeps ticking while
-// the freezer tunnel drains (freezerTime minutes after endedAt), advancing by
+// the Freeze tunnel drains (freezerTime minutes after endedAt), advancing by
 // exactly what EXITED the tunnel (calc.casesInFreezer drop between ticks).
 // It must: keep climbing during the drain, stop at freezer-empty, never exceed
 // what was pressed (cased + in-freezer) or the run target, never tick a run
@@ -124,7 +124,7 @@ describe("auto-track freezer-drain phase", () => {
     expect(values.batchesReady).toBe(2);
   });
 
-  it("keeps counting cases as the freezer drains, and product moves freezer→done without double-counting", () => {
+  it("keeps counting cases as the Freeze tunnel drains, and product moves tunnel→done without double-counting", () => {
     const t0 = 1_700_000_000_000;
     const endedAt = t0;
     // 60 cases cased at line-stop, 40 still in the tunnel; target 100.

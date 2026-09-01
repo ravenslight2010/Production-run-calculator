@@ -394,7 +394,7 @@ describe("auto-track tray/batch up/down tracking", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
     const t0 = 1_700_000_000_000;
     // The stop is COUNT-based, not time-based: calc.pressDone flips true when
-    // the real cased count plus live freezer contents reach casesNeeded. From
+    // the real cased count plus live Freeze tunnel contents reach casesNeeded. From
     // that moment the dough counters must freeze — the dough crew is on the
     // NEXT run's dough.
     const v = makeV({ casesNeeded: 100 });

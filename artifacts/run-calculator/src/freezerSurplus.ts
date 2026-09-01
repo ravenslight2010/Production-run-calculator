@@ -11,6 +11,7 @@ export type { FreezerSurplusAllocation, FreezerSurplusLedger, FreezerSurplusLot 
 
 export function getFreezerSurplusRemainingMs(input: {
   endedAt?: number | null;
+  /** Compatibility field: the run's physical Freeze tunnel time in minutes. */
   freezerTimeMin: number;
   nowMs: number;
 }): number {

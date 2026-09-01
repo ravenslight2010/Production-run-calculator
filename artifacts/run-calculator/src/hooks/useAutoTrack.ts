@@ -13,17 +13,17 @@ interface AutoTrackCalc {
   batchesNeeded: number;
   /**
    * True once the press has made everything the run needs — cased product
-   * plus live freezer contents ≥ casesNeeded. Count-based (real packaging
-   * count + freezer model), NOT an elapsed-time estimate: this is what stops
+   * plus live Freeze tunnel contents ≥ casesNeeded. Count-based (real packaging
+   * count + tunnel model), NOT an elapsed-time estimate: this is what stops
    * the dough counters, because from this moment the dough crew is working on
    * the NEXT run's dough.
    */
   pressDone: boolean;
   /**
-   * Live freezer-tunnel contents in cases (the pure computeCasesInFreezer
-   * model). During the post-End freezer drain this is the ONLY source of
-   * case-tick increments: cased count grows exactly by what EXITED the tunnel
-   * since the last tick, so product moves from "in freezer" to "done" without
+   * Live Freeze tunnel contents in cases (the pure computeCasesInFreezer
+   * model). During the post-End tunnel drain this is the ONLY source of
+    * case-tick increments: cased count grows exactly by what EXITED the tunnel
+    * since the last tick, so product moves from "in Freeze tunnel" to "done" without
    * double-counting and the count can never exceed what was pressed.
    */
   casesInFreezer: number;
@@ -1004,7 +1004,7 @@ export function useAutoTrack({
       const expectedCases = autoTrackSuggestion.expectedCases;
       caseNextDueMsRef.current = nowMs + casePeriodMs;
       lastExpectedCasesRef.current = expectedRaw;
-      // Freezer baseline advances on EVERY case tick (even suppressed / while
+      // Freeze tunnel baseline advances on EVERY case tick (even suppressed / while
       // running) so the drain delta is always measured from the latest tunnel
       // state — a suppression window expiring or the running→ended transition
       // never causes a catch-up jump.
@@ -1017,8 +1017,8 @@ export function useAutoTrack({
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
           (Number(form.getValues("casesOnCurrentSkid")) || 0);
         if (drainActive || packagingDrainActive) {
-          // Ended runs use the freezer WIP drop. During a paused packaging
-          // drain, freezer WIP is intentionally frozen at pause, so use the
+          // Ended runs use the Freeze tunnel WIP drop. During a paused packaging
+          // drain, tunnel WIP is intentionally frozen at pause, so use the
           // pause-relative stage clock instead. Both paths baseline first,
           // preventing reload/sync adoption from replaying old output.
           const exited = packagingDrainActive
@@ -1098,7 +1098,7 @@ export function useAutoTrack({
     // Trays / batches: incremental decrement, each at its own cadence.
     // Works after page reloads and naturally handles mid-run replenishments.
     // Stop once the press has made everything the run needs — COUNT-based
-    // (cased product + live freezer contents ≥ casesNeeded, via calc.pressDone),
+    // (cased product + live Freeze tunnel contents ≥ casesNeeded, via calc.pressDone),
     // not an elapsed-time estimate. When the line runs slower or faster than
     // the configured speed, the real counts are what decide when dough stops
     // moving for this run; from that moment the dough crew is on the NEXT run.

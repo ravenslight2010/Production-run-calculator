@@ -2,7 +2,7 @@
 //
 // Spec-import die line-setting blank-fill contract. When a spec sheet states
 // a profile's die type, applySpecImport blank-fills the line settings
-// (crusts/cycle, cycle speed, speed adjustment, freezer time, cases/layer)
+// (crusts/cycle, cycle speed, speed adjustment, Freeze tunnel time, cases/layer)
 // exactly like picking the die by hand on the run form: manager-stored
 // overrides (Manage Lists → Die Defaults, passed in by the commit glue) win,
 // the built-in hard-coded map is the fallback, and values a user (or prior

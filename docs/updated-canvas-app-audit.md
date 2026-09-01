@@ -11,7 +11,7 @@ The current app already keeps the physical tunnel calculation separate from ware
 There are three bounded follow-up areas:
 
 1. **Presentation gap:** the live app exposes three aggregate phases rather than the complete station map and its physical lane rules.
-2. **Terminology gap:** the physical tunnel is still exposed through labels and comments such as **Freezer Time**, **Freezer Draining**, and **freezer WIP**. This is not currently a calculation mix-up, but it can cause operators or future implementers to confuse tunnel state with warehouse freezer state.
+2. **Terminology gap (addressed):** physical line timing and WIP are now labeled **Freeze Tunnel Time**, **Freeze Tunnel Draining**, and **Freeze tunnel WIP**. Warehouse freezer-pull and freezer-surplus data retain their distinct names.
 3. **Tray-capacity gap:** the canvas describes three tray sections with a maximum of 20 trays each, while the app tracks one aggregate `traysOnLine` counter and currently allows automatic production up to 74. The canvas alone is not enough to safely redesign this persisted counter, so this should be treated as a product clarification and bounded domain follow-up rather than an immediate fix.
 
 No schema, sync, inventory-consumption, permission, or warehouse-location change is justified by the canvas update alone.
@@ -60,12 +60,12 @@ The current implementation is behaviorally coherent:
 
 The risk is operator-facing terminology, not a demonstrated data-path collision:
 
-- Setup and die-default surfaces call the physical duration **Freezer Time**.
-- Run status surfaces say **Freezer Draining** and **Freezer Empty**.
-- Comments and tests refer to freezer WIP and freezer drain.
+- Setup and die-default surfaces call the physical duration **Freeze Tunnel Time**.
+- Run status surfaces say **Freeze Tunnel Draining** and **Freeze Tunnel Empty**.
+- Comments and tests identify live WIP and drain timing as belonging to the Freeze tunnel.
 - A future reader could incorrectly infer that these labels refer to warehouse freezer stock or freezer-pull actions.
 
-Recommended bounded terminology work:
+Completed bounded terminology work:
 
 - Prefer **Tunnel time** or **Freeze tunnel time** in user-facing setup and run surfaces.
 - Prefer **Freeze tunnel draining** for the physical post-run transition.

@@ -113,7 +113,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                   {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}%
                 </span>
                 {calc.casesInFreezer > 0 && (
-                  <span className="text-[10px] font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</span>
+                  <span className="text-[10px] font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</span>
                 )}
               </div>
             )}

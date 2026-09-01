@@ -7,7 +7,7 @@
 //   Stage 2 — Freeze tunnel             (freezerTime - preTunnelMin - postTunnelMin)
 //   Stage 3 — Wrapper · Packaging       (postTunnelMin, default 2.5 min)
 //
-// The total line time (freezerTime) is unchanged — this function overlays the
+// The total Freeze tunnel line time (stored as freezerTime) is unchanged — this function overlays the
 // phase display on top of the existing timing model without altering case counts.
 //
 // Pause/resume propagation model
@@ -73,7 +73,7 @@ export interface ComputeLinePhasesArgs {
   preTunnelMin: number;
   /** Duration of Stage 3 (wrapper/packaging), in minutes. */
   postTunnelMin: number;
-  /** Total line time (all three stages combined), in minutes. */
+  /** Total Freeze tunnel line time (all three stages combined), in minutes. */
   freezerTime: number;
   /** Current wall-clock, in ms. */
   nowMs: number;
@@ -165,7 +165,8 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
   if (runStatus === "ended" && endedAt && freezerTime > 0) {
     // Product in Stage 1 always propagates through ALL downstream stages —
     // even if Stage 2/3 were empty at run-end, Stage 1's contents drain into
-    // them over time. The line is not clear until freezerTime has elapsed from
+    // them over time. The line is not clear until the configured Freeze tunnel
+    // time has elapsed from
     // the press stopping, regardless of how early the run ended.
     // Only exception: no product was ever pressed (elapsedMin == 0).
     if (elapsedMin <= 0) {

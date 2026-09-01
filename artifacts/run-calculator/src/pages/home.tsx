@@ -3043,7 +3043,7 @@ export default function Home() {
     () => findMixPresets(currentRun?.brand ?? "", currentRun?.flavor ?? ""),
     [currentRun?.brand, currentRun?.flavor]
   );
-  // Most recently ended run across the whole day — used for freezer-drain countdown
+  // Most recently ended run across the whole day — used for Freeze tunnel drain countdown
   // regardless of which run is currently being viewed.
   const lastEndedRun = dayState.runs.reduce<RunMeta | undefined>((best, r) => {
     if (!r.endedAt) return best;
@@ -14029,7 +14029,7 @@ export default function Home() {
     : "pending";
 
   // Effective values for calculation/display: the Run-tab temporary overrides
-  // (freezer time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
+  // (Freeze tunnel time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
   // Setup fields themselves are never touched.
   const ve = useMemo(() => withTempOverrides(v), [v]);
 
@@ -18938,7 +18938,7 @@ export default function Home() {
                           ["cycleSpeed", "Cycle Speed (rpm)"],
                           ["speedAdjustment", "Speed Adj"],
                           ["approxLineSpeed", "Line Speed"],
-                          ["freezerTime", "Total line time (min)"],
+                          ["freezerTime", "Freeze tunnel time (min)"],
                           ["pizzasPerCase", "Pizzas / Case"],
                           ["casesPerLayer", "Cases / Layer"],
                           ["doughballsPerTray", "Doughballs / Tray"],
@@ -19289,7 +19289,7 @@ function ScreenModeView() {
               <p className="text-lg font-semibold text-muted-foreground">
                 {Math.round(casesPct * 100)}% complete
                 {calc.casesInFreezer > 0 && (
-                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer ({Math.round(casesPctWithFreezer * 100)}%)</span>
+                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in Freeze tunnel ({Math.round(casesPctWithFreezer * 100)}%)</span>
                 )}
               </p>
               {v.casesPerSkid > 0 && v.casesNeeded > 0 && (
@@ -19429,7 +19429,7 @@ function ScreenModeView() {
               <p className="text-3xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
               <p className="text-sm text-muted-foreground">/ {fmtComma(v.casesNeeded)}</p>
               {calc.casesInFreezer > 0 && (
-                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
               )}
             </div>
           )}
@@ -19514,7 +19514,7 @@ function ScreenModeView() {
             <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
               {fmtComma(calc.casesCompleted)} <span className="text-lg">/ {fmtComma(v.casesNeeded)} cases</span>
               {calc.casesInFreezer > 0 && (
-                <span className="text-lg text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer</span>
+                <span className="text-lg text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in Freeze tunnel</span>
               )}
             </span>
           )}
@@ -19618,7 +19618,7 @@ function ScreenModeView() {
                 <p className="text-6xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
                 <p className="text-3xl text-muted-foreground font-bold mb-1">/ {fmtComma(v.casesNeeded)} cases</p>
                 {calc.casesInFreezer > 0 && (
-                  <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+                  <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
                 )}
               </div>
               <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
@@ -19643,11 +19643,11 @@ function ScreenModeView() {
             </div>
           )}
 
-          {/* Freezer countdown */}
+          {/* Freeze tunnel countdown */}
           {runStatus === "ended" && freezerMs > 0 && (
             <div className="flex flex-col gap-4">
               <p className={`text-sm font-bold uppercase tracking-widest ${freezerDraining ? "text-amber-400" : "text-emerald-400"}`}>
-                {freezerDraining ? "❄️ Freezer Draining" : "✅ Freezer Empty — Ready"}
+                {freezerDraining ? "❄️ Freeze Tunnel Draining" : "✅ Freeze Tunnel Empty — Ready"}
               </p>
               {freezerDraining && (
                 <>
@@ -19693,7 +19693,7 @@ function ScreenModeView() {
                     <div className="flex gap-4 mt-auto">
                       {s.totalCases > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cases</p><p className="text-xl font-black tabular-nums">{fmtComma(s.totalCases)}</p></div>}
                       {estSec > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Time</p><p className="text-xl font-black tabular-nums">{fmtTime(estSec)}</p></div>}
-                      {vals.freezerTime && Number(vals.freezerTime) > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Freezer</p><p className="text-xl font-black tabular-nums">{fmtNum(Number(vals.freezerTime), 0)}m</p></div>}
+                       {vals.freezerTime && Number(vals.freezerTime) > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Freeze Tunnel</p><p className="text-xl font-black tabular-nums">{fmtNum(Number(vals.freezerTime), 0)}m</p></div>}
                     </div>
                   </div>
                 );
@@ -20024,7 +20024,7 @@ function FloorModeView() {
                 <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
                 {calc.casesInFreezer > 0 && (
-                  <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZER</div>
+                  <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZE TUNNEL</div>
                 )}
               </div>
               <div className="flex flex-col items-center">
@@ -20829,7 +20829,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 if (!activePhase) return (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
                     <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                    Ended · Line clear
+                    Ended · Freeze tunnel clear
                   </span>
                 );
                 const mm2 = Math.floor(activePhase.remainMs / 60000);
@@ -20985,7 +20985,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                             )}
                             {calc.casesInFreezer > 0 && (
                               <div className="text-sm font-bold text-sky-400 bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/30 tabular-nums" data-testid="tile-cases-in-freezer">
-                                +{fmtComma(calc.casesInFreezer)} in freezer
+                                +{fmtComma(calc.casesInFreezer)} in Freeze tunnel
                               </div>
                             )}
                           </div>
@@ -21060,12 +21060,12 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                                   <div className="text-sm font-medium text-foreground tabular-nums">{fmtTime(calc.adjustedTimeSec)} remaining</div>
                                   {v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
                                     <div className="text-xs font-semibold text-foreground/80 tabular-nums" data-testid="text-press-cases-left">
-                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + freezer counted done)
+                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + Freeze tunnel counted done)
                                     </div>
                                   )}
                                   {Number(ve.freezerTime) > 0 && (
                                     <div className="text-xs font-semibold text-sky-400 tabular-nums" data-testid="text-line-clear-time">
-                                      Line clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)} (incl. freezer)
+                                      Freeze tunnel clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)}
                                     </div>
                                   )}
                                   {showDrift && (
@@ -21105,11 +21105,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`}>
                             {draining
-                              ? `Freezer draining — ${fmtCountdownParts(mm, ss)} remaining`
-                              : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."}
+                              ? `Freeze tunnel draining — ${fmtCountdownParts(mm, ss)} remaining`
+                              : emptyMs > 0 ? "Freeze tunnel empty — run complete." : "Run ended."}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} freezer time` : ""} — switch to another run to continue.
+                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} Freeze tunnel time` : ""} — switch to another run to continue.
                           </p>
                           {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
@@ -21142,8 +21142,8 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 })()}
 
                 {/* Missing-setup nudge — a running run with no line-speed /
-                    case / freezer numbers can't compute anything: the count,
-                    timing, and freezer status all silently sit at 0. Tell the
+                    case / Freeze tunnel numbers can't compute anything: the count,
+                    timing, and tunnel status all silently sit at 0. Tell the
                     operator exactly which numbers are missing instead. */}
                 {!currentRun?.endedAt && runStatus === "running" && (() => {
                   const missing: string[] = [];
@@ -21164,7 +21164,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     : "Line phase status can't show yet — Total line time not set";
                   const detail = missing.length > 0
                     ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
-                    : "If this run uses a freezer tunnel, scroll down and enter Total line time (min) under the line settings to see the 3-stage filling/emptying status.";
+                    : "If this run uses a Freeze tunnel, scroll down and enter Freeze tunnel time (min) under the line settings to see the 3-stage filling/emptying status.";
                   return (
                     <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-missing-line-setup">
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
@@ -21177,7 +21177,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 })()}
 
                 {/* Warehouse switchover staging — measured at the PRESS (cased
-                    product + freezer contents count as done): frontline must be
+                    product + Freeze tunnel contents count as done): frontline must be
                     staged 2 skids before the switchover, packaging 1 skid
                     before. Short runs (< 2 skids total) show it from the start
                     and tell warehouse to stage 2+ runs ahead. Mirrors the
@@ -21208,7 +21208,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           </p>
                         )}
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + freezer counted done)
+                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + Freeze tunnel counted done)
                           {calc.adjustedTimeSec > 0 ? ` — press stops ~${fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}` : ""}
                           {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
                           {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
@@ -21351,7 +21351,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     {([
-                      { name: "tempFreezerTime" as const, label: "Freezer Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
+                      { name: "tempFreezerTime" as const, label: "Freeze Tunnel Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
                       { name: "tempCrustsPerCycle" as const, label: "Crusts/Cycle", setup: Number(v.crustsPerCycle) > 0 ? fmtNum(Number(v.crustsPerCycle), 0) : null, step: "1", testId: "input-temp-crusts-per-cycle" },
                       { name: "tempCycleSpeed" as const, label: "Cycle Speed", setup: Number(v.cycleSpeed) > 0 ? fmtNum(Number(v.cycleSpeed), 1) : null, step: "0.1", testId: "input-temp-cycle-speed" },
                     ]).map((t: any) => (
@@ -21732,7 +21732,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <NumField
                           control={form.control}
                           name="freezerTime"
-                          label="Total line time (min)"
+                          label="Freeze tunnel time (min)"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -22079,11 +22079,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   } = useLiveRun();
 
   // ── Auto-tick skid/case counter for the prior run draining through the
-  // freezer tunnel while the NEXT run is already active on the form.
+  // Freeze tunnel while the NEXT run is already active on the form.
   // useAutoTrack only drives the CURRENT form run; once endRun() advances
   // currentIndex the ended run's counter stops. This effect replays the same
-  // drain-delta logic for the "Draining Prior Run" panel so cases keep
-  // flowing from "in freezer" to "cased" automatically. ────────────────────
+  // drain-delta logic for the "Freeze Tunnel Draining · Prior Run" panel so cases keep
+  // flowing from "in Freeze tunnel" to "cased" automatically. ───────────────
   const priorDrainFreezerRef = useRef<{ id: string; cases: number }>({ id: "", cases: -1 });
   useEffect(() => {
     if (!autoTrackProgress) return;
@@ -22181,10 +22181,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   onAllocate={async () => {}}
                 />
                 <div className="flex flex-col">
-                {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
+                {/* ─── Finishing — Freeze Tunnel Draining (just-ended run still exiting tunnel) ─── */}
                 {(() => {
                   // Pick the most-recently-ended run (other than the active one)
-                  // whose freezer is STILL draining AND that still has unpackaged
+                  // whose Freeze tunnel is STILL draining AND that still has unpackaged
                   // cases. Filter for eligibility FIRST, then take the latest, so a
                   // newer ended-but-finished run can't hide an older still-draining one.
                   // (The active run shows its own emptying bar elsewhere.)
@@ -22197,7 +22197,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     const rv = withTempOverrides(loadRunValues(r.id));
                     const rfT = Number(rv.freezerTime) || 0;
                     if (rfT <= 0) continue;
-                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // freezer fully empty
+                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // Freeze tunnel fully empty
                     const cps = Number(rv.casesPerSkid) || 0;
                     const cn = Number(rv.casesNeeded) || 0;
                     const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
@@ -22238,7 +22238,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-0.5">Draining Prior Run</p>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-0.5">Freeze Tunnel Draining · Prior Run</p>
                               <p className="text-sm font-semibold text-amber-100 truncate">{name}</p>
                             </div>
                             <div className="text-right shrink-0">
@@ -22367,10 +22367,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                         <div className={`border rounded-lg p-3 ${drainDone ? "bg-emerald-950/20 border-emerald-700/30" : lifecycleDraining ? "bg-amber-950/20 border-amber-600/30" : "bg-primary/5 border-primary/20"}`}>
                           <div className="flex justify-between items-end mb-2">
                             <span className={`text-sm font-semibold uppercase tracking-wider ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary"}`}>
-                              {drainDone ? "Line Clear" : lifecycleDraining ? "Line Draining" : "Line Loading"}
+                              {drainDone ? "Freeze Tunnel Clear" : lifecycleDraining ? "Freeze Tunnel Draining" : "Freeze Tunnel Loading"}
                             </span>
                             <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary/80"}`}>
-                              {drainDone ? "✓ Line clear" : `${fmtNum(pct * 100, 0)}%`}
+                              {drainDone ? "✓ Freeze tunnel clear" : `${fmtNum(pct * 100, 0)}%`}
                             </span>
                           </div>
                           <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden mb-2">
@@ -22646,7 +22646,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
                                   {/* Total cases still to PUT ON SKIDS = casesNeeded − casesCompleted.
                                       Previously used casesLeftToRun which subtracts the ~50 cases already
-                                      in the freezer tunnel, understating what packaging still has to do. */}
+                                      in the Freeze tunnel, understating what packaging still has to do. */}
                                   {(() => {
                                     const toPackage = Math.max(0, v.casesNeeded - calc.casesCompleted);
                                     return (
@@ -22670,7 +22670,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 </div>
                                 {calc.casesInFreezer > 0 && (
                                   <div className="bg-sky-950/30 border border-sky-700/40 rounded-xl p-3 flex items-center justify-between">
-                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">In Freezer / On Line</span>
+                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">In Freeze Tunnel / On Line</span>
                                     <span className="text-2xl font-mono font-black tabular-nums text-sky-400">{fmtNum(calc.casesInFreezer, 0)}</span>
                                   </div>
                                 )}

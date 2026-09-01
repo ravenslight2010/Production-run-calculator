@@ -27,6 +27,8 @@ export const formSchema = z.object({
   cycleSpeed: z.coerce.number().min(0).default(0),
   speedAdjustment: z.coerce.number().min(0.01).default(1.0),
   approxLineSpeed: z.coerce.number().min(0).default(0),
+  // Compatibility-preserved field name. This is the total physical Freeze
+  // tunnel line time, not warehouse freezer storage time.
   freezerTime: z.coerce.number().min(0).default(0),
   pizzasPerCase: z.coerce.number().min(0).default(0),
   casesPerSkid: z.coerce.number().min(0).default(0),
@@ -113,7 +115,7 @@ export const formSchema = z.object({
   skidStacking: z.string().default(""),
   gripSheets: z.string().default("none"),
   slipSheets: z.string().default("no"),
-  // Line tunnel stage timings — split the total line time (freezerTime) into
+  // Line tunnel stage timings — split the total Freeze tunnel time (freezerTime) into
   // three physically distinct segments.  Default 2.5 min each (the factory
   // standard pre/post dwell).  A one-time boot heal writes 2.5 into any
   // existing profile that still has 0 stored from before this default was set.
@@ -121,6 +123,7 @@ export const formSchema = z.object({
   postTunnelMin: z.coerce.number().min(0).default(2.5),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.
+  // Compatibility-preserved override field name for the Freeze tunnel time.
   tempFreezerTime: z.coerce.number().min(0).default(0),
   tempCrustsPerCycle: z.coerce.number().min(0).default(0),
   tempCycleSpeed: z.coerce.number().min(0).default(0),

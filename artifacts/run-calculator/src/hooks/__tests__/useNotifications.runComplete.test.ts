@@ -349,7 +349,7 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
 
   it("does NOT fire when navigating to an already-drained run (never-draining guard)", () => {
     // First (and only) observation already has remainMs = 0 →
-    // freezerDrainingRef is never set → guard prevents the "freezer empty" fire.
+    // freezerDrainingRef is never set → guard prevents the "Freeze tunnel empty" fire.
     renderHook((p: Params) => useNotifications(p), {
       initialProps: makeEndedParams(DRAIN_DONE),
     });

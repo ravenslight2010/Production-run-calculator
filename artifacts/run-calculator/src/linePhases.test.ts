@@ -5,7 +5,7 @@
 //   • Resume propagation — long pause (Stage 2 + Stage 3 both show resuming)
 //   • Lifecycle-gated drains (only persisted pause / stop records can drain)
 //   • Ended run wall-clock drain (Stage 1 empties first, Stage 3 last)
-//   • Normalization (oversized stage times clamped to fit freezerTime)
+//   • Normalization (oversized stage times clamped to fit the stored tunnel time)
 
 import { describe, it, expect } from "vitest";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec } from "./linePhases";
@@ -13,7 +13,7 @@ import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec } fro
 const BASE = {
   preTunnelMin: 2.5,
   postTunnelMin: 2.5,
-  freezerTime: 20,        // tunnel = 20 - 2.5 - 2.5 = 15 min
+  freezerTime: 20,        // Freeze tunnel = 20 - 2.5 - 2.5 = 15 min
   pausedAt: null as number | null,
   lastResumeWallMs: 0,
   lastPauseStartWallMs: 0,
@@ -24,6 +24,38 @@ const T0 = 1_700_000_000_000; // fixed wall-clock anchor
 
 // ── Filling sequence ─────────────────────────────────────────────────────────
 describe("computeLinePhases — filling sequence", () => {
+  it("labels the physical middle phase as Freeze tunnel", () => {
+    const phases = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 5 * 60,
+      runStatus: "running",
+      nowMs: T0,
+    });
+
+    expect(phases.stage2.label).toBe("Freeze tunnel");
+  });
+
+  it("uses tunnel time changes for line phases while keeping the outer stages unchanged", () => {
+    const shorter = computeLinePhases({
+      ...BASE,
+      freezerTime: 12,
+      elapsedBatchSec: 8 * 60,
+      runStatus: "running",
+      nowMs: T0,
+    });
+    const longer = computeLinePhases({
+      ...BASE,
+      freezerTime: 24,
+      elapsedBatchSec: 8 * 60,
+      runStatus: "running",
+      nowMs: T0,
+    });
+
+    expect(shorter.stage1.state).toBe("active");
+    expect(longer.stage1.state).toBe("active");
+    expect(shorter.stage2.remainMs).toBeLessThan(longer.stage2.remainMs);
+  });
+
   it("Stage 1 filling, Stage 2 & 3 empty when elapsed < preTunnelMin", () => {
     const phases = computeLinePhases({
       ...BASE,
@@ -655,6 +687,28 @@ describe("computeLinePhases — normalization (oversized stage times)", () => {
 
 // ── Ended run wall-clock drain ───────────────────────────────────────────────
 describe("computeLinePhases — ended run wall-clock drain", () => {
+  it("uses the configured Freeze tunnel time for the physical drain window", () => {
+    const shorter = computeLinePhases({
+      ...BASE,
+      freezerTime: 12,
+      elapsedBatchSec: 5 * 60,
+      runStatus: "ended",
+      endedAt: T0,
+      nowMs: T0 + 10 * 60_000,
+    });
+    const longer = computeLinePhases({
+      ...BASE,
+      freezerTime: 24,
+      elapsedBatchSec: 5 * 60,
+      runStatus: "ended",
+      endedAt: T0,
+      nowMs: T0 + 10 * 60_000,
+    });
+
+    expect(shorter.stage3.state).toBe("draining");
+    expect(longer.stage2.state).toBe("draining");
+  });
+
   // For ended-run drain tests the run must have run long enough for all three
   // stages to have received product. Use elapsedBatchSec = 25 * 60 (past the
   // 20-min full fill) so the occupancy gates don't hide any stage.
