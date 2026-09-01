@@ -12,20 +12,20 @@ $ node ./build.mjs
   dist/pino-pretty.mjs.map           204.0kb
   dist/thread-stream-worker.mjs.map   12.0kb
 
-⚡ Done in 880ms
+⚡ Done in 938ms
 $ node --enable-source-maps ./dist/index.mjs
-[03:09:29.238] [32mINFO[39m (42422): [36mServer listening[39m
+[05:05:25.025] [32mINFO[39m (17892): [36mServer listening[39m
     [35mport[39m: 18081
-[03:09:29.238] [32mINFO[39m (42422): [36moperation completed[39m
+[05:05:25.026] [32mINFO[39m (17892): [36moperation completed[39m
     [35mevent[39m: "operation"
-    [35mcorrelationId[39m: "startup-42422"
+    [35mcorrelationId[39m: "startup-17892"
     [35moperationType[39m: "startup"
-    [35mdurationMs[39m: 202
+    [35mdurationMs[39m: 142
     [35moutcome[39m: "success"
     [35msafeCounts[39m: {
       "port": 18081
     }
-[03:09:29.300] [32mINFO[39m (42422): [36mhealth check completed[39m
+[05:05:25.141] [32mINFO[39m (17892): [36mhealth check completed[39m
     [35mevent[39m: "health_check"
     [35moutcome[39m: "success"
     [35mchecks[39m: {
@@ -33,7 +33,7 @@ $ node --enable-source-maps ./dist/index.mjs
       "database": "ok",
       "dependencies": "ok"
     }
-[03:09:29.303] [32mINFO[39m (42422): [36mrequest completed[39m
+[05:05:25.147] [32mINFO[39m (17892): [36mrequest completed[39m
     [35mreq[39m: {
       "id": 1,
       "method": "GET",
@@ -42,23 +42,23 @@ $ node --enable-source-maps ./dist/index.mjs
     [35mres[39m: {
       "statusCode": 200
     }
-    [35mresponseTime[39m: 16
-[03:09:29.303] [32mINFO[39m (42422): [36moperation completed[39m
+    [35mresponseTime[39m: 30
+[05:05:25.147] [32mINFO[39m (17892): [36moperation completed[39m
     [35mreq[39m: {
       "id": 1,
       "method": "GET",
       "url": "/api/healthz"
     }
     [35mevent[39m: "operation"
-    [35mcorrelationId[39m: "44dfaa2a-bd41-4a9d-bb3b-30910315140e"
+    [35mcorrelationId[39m: "6da835a8-81a2-4806-a581-581083a350da"
     [35moperationType[39m: "request"
-    [35mdurationMs[39m: 15
+    [35mdurationMs[39m: 30
     [35moutcome[39m: "success"
     [35mstatusCode[39m: 200
     [35msafeCounts[39m: {
       "responseBytes": 116
     }
-[03:09:31.484] [32mINFO[39m (42422): [36mhealth check completed[39m
+[05:05:28.334] [32mINFO[39m (17892): [36mhealth check completed[39m
     [35mevent[39m: "health_check"
     [35moutcome[39m: "success"
     [35mchecks[39m: {
@@ -66,7 +66,7 @@ $ node --enable-source-maps ./dist/index.mjs
       "database": "ok",
       "dependencies": "ok"
     }
-[03:09:31.485] [32mINFO[39m (42422): [36mrequest completed[39m
+[05:05:28.335] [32mINFO[39m (17892): [36mrequest completed[39m
     [35mreq[39m: {
       "id": 2,
       "method": "GET",
@@ -75,32 +75,23 @@ $ node --enable-source-maps ./dist/index.mjs
     [35mres[39m: {
       "statusCode": 200
     }
-    [35mresponseTime[39m: 2
-[03:09:31.485] [32mINFO[39m (42422): [36moperation completed[39m
+    [35mresponseTime[39m: 3
+[05:05:28.336] [32mINFO[39m (17892): [36moperation completed[39m
     [35mreq[39m: {
       "id": 2,
       "method": "GET",
       "url": "/api/healthz"
     }
     [35mevent[39m: "operation"
-    [35mcorrelationId[39m: "f98b746e-1e77-42cf-99f3-9cce4a9b11e1"
+    [35mcorrelationId[39m: "d6393074-304e-4d80-8f46-17b626b28e81"
     [35moperationType[39m: "request"
-    [35mdurationMs[39m: 3
+    [35mdurationMs[39m: 4
     [35moutcome[39m: "success"
     [35mstatusCode[39m: 200
     [35msafeCounts[39m: {
       "responseBytes": 116
     }
-[03:09:39.253] [32mINFO[39m (42422): [36mmaster-data health scan completed[39m
-    [35mevent[39m: "master_data_health_scan"
-    [35menvironment[39m: "development"
-    [35moutcome[39m: "success"
-    [35msafeCounts[39m: {
-      "findings": 0,
-      "errors": 0,
-      "warnings": 0
-    }
-[03:09:39.254] [32mINFO[39m (42422): [36mmaster-data health scan completed[39m
+[05:05:35.152] [32mINFO[39m (17892): [36mmaster-data health scan completed[39m
     [35mevent[39m: "master_data_health_scan"
     [35menvironment[39m: "live"
     [35moutcome[39m: "success"
@@ -109,7 +100,16 @@ $ node --enable-source-maps ./dist/index.mjs
       "errors": 0,
       "warnings": 76
     }
-[03:09:42.569] [32mINFO[39m (42422): [36mrequest completed[39m
+[05:05:35.152] [32mINFO[39m (17892): [36mmaster-data health scan completed[39m
+    [35mevent[39m: "master_data_health_scan"
+    [35menvironment[39m: "development"
+    [35moutcome[39m: "success"
+    [35msafeCounts[39m: {
+      "findings": 0,
+      "errors": 0,
+      "warnings": 0
+    }
+[05:05:38.301] [32mINFO[39m (17892): [36mrequest completed[39m
     [35mreq[39m: {
       "id": 3,
       "method": "GET",
@@ -119,14 +119,14 @@ $ node --enable-source-maps ./dist/index.mjs
       "statusCode": 401
     }
     [35mresponseTime[39m: 4
-[03:09:42.569] [32mINFO[39m (42422): [36moperation completed[39m
+[05:05:38.301] [32mINFO[39m (17892): [36moperation completed[39m
     [35mreq[39m: {
       "id": 3,
       "method": "GET",
       "url": "/api/me"
     }
     [35mevent[39m: "operation"
-    [35mcorrelationId[39m: "018469ce-340c-44c1-b332-aacee38559df"
+    [35mcorrelationId[39m: "65cc5ac6-ed81-4db9-bf7c-af670a4c6ac8"
     [35moperationType[39m: "request"
     [35mdurationMs[39m: 4
     [35moutcome[39m: "degraded"
