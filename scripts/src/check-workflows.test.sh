@@ -100,21 +100,60 @@ test_rejects_mismatched_versions() {
 
 test_rejects_missing_actionlint_declaration() {
   local workspace
-  workspace=$(make_workspace_with_declarations missing-package "" "ACTIONLINT_VERSION: 1.7.12")
+  workspace=$(make_workspace_with_declarations missing-package \
+    '"github-actionlint": "1.7.12"' \
+    "ACTIONLINT_VERSION: 1.7.12")
+  rm "${workspace}/scripts/package.json"
   run_check "$workspace"
   [[ "$CHECK_STATUS" -eq 1 ]] || {
-    printf 'Expected a missing actionlint declaration to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    printf 'Expected a missing package declaration file to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
     return 1
   }
   assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): <missing>"
   assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): 1.7.12"
+  assert_contains "$CHECK_OUTPUT" "Missing local actionlint declaration: scripts/package.json."
   assert_contains "$CHECK_OUTPUT" "Set the github-actionlint devDependency and ACTIONLINT_VERSION"
   assert_contains "$CHECK_OUTPUT" "to the same release."
   [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
-    printf 'Expected the missing declaration to fail before actionlint ran.\n' >&2
+    printf 'Expected the missing package declaration file to fail before actionlint ran.\n' >&2
     return 1
   }
-  echo "PASS: reports missing actionlint declarations before linting"
+  echo "PASS: reports missing package declaration before linting"
+}
+
+test_rejects_missing_workflow_declaration_file() {
+  local workspace
+  workspace=$(make_workspace_with_declarations missing-workflow \
+    '"github-actionlint": "1.7.12"' \
+    "ACTIONLINT_VERSION: 1.7.12")
+  rm "${workspace}/.github/workflows/workflow-lint.yml"
+  cat > "${workspace}/.github/workflows/other.yml" <<'EOF'
+name: Other workflow
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a missing workflow declaration file to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): 1.7.12"
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): <missing>"
+  assert_contains "$CHECK_OUTPUT" "Missing CI actionlint declaration: .github/workflows/workflow-lint.yml."
+  assert_contains "$CHECK_OUTPUT" "Set the github-actionlint devDependency and ACTIONLINT_VERSION"
+  assert_contains "$CHECK_OUTPUT" "to the same release."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the missing workflow declaration file to fail before actionlint ran.\n' >&2
+    return 1
+  }
+  echo "PASS: reports missing workflow declaration before linting"
 }
 
 test_rejects_malformed_actionlint_declaration() {
@@ -142,4 +181,5 @@ test_rejects_malformed_actionlint_declaration() {
 test_accepts_matching_versions
 test_rejects_mismatched_versions
 test_rejects_missing_actionlint_declaration
+test_rejects_missing_workflow_declaration_file
 test_rejects_malformed_actionlint_declaration

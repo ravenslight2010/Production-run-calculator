@@ -16,28 +16,35 @@ if (( ${#workflow_files[@]} == 0 )); then
   exit 1
 fi
 
-if [[ ! -f "$actionlint_package" || ! -f "$actionlint_workflow" ]]; then
-  echo "Workflow lint version check failed: could not find the actionlint version declarations." >&2
-  echo "Expected $actionlint_package and $actionlint_workflow." >&2
-  exit 1
+local_actionlint_version=""
+if [[ -f "$actionlint_package" ]]; then
+  local_actionlint_version="$(
+    sed -nE \
+      's/^[[:space:]]*"github-actionlint"[[:space:]]*:[[:space:]]*"([^"]+)"[[:space:]]*,?[[:space:]]*$/\1/p' \
+      "$actionlint_package" | head -n1
+  )"
 fi
 
-local_actionlint_version="$(
-  sed -nE \
-    's/^[[:space:]]*"github-actionlint"[[:space:]]*:[[:space:]]*"([^"]+)"[[:space:]]*,?[[:space:]]*$/\1/p' \
-    "$actionlint_package" | head -n1
-)"
-ci_actionlint_version="$(
-  sed -nE \
-    's/^[[:space:]]*ACTIONLINT_VERSION:[[:space:]]*"?([^[:space:]#"]+)"?[[:space:]]*(#.*)?$/\1/p' \
-    "$actionlint_workflow" | head -n1
-)"
+ci_actionlint_version=""
+if [[ -f "$actionlint_workflow" ]]; then
+  ci_actionlint_version="$(
+    sed -nE \
+      's/^[[:space:]]*ACTIONLINT_VERSION:[[:space:]]*"?([^[:space:]#"]+)"?[[:space:]]*(#.*)?$/\1/p' \
+      "$actionlint_workflow" | head -n1
+  )"
+fi
 
 echo "Configured actionlint versions:"
 echo "  local wrapper (scripts/package.json): ${local_actionlint_version:-<missing>}"
 echo "  CI workflow (.github/workflows/workflow-lint.yml): ${ci_actionlint_version:-<missing>}"
 
 if [[ -z "$local_actionlint_version" || -z "$ci_actionlint_version" ]]; then
+  if [[ ! -f "$actionlint_package" ]]; then
+    echo "Missing local actionlint declaration: scripts/package.json." >&2
+  fi
+  if [[ ! -f "$actionlint_workflow" ]]; then
+    echo "Missing CI actionlint declaration: .github/workflows/workflow-lint.yml." >&2
+  fi
   cat >&2 <<'EOF'
 Workflow lint version check failed because one or both actionlint versions are
 not configured. Set the github-actionlint devDependency and ACTIONLINT_VERSION
