@@ -8,18 +8,20 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CHECK_SCRIPT="${SCRIPT_DIR}/check-workflows.sh"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
+FAKE_ACTIONLINT_MARKER="${TEST_ROOT}/actionlint-called"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-cat > "$FAKE_ACTIONLINT" <<'EOF'
+cat > "$FAKE_ACTIONLINT" <<EOF
 #!/usr/bin/env bash
+touch "$FAKE_ACTIONLINT_MARKER"
 exit 0
 EOF
 chmod +x "$FAKE_ACTIONLINT"
 
-make_workspace() {
+make_workspace_with_declarations() {
   local name="$1"
-  local package_version="$2"
-  local ci_version="$3"
+  local package_declaration="$2"
+  local ci_declaration="$3"
   local workspace="${TEST_ROOT}/${name}"
 
   mkdir -p "${workspace}/scripts/src" "${workspace}/.github/workflows"
@@ -27,7 +29,7 @@ make_workspace() {
   cat > "${workspace}/scripts/package.json" <<EOF
 {
   "devDependencies": {
-    "github-actionlint": "${package_version}"
+    ${package_declaration}
   }
 }
 EOF
@@ -35,13 +37,24 @@ EOF
 name: Workflow lint
 
 env:
-  ACTIONLINT_VERSION: ${ci_version}
+  ${ci_declaration}
 EOF
   printf '%s\n' "$workspace"
 }
 
+make_workspace() {
+  local name="$1"
+  local package_version="$2"
+  local ci_version="$3"
+  make_workspace_with_declarations \
+    "$name" \
+    "\"github-actionlint\": \"${package_version}\"" \
+    "ACTIONLINT_VERSION: ${ci_version}"
+}
+
 run_check() {
   local workspace="$1"
+  rm -f "$FAKE_ACTIONLINT_MARKER"
   set +e
   CHECK_OUTPUT=$(ACTIONLINT_BIN="$FAKE_ACTIONLINT" bash "${workspace}/scripts/src/check-workflows.sh" 2>&1)
   CHECK_STATUS=$?
@@ -85,5 +98,48 @@ test_rejects_mismatched_versions() {
   echo "PASS: rejects mismatched actionlint versions with remediation"
 }
 
+test_rejects_missing_actionlint_declaration() {
+  local workspace
+  workspace=$(make_workspace_with_declarations missing-package "" "ACTIONLINT_VERSION: 1.7.12")
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a missing actionlint declaration to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): <missing>"
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): 1.7.12"
+  assert_contains "$CHECK_OUTPUT" "Set the github-actionlint devDependency and ACTIONLINT_VERSION"
+  assert_contains "$CHECK_OUTPUT" "to the same release."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the missing declaration to fail before actionlint ran.\n' >&2
+    return 1
+  }
+  echo "PASS: reports missing actionlint declarations before linting"
+}
+
+test_rejects_malformed_actionlint_declaration() {
+  local workspace
+  workspace=$(make_workspace_with_declarations \
+    malformed-ci \
+    '"github-actionlint": "1.7.12"' \
+    'ACTIONLINT_VERSION: "1.7.12 trailing"')
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a malformed actionlint declaration to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): 1.7.12"
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): <missing>"
+  assert_contains "$CHECK_OUTPUT" "Set the github-actionlint devDependency and ACTIONLINT_VERSION"
+  assert_contains "$CHECK_OUTPUT" "to the same release."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the malformed declaration to fail before actionlint ran.\n' >&2
+    return 1
+  }
+  echo "PASS: reports malformed actionlint declarations before linting"
+}
+
 test_accepts_matching_versions
 test_rejects_mismatched_versions
+test_rejects_missing_actionlint_declaration
+test_rejects_malformed_actionlint_declaration
