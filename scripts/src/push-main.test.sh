@@ -15,13 +15,23 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 cat > "${FAKE_BIN}/pnpm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "run" && "${2:-}" == "check:workflows" ]]; then
+  if [[ "${FAKE_PNPM_WORKFLOW_SHOULD_FAIL:-0}" == "1" ]]; then
+    echo "simulated workflow validation failure" >&2
+    exit 23
+  fi
+  if [[ -n "${FAKE_PNPM_LOG:-}" ]]; then
+    printf 'workflow\n' >> "$FAKE_PNPM_LOG"
+  fi
+  exit 0
+fi
 if [[ "${1:-}" == "run" && "${2:-}" == "typecheck" ]]; then
   if [[ "${FAKE_PNPM_SHOULD_FAIL:-0}" == "1" ]]; then
     echo "simulated typecheck failure" >&2
     exit 23
   fi
   if [[ -n "${FAKE_PNPM_LOG:-}" ]]; then
-    printf 'validated\n' >> "$FAKE_PNPM_LOG"
+    printf 'typecheck\n' >> "$FAKE_PNPM_LOG"
   fi
   exit 0
 fi
@@ -154,8 +164,26 @@ test_validation_failure_does_not_commit_or_push() {
   assert_status 1
   assert_contains "$PUSH_OUTPUT" "validation failed; no commit or push was made"
   assert_commit_count "$repo" 1
+  [[ "$(cat "$validation_log")" == "workflow" ]] || {
+    printf 'Only workflow validation should run before the simulated typecheck failure.\n' >&2
+    return 1
+  }
+  [[ "$(git --git-dir="${repo}/.git" rev-parse refs/remotes/origin/main)" == "$(git -C "$repo" rev-parse main)" ]]
+}
+
+test_workflow_validation_failure_does_not_commit_or_push() {
+  local repo="${TEST_ROOT}/workflow-validation"
+  repo=$(make_repo workflow-validation)
+  printf 'workflow validation change\n' >> "${repo}/tracked.txt"
+  git -C "$repo" add tracked.txt
+  validation_log="${repo}/validation.log"
+  run_push "$repo" env FAKE_PNPM_WORKFLOW_SHOULD_FAIL=1 FAKE_PNPM_LOG="$validation_log" bash push-main.sh --message "blocked workflow"
+  assert_status 1
+  assert_contains "$PUSH_OUTPUT" "Running validation: pnpm run check:workflows"
+  assert_contains "$PUSH_OUTPUT" "validation failed; no commit or push was made"
+  assert_commit_count "$repo" 1
   [[ ! -e "$validation_log" ]] || {
-    printf 'Validation log should not be created on a failing validation.\n' >&2
+    printf 'Validation log should not be created after a failing workflow validation.\n' >&2
     return 1
   }
   [[ "$(git --git-dir="${repo}/.git" rev-parse refs/remotes/origin/main)" == "$(git -C "$repo" rev-parse main)" ]]
@@ -173,7 +201,7 @@ test_success_commits_and_targets_origin_main() {
   assert_commit_count "$repo" 2
   [[ "$(git --git-dir="${repo}/.git" rev-parse refs/remotes/origin/main)" == "$(git -C "$repo" rev-parse main)" ]]
   [[ "$(git --git-dir="${TEST_ROOT}/success.git" rev-parse refs/heads/main)" == "$(git -C "$repo" rev-parse main)" ]]
-  [[ "$(cat "$validation_log")" == "validated" ]]
+  [[ "$(cat "$validation_log")" == $'workflow\ntypecheck' ]]
 }
 
 configure_ssh_signing() {
@@ -274,6 +302,7 @@ EOF
 test_requires_message_and_staged_changes
 test_rejects_branch_and_unstaged_work
 test_rejects_missing_origin
+test_workflow_validation_failure_does_not_commit_or_push
 test_validation_failure_does_not_commit_or_push
 test_success_commits_and_targets_origin_main
 test_signed_commit_is_accepted_when_signing_is_required
