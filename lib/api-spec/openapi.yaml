@@ -4336,6 +4336,11 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    AiStatus:
+      type: string
+      enum: [deterministic, enriched, unavailable]
+      description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
+
     AutoTrackMutation:
       type: object
       required: [field, from, to]
@@ -7116,9 +7121,7 @@ components:
           type: boolean
           description: True when the AI narrated; false when the deterministic fallback was used
         aiStatus:
-          type: string
-          enum: [deterministic, enriched, unavailable]
-          description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
+          $ref: "#/components/schemas/AiStatus"
 
     OperationalReportInput:
       type: object
@@ -7421,9 +7424,7 @@ components:
           type: boolean
           description: True when the AI narrated; false otherwise
         aiStatus:
-          type: string
-          enum: [deterministic, enriched, unavailable]
-          description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
+          $ref: "#/components/schemas/AiStatus"
 
     ScheduleOptimizeRunInput:
       type: object
@@ -7553,9 +7554,7 @@ components:
           type: boolean
           description: True when the AI narrated; false otherwise
         aiStatus:
-          type: string
-          enum: [deterministic, enriched, unavailable]
-          description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
+          $ref: "#/components/schemas/AiStatus"
 
     ForecastAccuracyInput:
       type: object

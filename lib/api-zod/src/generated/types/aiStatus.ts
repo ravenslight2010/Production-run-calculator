@@ -9,10 +9,10 @@
 /**
  * Whether the response is deterministic-only, AI-enriched, or missing AI narration
  */
-export type AnomalyResultAiStatus = typeof AnomalyResultAiStatus[keyof typeof AnomalyResultAiStatus];
+export type AiStatus = typeof AiStatus[keyof typeof AiStatus];
 
 
-export const AnomalyResultAiStatus = {
+export const AiStatus = {
   deterministic: 'deterministic',
   enriched: 'enriched',
   unavailable: 'unavailable',

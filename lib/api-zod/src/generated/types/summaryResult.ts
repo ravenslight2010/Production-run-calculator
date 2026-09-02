@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { SummaryResultAiStatus } from './summaryResultAiStatus';
+import type { AiStatus } from './aiStatus';
 import type { SummaryStats } from './summaryStats';
 
 export interface SummaryResult {
@@ -15,6 +15,5 @@ export interface SummaryResult {
   generatedAt: number;
   /** True when the AI narrated; false when the deterministic fallback was used */
   aiGenerated: boolean;
-  /** Whether the response is deterministic-only, AI-enriched, or missing AI narration */
-  aiStatus: SummaryResultAiStatus;
+  aiStatus: AiStatus;
 }

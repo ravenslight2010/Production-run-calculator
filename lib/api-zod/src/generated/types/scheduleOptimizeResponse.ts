@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { ScheduleMetrics } from './scheduleMetrics';
-import type { ScheduleOptimizeResponseAiStatus } from './scheduleOptimizeResponseAiStatus';
 
 export interface ScheduleOptimizeResponse {
   /** Suggested run order (run ids), best-first */
@@ -24,6 +24,5 @@ export interface ScheduleOptimizeResponse {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
-  /** Whether the response is deterministic-only, AI-enriched, or missing AI narration */
-  aiStatus: ScheduleOptimizeResponseAiStatus;
+  aiStatus: AiStatus;
 }

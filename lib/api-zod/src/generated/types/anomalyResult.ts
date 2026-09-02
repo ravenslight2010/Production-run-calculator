@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { Anomaly } from './anomaly';
-import type { AnomalyResultAiStatus } from './anomalyResultAiStatus';
 
 export interface AnomalyResult {
   anomalies: Anomaly[];
@@ -19,6 +19,5 @@ export interface AnomalyResult {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
-  /** Whether the response is deterministic-only, AI-enriched, or missing AI narration */
-  aiStatus: AnomalyResultAiStatus;
+  aiStatus: AiStatus;
 }
