@@ -3,7 +3,8 @@
 // The cache is deliberately persisted outside the API process. These tests
 // prove that a validated result survives clearing the process-local in-flight
 // state, while the request scope still partitions otherwise identical keys.
-// Expired and malformed rows are also treated as misses and replaced.
+// Expired and malformed rows are also treated as misses and replaced. Writes
+// additionally prune expired rows and retain only the newest bounded set.
 //
 // @workspace/db binds its pool to process.env.DATABASE_URL at import time, so
 // the throwaway database is created and DATABASE_URL is redirected before the
@@ -268,6 +269,99 @@ describe("AI result cache persistence and scope isolation", () => {
       hit: true,
     });
     expect(providerCalls).toBe(2);
+  });
+
+  it("keeps a recovered result when pruning reaches the row limit", async () => {
+    const targetKey = cacheKey();
+    const seededUpdatedAt = new Date(Date.now() - 60_000);
+    const seededRows = Array.from(
+      { length: cache.AI_RESULT_CACHE_MAX_ROWS },
+      (_, index) => ({
+        scope: "live",
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: `row-limit-seed-${index}`,
+        result: { answer: `seed-${index}` },
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: seededUpdatedAt,
+        updatedAt: seededUpdatedAt,
+      }),
+    );
+    await db.insert(aiResultCacheTable).values([
+      ...seededRows,
+      {
+        scope: "live",
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: targetKey,
+        result: { answer: 42 },
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: seededUpdatedAt,
+        updatedAt: seededUpdatedAt,
+      },
+    ]);
+
+    await expect(
+      readOrCreate("live", async () => ({ answer: "recovered at row limit" })),
+    ).resolves.toEqual({
+      value: { answer: "recovered at row limit" },
+      hit: false,
+    });
+
+    const rows = await db.select().from(aiResultCacheTable);
+    expect(rows).toHaveLength(cache.AI_RESULT_CACHE_MAX_ROWS);
+    expect(rows.find((row) => row.operationKey === targetKey)?.result).toEqual({
+      answer: "recovered at row limit",
+    });
+    expect(rows.some((row) => row.operationKey === "row-limit-seed-0")).toBe(false);
+  });
+
+  it("removes expired rows before pruning the recovered result", async () => {
+    const targetKey = cacheKey();
+    const now = Date.now();
+    const expiredAt = new Date(now - 60_000);
+    const freshAt = new Date(now + 60_000);
+    await db.insert(aiResultCacheTable).values([
+      {
+        scope: "live",
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: "expiry-seed-0",
+        result: { answer: "expired" },
+        expiresAt: expiredAt,
+      },
+      {
+        scope: "live",
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: "expiry-seed-1",
+        result: { answer: "expired too" },
+        expiresAt: expiredAt,
+      },
+      {
+        scope: "live",
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: "expiry-fresh",
+        result: { answer: "keep this" },
+        expiresAt: freshAt,
+      },
+      {
+        scope: "live",
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: targetKey,
+        result: { answer: 42 },
+        expiresAt: expiredAt,
+      },
+    ]);
+
+    await expect(
+      readOrCreate("live", async () => ({ answer: "recovered after expiry pruning" })),
+    ).resolves.toEqual({
+      value: { answer: "recovered after expiry pruning" },
+      hit: false,
+    });
+
+    const rows = await db.select().from(aiResultCacheTable);
+    expect(rows.map((row) => row.operationKey).sort()).toEqual(
+      ["expiry-fresh", targetKey].sort(),
+    );
+    expect(rows.every((row) => row.expiresAt.getTime() > Date.now())).toBe(true);
   });
 
   it("does not share a same-key result between request scopes", async () => {
