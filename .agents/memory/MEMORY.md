@@ -12,7 +12,7 @@
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
-- [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; PURCHASED crusts (Bonici/Pedone parbake/pinsa) get NO die ever; apps self-heal DIE_TYPES from profiles honoring deletions.
+- [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
 - [Autosave edit attribution](autosave-edit-attribution.md) + [profile clobber](profile-clobber-blank-form.md) — autosave must never stamp an all-default run (empty-over-populated clobbers peers) nor zero a profile before it loads (saveProfile guard + seed self-heal).
@@ -125,8 +125,6 @@
 - [Corpus regression harness](corpus-harness.md) — no-AI snapshot bench over the real workbook corpus (test:corpus); mix-word rule deliberately beats cheesy components in spec-import routing.
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
 - [Dev DB connection exhaustion](dev-db-connection-exhaustion.md) + [detached process reaping](detached-process-reaping.md) — "too many clients" can last hours (retry, else reboot; restart both APIs); setsid/nohup dies with the bash session, >2min runs need a workflow.
-- [Die defaults switch-aware](die-defaults-switch-aware.md) — explicit die picks use the switch-aware resolver (replaces prior die auto-fill); import/autofill paths stay strict blank-fill-only.
-- [Die picker E2E names](die-picker-e2e-names.md) — 12-inch die variants canonicalize to `12"` in the live picker; seed/assert the canonical label in browser tests.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
 - [Brand rename aliases](brand-rename-aliases.md) — customer renames learn context-free brand spec-import aliases (chain re-point); premix redirect needs the brand-drift fallback, don't restore its early return.
@@ -154,6 +152,7 @@
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Phone E2E form overrides](phone-e2e-form-overrides.md) — server-backed reloads can overwrite local numeric fixtures; reapply values through controlled inputs after reload.
 - [GitHub Git push authentication](github-git-push.md) — the GitHub API integration cannot upload local Git objects; shell pushes need a secure GIT_URL remote.
+- [GitHub cancelled-job summaries](github-actions-job-summary-visibility.md) — cancelled runs may hide GITHUB_STEP_SUMMARY Markdown from public pages and check-run REST output despite successful summary steps.
 - [Skill catalog CI roots](skill-catalog-ci-roots.md) — GitHub checkouts may omit platform-injected `.local` roots, so missing roots warn while discovered editable skills still block.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
