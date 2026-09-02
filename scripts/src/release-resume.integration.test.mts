@@ -18,6 +18,12 @@ type FixtureStep = {
 
 const rootDir = resolve(new URL("../../", import.meta.url).pathname);
 const releaseCheck = join(rootDir, "scripts", "src", "release-check.mts");
+const stoppedSummaryScript = join(
+  rootDir,
+  "scripts",
+  "src",
+  "release-stopped-summary.sh",
+);
 const onboardingGuard = join(
   rootDir,
   "artifacts",
@@ -57,6 +63,110 @@ function runReleaseCheck(
     child.once("error", reject);
     child.once("close", (code) => resolveRun({ code: code ?? 1, output }));
   });
+}
+
+function runStoppedSummary(
+  evidenceDir: string,
+  summaryPath: string,
+  mode: "standard" | "full",
+): Promise<{ code: number; output: string }> {
+  const artifactUrl =
+    "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
+  return new Promise((resolveRun, reject) => {
+    const child = spawn("bash", [stoppedSummaryScript], {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        CHECKPOINT_DIR: evidenceDir,
+        CHECKPOINT_ARTIFACT_URL: artifactUrl,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        RELEASE_MODE: mode,
+        RESUME_COMMAND:
+          mode === "full"
+            ? "pnpm run release:check:full -- --resume"
+            : "pnpm run release:check -- --resume",
+        REGENERATE_COMMAND:
+          mode === "full"
+            ? "pnpm run release:check:full"
+            : "pnpm run release:check",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.once("error", reject);
+    child.once("close", (code) => resolveRun({ code: code ?? 1, output }));
+  });
+}
+
+async function runStoppedSummaryScenario(): Promise<void> {
+  const artifactUrl =
+    "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
+  for (const mode of ["standard", "full"] as const) {
+    const evidenceDir = await mkdtemp(join(tmpdir(), `release-summary-${mode}-`));
+    const summaryPath = join(evidenceDir, "step-summary.md");
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        summaryPath,
+        mode,
+      );
+      assert.equal(result.code, 0, result.output);
+      assert.equal(result.output, "", "summary capture must not emit release evidence");
+
+      const expected = [
+        "## Release check stopped — NO-GO",
+        "",
+        mode === "full"
+          ? "The full release check stopped before all gates completed."
+          : "The release check stopped before all gates completed.",
+        "",
+        `[Download the stopped-check checkpoint artifact](${artifactUrl})`,
+        "",
+        "**This checkpoint is not retained release evidence and cannot support a GO decision.**",
+        "",
+        "Resume the incomplete check with:",
+        "```text",
+        mode === "full"
+          ? "pnpm run release:check:full -- --resume"
+          : "pnpm run release:check -- --resume",
+        "```",
+        "",
+        "Or regenerate the retained report from a fresh run with:",
+        "```text",
+        mode === "full"
+          ? "pnpm run release:check:full"
+          : "pnpm run release:check",
+        "```",
+        "",
+      ].join("\n");
+      const summary = await readFile(summaryPath, "utf8");
+      assert.equal(
+        summary,
+        expected,
+        `${mode} stopped summary must remain an exact, auditable contract`,
+      );
+      assert.match(summary, /not retained release evidence/);
+      assert.match(summary, /NO-GO/);
+      assert.doesNotMatch(summary, /^Decision: GO$/m);
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log(
+    "Stopped release summary contract passed (standard/full; non-retained verification only).",
+  );
 }
 
 async function runParallelStageScenario(): Promise<void> {
@@ -941,11 +1051,15 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
   console.log("Release resume damaged-checkpoint scenarios passed.");
 }
 
-await run();
-await runOnboardingGuardStopScenario();
-await runParallelStageScenario();
-await runApiShardConcurrencyScenario();
-await runParallelResumeScenario();
-await runFullModeScenario();
-await runStaleCheckpointScenarios();
-await runDamagedCheckpointScenarios();
+if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
+  await runStoppedSummaryScenario();
+} else {
+  await run();
+  await runOnboardingGuardStopScenario();
+  await runParallelStageScenario();
+  await runApiShardConcurrencyScenario();
+  await runParallelResumeScenario();
+  await runFullModeScenario();
+  await runStaleCheckpointScenarios();
+  await runDamagedCheckpointScenarios();
+}

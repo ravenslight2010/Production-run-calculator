@@ -122,6 +122,22 @@ clean-start evidence, and startup logs. The roots and artifact names are
 deliberately distinct so a full run cannot overwrite or be mistaken for
 standard evidence.
 
+When a job stops before all gates complete, the workflow writes a separate
+NO-GO summary with the uploaded checkpoint-artifact link, the matching resume
+command, and the matching fresh-run command. GitHub may not expose that
+Markdown for cancelled jobs through an unauthenticated page or check-run API.
+The summary contract can therefore be checked without GitHub access:
+
+```bash
+pnpm --filter @workspace/scripts run test:release-stopped-summary
+```
+
+This is a bounded, fixture-only contract check. It writes only to temporary
+files, prints a `non-retained verification only` marker, and must never be
+treated as retained release evidence or a GO decision. It verifies the exact
+standard and full Markdown, including the artifact URL, the explicit
+non-retained-evidence warning, and each mode's resume/regenerate commands.
+
 ## Disposable API concurrency calibration
 
 The release gate inventory does not include the database-pressure calibration
