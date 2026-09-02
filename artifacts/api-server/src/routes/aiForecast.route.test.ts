@@ -96,7 +96,7 @@ vi.mock("./aiForecastVerify", () => ({
 
 // Stub out request scope (DB-dependent).
 vi.mock("../lib/requestScope", () => ({
-  currentScope: () => ({ scope: "test", scopeId: "test" }),
+  currentScope: () => "test",
 }));
 
 // ── Test server ───────────────────────────────────────────────────────────────

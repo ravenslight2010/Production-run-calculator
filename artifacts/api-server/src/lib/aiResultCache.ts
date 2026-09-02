@@ -238,11 +238,20 @@ export async function getOrCreateAiResult<T>(opts: {
 }
 
 export async function clearAiResultCacheForTests(): Promise<void> {
-  inFlight.clear();
+  clearAiResultInFlightForTests();
   try {
     await db.delete(aiResultCacheTable);
   } catch {
     // Unit tests that mock the database still need the in-flight reset; a
     // missing/unavailable cache table must not make those tests fail.
   }
+}
+
+/**
+ * Simulate an API process restart without removing the database-backed cache.
+ * This is intentionally exported only for tests; production callers should
+ * never need to manipulate the in-flight request coalescing state.
+ */
+export function clearAiResultInFlightForTests(): void {
+  inFlight.clear();
 }
