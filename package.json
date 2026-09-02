@@ -12,6 +12,7 @@
     "check:clean-start": "pnpm --filter @workspace/scripts run check:clean-start",
     "check:github-signed-commit-policy": "pnpm --filter @workspace/scripts run check:github-signed-commit-policy",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
+    "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",
     "push:main": "bash ./scripts/src/push-main.sh",
     "test:gemini": "python3 scripts/test_gemini_skill_trigger_benchmark.py && python3 scripts/test_gemini_failure_alert.py",
     "release:check": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts",

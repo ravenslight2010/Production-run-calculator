@@ -122,6 +122,46 @@ clean-start evidence, and startup logs. The roots and artifact names are
 deliberately distinct so a full run cannot overwrite or be mistaken for
 standard evidence.
 
+## Disposable API concurrency calibration
+
+The release gate inventory does not include the database-pressure calibration
+lane. Run it manually when API integration coverage or the CI Postgres service
+changes:
+
+```bash
+RELEASE_CONCURRENCY_APPROVED_DISPOSABLE_DB=1 NODE_ENV=test \
+  pnpm run check:release-concurrency
+```
+
+The command requires `DATABASE_URL` to point at a disposable CI-style Postgres
+service, the explicit `RELEASE_CONCURRENCY_APPROVED_DISPOSABLE_DB=1`
+acknowledgement, and either CI or a test-environment marker. It runs the same
+six API release shards used by the release gate at the documented cap of two
+active database shards. Each shard remains internally serialized by
+`artifacts/api-server/vitest.config.ts`; the lane does not raise Vitest workers
+or reuse release evidence.
+
+The lane writes `release-concurrency-stress.json` and
+`release-concurrency-stress.md` under a disposable `tmp/` directory. Set
+`RELEASE_CONCURRENCY_EVIDENCE_DIR` to retain them at a chosen path. Reports
+record:
+
+- setup time: the elapsed time for the same schema push that prepares the
+  disposable CI database (the shards then perform their normal per-fixture
+  database create, schema push, and teardown);
+- peak active shards and the documented cap;
+- per-shard result and elapsed time;
+- timeout failures and lock/setup failures, including deadlocks, duplicate
+  markers, connection exhaustion, and related Postgres symptoms; and
+- total wall-clock time.
+
+Any non-passing shard, timeout, lock/setup failure, missing shard startup, or
+observed cap violation fails the lane with a clear `Concurrency cap unsafe`
+diagnostic. This is a calibration signal, not a release GO/NO-GO decision:
+never add its output to `release-evidence/` or treat it as retained release
+evidence. The normal `release:check` and `release:check:full` commands and
+their workflow inventory remain unchanged.
+
 ## Startup and port recovery
 
 Clean-start uses disposable ports (`18081`, `18082`, `18180` in release

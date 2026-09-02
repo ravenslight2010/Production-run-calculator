@@ -115,6 +115,33 @@ async function run(): Promise<void> {
   });
   assert.equal(timedOut.exitCode, 124);
   assert.equal(timedOut.status, "INFRASTRUCTURE TIMEOUT");
+  const descendantRoot = await mkdtemp(join(tmpdir(), "release-timeout-tree-"));
+  const descendantMarker = join(descendantRoot, "leaked-descendant");
+  try {
+    const parentScript = [
+      "const { spawn } = require('node:child_process');",
+      `spawn(process.execPath, ['-e', ${JSON.stringify(
+        `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(
+          descendantMarker,
+        )}, "leaked"), 250)`,
+      )}], { stdio: 'inherit' });`,
+      "setTimeout(() => {}, 5000);",
+    ].join("");
+    const timedTree = await runStep({
+      label: "timed-out process-tree fixture",
+      command: process.execPath,
+      args: ["-e", parentScript],
+      timeoutMs: 50,
+    });
+    assert.equal(timedTree.status, "INFRASTRUCTURE TIMEOUT");
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await assert.rejects(
+      readFile(descendantMarker, "utf8"),
+      "a timed-out shard must terminate descendants before releasing its scheduler slot",
+    );
+  } finally {
+    await rm(descendantRoot, { recursive: true, force: true });
+  }
   assert.match(
     formatReleaseReport([
       {

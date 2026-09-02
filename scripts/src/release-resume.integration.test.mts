@@ -81,7 +81,7 @@ async function runParallelStageScenario(): Promise<void> {
       args: ["-e", delayedGate],
       env: {
         RELEASE_PARALLEL_MARKER: firstMarker,
-        RELEASE_PARALLEL_DELAY: "240",
+        RELEASE_PARALLEL_DELAY: "1000",
       },
       stage: "parallel-fixtures",
     },
@@ -462,6 +462,70 @@ async function runParallelResumeScenario(): Promise<void> {
   }
 }
 
+async function runApiShardConcurrencyScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-api-cap-"));
+  const markerDir = await mkdtemp(join(tmpdir(), "release-resume-api-cap-marker-"));
+  const eventsPath = join(markerDir, "events");
+  const gateScript = [
+    "const fs = require('node:fs');",
+    "const eventsPath = process.env.RELEASE_API_EVENTS;",
+    "fs.appendFileSync(eventsPath, 'start\\n');",
+    "setTimeout(() => {",
+    "  fs.appendFileSync(eventsPath, 'end\\n');",
+    "  process.exit(0);",
+    "}, Number(process.env.RELEASE_API_DELAY));",
+  ].join("");
+  const steps: FixtureStep[] = Array.from({ length: 4 }, (_, index) => ({
+    label: `API fixture shard ${index + 1}`,
+    command: process.execPath,
+    args: ["-e", gateScript],
+    env: {
+      RELEASE_API_EVENTS: eventsPath,
+      RELEASE_API_DELAY: "500",
+    },
+    group: "api-test-shards",
+    stage: "api-cap-fixtures",
+  }));
+
+  try {
+    for (const file of [
+      "clean-start/clean-start-evidence.json",
+      "clean-start/browser-result.json",
+      "clean-start/preview-home.png",
+      "clean-start/startup-api.log",
+      "clean-start/startup-web.log",
+      "clean-start/startup-mockup.log",
+    ]) {
+      const path = join(evidenceDir, file);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
+    }
+    const result = await runReleaseCheck(evidenceDir, steps, [], {
+      RELEASE_CHECK_MAX_CONCURRENCY: "4",
+    });
+    assert.equal(result.code, 0, result.output);
+    let active = 0;
+    let observedPeak = 0;
+    for (const event of (await readFile(eventsPath, "utf8")).trim().split("\n")) {
+      active += event === "start" ? 1 : -1;
+      observedPeak = Math.max(observedPeak, active);
+    }
+    assert.equal(
+      observedPeak,
+      2,
+      "API fixture shards must never exceed the documented two-child database cap",
+    );
+    assert.match(
+      result.output,
+      /Stage api-cap-fixtures: 4 gates \(max 4 concurrent; API\/database max 2\)/,
+      "the release runner should report the API-specific cap",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+}
+
 async function runFullModeScenario(): Promise<void> {
   const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-full-"));
   const markerDir = await mkdtemp(join(tmpdir(), "release-resume-full-marker-"));
@@ -711,6 +775,7 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
 
 await run();
 await runParallelStageScenario();
+await runApiShardConcurrencyScenario();
 await runParallelResumeScenario();
 await runFullModeScenario();
 await runStaleCheckpointScenarios();

@@ -29,7 +29,7 @@ export type ReleaseStep = {
   concurrencyLimit?: number;
 };
 
-type StepStatus =
+export type StepStatus =
   | "PASS"
   | "FAIL"
   | "INFRASTRUCTURE TIMEOUT"
@@ -70,8 +70,8 @@ export type BrowserDurationRegression = {
 // remaining integration fixtures. It is serialized inside its own Vitest
 // process, so it can exceed four minutes on the release environment even when
 // every test is healthy.
-const API_SHARD_TIMEOUT_MS = 8 * 60_000;
-const API_SHARD_WARNING_MS = 6 * 60_000;
+export const API_SHARD_TIMEOUT_MS = 8 * 60_000;
+export const API_SHARD_WARNING_MS = 6 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
 export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
@@ -180,59 +180,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-state.json",
 ] as const;
 
-const steps: ReleaseStep[] = [
-  {
-    label: "production dependency audit",
-    args: ["run", "audit:prod"],
-    stage: "prerequisites",
-  },
-  {
-    label: "generated API client freshness",
-    args: ["run", "check:api-generated"],
-    stage: "prerequisites",
-  },
-  {
-    label: "shared library typechecks",
-    args: ["run", "typecheck:libs"],
-    stage: "shared-output",
-  },
-  {
-    label: "API server typecheck",
-    args: ["--filter", "@workspace/api-server", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "run calculator typecheck",
-    args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "mockup sandbox typecheck",
-    args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "scripts typecheck",
-    args: ["--filter", "@workspace/scripts", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "recovery evidence audit",
-    args: ["run", "audit:recovery"],
-    stage: "prerequisites",
-  },
-  {
-    label: "clean-start smoke",
-    args: ["run", "check:clean-start"],
-    env: {
-      CLEAN_START_API_PORT: "18081",
-      CLEAN_START_WEB_PORT: "18082",
-      CLEAN_START_MOCKUP_PORT: "18180",
-      CLEAN_START_EVIDENCE_DIR: cleanStartEvidenceDir,
-    },
-    stage: "clean-start",
-    concurrencyLimit: 1,
-  },
+export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
     label: "API unit tests (release shard 1/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
@@ -296,6 +244,62 @@ const steps: ReleaseStep[] = [
     group: "api-test-shards",
     stage: "release-tests",
   },
+] as const;
+
+const steps: ReleaseStep[] = [
+  {
+    label: "production dependency audit",
+    args: ["run", "audit:prod"],
+    stage: "prerequisites",
+  },
+  {
+    label: "generated API client freshness",
+    args: ["run", "check:api-generated"],
+    stage: "prerequisites",
+  },
+  {
+    label: "shared library typechecks",
+    args: ["run", "typecheck:libs"],
+    stage: "shared-output",
+  },
+  {
+    label: "API server typecheck",
+    args: ["--filter", "@workspace/api-server", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "run calculator typecheck",
+    args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "mockup sandbox typecheck",
+    args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "scripts typecheck",
+    args: ["--filter", "@workspace/scripts", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "recovery evidence audit",
+    args: ["run", "audit:recovery"],
+    stage: "prerequisites",
+  },
+  {
+    label: "clean-start smoke",
+    args: ["run", "check:clean-start"],
+    env: {
+      CLEAN_START_API_PORT: "18081",
+      CLEAN_START_WEB_PORT: "18082",
+      CLEAN_START_MOCKUP_PORT: "18180",
+      CLEAN_START_EVIDENCE_DIR: cleanStartEvidenceDir,
+    },
+    stage: "clean-start",
+    concurrencyLimit: 1,
+  },
+  ...RELEASE_CHECK_API_SHARD_STEPS,
   {
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test"],
@@ -885,6 +889,7 @@ export function runStep(
     logPath?: string;
     signal?: AbortSignal;
     deferLog?: boolean;
+    onOutput?: (text: string) => void;
   } = {},
 ): Promise<{
   exitCode: number;
@@ -897,6 +902,7 @@ export function runStep(
     const child = spawn(step.command ?? "pnpm", step.args, {
       cwd: rootDir,
       env: { ...process.env, ...step.env },
+      detached: process.platform !== "win32",
       stdio: options.logPath ? ["ignore", "pipe", "pipe"] : "inherit",
     });
     let logWrite = Promise.resolve();
@@ -905,6 +911,7 @@ export function runStep(
       const text = chunk.toString();
       capturedOutput += text;
       process.stdout.write(text);
+      options.onOutput?.(text);
       if (options.logPath && !options.deferLog) {
         logWrite = logWrite.then(() => appendFile(options.logPath!, text));
       }
@@ -915,12 +922,39 @@ export function runStep(
     }
     let settled = false;
     let warningTimer: ReturnType<typeof setTimeout> | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
+    let forcedResult:
+      | { exitCode: number; status: StepStatus }
+      | undefined;
+    const killTree = (signal: NodeJS.Signals): void => {
+      if (child.pid && process.platform !== "win32") {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // The process group may already be gone. Fall back to the direct
+          // child so callers still wait for its close event before continuing.
+        }
+      }
+      child.kill(signal);
+    };
+    const stopTree = (
+      exitCode: number,
+      status: StepStatus,
+    ): void => {
+      if (forcedResult) return;
+      forcedResult = { exitCode, status };
+      killTree("SIGTERM");
+      killTimer = setTimeout(() => killTree("SIGKILL"), 5_000);
+      killTimer.unref();
+    };
     const finish = (code: number, status?: StepStatus): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       if (warningTimer) clearTimeout(warningTimer);
+      if (killTimer) clearTimeout(killTimer);
       if (abortHandler) {
         options.signal?.removeEventListener("abort", abortHandler);
       }
@@ -959,15 +993,12 @@ export function runStep(
                 step.timeoutMs! / 60_000,
               )} minute timeout`,
             );
-            child.kill("SIGTERM");
-            setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
-            finish(124, "INFRASTRUCTURE TIMEOUT");
+            stopTree(124, "INFRASTRUCTURE TIMEOUT");
           }, step.timeoutMs);
 
     abortHandler = () => {
       console.error(`${step.label} interrupted by the release runner`);
-      child.kill("SIGTERM");
-      finish(1, "INFRASTRUCTURE ERROR");
+      stopTree(1, "INFRASTRUCTURE ERROR");
     };
     if (options.signal?.aborted) {
       abortHandler();
@@ -980,6 +1011,10 @@ export function runStep(
       finish(1, "INFRASTRUCTURE ERROR");
     });
     child.once("close", (code, signal) => {
+      if (forcedResult) {
+        finish(forcedResult.exitCode, forcedResult.status);
+        return;
+      }
       if (signal) {
         console.error(`${step.label} stopped by ${signal}`);
         // A signal means the runner or operating environment stopped the
@@ -1480,20 +1515,15 @@ async function main(): Promise<void> {
       }
 
       const stageStartedAt = Date.now();
-      console.log(
-        `\nStage ${stage}: ${pending.length} gate${
-          pending.length === 1 ? "" : "s"
-        } (max ${Math.min(
-          concurrencyLimit,
-          ...stageSteps.map(
-            ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
-          ),
-        )} concurrent).`,
+      const stageHasApiShards = stageSteps.some(
+        ({ step }) => step.group === "api-test-shards",
       );
-      const active = new Set<Promise<void>>();
-      const waiting = [...pending];
-      const stageLogs = new Map<string, string>();
-      let apiActive = 0;
+      const stageLimit = Math.min(
+        concurrencyLimit,
+        ...stageSteps.map(
+          ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
+        ),
+      );
       const apiLimit = Math.min(
         concurrencyLimit,
         RELEASE_CHECK_API_CONCURRENCY,
@@ -1503,12 +1533,17 @@ async function main(): Promise<void> {
             releaseConcurrencyLimit(step, concurrencyLimit),
           ),
       );
-      const stageLimit = Math.min(
-        concurrencyLimit,
-        ...stageSteps.map(
-          ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
-        ),
+      console.log(
+        `\nStage ${stage}: ${pending.length} gate${
+          pending.length === 1 ? "" : "s"
+        } (max ${stageLimit} concurrent${
+          stageHasApiShards ? `; API/database max ${apiLimit}` : ""
+        }).`,
       );
+      const active = new Set<Promise<void>>();
+      const waiting = [...pending];
+      const stageLogs = new Map<string, string>();
+      let apiActive = 0;
       const launchAvailable = (): void => {
         if (interruptedBySignal) return;
         while (waiting.length > 0 && active.size < stageLimit) {

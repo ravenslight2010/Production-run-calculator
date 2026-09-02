@@ -13,6 +13,8 @@
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
     "test:release-evidence": "tsx ./src/release-evidence.test.mts && tsx ../artifacts/run-calculator/e2e/release-duration-reporter.unit.mts",
     "test:release-resume": "tsx ./src/release-resume.integration.test.mts",
+    "check:release-concurrency": "tsx ./src/release-concurrency-stress.mts",
+    "test:release-concurrency": "tsx ./src/release-concurrency-stress.test.mts",
     "audit:recovery": "tsx ./src/recovery-audit.mts",
     "check-model-bump": "pnpm run test && bash ./src/check-model-version-bump.sh",
     "check-department-playwright-projects": "tsx ./src/check-department-playwright-projects.mts",
