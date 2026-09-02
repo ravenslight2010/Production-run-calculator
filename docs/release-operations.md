@@ -142,6 +142,11 @@ standard and full Markdown with both an artifact URL and an empty artifact URL,
 including the explicit upload-failure message, the non-retained-evidence
 warning, and each mode's resume/regenerate commands.
 
+The workflow-lint job runs a separate workflow guard that checks both standard
+and full jobs keep their `always()` stopped-summary step after the matching
+evidence upload and pass the matching artifact URL and recovery commands. This
+workflow-level check is distinct from retained release evidence validation.
+
 ## Disposable API concurrency calibration
 
 The release gate inventory does not include the database-pressure calibration

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
-# Regression tests for the actionlint version synchronization guard.
+# Regression tests for workflow guard contracts.
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CHECK_SCRIPT="${SCRIPT_DIR}/check-workflows.sh"
+RELEASE_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-check.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
 FAKE_ACTIONLINT_MARKER="${TEST_ROOT}/actionlint-called"
@@ -68,6 +69,78 @@ assert_contains() {
     printf 'Expected output to contain: %s\nActual output:\n%s\n' "$needle" "$haystack" >&2
     return 1
   fi
+}
+
+workflow_step_block() {
+  local step_name="$1"
+  awk -v step_name="$step_name" '
+    $0 == "      - name: " step_name {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^      - name: / {
+      exit
+    }
+    found {
+      print
+    }
+  ' "$RELEASE_WORKFLOW"
+}
+
+assert_stopped_summary_workflow_contract() {
+  local mode="$1"
+  local upload_step="$2"
+  local summary_step="$3"
+  local artifact_step_id="$4"
+  local checkpoint_dir="$5"
+  local resume_command="$6"
+  local regenerate_command="$7"
+  local upload_line
+  local summary_line
+  local summary_block
+
+  upload_line=$(grep -nF -- "      - name: ${upload_step}" "$RELEASE_WORKFLOW" | cut -d: -f1)
+  summary_line=$(grep -nF -- "      - name: ${summary_step}" "$RELEASE_WORKFLOW" | cut -d: -f1)
+  if [[ -z "$upload_line" || -z "$summary_line" ]]; then
+    printf 'Expected %s upload and stopped-summary steps in %s.\n' \
+      "$mode" "$RELEASE_WORKFLOW" >&2
+    return 1
+  fi
+  if (( summary_line <= upload_line )); then
+    printf '%s stopped-summary step must follow its evidence upload step.\n' "$mode" >&2
+    return 1
+  fi
+
+  summary_block=$(workflow_step_block "$summary_step")
+  assert_contains "$summary_block" "if: always()"
+  assert_contains "$summary_block" "CHECKPOINT_DIR: ${checkpoint_dir}"
+  assert_contains "$summary_block" \
+    'CHECKPOINT_ARTIFACT_URL: ${{ steps.'"${artifact_step_id}"'.outputs.artifact-url }}'
+  assert_contains "$summary_block" "RELEASE_MODE: ${mode}"
+  assert_contains "$summary_block" "RESUME_COMMAND: ${resume_command}"
+  assert_contains "$summary_block" "REGENERATE_COMMAND: ${regenerate_command}"
+  assert_contains "$summary_block" "bash scripts/src/release-stopped-summary.sh"
+  echo "PASS: preserves ${mode} stopped-summary workflow contract"
+}
+
+test_release_workflow_preserves_stopped_summary_contract() {
+  assert_stopped_summary_workflow_contract \
+    standard \
+    "Upload standard release evidence" \
+    "Summarize stopped standard release check" \
+    upload-standard-release-evidence \
+    release-evidence \
+    "pnpm run release:check -- --resume" \
+    "pnpm run release:check"
+  assert_stopped_summary_workflow_contract \
+    full \
+    "Upload full release evidence" \
+    "Summarize stopped full release check" \
+    upload-full-release-evidence \
+    release-evidence-full \
+    "pnpm run release:check:full -- --resume" \
+    "pnpm run release:check:full"
 }
 
 test_accepts_matching_versions() {
@@ -331,3 +404,4 @@ test_rejects_malformed_ci_actionlint_declaration
 test_rejects_invalid_local_actionlint_release
 test_rejects_invalid_ci_actionlint_release
 test_rejects_both_invalid_actionlint_releases
+test_release_workflow_preserves_stopped_summary_contract
