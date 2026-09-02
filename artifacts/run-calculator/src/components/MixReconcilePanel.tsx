@@ -32,6 +32,7 @@ import {
   type MixReconcileView,
 } from "@/mixReconcile";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import AiStatusNotice from "@/components/AiStatusNotice";
 
 function fmtDate(ms: number): string {
   try {
@@ -280,6 +281,7 @@ export default function MixReconcilePanel({
         )}
 
         {resultError ? <p className="text-sm text-destructive">{resultError}</p> : null}
+        <AiStatusNotice status={result?.aiStatus} feature="AI reconciliation" />
 
         {result ? (
           <div

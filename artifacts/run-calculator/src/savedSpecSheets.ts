@@ -14,6 +14,7 @@
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import type { Discrepancy, ReconcileRecipe, ReconcileProfile } from "@workspace/spec-reconcile";
 import { inventoryClientId } from "./inventoryShared";
+import type { AiStatus } from "./aiStatus";
 import {
   loadDoughRecipePresets,
   loadFrontlineRecipePresets,
@@ -132,6 +133,7 @@ export type SpecReconcileResult = {
   discrepancies: Discrepancy[];
   generatedAt: number;
   summary?: string;
+  aiStatus?: AiStatus;
 };
 
 function authHeaders(json = false): Record<string, string> {

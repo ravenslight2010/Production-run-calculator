@@ -3,6 +3,7 @@ import { computeCasesInFreezer } from "@workspace/inventory-math";
 import { withTempOverrides, type FormValues, type RunMeta, type HistoryDay } from "./types";
 import { computeSummaryStats, runLabel } from "./utils";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
+import type { AiStatus } from "./aiStatus";
 
 // ── Types (mirror the OpenAPI /ai/optimize contract) ─────────────────────────
 export type OptimizeCategory = "run" | "break" | "efficiency";
@@ -99,6 +100,7 @@ export type OptimizeResult = {
   recommendations: OptimizeRecommendation[];
   generatedAt: number;
   note?: string;
+  aiStatus?: AiStatus;
 };
 
 // ── Per-run shaping ──────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@
 // artifacts/run-calculator-mobile/context/matchImport.ts (replit.md parity).
 
 import type { ReviewVerdict } from "@workspace/ai-review";
+import type { AiStatus } from "./aiStatus";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
@@ -50,6 +51,7 @@ export type MatchImportResult = {
   pepTypeMatches?: NameMatch[];
   generatedAt: number;
   note?: string;
+  aiStatus?: AiStatus;
 };
 
 export async function requestMatchImport(input: MatchImportInput): Promise<MatchImportResult> {

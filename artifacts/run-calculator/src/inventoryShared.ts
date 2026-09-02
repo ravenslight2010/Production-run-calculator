@@ -3,6 +3,7 @@ import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
 import { fetchWithDiagnostics } from "./performanceDiagnostics";
+import type { AiStatus } from "./aiStatus";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -1369,6 +1370,7 @@ export type IncidentClustersResult = {
   note?: string;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 export const requestIncidentClusters = (lookbackDays?: number) =>
   api<IncidentClustersResult>("/ai/incident-clusters", {
@@ -1408,6 +1410,7 @@ export type AnomalyResult = {
   note?: string;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 export const requestAnomalies = (
   today: AnomalyRunInput[],
@@ -1451,6 +1454,7 @@ export type ScheduleOptimizeResult = {
   note?: string;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 export const requestScheduleOptimize = (
   runs: ScheduleRunInput[],

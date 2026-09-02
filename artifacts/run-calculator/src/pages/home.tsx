@@ -416,6 +416,7 @@ import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
+import AiStatusNotice from "../components/AiStatusNotice";
 import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
@@ -7561,7 +7562,11 @@ export default function Home() {
   // an active day and skips the AI call when idle with no at-risk stock). The
   // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
   // provider in (tabs)/_layout.tsx (replit.md parity).
-  const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
+  const {
+    alert: proactiveAlert,
+    dismiss: dismissProactiveAlert,
+    aiStatus: proactiveAiStatus,
+  } = useProactiveAlert({
     enabled: isManager,
     buildInput: () => {
       // Resolve upcoming scheduled runs to their FormValues (scheduled runs carry
@@ -16644,6 +16649,7 @@ export default function Home() {
                 )}
               </div>
             )}
+            <AiStatusNotice status={proactiveAiStatus ?? undefined} feature="AI proactive alerts" />
             <ProactiveAlertBanner
               alert={proactiveAlert}
               onDismiss={dismissProactiveAlert}

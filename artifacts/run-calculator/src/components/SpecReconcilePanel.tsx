@@ -43,6 +43,7 @@ import {
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import AiStatusNotice from "@/components/AiStatusNotice";
 
 function fmtDate(ms: number): string {
   try {
@@ -605,6 +606,7 @@ export default function SpecReconcilePanel({
         )}
 
         {resultError && <p className="text-sm text-destructive">{resultError}</p>}
+        <AiStatusNotice status={aiResult?.aiStatus} feature="AI reconciliation" />
 
         {combined && summaryCounts && (
           <div className="space-y-4 mt-2" data-testid="spec-reconcile-result">
