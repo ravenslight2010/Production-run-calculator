@@ -157,6 +157,71 @@ describe("AI result cache", () => {
     expect(load).toHaveBeenCalledOnce();
   });
 
+  it("fails open when advisory-lock acquisition is unavailable", async () => {
+    const store = makeStore();
+    const withLock = vi.fn(async () => {
+      throw new Error("transaction unavailable");
+    });
+    store.withLock = withLock;
+    let release!: () => void;
+    const providerMayFinish = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let signalProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      signalProviderStarted = resolve;
+    });
+    const load = vi.fn(async () => {
+      signalProviderStarted();
+      await providerMayFinish;
+      return { answer: "provider still runs" };
+    });
+
+    const first = getOrCreateAiResult(options(store, load));
+    await providerStarted;
+    const second = getOrCreateAiResult(options(store, load));
+    expect(load).toHaveBeenCalledOnce();
+    release();
+
+    await expect(first).resolves.toEqual({
+      value: { answer: "provider still runs" },
+      hit: false,
+    });
+    await expect(second).resolves.toEqual({
+      value: { answer: "provider still runs" },
+      hit: false,
+    });
+    expect(withLock).toHaveBeenCalledOnce();
+    expect(load).toHaveBeenCalledOnce();
+    expect(store.entry).toMatchObject({ value: { answer: "provider still runs" } });
+  });
+
+  it("keeps provider failures retryable and does not preserve a malformed cache row", async () => {
+    const store = makeStore({
+      value: { answer: 42 },
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    store.withLock = async () => {
+      throw new Error("transaction unavailable");
+    };
+    const providerError = new Error("provider unavailable");
+    const failedLoad = vi.fn(async () => {
+      throw providerError;
+    });
+
+    await expect(getOrCreateAiResult(options(store, failedLoad))).rejects.toBe(providerError);
+    expect(failedLoad).toHaveBeenCalledOnce();
+    expect(store.entry).toBeNull();
+
+    const retryLoad = vi.fn(async () => ({ answer: "provider recovered" }));
+    await expect(getOrCreateAiResult(options(store, retryLoad))).resolves.toEqual({
+      value: { answer: "provider recovered" },
+      hit: false,
+    });
+    expect(retryLoad).toHaveBeenCalledOnce();
+    expect(store.entry).toMatchObject({ value: { answer: "provider recovered" } });
+  });
+
   it("does not persist fallback-only or oversized results", async () => {
     const fallbackStore = makeStore();
     const fallbackLoad = vi.fn(async () => ({ value: { answer: "fallback" }, cacheable: false }));

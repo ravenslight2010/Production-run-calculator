@@ -480,6 +480,20 @@ describe("POST /ai/forecast — AI fallback and cache contract", () => {
     expect(body.aiStatus).toBe("unavailable");
     expect(body.note).toContain("unavailable");
     expect(mock.calls).toHaveLength(1);
+
+    // Provider failures are intentionally not cached: the next request should
+    // get another chance to recover instead of replaying the outage response.
+    mock.shouldThrow = false;
+    mock.reply = goodSingleDayReply(request.targetDate);
+    const retry = await post(request);
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json()) as {
+      forecast: { targetDate: string } | null;
+      forecasts: unknown[];
+    };
+    expect(retryBody.forecast?.targetDate).toBe(request.targetDate);
+    expect(retryBody.forecasts).toHaveLength(1);
+    expect(mock.calls).toHaveLength(2);
   });
 
   it("returns an explicit unavailable state after malformed JSON exhausts the retry", async () => {
