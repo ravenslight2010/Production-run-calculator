@@ -13,13 +13,24 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  vi,
+} from "vitest";
 import pg from "pg";
 import { runWithScope, type Scope } from "./requestScope";
 import type { AiCacheResult } from "./aiResultCache";
 
 type DbModule = typeof import("@workspace/db");
 type CacheModule = typeof import("./aiResultCache");
+type CacheLog = {
+  info: (fields: unknown, message?: string) => void;
+};
 
 let db: DbModule["db"];
 let pool: DbModule["pool"];
@@ -57,6 +68,7 @@ function readOrCreate(
   load: () => Promise<{ answer: string }>,
   cacheModule: CacheModule = cache,
   request = "same grounded request",
+  log?: CacheLog,
 ): Promise<AiCacheResult<{ answer: string }>> {
   return runWithScope(scope, () =>
     cacheModule.getOrCreateAiResult({
@@ -64,6 +76,7 @@ function readOrCreate(
       key: cacheKey(cacheModule, request),
       validate: valid,
       load: async () => ({ value: await load() }),
+      log,
     }),
   );
 }
@@ -540,6 +553,94 @@ describe("AI result cache persistence and scope isolation", () => {
       expect(scopedRows.find((row) => row.operationKey === targetKey)?.result).toEqual({
         answer: expectedAnswer,
       });
+    }
+  });
+
+  it("records scoped, bounded telemetry for concurrent cache maintenance", async () => {
+    const [liveOwner, sandboxOwner] = await Promise.all([
+      import("./aiResultCache" + "?telemetry-contention-live"),
+      import("./aiResultCache" + "?telemetry-contention-sandbox"),
+    ]);
+    const liveLog = { info: vi.fn() };
+    const sandboxLog = { info: vi.fn() };
+    const livePruneLock = await pool.connect();
+    await livePruneLock.query("BEGIN");
+    await livePruneLock.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`${liveOwner.AI_RESULT_CACHE_NAMESPACE}:live:prune`],
+    );
+
+    let signalLiveProviderStarted!: () => void;
+    const liveProviderStarted = new Promise<void>((resolve) => {
+      signalLiveProviderStarted = resolve;
+    });
+    const liveMaintenance = readOrCreate(
+      "live",
+      async () => {
+        signalLiveProviderStarted();
+        return { answer: "live telemetry result" };
+      },
+      liveOwner,
+      "telemetry live request",
+      liveLog,
+    );
+
+    try {
+      await liveProviderStarted;
+      await expect(
+        readOrCreate(
+          "sandbox",
+          async () => ({ answer: "sandbox telemetry result" }),
+          sandboxOwner,
+          "telemetry sandbox request",
+          sandboxLog,
+        ),
+      ).resolves.toEqual({
+        value: { answer: "sandbox telemetry result" },
+        hit: false,
+      });
+    } finally {
+      await livePruneLock.query("ROLLBACK");
+      livePruneLock.release();
+    }
+
+    await expect(liveMaintenance).resolves.toEqual({
+      value: { answer: "live telemetry result" },
+      hit: false,
+    });
+
+    const expectedFields = [
+      "event",
+      "operation",
+      "outcome",
+      "scope",
+      "waitDurationMs",
+    ];
+    for (const [scope, log] of [
+      ["live", liveLog],
+      ["sandbox", sandboxLog],
+    ] as const) {
+      expect(log.info).toHaveBeenCalledTimes(1);
+      const [fields, message] = log.info.mock.calls[0] as [
+        Record<string, unknown>,
+        string,
+      ];
+      expect(Object.keys(fields).sort()).toEqual(expectedFields);
+      expect(fields).toMatchObject({
+        event: "cache_maintenance",
+        scope,
+        operation: "prune",
+        outcome: "success",
+      });
+      expect(fields.waitDurationMs).toEqual(expect.any(Number));
+      expect(fields.waitDurationMs).toBeGreaterThanOrEqual(0);
+      expect(fields.waitDurationMs).toBeLessThanOrEqual(
+        7 * 24 * 60 * 60 * 1000,
+      );
+      expect(Number.isInteger(fields.waitDurationMs)).toBe(true);
+      expect(fields).not.toHaveProperty("prompt");
+      expect(fields).not.toHaveProperty("result");
+      expect(message).toBe("cache maintenance completed");
     }
   });
 
