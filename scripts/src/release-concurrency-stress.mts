@@ -16,6 +16,7 @@ const LOCK_FAILURE_RE =
   /(?:deadlock|lock timeout|could not obtain lock|duplicate[- ]marker|duplicate key|too many clients|remaining connection slots|connection pool exhausted)/i;
 export const CONCURRENCY_REGRESSION_MIN_INCREASE_MS = 30_000;
 export const CONCURRENCY_REGRESSION_MIN_INCREASE_PERCENT = 25;
+export const CONCURRENCY_TREND_HISTORY_LIMIT = 5;
 
 export type StressShardResult = {
   label: string;
@@ -59,6 +60,40 @@ export type ConcurrencyStressComparison = {
   minimumIncreasePercent: number;
   setup: ConcurrencyTimingMetric | null;
   totalWallClock: ConcurrencyTimingMetric | null;
+};
+
+export type ConcurrencyHistoryArtifact = {
+  runId: string;
+  createdAt?: string;
+  report: ConcurrencyStressReport;
+};
+
+export type ConcurrencyTrendMetric = {
+  sampleCount: number;
+  firstMs: number;
+  latestMs: number;
+  minimumMs: number;
+  maximumMs: number;
+  averageMs: number;
+  changeMs: number;
+  changePercent: number | null;
+};
+
+export type ConcurrencyStressTrend = {
+  schemaVersion: 1;
+  historyLimit: number;
+  historicalSampleCount: number;
+  ignoredHistoricalArtifactCount: number;
+  currentRunIncluded: boolean;
+  points: Array<{
+    runId: string;
+    createdAt?: string;
+    setupMs: number;
+    totalWallClockMs: number;
+  }>;
+  setup: ConcurrencyTrendMetric | null;
+  totalWallClock: ConcurrencyTrendMetric | null;
+  note: string;
 };
 
 export type StressRunStep = (
@@ -149,14 +184,22 @@ function timingMetric(
   };
 }
 
-function isHealthyBaseline(
-  report: ConcurrencyStressReport | undefined,
-): report is ConcurrencyStressReport {
+function isHealthyBaseline(report: unknown): report is ConcurrencyStressReport {
   return (
-    report?.schemaVersion === 1 &&
+    typeof report === "object" &&
+    report !== null &&
+    "schemaVersion" in report &&
+    report.schemaVersion === 1 &&
+    "safe" in report &&
     report.safe === true &&
+    "setupElapsedMs" in report &&
+    typeof report.setupElapsedMs === "number" &&
     Number.isFinite(report.setupElapsedMs) &&
-    Number.isFinite(report.totalElapsedMs)
+    report.setupElapsedMs >= 0 &&
+    "totalElapsedMs" in report &&
+    typeof report.totalElapsedMs === "number" &&
+    Number.isFinite(report.totalElapsedMs) &&
+    report.totalElapsedMs >= 0
   );
 }
 
@@ -249,6 +292,162 @@ export function formatConcurrencyComparisonMarkdown(
   ].join("\n");
 }
 
+function isHealthyHistoryArtifact(
+  value: unknown,
+): value is ConcurrencyHistoryArtifact {
+  if (typeof value !== "object" || value === null) return false;
+  if (!("runId" in value) || typeof value.runId !== "string" || !value.runId) {
+    return false;
+  }
+  if (
+    "createdAt" in value &&
+    value.createdAt !== undefined &&
+    typeof value.createdAt !== "string"
+  ) {
+    return false;
+  }
+  return "report" in value && isHealthyBaseline(value.report);
+}
+
+function summarizeTrendMetric(
+  values: readonly number[],
+): ConcurrencyTrendMetric {
+  const firstMs = values[0]!;
+  const latestMs = values[values.length - 1]!;
+  const changeMs = latestMs - firstMs;
+  return {
+    sampleCount: values.length,
+    firstMs,
+    latestMs,
+    minimumMs: Math.min(...values),
+    maximumMs: Math.max(...values),
+    averageMs: values.reduce((sum, value) => sum + value, 0) / values.length,
+    changeMs,
+    changePercent: firstMs > 0 ? (changeMs / firstMs) * 100 : null,
+  };
+}
+
+export function summarizeConcurrencyStressTrend(
+  current: ConcurrencyStressReport,
+  history: readonly unknown[] = [],
+): ConcurrencyStressTrend {
+  const validHistory = history
+    .filter(isHealthyHistoryArtifact)
+    .slice(0, CONCURRENCY_TREND_HISTORY_LIMIT);
+  const points = validHistory
+    .slice()
+    .reverse()
+    .map(({ runId, createdAt, report }) => ({
+      runId,
+      ...(createdAt ? { createdAt } : {}),
+      setupMs: report.setupElapsedMs,
+      totalWallClockMs: report.totalElapsedMs,
+    }));
+  const currentRunIncluded = isHealthyBaseline(current);
+  if (currentRunIncluded) {
+    points.push({
+      runId: process.env.GITHUB_RUN_ID ?? "current",
+      setupMs: current.setupElapsedMs,
+      totalWallClockMs: current.totalElapsedMs,
+    });
+  }
+  const ignoredHistoricalArtifactCount = history.length - validHistory.length;
+  const note = currentRunIncluded
+    ? "Informational trend only; the single-baseline comparison remains the calibration alert."
+    : "The current unsafe calibration was omitted; historical healthy samples are informational only.";
+  return {
+    schemaVersion: 1,
+    historyLimit: CONCURRENCY_TREND_HISTORY_LIMIT,
+    historicalSampleCount: validHistory.length,
+    ignoredHistoricalArtifactCount,
+    currentRunIncluded,
+    points,
+    setup:
+      points.length > 0
+        ? summarizeTrendMetric(points.map((point) => point.setupMs))
+        : null,
+    totalWallClock:
+      points.length > 0
+        ? summarizeTrendMetric(points.map((point) => point.totalWallClockMs))
+        : null,
+    note,
+  };
+}
+
+function formatTrendMetric(metric: ConcurrencyTrendMetric | null): string {
+  if (!metric) return "not available";
+  const changePercent =
+    metric.changePercent === null
+      ? "n/a"
+      : `${metric.changePercent.toFixed(1)}%`;
+  return [
+    `${metric.sampleCount} samples`,
+    `first ${metric.firstMs}ms`,
+    `latest ${metric.latestMs}ms`,
+    `min ${metric.minimumMs}ms`,
+    `max ${metric.maximumMs}ms`,
+    `average ${Math.round(metric.averageMs)}ms`,
+    `change ${metric.changeMs >= 0 ? "+" : ""}${metric.changeMs}ms (${changePercent})`,
+  ].join("; ");
+}
+
+export function formatConcurrencyTrendMarkdown(
+  trend: ConcurrencyStressTrend,
+): string {
+  return [
+    "# API concurrency calibration trend",
+    "",
+    `Samples: ${trend.points.length} total (${trend.historicalSampleCount} prior healthy, current run ${
+      trend.currentRunIncluded ? "included" : "omitted"
+    })`,
+    `Ignored historical artifacts: ${trend.ignoredHistoricalArtifactCount}`,
+    "",
+    "| Metric | Trend summary |",
+    "| --- | --- |",
+    `| Setup time | ${formatTrendMetric(trend.setup)} |`,
+    `| Total wall-clock time | ${formatTrendMetric(trend.totalWallClock)} |`,
+    "",
+    trend.note,
+    "This trend is descriptive and does not pass or fail the release. See the calibration comparison for the existing single-baseline alert.",
+    "",
+    "## Healthy samples",
+    "",
+    "| Run | Created | Setup | Total wall-clock |",
+    "| --- | --- | ---: | ---: |",
+    ...(trend.points.length === 0
+      ? ["| none | — | — | — |"]
+      : trend.points.map(
+          (point) =>
+            `| ${point.runId} | ${point.createdAt ?? "unknown"} | ${point.setupMs}ms | ${point.totalWallClockMs}ms |`,
+        )),
+    "",
+  ].join("\n");
+}
+
+async function readConcurrencyHistory(): Promise<unknown[]> {
+  const historyPath = process.env.RELEASE_CONCURRENCY_HISTORY_JSON;
+  if (!historyPath) {
+    console.info("No prior calibration history was provided.");
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(await readFile(historyPath, "utf8"));
+    if (!Array.isArray(parsed)) {
+      console.warn(
+        "Ignoring malformed calibration history: expected an array.",
+      );
+      return [];
+    }
+    return parsed;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `Ignoring missing or unreadable calibration history: ${message}`,
+    );
+    return [];
+  }
+}
+
 async function writeConcurrencyComparison(
   outputDirectory: string,
   current: ConcurrencyStressReport,
@@ -274,6 +473,24 @@ async function writeConcurrencyComparison(
   await writeFile(
     join(outputDirectory, "release-concurrency-comparison.md"),
     formatConcurrencyComparisonMarkdown(comparison),
+    "utf8",
+  );
+}
+
+async function writeConcurrencyTrend(
+  outputDirectory: string,
+  current: ConcurrencyStressReport,
+): Promise<void> {
+  const history = await readConcurrencyHistory();
+  const trend = summarizeConcurrencyStressTrend(current, history);
+  await writeFile(
+    join(outputDirectory, "release-concurrency-trend.json"),
+    `${JSON.stringify(trend, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    join(outputDirectory, "release-concurrency-trend.md"),
+    formatConcurrencyTrendMarkdown(trend),
     "utf8",
   );
 }
@@ -456,6 +673,7 @@ export async function runConcurrencyStress(
     "utf8",
   );
   await writeConcurrencyComparison(outputDirectory, report);
+  await writeConcurrencyTrend(outputDirectory, report);
   return report;
 }
 
@@ -490,6 +708,9 @@ async function main(): Promise<void> {
     );
     console.log(
       "Set RELEASE_CONCURRENCY_BASELINE_JSON to compare setup and wall-clock time with a healthy prior report.",
+    );
+    console.log(
+      `Set RELEASE_CONCURRENCY_HISTORY_JSON to summarize up to ${CONCURRENCY_TREND_HISTORY_LIMIT} prior healthy calibration reports.`,
     );
     console.log(
       "Requires RELEASE_CONCURRENCY_APPROVED_DISPOSABLE_DB=1 and a CI/test environment.",

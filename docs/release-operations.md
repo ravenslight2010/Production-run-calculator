@@ -146,7 +146,10 @@ The lane writes `release-concurrency-stress.json` and
 `RELEASE_CONCURRENCY_EVIDENCE_DIR` to retain them at a chosen path. When
 `RELEASE_CONCURRENCY_BASELINE_JSON` points at a prior healthy report, it also
 writes `release-concurrency-comparison.json` and
-`release-concurrency-comparison.md`. Reports record:
+`release-concurrency-comparison.md`. When
+`RELEASE_CONCURRENCY_HISTORY_JSON` points at a JSON array of prior healthy
+artifacts, it additionally writes `release-concurrency-trend.json` and
+`release-concurrency-trend.md`. Reports record:
 
 - setup time: the elapsed time for the same schema push that prepares the
   disposable CI database (the shards then perform their normal per-fixture
@@ -162,11 +165,15 @@ The manual GitHub Actions workflow
 Postgres, sets the explicit disposable-database acknowledgement, and retains
 the JSON, Markdown, database-setup log, and per-shard logs in the separate
 `release-concurrency-calibration-<run-id>` artifact. It looks through prior
-successful calibration runs for the newest healthy report and compares setup
-and total wall-clock time. A slowdown is meaningful when it is both at least
-30 seconds and at least 25% slower than that baseline; the comparison is
-highlighted in the workflow summary. The workflow is manual-only and is not a
-release gate.
+successful calibration runs for up to five non-expired healthy reports. Missing,
+expired, malformed, unsafe, and unsafe-path artifacts are logged and ignored.
+The newest accepted report remains the single baseline, so setup and total
+wall-clock time are still compared with the existing alert rule: a slowdown is
+meaningful when it is both at least 30 seconds and at least 25% slower than that
+baseline. The workflow summary also includes an informational chronological
+trend with first/latest/minimum/maximum/average values and the change across
+the retained healthy samples. The trend never changes the alert status or
+release gates. The workflow is manual-only and is not a release gate.
 
 Any non-passing shard, timeout, lock/setup failure, missing shard startup, or
 observed cap violation fails the lane with a clear `Concurrency cap unsafe`
