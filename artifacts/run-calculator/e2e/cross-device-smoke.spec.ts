@@ -7,12 +7,13 @@
  * and individual failed-write regressions belong to their focused suites.
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
+const ONBOARDING_RESPONSE_TIMEOUT = 15_000;
 const testUsernames = new Set<string>();
 
 function uid(): string {
@@ -58,27 +59,47 @@ async function signUp(page: Page, username: string): Promise<void> {
 
   const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
   if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
+    await completeOnboarding(page, welcome);
   }
 }
 
 async function dismissOnboarding(page: Page): Promise<void> {
   const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
   if (!(await welcome.isVisible().catch(() => false))) return;
-  const seen = page.waitForResponse(
+  await completeOnboarding(page, welcome);
+}
+
+async function completeOnboarding(
+  page: Page,
+  welcome: ReturnType<Page["getByRole"]>,
+): Promise<void> {
+  // Register the waiter before clicking so a fast response cannot be missed.
+  const seenPromise = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/me/onboarding-seen") &&
       response.request().method() === "POST",
+    { timeout: ONBOARDING_RESPONSE_TIMEOUT },
   );
-  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-  await expect((await seen).status()).toBe(200);
+
+  let response: Response;
+  try {
+    [response] = await Promise.all([
+      seenPromise,
+      welcome.getByRole("button", { name: "Get started", exact: true }).click(),
+    ]);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Timed out waiting up to ${ONBOARDING_RESPONSE_TIMEOUT}ms for POST /api/me/onboarding-seen after clicking Get started: ${reason}`,
+    );
+  }
+
+  const body = (await response.text().catch(() => "<unavailable>")).trim();
+  const bodyContext = body ? body.slice(0, 1_000) : "<empty>";
+  expect(
+    response.status(),
+    `POST /api/me/onboarding-seen returned status ${response.status()} with body: ${bodyContext}`,
+  ).toBe(200);
   await expect(welcome).toBeHidden({ timeout: 10_000 });
 }
 
