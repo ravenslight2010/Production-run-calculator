@@ -74,12 +74,49 @@ jobs:
 
       - name: Upload standard release evidence
         if: always()
+        id: upload-standard-release-evidence
         uses: actions/upload-artifact@v4
         with:
           name: release-evidence-standard-${{ github.run_id }}
           path: release-evidence
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Summarize stopped standard release check
+        if: always()
+        env:
+          CHECKPOINT_DIR: release-evidence
+          CHECKPOINT_ARTIFACT_URL: ${{ steps.upload-standard-release-evidence.outputs.artifact-url }}
+          RESUME_COMMAND: pnpm run release:check -- --resume
+          REGENERATE_COMMAND: pnpm run release:check
+        run: |
+          if [[ ! -s "$CHECKPOINT_DIR/release-check-checkpoint.md" ]]; then
+            exit 0
+          fi
+
+          {
+            echo "## Release check stopped — NO-GO"
+            echo
+            echo "The release check stopped before all gates completed."
+            echo
+            if [[ -n "$CHECKPOINT_ARTIFACT_URL" ]]; then
+              echo "[Download the stopped-check checkpoint artifact]($CHECKPOINT_ARTIFACT_URL)"
+            else
+              echo "The checkpoint artifact was not uploaded successfully."
+            fi
+            echo
+            echo "**This checkpoint is not retained release evidence and cannot support a GO decision.**"
+            echo
+            echo "Resume the incomplete check with:"
+            echo '```text'
+            echo "$RESUME_COMMAND"
+            echo '```'
+            echo
+            echo "Or regenerate the retained report from a fresh run with:"
+            echo '```text'
+            echo "$REGENERATE_COMMAND"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release-check-full:
     name: Release gates and retained full evidence
@@ -145,9 +182,46 @@ jobs:
 
       - name: Upload full release evidence
         if: always()
+        id: upload-full-release-evidence
         uses: actions/upload-artifact@v4
         with:
           name: release-evidence-full-${{ github.run_id }}
           path: release-evidence-full
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Summarize stopped full release check
+        if: always()
+        env:
+          CHECKPOINT_DIR: release-evidence-full
+          CHECKPOINT_ARTIFACT_URL: ${{ steps.upload-full-release-evidence.outputs.artifact-url }}
+          RESUME_COMMAND: pnpm run release:check:full -- --resume
+          REGENERATE_COMMAND: pnpm run release:check:full
+        run: |
+          if [[ ! -s "$CHECKPOINT_DIR/release-check-checkpoint.md" ]]; then
+            exit 0
+          fi
+
+          {
+            echo "## Release check stopped — NO-GO"
+            echo
+            echo "The full release check stopped before all gates completed."
+            echo
+            if [[ -n "$CHECKPOINT_ARTIFACT_URL" ]]; then
+              echo "[Download the stopped-check checkpoint artifact]($CHECKPOINT_ARTIFACT_URL)"
+            else
+              echo "The checkpoint artifact was not uploaded successfully."
+            fi
+            echo
+            echo "**This checkpoint is not retained release evidence and cannot support a GO decision.**"
+            echo
+            echo "Resume the incomplete check with:"
+            echo '```text'
+            echo "$RESUME_COMMAND"
+            echo '```'
+            echo
+            echo "Or regenerate the retained report from a fresh run with:"
+            echo '```text'
+            echo "$REGENERATE_COMMAND"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -339,6 +339,16 @@ async function run(): Promise<void> {
       /Gates not reached: fixture gate three \(NOT REACHED\)/,
     );
     assert.match(
+      checkpointReport,
+      /^Resume: pnpm run release:check -- --resume$/m,
+      "the standard checkpoint must publish its matching resume command",
+    );
+    assert.match(
+      checkpointReport,
+      /^Regenerate: pnpm run release:check$/m,
+      "the standard checkpoint must publish its matching regenerate command",
+    );
+    assert.match(
       interrupted.output,
       /Release checkpoint \(INCOMPLETE \/ NO-GO; not retained evidence\):/,
       "the console must distinguish a checkpoint from retained evidence",
@@ -788,6 +798,16 @@ async function runFullModeScenario(): Promise<void> {
     assert.match(
       interruptedCheckpointReport,
       /\| full browser E2E suite \| INFRASTRUCTURE TIMEOUT \|/,
+    );
+    assert.match(
+      interruptedCheckpointReport,
+      /^Resume: pnpm run release:check:full -- --resume$/m,
+      "the full checkpoint must publish its matching resume command",
+    );
+    assert.match(
+      interruptedCheckpointReport,
+      /^Regenerate: pnpm run release:check:full$/m,
+      "the full checkpoint must publish its matching regenerate command",
     );
     assert.doesNotMatch(
       interruptedCheckpointReport,
