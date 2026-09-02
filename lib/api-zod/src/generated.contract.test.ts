@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  AiScheduleOptimizeResponse,
+  AiSummaryResponse,
   CheckUsernameAvailableQueryParams,
   ListPasswordResetRequestsResponseItem,
   ListRunsResponseItem,
@@ -54,6 +56,72 @@ describe("generated Zod schema runtime contracts", () => {
         batchesNeeded: "3",
         inputs: {},
         createdAt: "2026-08-26T12:34:56.000Z",
+      }),
+    ).toThrow(z.ZodError);
+  });
+
+  it("validates the shared AI status values on recap and schedule responses", () => {
+    const statuses = ["deterministic", "enriched", "unavailable"] as const;
+
+    for (const aiStatus of statuses) {
+      const summary = AiSummaryResponse.parse({
+        summary: "Production recap",
+        stats: {
+          scope: "day",
+          date: "2026-08-26",
+          runsPlanned: 1,
+          runsFinished: 1,
+          casesPlanned: 12,
+          casesProduced: 12,
+          attainmentPct: 100,
+          totalDowntimeMinutes: 0,
+          totalStoppages: 0,
+          unfinishedRuns: [],
+          incidentCount: 0,
+          wasteFlaggedCount: 0,
+          hasData: true,
+        },
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(summary.aiStatus).toBe(aiStatus);
+
+      const schedule = AiScheduleOptimizeResponse.parse({
+        order: ["run-1"],
+        changed: false,
+        improved: false,
+        before: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        after: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(schedule.aiStatus).toBe(aiStatus);
+    }
+
+    expect(() =>
+      AiSummaryResponse.parse({
+        summary: "Production recap",
+        stats: {
+          scope: "day",
+          date: "2026-08-26",
+          runsPlanned: 0,
+          runsFinished: 0,
+          casesPlanned: 0,
+          casesProduced: 0,
+          attainmentPct: 0,
+          totalDowntimeMinutes: 0,
+          totalStoppages: 0,
+          unfinishedRuns: [],
+          incidentCount: 0,
+          wasteFlaggedCount: 0,
+          hasData: false,
+        },
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
       }),
     ).toThrow(z.ZodError);
   });

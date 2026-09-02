@@ -1813,6 +1813,18 @@ export interface SummaryStats {
   hasData: boolean;
 }
 
+/**
+ * Whether the response is deterministic-only, AI-enriched, or missing AI narration
+ */
+export type SummaryResultAiStatus = typeof SummaryResultAiStatus[keyof typeof SummaryResultAiStatus];
+
+
+export const SummaryResultAiStatus = {
+  deterministic: 'deterministic',
+  enriched: 'enriched',
+  unavailable: 'unavailable',
+} as const;
+
 export interface SummaryResult {
   /** Plain-language recap (AI narration, or deterministic fallback) */
   summary: string;
@@ -1820,6 +1832,8 @@ export interface SummaryResult {
   generatedAt: number;
   /** True when the AI narrated; false when the deterministic fallback was used */
   aiGenerated: boolean;
+  /** Whether the response is deterministic-only, AI-enriched, or missing AI narration */
+  aiStatus: SummaryResultAiStatus;
 }
 
 export type OperationalReportInputScope = typeof OperationalReportInputScope[keyof typeof OperationalReportInputScope];
@@ -2170,6 +2184,18 @@ export interface ScheduleMetrics {
   changeovers: number;
 }
 
+/**
+ * Whether the response is deterministic-only, AI-enriched, or missing AI narration
+ */
+export type ScheduleOptimizeResponseAiStatus = typeof ScheduleOptimizeResponseAiStatus[keyof typeof ScheduleOptimizeResponseAiStatus];
+
+
+export const ScheduleOptimizeResponseAiStatus = {
+  deterministic: 'deterministic',
+  enriched: 'enriched',
+  unavailable: 'unavailable',
+} as const;
+
 export interface ScheduleOptimizeResponse {
   /** Suggested run order (run ids), best-first */
   order: string[];
@@ -2186,6 +2212,8 @@ export interface ScheduleOptimizeResponse {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
+  /** Whether the response is deterministic-only, AI-enriched, or missing AI narration */
+  aiStatus: ScheduleOptimizeResponseAiStatus;
 }
 
 /**

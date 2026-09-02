@@ -7103,6 +7103,7 @@ components:
         - stats
         - generatedAt
         - aiGenerated
+        - aiStatus
       properties:
         summary:
           type: string
@@ -7114,6 +7115,10 @@ components:
         aiGenerated:
           type: boolean
           description: True when the AI narrated; false when the deterministic fallback was used
+        aiStatus:
+          type: string
+          enum: [deterministic, enriched, unavailable]
+          description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
 
     OperationalReportInput:
       type: object
@@ -7519,6 +7524,7 @@ components:
         - summary
         - generatedAt
         - aiGenerated
+        - aiStatus
       properties:
         order:
           type: array
@@ -7546,6 +7552,10 @@ components:
         aiGenerated:
           type: boolean
           description: True when the AI narrated; false otherwise
+        aiStatus:
+          type: string
+          enum: [deterministic, enriched, unavailable]
+          description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
 
     ForecastAccuracyInput:
       type: object

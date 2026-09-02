@@ -1618,7 +1618,8 @@ export const AiSummaryResponse = zod.object({
   "hasData": zod.boolean()
 }).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used')
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1916,7 +1917,8 @@ export const AiScheduleOptimizeResponse = zod.object({
   "summary": zod.string().describe('Plain-language narration (AI), or empty when no improvement \/ AI unavailable'),
   "note": zod.string().optional().describe('Optional explanation (e.g. already optimally ordered)'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise')
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
