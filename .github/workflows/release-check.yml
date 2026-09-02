@@ -15,6 +15,9 @@ jobs:
     name: Release gates and retained standard evidence
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
 
     services:
       postgres:
@@ -87,7 +90,12 @@ jobs:
         env:
           CHECKPOINT_DIR: release-evidence
           CHECKPOINT_ARTIFACT_URL: ${{ steps.upload-standard-release-evidence.outputs.artifact-url }}
+          CHECKPOINT_ARTIFACT_NAME: release-evidence-standard-${{ github.run_id }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
           RELEASE_MODE: standard
+          VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check -- --resume
           REGENERATE_COMMAND: pnpm run release:check
         run: |
@@ -98,6 +106,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
 
     services:
       postgres:
@@ -170,7 +181,12 @@ jobs:
         env:
           CHECKPOINT_DIR: release-evidence-full
           CHECKPOINT_ARTIFACT_URL: ${{ steps.upload-full-release-evidence.outputs.artifact-url }}
+          CHECKPOINT_ARTIFACT_NAME: release-evidence-full-${{ github.run_id }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
           RELEASE_MODE: full
+          VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check:full -- --resume
           REGENERATE_COMMAND: pnpm run release:check:full
         run: |

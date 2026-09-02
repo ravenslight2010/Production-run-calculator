@@ -39,20 +39,16 @@ function runReleaseCheck(
   envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(
-      "pnpm",
-      ["exec", "tsx", releaseCheck, ...args],
-      {
-        cwd: rootDir,
-        env: {
-          ...process.env,
-          RELEASE_EVIDENCE_DIR: evidenceDir,
-          RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify(steps),
-          ...envOverrides,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
+    const child = spawn("pnpm", ["exec", "tsx", releaseCheck, ...args], {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        RELEASE_EVIDENCE_DIR: evidenceDir,
+        RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify(steps),
+        ...envOverrides,
       },
-    );
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let output = "";
     child.stdout.on("data", (chunk: Buffer) => {
       output += chunk.toString();
@@ -70,6 +66,7 @@ function runStoppedSummary(
   summaryPath: string,
   mode: "standard" | "full",
   artifactUrl: string,
+  envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolveRun, reject) => {
     const child = spawn("bash", [stoppedSummaryScript], {
@@ -88,6 +85,7 @@ function runStoppedSummary(
           mode === "full"
             ? "pnpm run release:check:full"
             : "pnpm run release:check",
+        ...envOverrides,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -101,6 +99,96 @@ function runStoppedSummary(
     child.once("error", reject);
     child.once("close", (code) => resolveRun({ code: code ?? 1, output }));
   });
+}
+
+async function runStoppedArtifactLinkVerificationScenario(): Promise<void> {
+  for (const mode of ["standard", "full"] as const) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-artifact-verification-`),
+    );
+    const fakeBinDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-artifact-verification-bin-`),
+    );
+    const artifactUrl =
+      "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
+    const callsPath = join(fakeBinDir, "curl-calls");
+    const fakeCurlPath = join(fakeBinDir, "curl");
+    const expectedArtifactName = `release-evidence-${mode}-123456789`;
+    await writeFile(
+      fakeCurlPath,
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+output_path=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "--output" ]]; then
+    output_path="$argument"
+  fi
+  previous="$argument"
+done
+if [[ "\${*: -1}" == */actions/artifacts/* ]]; then
+  printf '{"name":"%s"}\\n' "$EXPECTED_ARTIFACT_NAME" > "$output_path"
+fi
+`,
+      { encoding: "utf8", mode: 0o755 },
+    );
+
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        join(evidenceDir, "step-summary.md"),
+        mode,
+        artifactUrl,
+        {
+          CHECKPOINT_ARTIFACT_NAME: expectedArtifactName,
+          EXPECTED_ARTIFACT_NAME: expectedArtifactName,
+          GITHUB_API_URL: "https://api.example.test",
+          GITHUB_REPOSITORY: "example/factory",
+          GITHUB_TOKEN: "test-token",
+          PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+          VERIFY_CHECKPOINT_ARTIFACT_LINK: "1",
+        },
+      );
+      assert.equal(result.code, 0, result.output);
+      assert.doesNotMatch(
+        result.output,
+        /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/,
+        "artifact URLs must not be exposed in process output",
+      );
+
+      const curlCalls = await readFile(callsPath, "utf8");
+      assert.equal(
+        (
+          curlCalls.match(
+            /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/g,
+          ) ?? []
+        ).length,
+        1,
+        `${mode} uploaded artifact link should be probed exactly once`,
+      );
+      assert.match(
+        curlCalls,
+        /Authorization: Bearer test-token/,
+        `${mode} artifact link probe must authenticate`,
+      );
+      assert.match(
+        curlCalls,
+        /https:\/\/api\.example\.test\/repos\/example\/factory\/actions\/artifacts\/987654321/,
+        `${mode} artifact metadata should be checked by artifact id`,
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+      await rm(fakeBinDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log("Stopped release artifact link verification passed.");
 }
 
 async function runStoppedSummaryScenario(): Promise<void> {
@@ -416,7 +504,10 @@ async function run(): Promise<void> {
     {
       label: "fixture gate three",
       command: process.execPath,
-      args: ["-e", "console.log('fixture gate three resumed'); process.exit(0)"],
+      args: [
+        "-e",
+        "console.log('fixture gate three resumed'); process.exit(0)",
+      ],
     },
   ];
 
@@ -433,7 +524,8 @@ async function run(): Promise<void> {
       await mkdir(join(path, ".."), { recursive: true });
       await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
     }
-    const priorRetainedReport = "# Prior retained release report\nDecision: GO\n";
+    const priorRetainedReport =
+      "# Prior retained release report\nDecision: GO\n";
     await writeFile(
       join(evidenceDir, "release-check-report.md"),
       priorRetainedReport,
@@ -442,10 +534,15 @@ async function run(): Promise<void> {
 
     const interrupted = await runReleaseCheck(evidenceDir, steps);
     assert.equal(interrupted.code, 1, interrupted.output);
-    assert.match(interrupted.output, /fixture gate two exceeded its 0 minute timeout/);
+    assert.match(
+      interrupted.output,
+      /fixture gate two exceeded its 0 minute timeout/,
+    );
 
     const checkpointPath = join(evidenceDir, "release-check-state.json");
-    const firstCheckpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as {
+    const firstCheckpoint = JSON.parse(
+      await readFile(checkpointPath, "utf8"),
+    ) as {
       revision: string;
       mode: string;
       results: Array<{ label: string; passed: boolean; status: string }>;
@@ -508,8 +605,15 @@ async function run(): Promise<void> {
       "resume must not treat the failed gate as completed",
     );
 
-    const report = await readFile(join(evidenceDir, "release-check-report.md"), "utf8");
-    for (const label of ["fixture gate one", "fixture gate two", "fixture gate three"]) {
+    const report = await readFile(
+      join(evidenceDir, "release-check-report.md"),
+      "utf8",
+    );
+    for (const label of [
+      "fixture gate one",
+      "fixture gate two",
+      "fixture gate three",
+    ]) {
       assert.match(report, new RegExp(`\\| ${label} \\| PASS \\|`));
     }
     assert.equal(
@@ -544,7 +648,9 @@ async function run(): Promise<void> {
     await rm(markerDir, { recursive: true, force: true });
   }
 
-  console.log("Release resume integration test passed (checkpoint, rerun, log, report).");
+  console.log(
+    "Release resume integration test passed (checkpoint, rerun, log, report).",
+  );
 }
 
 async function runParallelResumeScenario(): Promise<void> {
@@ -740,7 +846,9 @@ async function runOnboardingGuardStopScenario(): Promise<void> {
 
 async function runApiShardConcurrencyScenario(): Promise<void> {
   const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-api-cap-"));
-  const markerDir = await mkdtemp(join(tmpdir(), "release-resume-api-cap-marker-"));
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-api-cap-marker-"),
+  );
   const eventsPath = join(markerDir, "events");
   const gateScript = [
     "const fs = require('node:fs');",
@@ -782,7 +890,9 @@ async function runApiShardConcurrencyScenario(): Promise<void> {
     assert.equal(result.code, 0, result.output);
     let active = 0;
     let observedPeak = 0;
-    for (const event of (await readFile(eventsPath, "utf8")).trim().split("\n")) {
+    for (const event of (await readFile(eventsPath, "utf8"))
+      .trim()
+      .split("\n")) {
       active += event === "start" ? 1 : -1;
       observedPeak = Math.max(observedPeak, active);
     }
@@ -804,7 +914,9 @@ async function runApiShardConcurrencyScenario(): Promise<void> {
 
 async function runFullModeScenario(): Promise<void> {
   const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-full-"));
-  const markerDir = await mkdtemp(join(tmpdir(), "release-resume-full-marker-"));
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-full-marker-"),
+  );
   const marker = join(markerDir, "full-browser-started");
   const revision = await getCurrentRevision();
   const browserReport = [
@@ -857,7 +969,10 @@ async function runFullModeScenario(): Promise<void> {
     {
       label: "fixture gate three",
       command: process.execPath,
-      args: ["-e", "console.log('fixture gate three resumed'); process.exit(0)"],
+      args: [
+        "-e",
+        "console.log('fixture gate three resumed'); process.exit(0)",
+      ],
     },
   ];
 
@@ -897,7 +1012,9 @@ async function runFullModeScenario(): Promise<void> {
     );
 
     const checkpointPath = join(evidenceDir, "release-check-state.json");
-    const firstCheckpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as {
+    const firstCheckpoint = JSON.parse(
+      await readFile(checkpointPath, "utf8"),
+    ) as {
       revision: string;
       mode: string;
       results: Array<{ label: string; passed: boolean; status: string }>;
@@ -972,7 +1089,10 @@ async function runFullModeScenario(): Promise<void> {
       "resume must rerun the failed full browser gate",
     );
 
-    const report = await readFile(join(evidenceDir, "release-check-report.md"), "utf8");
+    const report = await readFile(
+      join(evidenceDir, "release-check-report.md"),
+      "utf8",
+    );
     assert.match(report, /^Revision: \S+$/m);
     assert.equal(
       report.match(/^Revision:\s*(\S+)\s*$/m)?.[1],
@@ -1087,6 +1207,7 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
 }
 
 if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
+  await runStoppedArtifactLinkVerificationScenario();
   await runStoppedSummaryScenario();
 } else {
   await run();
