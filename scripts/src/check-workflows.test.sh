@@ -83,6 +83,25 @@ test_accepts_matching_versions() {
   echo "PASS: accepts matching actionlint versions"
 }
 
+test_accepts_quoted_ci_version_with_inline_comment() {
+  local workspace
+  workspace=$(make_workspace_with_declarations quoted-inline-comment \
+    '"github-actionlint": "1.7.12"' \
+    'ACTIONLINT_VERSION: "1.7.12" # Keep CI aligned with the local wrapper')
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected a quoted CI version with an inline comment to pass. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): 1.7.12"
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): 1.7.12"
+  [[ -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the accepted declaration to reach actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: accepts quoted CI version with inline comment"
+}
+
 test_rejects_mismatched_versions() {
   local workspace
   workspace=$(make_workspace mismatched 1.7.12 1.7.11)
@@ -263,6 +282,7 @@ test_rejects_both_invalid_actionlint_releases() {
 }
 
 test_accepts_matching_versions
+test_accepts_quoted_ci_version_with_inline_comment
 test_rejects_mismatched_versions
 test_rejects_missing_actionlint_declaration
 test_rejects_missing_workflow_declaration_file
