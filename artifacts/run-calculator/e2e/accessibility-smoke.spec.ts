@@ -6,7 +6,10 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const testUsernames = new Set<string>();
 
@@ -203,67 +206,55 @@ async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
 async function signUp(page: Page): Promise<void> {
   const username = uniqueTestId("a11y");
   testUsernames.add(username);
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill("AccessibilitySmoke123!");
-  await page.locator("#confirm").fill("AccessibilitySmoke123!");
-  await page.locator("#accessCode").fill(signupCode());
-  const signupResponse = page.waitForResponse(
-    (response) => response.url().includes("/api/auth/sign-up"),
-  );
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  const response = await signupResponse;
-  expect(response.status(), "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
-  expect(response.status(), "isolated sign-up should not be rejected").toBeLessThan(300);
-
-  // Keep this browser fixture independent of stale role seeds in disposable
-  // databases. Every import entry point below requires the manager's full
-  // capability set, including AI, inventory, and profile management.
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must be configured for a11y smoke tests.");
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    const user = await db.query<{ id: string }>(
-      "SELECT id FROM users WHERE username = $1",
-      [username],
-    );
-    const userId = user.rows[0]?.id;
-    expect(userId, "isolated sign-up did not create a database user").toBeTruthy();
-    await db.query(
-      "INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager') " +
-        "ON CONFLICT (user_id) DO UPDATE SET role = 'manager'",
-      [userId],
-    );
-    await db.query(
-      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-      [JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "edit-production-rules",
-        "approve-password-resets",
-        "review-incidents",
-        "use-ai-tools",
-        "manage-factory-settings",
-        "manage-profiles",
-      ])],
-    );
-  } finally {
-    await db.end().catch(() => {});
-  }
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 60_000 });
-  await page.waitForTimeout(500);
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  await welcome.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
-  if (await welcome.isVisible().catch(() => false)) {
-    await completeOnboarding(page, welcome);
-  } else {
-    // A delayed onboarding overlay can render after the tab is attached.
-    // Escape is harmless when it is absent and closes that overlay when it is
-    // present, leaving the authenticated shell available to the smoke checks.
-    await page.keyboard.press("Escape");
-  }
-  await page.keyboard.press("Escape");
+  await signUpAndHandleOnboarding(page, username, "AccessibilitySmoke123!", {
+    signupCode: signupCode(),
+    waitForApp: async (currentPage) => {
+      await currentPage.locator('[data-testid="tab-run"]').waitFor({
+        state: "attached",
+        timeout: 60_000,
+      });
+    },
+    afterSignUp: async (currentPage) => {
+      // Keep this browser fixture independent of stale role seeds in
+      // disposable databases. Every import entry point below requires the
+      // manager's full capability set.
+      if (!process.env.DATABASE_URL) {
+        throw new Error("DATABASE_URL must be configured for a11y smoke tests.");
+      }
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      try {
+        await db.connect();
+        const user = await db.query<{ id: string }>(
+          "SELECT id FROM users WHERE username = $1",
+          [username],
+        );
+        const userId = user.rows[0]?.id;
+        expect(userId, "isolated sign-up did not create a database user").toBeTruthy();
+        await db.query(
+          "INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager') " +
+            "ON CONFLICT (user_id) DO UPDATE SET role = 'manager'",
+          [userId],
+        );
+        await db.query(
+          "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+          [JSON.stringify([
+            "manage-staff",
+            "manage-inventory",
+            "edit-production-rules",
+            "approve-password-resets",
+            "review-incidents",
+            "use-ai-tools",
+            "manage-factory-settings",
+            "manage-profiles",
+          ])],
+        );
+      } finally {
+        await db.end().catch(() => {});
+      }
+      await currentPage.waitForTimeout(500);
+      await currentPage.keyboard.press("Escape");
+    },
+  });
 }
 
 test.afterAll(async () => {
@@ -357,7 +348,7 @@ async function dismissUnexpectedDialog(page: Page): Promise<void> {
   const getStarted = welcome.getByRole("button", { name: "Get started", exact: true });
   await getStarted.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   if (await getStarted.isVisible().catch(() => false)) {
-    await completeOnboarding(page, welcome, { button: getStarted });
+    await dismissOnboardingIfPresent(page, { dialog: () => welcome, button: getStarted });
   }
   const dialogs = page.getByRole("dialog");
   for (let index = 0; index < await dialogs.count(); index += 1) {

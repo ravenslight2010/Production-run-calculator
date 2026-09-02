@@ -19,31 +19,24 @@ import {
   today,
   uniqueRunId,
 } from "./multi-device-harness";
-import { completeOnboarding } from "./onboarding";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const users = new Set<string>();
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  const onboardingVisible = await getStarted
-    .waitFor({ state: "visible", timeout: 8_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (onboardingVisible) {
-    await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
-    await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
-  }
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      afterComplete: async (currentPage) => {
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 5_000 })
+          .catch(() => {});
+      },
+    },
+  });
 }
 
 async function clearToday(): Promise<void> {

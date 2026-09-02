@@ -54,7 +54,7 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 import { Client as PgClient } from "pg";
 import { computeCasesOnLine } from "@workspace/inventory-math";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -90,27 +90,20 @@ async function signUpAndDismissDialog(
   username: string,
   password: string,
 ): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-
-  // "Get Started" dialog always auto-opens on first login.
-  const getStartedBtn = page.getByRole("button", { name: /get.?started/i });
-  const onboardingVisible = await getStartedBtn
-    .waitFor({ state: "visible", timeout: 8_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (onboardingVisible) {
-    await completeOnboarding(page, page.getByRole("dialog"), { button: getStartedBtn });
-    await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(300);
-  }
+  await signUpAndHandleOnboarding(page, username, password, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) => currentPage.getByRole("dialog"),
+      visibilityTimeout: 8_000,
+      afterComplete: async (currentPage) => {
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 5_000 })
+          .catch(() => {});
+        await currentPage.waitForTimeout(300);
+      },
+    },
+  });
 }
 
 async function promoteCurrentPageUserToManager(page: Page): Promise<void> {

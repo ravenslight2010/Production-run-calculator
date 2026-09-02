@@ -8,7 +8,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PASSWORD = "PhotoSpecImport123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -41,24 +44,14 @@ const PNG = Buffer.from(
 type MasterDataSnapshot = Record<string, unknown>;
 
 async function dismissWelcome(page: Page): Promise<void> {
-  const welcome = page.getByRole("dialog", {
-    name: /welcome to production run calculator/i,
-  });
-  if (!await welcome.isVisible({ timeout: 5_000 }).catch(() => false)) return;
-
-  await completeOnboarding(page, welcome);
+  await dismissOnboardingIfPresent(page, { visibilityTimeout: 5_000 });
 }
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  await dismissWelcome(page);
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: { visibilityTimeout: 5_000 },
+  });
 }
 
 async function signIn(page: Page, username: string): Promise<void> {

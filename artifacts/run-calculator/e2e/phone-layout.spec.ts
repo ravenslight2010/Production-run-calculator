@@ -5,7 +5,9 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import {
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PHONE_VIEWPORTS = [
   { width: 375, height: 812 },
@@ -407,44 +409,13 @@ async function assertMobileViewportAndSafeArea(
   };
 }
 
-async function dismissOnboardingIfPresent(page: Page): Promise<boolean> {
-  const welcome = page.getByRole("dialog", {
-    name: /welcome to production run calculator/i,
-  });
-
-  // The overview is mounted from an effect after the authenticated home page
-  // is ready. Waiting for the dialog (rather than checking once) prevents a
-  // late overlay from intercepting the first Run-tab interaction on phones.
-  if (
-    !(await welcome
-      .waitFor({ state: "visible", timeout: 10_000 })
-      .then(() => true)
-      .catch(() => false))
-  ) {
-    return false;
-  }
-
-  await completeOnboarding(page, welcome);
-  return true;
-}
-
 async function signInToSandbox(page: Page): Promise<boolean> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page
-    .locator("#username")
-    .waitFor({ state: "visible", timeout: 20_000 });
   const password = "PhoneLayoutTest123!";
   const username = uniqueUsername();
   testUsernames.add(username);
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(getSignupCode());
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page
-    .locator('[data-testid="tab-run"]')
-    .waitFor({ state: "attached", timeout: 25_000 });
-  return dismissOnboardingIfPresent(page);
+  return signUpAndHandleOnboarding(page, username, password, {
+    signupCode: getSignupCode(),
+  });
 }
 
 async function visible(locator: Locator): Promise<boolean> {

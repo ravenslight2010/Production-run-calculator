@@ -9,7 +9,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
@@ -44,24 +47,21 @@ function uid(): string {
 }
 
 async function signUpAndDismissOnboarding(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-  const onboarding = page.getByRole("dialog");
-  await onboarding.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
-  if (await onboarding.isVisible().catch(() => false)) {
-    const completionButton = onboarding.getByRole("button", { name: /get started|close/i }).first();
-    await completeOnboarding(page, onboarding, {
-      button: completionButton,
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) => currentPage.getByRole("dialog"),
+      button: (dialog) =>
+        dialog.getByRole("button", { name: /get started|close/i }).first(),
       actionLabel: "onboarding completion action",
-    });
-    await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
-  }
+      afterComplete: async (currentPage) => {
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 5_000 })
+          .catch(() => {});
+      },
+    },
+  });
 }
 
 async function seedRunningValues(
@@ -114,17 +114,18 @@ async function seedRunningValues(
   }, valueOverrides);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const onboarding = page.getByRole("dialog");
-  await onboarding.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
-  if (await onboarding.isVisible().catch(() => false)) {
-    const completionButton = onboarding.getByRole("button", { name: /get started|close/i }).first();
-    await completeOnboarding(page, onboarding, {
-      button: completionButton,
-      actionLabel: "onboarding completion action",
-    });
-    await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
-  }
+  await dismissOnboardingIfPresent(page, {
+    dialog: (currentPage) => currentPage.getByRole("dialog"),
+    button: (dialog) =>
+      dialog.getByRole("button", { name: /get started|close/i }).first(),
+    actionLabel: "onboarding completion action",
+    afterComplete: async (currentPage) => {
+      await currentPage
+        .locator('[data-state="open"][aria-hidden="true"]')
+        .waitFor({ state: "detached", timeout: 5_000 })
+        .catch(() => {});
+    },
+  });
   for (const field of [
     "casesNeeded",
     "pizzasPerCase",

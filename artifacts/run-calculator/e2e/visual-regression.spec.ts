@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import * as XLSX from "xlsx";
 import { requireIsolatedTestDatabase } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const suffix = Math.random().toString(36).slice(2, 10);
@@ -12,55 +12,45 @@ const password = "VisualRegression123!";
 let cleanupDb: Client | undefined;
 
 async function signUp(page: Page, account = username): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.locator('[data-testid="tab-run"]').waitFor({
-    state: "attached",
-    timeout: 25_000,
-  });
-  const onboarding = page.getByRole("dialog");
-  if (await onboarding.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    // The overview is scrollable on short preview heights, so its footer
-    // action can be outside the viewport even though the dialog is visible.
-    // Clicking the final footer action avoids depending on that scroll state.
-    await completeOnboarding(page, onboarding, {
-      button: onboarding.getByRole("button").last(),
+  await signUpAndHandleOnboarding(page, account, password, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) => currentPage.getByRole("dialog"),
+      visibilityTimeout: 10_000,
+      button: (dialog) => dialog.getByRole("button").last(),
       clickOptions: { force: true },
       actionLabel: "final onboarding action",
-    });
-    // Radix keeps the closing overlay mounted during its exit animation. Do
-    // not start the visual states until it is actually detached, otherwise
-    // the invisible overlay can intercept the first tab click.
-    await page
-      .locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 15_000 })
-      .catch(() => {});
-    await page.waitForTimeout(500);
-  }
-  // Some dev builds retain the aria-hidden Radix overlay in the portal after
-  // the exit animation. Remove only aria-hidden overlays in this isolated
-  // fixture; this cannot affect a visible production dialog.
-  await page.evaluate(() => {
-    document
-      .querySelectorAll('[data-state="open"][aria-hidden="true"]')
-      .forEach((element) => element.remove());
+      afterComplete: async (currentPage) => {
+        // Radix keeps the closing overlay mounted during its exit animation.
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 15_000 })
+          .catch(() => {});
+        await currentPage.waitForTimeout(500);
+      },
+    },
+    afterSignUp: async (currentPage) => {
+      // Some dev builds retain the aria-hidden Radix overlay in the portal
+      // after the exit animation. Remove only aria-hidden overlays in this
+      // isolated fixture; this cannot affect a visible production dialog.
+      await currentPage.evaluate(() => {
+        document
+          .querySelectorAll('[data-state="open"][aria-hidden="true"]')
+          .forEach((element) => element.remove());
+      });
+      if (cleanupDb) {
+        await cleanupDb.query(
+          "UPDATE users SET onboarding_seen = true WHERE username = $1",
+          [account],
+        );
+        await currentPage.reload({ waitUntil: "domcontentloaded" });
+        await currentPage.locator('[data-testid="tab-run"]').waitFor({
+          state: "attached",
+          timeout: 25_000,
+        });
+      }
+    },
   });
-  if (cleanupDb) {
-    await cleanupDb.query(
-      "UPDATE users SET onboarding_seen = true WHERE username = $1",
-      [account],
-    );
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.locator('[data-testid="tab-run"]').waitFor({
-      state: "attached",
-      timeout: 25_000,
-    });
-  }
 }
 
 async function goToMixPlan(page: Page): Promise<void> {

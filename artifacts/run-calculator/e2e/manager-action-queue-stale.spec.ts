@@ -9,7 +9,10 @@
 import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -24,31 +27,17 @@ const LARGE_HISTORY_COUNT = 750;
 let largeHistoryPrefix = "";
 
 async function dismissWelcomeIfPresent(page: Page, timeout = 1_500): Promise<void> {
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
   // The shell mounts before the onboarding query resolves. Checking
   // isVisible() immediately after tab-run is therefore racy: the dialog can
   // appear after the check and intercept the next header-menu interaction.
-  try {
-    await welcome.waitFor({ state: "visible", timeout });
-  } catch {
-    return;
-  }
-  await completeOnboarding(page, welcome);
+  await dismissOnboardingIfPresent(page, { visibilityTimeout: timeout });
 }
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  // A new account must finish onboarding before another context signs in.
-  // Allow the first authenticated shell's deferred query enough time to
-  // reveal the dialog; returning sign-ins use the short no-dialog probe.
-  await dismissWelcomeIfPresent(page, 5_000);
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: { visibilityTimeout: 5_000 },
+  });
 }
 
 async function signIn(page: Page, username: string): Promise<void> {

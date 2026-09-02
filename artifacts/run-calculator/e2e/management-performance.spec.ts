@@ -9,7 +9,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
-import { completeOnboarding } from "./onboarding";
+import { signUpAndHandleOnboarding } from "./onboarding";
 import {
   AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS,
   MANAGEMENT_PERFORMANCE_BUDGETS,
@@ -51,24 +51,16 @@ function safePath(url: string): string {
 }
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
   const response = page.waitForResponse((candidate) =>
     candidate.url().includes("/api/auth/sign-up"),
   );
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  expect((await response).status(), "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
-  expect((await response).status(), "isolated sign-up should not be rejected").toBeLessThan(300);
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
-  }
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: { visibilityTimeout: 2_000 },
+  });
+  const signupStatus = (await response).status();
+  expect(signupStatus, "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
+  expect(signupStatus, "isolated sign-up should not be rejected").toBeLessThan(300);
   await page.keyboard.press("Escape");
 }
 
