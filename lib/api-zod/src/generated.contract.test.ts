@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  AiAnomaliesResponse,
   AiScheduleOptimizeResponse,
   AiSummaryResponse,
   CheckUsernameAvailableQueryParams,
@@ -99,6 +100,17 @@ describe("generated Zod schema runtime contracts", () => {
         aiStatus,
       });
       expect(schedule.aiStatus).toBe(aiStatus);
+
+      const anomalies = AiAnomaliesResponse.parse({
+        anomalies: [],
+        checkedRuns: 0,
+        baselineRuns: 0,
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(anomalies.aiStatus).toBe(aiStatus);
     }
 
     expect(() =>
@@ -119,6 +131,18 @@ describe("generated Zod schema runtime contracts", () => {
           wasteFlaggedCount: 0,
           hasData: false,
         },
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiAnomaliesResponse.parse({
+        anomalies: [],
+        checkedRuns: 0,
+        baselineRuns: 0,
+        summary: "",
         generatedAt: 1_750_000_000_000,
         aiGenerated: false,
         aiStatus: "unknown",
