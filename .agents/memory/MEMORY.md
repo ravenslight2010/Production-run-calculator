@@ -147,6 +147,7 @@
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release evidence timing and revision](release-check-shard-budget.md) + [revision-bound-release-evidence](revision-bound-release-evidence.md) — shard runtime and managed rebases both affect whether release reports remain valid.
+- [Release evidence verifier mode](release-evidence-verifier-mode.md) — full releases need explicit full-mode verification; the default verifier checks a separate standard directory.
 - [Browser coverage contract](release-browser-coverage-contract.md) — when the full suite’s enumerated cases change, update reporter, verifier, and fixtures together or passing runs cannot produce retained evidence.
 - [Source-audit reports](large-source-audit-captures.md) + [versions](source-audit-report-versions.md) — keep hashed source captures shard-safe and dispatch persisted comparisons by supported read version.
 - [Development esbuild override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
