@@ -16,15 +16,22 @@ fi
 
 if [[ -n "${ACTIONLINT_BIN:-}" ]]; then
   actionlint_bin="$ACTIONLINT_BIN"
+elif command -v github-actionlint >/dev/null 2>&1; then
+  # github-actionlint downloads and caches the official actionlint release
+  # matching its pinned package version, so developers do not need to install
+  # a separate system binary.
+  actionlint_bin="$(command -v github-actionlint)"
 elif command -v actionlint >/dev/null 2>&1; then
+  # Keep the CI-installed binary as a fallback for environments that do not
+  # install workspace dependencies before invoking this check.
   actionlint_bin="$(command -v actionlint)"
 else
   cat >&2 <<'EOF'
-Workflow lint could not run because actionlint is not installed.
+Workflow lint could not run because actionlint is not available.
 
-Install actionlint from https://github.com/rhysd/actionlint/releases, add it to
-PATH, and retry `pnpm run check:workflows`. The GitHub Actions workflow installs
-the pinned CI version automatically.
+Run `pnpm install` to install the repository's pinned actionlint wrapper, then
+retry `pnpm run check:workflows`. You can also set ACTIONLINT_BIN to an
+explicit actionlint executable.
 EOF
   exit 127
 fi
