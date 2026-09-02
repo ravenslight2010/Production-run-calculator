@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   compareConcurrencyStressReports,
   formatConcurrencyStressMarkdown,
@@ -18,6 +29,17 @@ import {
   releaseGateLabelsForMode,
 } from "./release-check.mts";
 
+const execFile = promisify(execFileCallback);
+const rootDir = fileURLToPath(new URL("../../", import.meta.url));
+const historyScript = join(
+  rootDir,
+  "scripts/src/fetch-release-concurrency-history.sh",
+);
+const historyFixtures = join(
+  rootDir,
+  "scripts/src/fixtures/release-concurrency-history",
+);
+
 const steps = [
   { label: "shard one", args: [] },
   { label: "shard two", args: [] },
@@ -25,8 +47,201 @@ const steps = [
   { label: "shard four", args: [] },
 ];
 
+async function createArchive(
+  archivePath: string,
+  sourcePath: string,
+  entryName: string,
+): Promise<void> {
+  await execFile("python3", [
+    "-c",
+    [
+      "import sys, zipfile",
+      "archive, source, entry = sys.argv[1:]",
+      "with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:",
+      "    output.writestr(entry, open(source, 'rb').read())",
+    ].join("\n"),
+    archivePath,
+    sourcePath,
+    entryName,
+  ]);
+}
+
+async function testCalibrationHistoryWorkflow(): Promise<void> {
+  const fixtureWorkspace = await mkdtemp(
+    join(tmpdir(), "release-concurrency-history-workflow-"),
+  );
+  const fakeBin = join(fixtureWorkspace, "bin");
+  const archiveRoot = join(fixtureWorkspace, "archives");
+  const githubEnv = join(fixtureWorkspace, "github.env");
+  await mkdir(fakeBin, { recursive: true });
+  await mkdir(archiveRoot, { recursive: true });
+  const fakeGh = join(fakeBin, "gh");
+  await writeFile(
+    fakeGh,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      'url=""',
+      'for arg in "$@"; do',
+      '  if [[ "$arg" == repos/* ]]; then',
+      '    url="$arg"',
+      "  fi",
+      "done",
+      'case "$url" in',
+      '  *"/actions/workflows/"*"runs?status=success"*)',
+      '    jq -r \'.workflow_runs[] | [.id, .created_at] | @tsv\' "$FIXTURE_ROOT/artifact-list.json"',
+      "    ;;",
+      '  *"/actions/runs/"*"/artifacts?per_page=100")',
+      '    run_id="${url#*/actions/runs/}"',
+      '    run_id="${run_id%%/*}"',
+      '    if [[ "$run_id" == "expired-artifact" ]]; then',
+      '      cat "$FIXTURE_ROOT/expired-artifact.json"',
+      "    else",
+      '      jq -c --arg runId "$run_id" \'.artifacts[$runId]\' "$FIXTURE_ROOT/artifact-list.json"',
+      "    fi",
+      "    ;;",
+      '  *"/actions/artifacts/"*"/zip")',
+      '    artifact_id="${url#*/actions/artifacts/}"',
+      '    artifact_id="${artifact_id%%/*}"',
+      '    cat "$ARCHIVE_ROOT/archive-${artifact_id}.zip"',
+      "    ;;",
+      "  *)",
+      '    echo "Unexpected fixture gh URL: $url" >&2',
+      "    exit 1",
+      "    ;;",
+      "esac",
+    ].join("\n") + "\n",
+    "utf8",
+  );
+  await chmod(fakeGh, 0o755);
+
+  try {
+    const reportFixtures = [
+      ["artifact-valid-newest", "healthy-report.json"],
+      ["artifact-malformed-report", "malformed-report.json"],
+      ["artifact-unsafe-report", "unsafe-report.json"],
+      ["artifact-valid-older-1", "healthy-report.json"],
+      ["artifact-valid-older-2", "healthy-report.json"],
+      ["artifact-valid-older-3", "healthy-report.json"],
+      ["artifact-valid-older-4", "healthy-report.json"],
+      ["artifact-valid-older-5", "healthy-report.json"],
+    ] as const;
+    for (const [artifactId, fixtureName] of reportFixtures) {
+      await createArchive(
+        join(archiveRoot, `archive-${artifactId}.zip`),
+        join(historyFixtures, fixtureName),
+        "nested/release-concurrency-stress.json",
+      );
+    }
+    const unsafeArchive = JSON.parse(
+      await readFile(join(historyFixtures, "unsafe-archive.json"), "utf8"),
+    ) as { entry: string };
+    await createArchive(
+      join(archiveRoot, "archive-artifact-unsafe-archive.zip"),
+      join(historyFixtures, "healthy-report.json"),
+      unsafeArchive.entry,
+    );
+
+    const { stdout, stderr } = await execFile("bash", [historyScript], {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        FIXTURE_ROOT: historyFixtures,
+        ARCHIVE_ROOT: archiveRoot,
+        GITHUB_WORKSPACE: fixtureWorkspace,
+        GITHUB_REPOSITORY: "fixture-owner/fixture-repo",
+        GITHUB_RUN_ID: "current-run",
+        GITHUB_ENV: githubEnv,
+      },
+    });
+    assert.equal(stderr, "");
+    assert.match(
+      stdout,
+      /Using healthy calibration from workflow run valid-newest as the single baseline/,
+    );
+    assert.match(
+      stdout,
+      /Ignoring calibration run malformed-report: report is missing, malformed, or unsafe/,
+    );
+    assert.match(
+      stdout,
+      /Ignoring calibration run unsafe-report: report is missing, malformed, or unsafe/,
+    );
+    assert.match(
+      stdout,
+      /Ignoring calibration run expired-artifact: no non-expired calibration artifact/,
+    );
+    assert.match(
+      stdout,
+      /Ignoring calibration run unsafe-archive: artifact archive has unsafe paths/,
+    );
+    assert.match(
+      stdout,
+      /Collected 5 prior healthy calibration artifact\(s\); history is bounded at 5/,
+    );
+    assert.doesNotMatch(
+      stdout,
+      /Accepted healthy calibration history from workflow run valid-older-5/,
+    );
+
+    const history = JSON.parse(
+      await readFile(
+        join(
+          fixtureWorkspace,
+          "calibration-history/release-concurrency-history.json",
+        ),
+        "utf8",
+      ),
+    ) as Array<{ runId: string; report: { setupElapsedMs: number } }>;
+    assert.deepEqual(
+      history.map(({ runId }) => runId),
+      [
+        "valid-newest",
+        "valid-older-1",
+        "valid-older-2",
+        "valid-older-3",
+        "valid-older-4",
+      ],
+      "valid archives should establish the newest baseline and retain only the bounded history",
+    );
+    assert.equal(history[0]?.report.setupElapsedMs, 125);
+    const baseline = JSON.parse(
+      await readFile(
+        join(
+          fixtureWorkspace,
+          "calibration-history/release-concurrency-stress.json",
+        ),
+        "utf8",
+      ),
+    ) as { setupElapsedMs: number };
+    assert.equal(
+      baseline.setupElapsedMs,
+      125,
+      "the first accepted healthy report should remain the single baseline",
+    );
+    assert.deepEqual(
+      (await readFile(githubEnv, "utf8")).trim().split("\n").sort(),
+      [
+        `RELEASE_CONCURRENCY_BASELINE_JSON=${join(
+          fixtureWorkspace,
+          "calibration-history/release-concurrency-stress.json",
+        )}`,
+        `RELEASE_CONCURRENCY_HISTORY_JSON=${join(
+          fixtureWorkspace,
+          "calibration-history/release-concurrency-history.json",
+        )}`,
+      ].sort(),
+    );
+  } finally {
+    await rm(fixtureWorkspace, { recursive: true, force: true });
+  }
+}
+
 async function run(): Promise<void> {
   assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 6);
+  const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
+  const fullReleaseGateInventory = releaseGateLabelsForMode("full");
   assert.ok(
     RELEASE_CHECK_API_SHARD_STEPS.every(
       (step) =>
@@ -46,6 +261,17 @@ async function run(): Promise<void> {
       (label) => !label.includes("concurrency stress"),
     ),
     "the disposable lane must not alter the full release gate inventory",
+  );
+  await testCalibrationHistoryWorkflow();
+  assert.deepEqual(
+    releaseGateLabelsForMode("standard"),
+    standardReleaseGateInventory,
+    "ignored calibration artifacts must not change the standard release gate inventory",
+  );
+  assert.deepEqual(
+    releaseGateLabelsForMode("full"),
+    fullReleaseGateInventory,
+    "ignored calibration artifacts must not change the full release gate inventory",
   );
 
   let active = 0;

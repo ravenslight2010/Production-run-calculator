@@ -175,6 +175,19 @@ trend with first/latest/minimum/maximum/average values and the change across
 the retained healthy samples. The trend never changes the alert status or
 release gates. The workflow is manual-only and is not a release gate.
 
+The archive selection and validation step is implemented in
+`scripts/src/fetch-release-concurrency-history.sh`, rather than being kept
+inline in the workflow, so it can be exercised with representative fixtures.
+Run its fixture-driven regression test with:
+
+```bash
+pnpm --filter @workspace/scripts run test:release-concurrency
+```
+
+The test covers healthy baseline/history retention, malformed and unsafe
+reports, expired artifacts, unsafe archive paths, and the invariant that the
+calibration lane does not change the release-gate inventory.
+
 Any non-passing shard, timeout, lock/setup failure, missing shard startup, or
 observed cap violation fails the lane with a clear `Concurrency cap unsafe`
 diagnostic. This is a calibration signal, not a release GO/NO-GO decision:
