@@ -12,6 +12,7 @@ import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
 } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -95,8 +96,7 @@ async function signUp(page: Page, username: string): Promise<void> {
   });
   await onboarding.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect(onboarding).toBeHidden({ timeout: 10_000 });
+    await completeOnboarding(page, onboarding);
   } else {
     await page.keyboard.press("Escape");
   }

@@ -13,6 +13,7 @@ import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
 } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -59,14 +60,16 @@ async function signUp(page: Page, username: string): Promise<void> {
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  try {
-    await getStarted.waitFor({ state: "visible", timeout: 8_000 });
-    await getStarted.click();
+  const onboardingVisible = await getStarted
+    .waitFor({ state: "visible", timeout: 8_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (onboardingVisible) {
+    const welcome = page.getByRole("dialog");
+    await completeOnboarding(page, welcome, { button: getStarted });
     await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 });
+      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(300);
-  } catch {
-    // The dialog may already have been dismissed for this account.
   }
 }
 
@@ -917,7 +920,7 @@ test(
       await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
       const getStarted = page.getByRole("button", { name: /^get.?started$/i });
       if (await getStarted.isVisible().catch(() => false)) {
-        await getStarted.click();
+        await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
       }
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: /^Schedule/ }).click();

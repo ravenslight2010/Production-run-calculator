@@ -14,6 +14,7 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -50,7 +51,7 @@ async function signUp(page: Page, username: string): Promise<void> {
 
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
   if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await getStarted.click();
+    await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
   }
 }
 

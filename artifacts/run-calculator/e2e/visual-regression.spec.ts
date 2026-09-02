@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import * as XLSX from "xlsx";
 import { requireIsolatedTestDatabase } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const suffix = Math.random().toString(36).slice(2, 10);
@@ -27,7 +28,11 @@ async function signUp(page: Page, account = username): Promise<void> {
     // The overview is scrollable on short preview heights, so its footer
     // action can be outside the viewport even though the dialog is visible.
     // Clicking the final footer action avoids depending on that scroll state.
-    await onboarding.getByRole("button").last().click({ force: true });
+    await completeOnboarding(page, onboarding, {
+      button: onboarding.getByRole("button").last(),
+      clickOptions: { force: true },
+      actionLabel: "final onboarding action",
+    });
     // Radix keeps the closing overlay mounted during its exit animation. Do
     // not start the visual states until it is actually detached, otherwise
     // the invisible overlay can intercept the first tab click.

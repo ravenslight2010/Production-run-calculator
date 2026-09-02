@@ -9,6 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
@@ -53,7 +54,11 @@ async function signUpAndDismissOnboarding(page: Page, username: string): Promise
   const onboarding = page.getByRole("dialog");
   await onboarding.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: /get started|close/i }).first().click();
+    const completionButton = onboarding.getByRole("button", { name: /get started|close/i }).first();
+    await completeOnboarding(page, onboarding, {
+      button: completionButton,
+      actionLabel: "onboarding completion action",
+    });
     await page.locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
   }
@@ -112,7 +117,11 @@ async function seedRunningValues(
   const onboarding = page.getByRole("dialog");
   await onboarding.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: /get started|close/i }).first().click();
+    const completionButton = onboarding.getByRole("button", { name: /get started|close/i }).first();
+    await completeOnboarding(page, onboarding, {
+      button: completionButton,
+      actionLabel: "onboarding completion action",
+    });
     await page.locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
   }

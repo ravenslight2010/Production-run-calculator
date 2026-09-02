@@ -54,6 +54,7 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 import { Client as PgClient } from "pg";
 import { computeCasesOnLine } from "@workspace/inventory-math";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -100,14 +101,15 @@ async function signUpAndDismissDialog(
 
   // "Get Started" dialog always auto-opens on first login.
   const getStartedBtn = page.getByRole("button", { name: /get.?started/i });
-  try {
-    await getStartedBtn.waitFor({ state: "visible", timeout: 8_000 });
-    await getStartedBtn.click();
+  const onboardingVisible = await getStartedBtn
+    .waitFor({ state: "visible", timeout: 8_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (onboardingVisible) {
+    await completeOnboarding(page, page.getByRole("dialog"), { button: getStartedBtn });
     await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 });
+      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(300);
-  } catch {
-    // Dialog did not appear — page is already clear.
   }
 }
 

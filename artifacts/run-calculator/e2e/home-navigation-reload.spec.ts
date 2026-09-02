@@ -11,6 +11,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -49,7 +50,10 @@ async function signUp(page: Page, username: string): Promise<void> {
   const onboarding = page.getByRole("dialog");
   await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
   if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: "Close" }).click();
+    await completeOnboarding(page, onboarding, {
+      button: onboarding.getByRole("button", { name: "Close" }),
+      actionLabel: "Close",
+    });
     await page
       .locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 })

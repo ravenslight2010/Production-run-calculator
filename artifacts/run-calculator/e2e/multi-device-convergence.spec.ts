@@ -19,6 +19,7 @@ import {
   today,
   uniqueRunId,
 } from "./multi-device-harness";
+import { completeOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -34,13 +35,14 @@ async function signUp(page: Page, username: string): Promise<void> {
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  try {
-    await getStarted.waitFor({ state: "visible", timeout: 8_000 });
-    await getStarted.click();
+  const onboardingVisible = await getStarted
+    .waitFor({ state: "visible", timeout: 8_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (onboardingVisible) {
+    await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
     await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 });
-  } catch {
-    // The onboarding dialog may already be dismissed for this account.
+      .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
   }
 }
 

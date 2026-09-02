@@ -9,6 +9,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 function uid(): string {
   return `e2edie${Math.random().toString(36).slice(2, 9)}`;
@@ -44,7 +45,7 @@ async function signUpAndDismissOnboarding(
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
   await getStarted.waitFor({ state: "visible", timeout: 10_000 });
-  await getStarted.click();
+  await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
   await page.locator('[data-state="open"][aria-hidden="true"]')
     .waitFor({ state: "detached", timeout: 5_000 })
     .catch(() => {});

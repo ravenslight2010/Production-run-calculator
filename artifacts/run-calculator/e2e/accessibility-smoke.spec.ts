@@ -353,11 +353,11 @@ async function openSettings(page: Page): Promise<Locator> {
 }
 
 async function dismissUnexpectedDialog(page: Page): Promise<void> {
-  const getStarted = page.getByRole("dialog").last().getByRole("button", { name: "Get started", exact: true });
+  const welcome = page.getByRole("dialog").last();
+  const getStarted = welcome.getByRole("button", { name: "Get started", exact: true });
   await getStarted.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
-    await expect(getStarted).toBeHidden();
+    await completeOnboarding(page, welcome, { button: getStarted });
   }
   const dialogs = page.getByRole("dialog");
   for (let index = 0; index < await dialogs.count(); index += 1) {

@@ -2,7 +2,23 @@ import { expect, type Locator, type Page, type Response } from "@playwright/test
 
 const ONBOARDING_RESPONSE_TIMEOUT = 15_000;
 
-export async function completeOnboarding(page: Page, welcome: Locator): Promise<void> {
+type CompleteOnboardingOptions = {
+  button?: Locator;
+  clickOptions?: Parameters<Locator["click"]>[0];
+  actionLabel?: string;
+};
+
+export async function completeOnboarding(
+  page: Page,
+  welcome: Locator,
+  options: CompleteOnboardingOptions = {},
+): Promise<void> {
+  const completionButton = options.button ?? welcome.getByRole("button", {
+    name: "Get started",
+    exact: true,
+  });
+  const actionLabel = options.actionLabel ?? "Get started";
+
   // Register the waiter before clicking so a fast response cannot be missed.
   const seenPromise = page.waitForResponse(
     (response) =>
@@ -15,12 +31,12 @@ export async function completeOnboarding(page: Page, welcome: Locator): Promise<
   try {
     [response] = await Promise.all([
       seenPromise,
-      welcome.getByRole("button", { name: "Get started", exact: true }).click(),
+      completionButton.click(options.clickOptions),
     ]);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Timed out waiting up to ${ONBOARDING_RESPONSE_TIMEOUT}ms for POST /api/me/onboarding-seen after clicking Get started: ${reason}`,
+      `Timed out waiting up to ${ONBOARDING_RESPONSE_TIMEOUT}ms for POST /api/me/onboarding-seen after clicking ${actionLabel}: ${reason}`,
     );
   }
 

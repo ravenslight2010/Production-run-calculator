@@ -9,6 +9,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 import {
   AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS,
   MANAGEMENT_PERFORMANCE_BUDGETS,
@@ -66,7 +67,7 @@ async function signUp(page: Page, username: string): Promise<void> {
 
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
   if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await getStarted.click();
+    await completeOnboarding(page, page.getByRole("dialog"), { button: getStarted });
   }
   await page.keyboard.press("Escape");
 }

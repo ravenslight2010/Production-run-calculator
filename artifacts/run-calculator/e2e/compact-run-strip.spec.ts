@@ -22,6 +22,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers } from "./isolation";
+import { completeOnboarding } from "./onboarding";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,9 +75,10 @@ async function signUpAndDismissOnboarding(
   // It has a modal overlay (data-state="open") that intercepts ALL pointer
   // events. Wait for the "Get started" button inside the dialog, then click
   // it so the overlay clears before we interact with anything else.
-  const getStartedBtn = page.getByRole("button", { name: /^get.?started$/i });
+  const welcome = page.getByRole("dialog");
+  const getStartedBtn = welcome.getByRole("button", { name: /^get.?started$/i });
   await getStartedBtn.waitFor({ state: "visible", timeout: 10_000 });
-  await getStartedBtn.click();
+  await completeOnboarding(page, welcome, { button: getStartedBtn });
 
   // Wait for the modal overlay to fully exit before any further clicks.
   const overlay = page.locator('[data-state="open"][aria-hidden="true"]');
