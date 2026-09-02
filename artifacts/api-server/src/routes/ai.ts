@@ -1956,13 +1956,19 @@ router.post(
         summary: "",
         note: "Not enough run history yet to spot anomalies.",
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
 
     // Nothing drifted → skip the AI call entirely. Cheap and honest.
     if (result.anomalies.length === 0) {
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({
+        ...baseResponse,
+        summary: "",
+        aiGenerated: false,
+        aiStatus: "deterministic",
+      });
       return;
     }
 
@@ -1990,7 +1996,12 @@ router.post(
     } catch (err) {
       // Fail-safe: AI provider error still returns the deterministic anomalies.
       req.log.error({ err }, "ai-anomalies call failed; returning anomalies without narration");
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({
+        ...baseResponse,
+        summary: "",
+        aiGenerated: false,
+        aiStatus: "unavailable",
+      });
       return;
     }
 
@@ -1999,7 +2010,12 @@ router.post(
       raw = JSON.parse(content);
     } catch {
       req.log.warn({ content: content.slice(0, 200) }, "ai-anomalies non-JSON response");
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({
+        ...baseResponse,
+        summary: "",
+        aiGenerated: false,
+        aiStatus: "unavailable",
+      });
       return;
     }
 
@@ -2008,6 +2024,7 @@ router.post(
       ...baseResponse,
       summary: narrated ?? "",
       aiGenerated: narrated != null,
+      aiStatus: narrated != null ? "enriched" : "unavailable",
     });
   },
 );

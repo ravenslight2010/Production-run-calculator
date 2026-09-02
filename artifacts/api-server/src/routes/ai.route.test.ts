@@ -292,6 +292,34 @@ function postScheduleOptimize(body: unknown): Promise<Response> {
   });
 }
 
+function makeAnomalyRun(overrides: Record<string, unknown> = {}) {
+  return {
+    brand: "Acme",
+    flavor: "Cheese",
+    casesPlanned: 100,
+    casesProduced: 100,
+    downtimeMinutes: 2,
+    stoppageCount: 1,
+    ...overrides,
+  };
+}
+
+function makeAnomalyBody(overrides: Record<string, unknown> = {}) {
+  return {
+    today: [makeAnomalyRun()],
+    history: [makeAnomalyRun(), makeAnomalyRun(), makeAnomalyRun()],
+    ...overrides,
+  };
+}
+
+function postAnomalies(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/anomalies`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("POST /ai/optimize — request validation glue", () => {
   it("returns 400 for an invalid body and never calls the model", async () => {
     const res = await postOptimize({ date: "2026-06-18" });
@@ -559,6 +587,144 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
       hasData: true,
     });
     expect(json.summary).toBe("Acme finished strongly while Beta needs attention.");
+    expect(json.aiGenerated).toBe(true);
+    expect(json.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
+});
+
+describe("POST /ai/anomalies — deterministic and fallback glue", () => {
+  it("returns an explicitly deterministic response without calling the model when history is insufficient", async () => {
+    const res = await postAnomalies(
+      makeAnomalyBody({ history: [makeAnomalyRun(), makeAnomalyRun()] }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      anomalies: unknown[];
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+      note: string;
+    };
+
+    expect(json.anomalies).toEqual([]);
+    expect(json.summary).toBe("");
+    expect(json.note).toContain("Not enough run history");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("returns an explicitly deterministic response without calling the model when no anomalies are found", async () => {
+    const res = await postAnomalies(makeAnomalyBody());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      anomalies: unknown[];
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.anomalies).toEqual([]);
+    expect(json.summary).toBe("");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("preserves deterministic anomalies and reports unavailable when the provider throws", async () => {
+    mock.shouldThrow = true;
+    const res = await postAnomalies(
+      makeAnomalyBody({
+        today: [
+          makeAnomalyRun({
+            casesProduced: 50,
+            downtimeMinutes: 20,
+            stoppageCount: 5,
+          }),
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      anomalies: Array<{ metric: string; observed: number }>;
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.anomalies).toEqual([
+      expect.objectContaining({ metric: "downtime", observed: 20 }),
+      expect.objectContaining({ metric: "stoppages", observed: 5 }),
+      expect.objectContaining({ metric: "yield", observed: 50 }),
+    ]);
+    expect(json.summary).toBe("");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves deterministic anomalies and reports unavailable for unusable output", async () => {
+    mock.nextContent = JSON.stringify({ summary: "   " });
+    const res = await postAnomalies(
+      makeAnomalyBody({
+        today: [
+          makeAnomalyRun({
+            casesProduced: 50,
+            downtimeMinutes: 20,
+            stoppageCount: 5,
+          }),
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      anomalies: Array<{ metric: string; observed: number }>;
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.anomalies).toEqual([
+      expect.objectContaining({ metric: "downtime", observed: 20 }),
+      expect.objectContaining({ metric: "stoppages", observed: 5 }),
+      expect.objectContaining({ metric: "yield", observed: 50 }),
+    ]);
+    expect(json.summary).toBe("");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("labels usable narration as enriched while retaining the deterministic anomalies", async () => {
+    mock.nextContent = JSON.stringify({
+      summary: "Acme Cheese is showing a meaningful production drift today.",
+    });
+    const res = await postAnomalies(
+      makeAnomalyBody({
+        today: [
+          makeAnomalyRun({
+            casesProduced: 50,
+            downtimeMinutes: 20,
+            stoppageCount: 5,
+          }),
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      anomalies: Array<{ metric: string; observed: number }>;
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.anomalies).toEqual([
+      expect.objectContaining({ metric: "downtime", observed: 20 }),
+      expect.objectContaining({ metric: "stoppages", observed: 5 }),
+      expect.objectContaining({ metric: "yield", observed: 50 }),
+    ]);
+    expect(json.summary).toBe("Acme Cheese is showing a meaningful production drift today.");
     expect(json.aiGenerated).toBe(true);
     expect(json.aiStatus).toBe("enriched");
     expect(mock.calls).toBe(1);
