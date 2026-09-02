@@ -48,6 +48,23 @@ jobs:
         # smaller, explicit set of high-value library gates.
         run: pnpm -r --filter "./lib/**" --if-present test
 
+  test-release-concurrency:
+    name: Release concurrency fixture tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate calibration history fixtures
+        # Keep this fixture-only regression check separate from the disposable
+        # Postgres calibration lane and the production release-gate inventory.
+        run: pnpm --filter @workspace/scripts run test:release-concurrency
+
   test-db:
     name: API tests (Postgres)
     runs-on: ubuntu-latest
