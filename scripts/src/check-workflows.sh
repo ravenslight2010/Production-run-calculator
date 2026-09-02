@@ -57,9 +57,30 @@ if [[ "$ci_actionlint_state" == "malformed" ]]; then
   ci_actionlint_display="<malformed>"
 fi
 
+actionlint_release_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
 echo "Configured actionlint versions:"
 echo "  local wrapper (scripts/package.json): ${local_actionlint_display}"
 echo "  CI workflow (.github/workflows/workflow-lint.yml): ${ci_actionlint_display}"
+
+invalid_actionlint_release=0
+if [[ "$local_actionlint_state" == "configured" &&
+  ! "$local_actionlint_version" =~ $actionlint_release_pattern ]]; then
+  echo "Invalid local actionlint release in scripts/package.json: ${local_actionlint_version}." >&2
+  invalid_actionlint_release=1
+fi
+if [[ "$ci_actionlint_state" == "configured" &&
+  ! "$ci_actionlint_version" =~ $actionlint_release_pattern ]]; then
+  echo "Invalid CI actionlint release in .github/workflows/workflow-lint.yml: ${ci_actionlint_version}." >&2
+  invalid_actionlint_release=1
+fi
+if (( invalid_actionlint_release )); then
+  cat >&2 <<'EOF'
+Workflow lint version check failed because an actionlint release is invalid.
+Use a numeric major.minor.patch release such as 1.7.12.
+EOF
+  exit 1
+fi
 
 if [[ "$local_actionlint_state" != "configured" || "$ci_actionlint_state" != "configured" ]]; then
   if [[ "$local_actionlint_state" == "malformed" ]]; then
