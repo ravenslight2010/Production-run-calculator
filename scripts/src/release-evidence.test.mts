@@ -57,6 +57,10 @@ async function run(): Promise<void> {
     releaseGateLabelsForMode("standard").includes("spec import tests"),
     "the bounded release gate must explicitly cover spec-import",
   );
+  assert.ok(
+    releaseGateLabelsForMode("standard").includes("onboarding bypass guard"),
+    "standard release checks must include the onboarding bypass guard",
+  );
   assert.equal(
     defaultReleaseEvidenceDir("standard"),
     "release-evidence",

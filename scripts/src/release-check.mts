@@ -356,6 +356,16 @@ const steps: ReleaseStep[] = [
     stage: "release-tests",
   },
   {
+    label: "onboarding bypass guard",
+    args: [
+      "--filter",
+      "@workspace/run-calculator",
+      "run",
+      "check:e2e:onboarding",
+    ],
+    stage: "browser-guard",
+  },
+  {
     label: "browser smoke tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:smoke"],
     env: {
