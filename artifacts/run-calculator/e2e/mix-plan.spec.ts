@@ -50,7 +50,7 @@
  *   artifacts/api-server/src/routes/mixes.ts — POST /api/mixes
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Response } from "@playwright/test";
 import { Client } from "pg";
 import { requireIsolatedTestDatabase } from "./isolation";
 
@@ -61,6 +61,7 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
+const ONBOARDING_RESPONSE_TIMEOUT = 15_000;
 
 async function closeOnboardingIfVisible(page: Page): Promise<void> {
   const welcome = page.getByRole("dialog", {
@@ -68,17 +69,32 @@ async function closeOnboardingIfVisible(page: Page): Promise<void> {
   });
   if (!(await welcome.isVisible().catch(() => false))) return;
 
-  const seen = page
-    .waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-      { timeout: 10_000 },
-    )
-    .catch(() => undefined);
-  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-  const response = await seen;
-  if (response) await expect(response.status()).toBe(200);
+  const seenPromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/me/onboarding-seen") &&
+      response.request().method() === "POST",
+    { timeout: ONBOARDING_RESPONSE_TIMEOUT },
+  );
+
+  let response: Response;
+  try {
+    [response] = await Promise.all([
+      seenPromise,
+      welcome.getByRole("button", { name: "Get started", exact: true }).click(),
+    ]);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Timed out waiting up to ${ONBOARDING_RESPONSE_TIMEOUT}ms for POST /api/me/onboarding-seen after clicking Get started: ${reason}`,
+    );
+  }
+
+  const body = (await response.text().catch(() => "<unavailable>")).trim();
+  const bodyContext = body ? body.slice(0, 1_000) : "<empty>";
+  expect(
+    response.status(),
+    `POST /api/me/onboarding-seen returned status ${response.status()} with body: ${bodyContext}`,
+  ).toBe(200);
   await expect(welcome).toBeHidden({ timeout: 10_000 });
 }
 
