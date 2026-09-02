@@ -39,8 +39,8 @@ const valid = (value: unknown): value is { answer: string } =>
   value !== null &&
   typeof (value as { answer?: unknown }).answer === "string";
 
-function cacheKey(): string {
-  return cache.fingerprintAiOperation({
+function cacheKey(cacheModule: CacheModule = cache): string {
+  return cacheModule.fingerprintAiOperation({
     operation,
     model: "integration-model",
     system: "integration-system",
@@ -51,11 +51,12 @@ function cacheKey(): string {
 function readOrCreate(
   scope: Scope,
   load: () => Promise<{ answer: string }>,
+  cacheModule: CacheModule = cache,
 ): Promise<AiCacheResult<{ answer: string }>> {
   return runWithScope(scope, () =>
-    cache.getOrCreateAiResult({
+    cacheModule.getOrCreateAiResult({
       operation,
-      key: cacheKey(),
+      key: cacheKey(cacheModule),
       validate: valid,
       load: async () => ({ value: await load() }),
     }),
@@ -142,6 +143,54 @@ describe("AI result cache persistence and scope isolation", () => {
       value: { answer: "persisted result" },
       hit: true,
     });
+  });
+
+  it("coalesces a concurrent miss across isolated cache modules and keeps the row scoped", async () => {
+    // Vite query imports create isolated module instances while sharing the
+    // same database module/pool, which models separate API process owners.
+    const firstOwner = await import("./aiResultCache" + "?owner=first");
+    const secondOwner = await import("./aiResultCache" + "?owner=second");
+    let providerCalls = 0;
+    let signalProviderStarted!: () => void;
+    let releaseProvider!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      signalProviderStarted = resolve;
+    });
+    const providerMayFinish = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const load = async () => {
+      providerCalls += 1;
+      signalProviderStarted();
+      await providerMayFinish;
+      return { answer: "one provider result" };
+    };
+
+    // Separate module instances represent separate API processes: their
+    // process-local in-flight maps cannot coalesce this request.
+    const first = readOrCreate("live", load, firstOwner);
+    await providerStarted;
+    const second = readOrCreate("live", load, secondOwner);
+    releaseProvider();
+    await Promise.all([first, second]);
+
+    expect(providerCalls).toBe(1);
+    await expect(first).resolves.toEqual({
+      value: { answer: "one provider result" },
+      hit: false,
+    });
+    await expect(second).resolves.toEqual({
+      value: { answer: "one provider result" },
+      hit: true,
+    });
+
+    const rows = await db.select().from(aiResultCacheTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.scope).toBe("live");
+    expect(rows[0]?.namespace).toBe(firstOwner.AI_RESULT_CACHE_NAMESPACE);
+    expect(rows[0]?.operationKey).toBe(cacheKey(firstOwner));
+    expect(rows[0]?.result).toEqual({ answer: "one provider result" });
+    expect(rows[0]?.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
   it("does not share a same-key result between request scopes", async () => {

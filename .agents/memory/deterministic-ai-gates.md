@@ -14,4 +14,7 @@ provider outages look like workflow failures.
 
 **How to apply:** Fingerprint stable deterministic inputs for repeated
 non-conversational requests, cache bounded no-AI outcomes for the same snapshot,
-and retain human confirmation for every uncertain AI suggestion.
+and retain human confirmation for every uncertain AI suggestion. For persisted
+AI results, serialize cache misses with a scope-and-key database lock and
+re-check the row before calling the provider; successful cacheable calls should
+dedupe across API processes, while provider failures remain retryable.

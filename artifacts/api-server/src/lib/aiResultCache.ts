@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { aiResultCacheTable, db } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 
@@ -76,67 +76,97 @@ export type AiResultCacheStore = {
   remove: (scope: string, key: string) => Promise<void>;
   write: (scope: string, key: string, value: unknown, expiresAt: Date) => Promise<void>;
   prune: (scope: string) => Promise<void>;
+  /**
+   * Serialize miss resolution across API processes. The callback receives a
+   * transaction-bound store so its re-read, provider call, and write stay
+   * behind the same database advisory lock.
+   */
+  withLock?: <T>(
+    scope: string,
+    key: string,
+    callback: (store: AiResultCacheStore) => Promise<T>,
+  ) => Promise<T>;
 };
 
+type CacheQueryDb = Pick<typeof db, "select" | "delete" | "insert">;
+
+function createDatabaseCacheStore(queryDb: CacheQueryDb): AiResultCacheStore {
+  return {
+    async read(scope, key) {
+      const rows = await queryDb
+        .select()
+        .from(aiResultCacheTable)
+        .where(
+          and(
+            eq(aiResultCacheTable.scope, scope),
+            eq(aiResultCacheTable.namespace, AI_RESULT_CACHE_NAMESPACE),
+            eq(aiResultCacheTable.operationKey, key),
+          ),
+        )
+        .limit(1);
+      const row = rows[0];
+      return row ? { value: row.result, expiresAt: row.expiresAt } : null;
+    },
+    async remove(scope, key) {
+      await queryDb
+        .delete(aiResultCacheTable)
+        .where(
+          and(
+            eq(aiResultCacheTable.scope, scope),
+            eq(aiResultCacheTable.namespace, AI_RESULT_CACHE_NAMESPACE),
+            eq(aiResultCacheTable.operationKey, key),
+          ),
+        );
+    },
+    async write(scope, key, value, expiresAt) {
+      await queryDb
+        .insert(aiResultCacheTable)
+        .values({
+          scope,
+          namespace: AI_RESULT_CACHE_NAMESPACE,
+          operationKey: key,
+          result: value,
+          expiresAt,
+        })
+        .onConflictDoUpdate({
+          target: [
+            aiResultCacheTable.scope,
+            aiResultCacheTable.namespace,
+            aiResultCacheTable.operationKey,
+          ],
+          set: { result: value, expiresAt, updatedAt: new Date() },
+        });
+    },
+    async prune(scope) {
+      await queryDb
+        .delete(aiResultCacheTable)
+        .where(and(eq(aiResultCacheTable.scope, scope), lt(aiResultCacheTable.expiresAt, new Date())));
+      const rows = await queryDb
+        .select({ id: aiResultCacheTable.id })
+        .from(aiResultCacheTable)
+        .where(eq(aiResultCacheTable.scope, scope))
+        .orderBy(desc(aiResultCacheTable.updatedAt), desc(aiResultCacheTable.id));
+      if (rows.length <= AI_RESULT_CACHE_MAX_ROWS) return;
+      for (const row of rows.slice(AI_RESULT_CACHE_MAX_ROWS)) {
+        await queryDb.delete(aiResultCacheTable).where(eq(aiResultCacheTable.id, row.id));
+      }
+    },
+  };
+}
+
 const databaseCacheStore: AiResultCacheStore = {
-  async read(scope, key) {
-    const rows = await db
-      .select()
-      .from(aiResultCacheTable)
-      .where(
-        and(
-          eq(aiResultCacheTable.scope, scope),
-          eq(aiResultCacheTable.namespace, AI_RESULT_CACHE_NAMESPACE),
-          eq(aiResultCacheTable.operationKey, key),
-        ),
-      )
-      .limit(1);
-    const row = rows[0];
-    return row ? { value: row.result, expiresAt: row.expiresAt } : null;
-  },
-  async remove(scope, key) {
-    await db
-      .delete(aiResultCacheTable)
-      .where(
-        and(
-          eq(aiResultCacheTable.scope, scope),
-          eq(aiResultCacheTable.namespace, AI_RESULT_CACHE_NAMESPACE),
-          eq(aiResultCacheTable.operationKey, key),
-        ),
+  ...createDatabaseCacheStore(db),
+  async withLock(scope, key, callback) {
+    return db.transaction(async (tx) => {
+      // The scope is part of the lock key so live and sandbox/facility data
+      // can never block or satisfy one another.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${
+          `${AI_RESULT_CACHE_NAMESPACE}:${scope}:${key}`
+        }, 0))`,
       );
-  },
-  async write(scope, key, value, expiresAt) {
-    await db
-      .insert(aiResultCacheTable)
-      .values({
-        scope,
-        namespace: AI_RESULT_CACHE_NAMESPACE,
-        operationKey: key,
-        result: value,
-        expiresAt,
-      })
-      .onConflictDoUpdate({
-        target: [
-          aiResultCacheTable.scope,
-          aiResultCacheTable.namespace,
-          aiResultCacheTable.operationKey,
-        ],
-        set: { result: value, expiresAt, updatedAt: new Date() },
-      });
-  },
-  async prune(scope) {
-    await db
-      .delete(aiResultCacheTable)
-      .where(and(eq(aiResultCacheTable.scope, scope), lt(aiResultCacheTable.expiresAt, new Date())));
-    const rows = await db
-      .select({ id: aiResultCacheTable.id })
-      .from(aiResultCacheTable)
-      .where(eq(aiResultCacheTable.scope, scope))
-      .orderBy(desc(aiResultCacheTable.updatedAt), desc(aiResultCacheTable.id));
-    if (rows.length <= AI_RESULT_CACHE_MAX_ROWS) return;
-    for (const row of rows.slice(AI_RESULT_CACHE_MAX_ROWS)) {
-      await db.delete(aiResultCacheTable).where(eq(aiResultCacheTable.id, row.id));
-    }
+      return callback(createDatabaseCacheStore(tx));
+    });
   },
 };
 
@@ -155,55 +185,99 @@ async function executeCache<T>(opts: {
 }): Promise<AiCacheResult<T>> {
   const scope = currentScope();
   const fields = logFields(opts.operation, opts.key);
-  const now = new Date();
 
-  try {
-    const row = await opts.store.read(scope, opts.key);
-    if (row && row.expiresAt > now) {
-      if (opts.validate(row.value)) {
-        opts.log?.debug?.(fields, "ai result cache hit");
-        return { value: row.value, hit: true };
+  const readCached = async (
+    store: AiResultCacheStore,
+  ): Promise<AiCacheResult<T> | null> => {
+    try {
+      const row = await store.read(scope, opts.key);
+      if (row && row.expiresAt > new Date()) {
+        if (opts.validate(row.value)) {
+          opts.log?.debug?.(fields, "ai result cache hit");
+          return { value: row.value, hit: true };
+        }
+        opts.log?.warn?.(fields, "ai result cache entry was malformed; ignoring");
+        await store.remove(scope, opts.key);
+      } else if (row) {
+        await store.remove(scope, opts.key);
       }
-      opts.log?.warn?.(fields, "ai result cache entry was malformed; ignoring");
-      await opts.store.remove(scope, opts.key);
-    } else if (row) {
-      await opts.store.remove(scope, opts.key);
+    } catch (err) {
+      // The cache is an optimization. A database outage must never change the
+      // existing AI route's provider/fallback behavior.
+      opts.log?.error?.({ err, ...fields }, "ai result cache read failed; bypassing");
     }
-  } catch (err) {
-    // The cache is an optimization. A database outage must never change the
-    // existing AI route's provider/fallback behavior.
-    opts.log?.error?.({ err, ...fields }, "ai result cache read failed; bypassing");
-  }
+    return null;
+  };
 
-  opts.log?.debug?.(fields, "ai result cache miss");
-  const loaded = await opts.load();
-  if (loaded.cacheable === false) return { value: loaded.value, hit: false };
+  type MissOutcome =
+    | { result: AiCacheResult<T> }
+    | { error: unknown };
 
-  let serialized: string;
-  try {
-    const encoded = JSON.stringify(loaded.value);
-    if (typeof encoded !== "string") {
-      throw new Error("result is not JSON-serializable");
+  const resolveMiss = async (store: AiResultCacheStore): Promise<MissOutcome> => {
+    // A different API process may have filled the row while this process was
+    // waiting for the advisory lock. Always re-read before spending provider
+    // budget.
+    const cached = await readCached(store);
+    if (cached) return { result: cached };
+
+    opts.log?.debug?.(fields, "ai result cache miss");
+    let loaded: AiCacheLoadResult<T>;
+    try {
+      loaded = await opts.load();
+    } catch (error) {
+      // Keep provider failures distinct from lock/database failures so the
+      // caller retains the route's established fallback/error behavior.
+      return { error };
     }
-    serialized = encoded;
-  } catch (err) {
-    opts.log?.warn?.({ err, ...fields }, "ai result cache serialization failed; bypassing write");
-    return { value: loaded.value, hit: false };
-  }
-  const bytes = Buffer.byteLength(serialized, "utf8");
-  if (bytes > AI_RESULT_CACHE_MAX_BYTES) {
-    opts.log?.warn?.({ ...fields, bytes }, "ai result cache result too large; bypassing write");
-    return { value: loaded.value, hit: false };
+    if (loaded.cacheable === false) return { result: { value: loaded.value, hit: false } };
+
+    let serialized: string;
+    try {
+      const encoded = JSON.stringify(loaded.value);
+      if (typeof encoded !== "string") {
+        throw new Error("result is not JSON-serializable");
+      }
+      serialized = encoded;
+    } catch (err) {
+      opts.log?.warn?.({ err, ...fields }, "ai result cache serialization failed; bypassing write");
+      return { result: { value: loaded.value, hit: false } };
+    }
+    const bytes = Buffer.byteLength(serialized, "utf8");
+    if (bytes > AI_RESULT_CACHE_MAX_BYTES) {
+      opts.log?.warn?.({ ...fields, bytes }, "ai result cache result too large; bypassing write");
+      return { result: { value: loaded.value, hit: false } };
+    }
+
+    try {
+      const expiresAt = new Date(Date.now() + (opts.ttlMs ?? AI_RESULT_CACHE_TTL_MS));
+      await store.write(scope, opts.key, loaded.value, expiresAt);
+      await store.prune(scope);
+    } catch (err) {
+      opts.log?.error?.({ err, ...fields }, "ai result cache write failed; continuing");
+    }
+    return { result: { value: loaded.value, hit: false } };
+  };
+
+  const cached = await readCached(opts.store);
+  if (cached) return cached;
+
+  if (opts.store.withLock) {
+    let outcome: MissOutcome;
+    try {
+      outcome = await opts.store.withLock(scope, opts.key, resolveMiss);
+    } catch (err) {
+      // Lock acquisition is best-effort, like the rest of the cache. If the
+      // database is unavailable, run the provider without cache protection.
+      opts.log?.error?.({ err, ...fields }, "ai result cache lock failed; bypassing");
+      outcome = await resolveMiss(opts.store);
+    }
+    if ("error" in outcome) throw outcome.error;
+    return outcome.result;
   }
 
-  try {
-    const expiresAt = new Date(Date.now() + (opts.ttlMs ?? AI_RESULT_CACHE_TTL_MS));
-    await opts.store.write(scope, opts.key, loaded.value, expiresAt);
-    await opts.store.prune(scope);
-  } catch (err) {
-    opts.log?.error?.({ err, ...fields }, "ai result cache write failed; continuing");
-  }
-  return { value: loaded.value, hit: false };
+  const outcome = await resolveMiss(opts.store);
+  if ("error" in outcome) throw outcome.error;
+  return outcome.result;
 }
 
 /**
