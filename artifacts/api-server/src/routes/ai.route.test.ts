@@ -199,6 +199,22 @@ describe("POST /ai/optimize — request validation glue", () => {
     expect(json.error).toContain(String(MAX_RUNS));
     expect(mock.calls).toBe(0);
   });
+
+  it("returns a deterministic no-AI result without calling the model for an empty day", async () => {
+    const res = await postOptimize(makeBody({ runs: [], scheduledRuns: [], historyRuns: [] }));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      recommendations: unknown[];
+      aiGenerated: boolean;
+      aiStatus: string;
+      note: string;
+    };
+    expect(json.recommendations).toEqual([]);
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(json.note).toContain("No production data");
+    expect(mock.calls).toBe(0);
+  });
 });
 
 describe("POST /ai/optimize — happy path glue (build -> call -> sanitize)", () => {
@@ -312,9 +328,15 @@ describe("POST /ai/optimize — model failure glue", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as {
       recommendations: unknown[];
+      aiGenerated: boolean;
+      aiStatus: string;
+      note: string;
       generatedAt: number;
     };
     expect(json.recommendations).toEqual([]);
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(json.note).toContain("no usable");
     expect(typeof json.generatedAt).toBe("number");
   });
 });

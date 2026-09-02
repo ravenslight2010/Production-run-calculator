@@ -415,4 +415,27 @@ describe("shared retry semantics (pinned once — same helper on every route)", 
     expect(res.status).toBe(200);
     expect(mock.mainCalls).toBe(1);
   });
+
+  it("serves unchanged merge-suggestion input from cache without another provider call", async () => {
+    const request = { names: ["Mozzarella", "Mozz"] };
+    mock.queue = [JSON.stringify({
+      suggestions: [{ target: "Mozzarella", sources: ["Mozz"], reason: "abbreviation" }],
+    })];
+
+    const first = await post("/ai/suggest-merges", request);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as Record<string, unknown>;
+    expect(mock.mainCalls).toBe(1);
+
+    mock.queue = [JSON.stringify({
+      suggestions: [{ target: "Mozzarella", sources: [], reason: "different answer" }],
+    })];
+    const second = await post("/ai/suggest-merges", request);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({
+      ...firstBody,
+      generatedAt: expect.any(Number),
+    });
+    expect(mock.mainCalls).toBe(1);
+  });
 });

@@ -31,6 +31,7 @@ const mock = vi.hoisted(() => ({
   // AI client capture
   calls: [] as CapturedCall[],
   reply: "",
+  shouldThrow: false as boolean,
   // verifyForecastHistory result
   verifyResult: true as boolean,
   // recordFacilityKnowledge call counter
@@ -49,6 +50,7 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
               model: String(args.model ?? ""),
               max_completion_tokens: Number(args.max_completion_tokens ?? 0),
             });
+            if (mock.shouldThrow) throw new Error("provider blew up");
             return { choices: [{ message: { content: mock.reply } }] };
           },
         },
@@ -62,7 +64,8 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
 vi.mock("../middlewares/requireCapability", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   requireCapability: () => (req: any, _res: unknown, next: () => void) => {
-    req.userId = "test-manager";
+    const user = req.headers?.["x-test-user"];
+    req.userId = typeof user === "string" ? user : "test-manager";
     next();
   },
 }));
@@ -99,6 +102,7 @@ vi.mock("../lib/requestScope", () => ({
 // ── Test server ───────────────────────────────────────────────────────────────
 let server: Server;
 let baseUrl: string;
+let userCounter = 0;
 
 beforeAll(async () => {
   const routerMod = await import("./ai");
@@ -125,8 +129,10 @@ beforeEach(async () => {
   await clearAiResultCacheForTests();
   mock.calls = [];
   mock.reply = "";
+  mock.shouldThrow = false;
   mock.verifyResult = true;
   mock.recordCalls = 0;
+  userCounter += 1;
 });
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -134,7 +140,10 @@ beforeEach(async () => {
 function post(body: unknown): Promise<Response> {
   return fetch(`${baseUrl}/ai/forecast`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-test-user": `forecast-user-${userCounter}`,
+    },
     body: JSON.stringify(body),
   });
 }
@@ -276,6 +285,29 @@ describe("POST /ai/forecast — response shape", () => {
     expect(typeof body.note).toBe("string");
     expect(body.note.length).toBeGreaterThan(0);
     // No AI call should have been made.
+    expect(mock.calls).toHaveLength(0);
+  });
+
+  it("returns deterministic metadata and skips AI for empty history", async () => {
+    const res = await post({
+      nowMs: Date.now(),
+      targetDate: "2026-06-23",
+      history: [],
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      forecast: null;
+      forecasts: unknown[];
+      aiGenerated: boolean;
+      aiStatus: string;
+      note: string;
+    };
+    expect(body.forecast).toBeNull();
+    expect(body.forecasts).toEqual([]);
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(body.note).toContain("Not enough production history");
     expect(mock.calls).toHaveLength(0);
   });
 
@@ -421,4 +453,69 @@ describe("POST /ai/forecast — unverified history path", () => {
     expect(mock.recordCalls).toBe(0);
   });
 
+});
+
+describe("POST /ai/forecast — AI fallback and cache contract", () => {
+  const request = {
+    nowMs: Date.now(),
+    targetDate: "2026-06-23",
+    history: historyWithRuns(2),
+  };
+
+  it("returns an explicit unavailable state when the provider fails", async () => {
+    mock.shouldThrow = true;
+    const res = await post(request);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      forecast: null;
+      forecasts: unknown[];
+      aiGenerated: boolean;
+      aiStatus: string;
+      note: string;
+    };
+    expect(body.forecast).toBeNull();
+    expect(body.forecasts).toEqual([]);
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("unavailable");
+    expect(body.note).toContain("unavailable");
+    expect(mock.calls).toHaveLength(1);
+  });
+
+  it("returns an explicit unavailable state after malformed JSON exhausts the retry", async () => {
+    mock.reply = "not JSON";
+    const res = await post(request);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      forecast: null;
+      forecasts: unknown[];
+      aiGenerated: boolean;
+      aiStatus: string;
+      note: string;
+    };
+    expect(body.forecast).toBeNull();
+    expect(body.forecasts).toEqual([]);
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("unavailable");
+    expect(body.note).toContain("unavailable");
+    expect(mock.calls).toHaveLength(2);
+  });
+
+  it("serves an unchanged request from cache without calling the provider again", async () => {
+    mock.reply = goodSingleDayReply(request.targetDate);
+    const first = await post(request);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as Record<string, unknown>;
+    expect(mock.calls).toHaveLength(1);
+
+    mock.reply = JSON.stringify({ forecasts: [] });
+    const second = await post(request);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({
+      ...firstBody,
+      generatedAt: expect.any(Number),
+    });
+    expect(mock.calls).toHaveLength(1);
+  });
 });

@@ -1658,6 +1658,9 @@ router.post(
     if (agg.totalRuns < FORECAST_MIN_RUNS) {
       res.json({
         forecast: null,
+        forecasts: [],
+        aiGenerated: false,
+        aiStatus: "deterministic",
         generatedAt: Date.now(),
         note: "Not enough production history yet to forecast. Finish a few days of runs and try again.",
       });
@@ -1733,7 +1736,16 @@ router.post(
               const failure = aiCallFailureHttp(result, "AI provider error");
               throw new AiResponseError(failure.status, failure.error);
             }
-            return { value: { forecast: null, forecasts: [] }, cacheable: false };
+            return {
+              value: {
+                forecast: null,
+                forecasts: [],
+                aiGenerated: false,
+                aiStatus: "unavailable",
+                note: "AI forecasting is unavailable. No forecast was produced.",
+              },
+              cacheable: false,
+            };
           }
 
           const { forecasts, note } = sanitizeForecasts(result.raw, targetDates);
@@ -2811,7 +2823,7 @@ router.post(
     let cachedMergeBody: MergeCacheBody;
     const model = pickModel("cheap");
     try {
-      const cached = await cachedAiResponse(req, res, {
+      const cached = await cachedAiResponse<MergeCacheBody>(req, res, {
         operation: "suggest-merges",
         model,
         system,
@@ -2843,7 +2855,10 @@ router.post(
               const failure = aiCallFailureHttp(result, "AI provider error");
               throw new AiResponseError(failure.status, failure.error);
             }
-            return { value: { suggestions: [] }, cacheable: false };
+            return {
+              value: { suggestions: [], aiStatus: "unavailable" as const },
+              cacheable: false,
+            };
           }
           const raw = result.raw;
           const rawIsValidShape = isObject(raw) && Array.isArray(raw.suggestions);
