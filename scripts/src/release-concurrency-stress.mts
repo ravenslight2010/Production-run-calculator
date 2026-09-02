@@ -1,7 +1,4 @@
-import {
-  mkdir,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   API_SHARD_TIMEOUT_MS,
@@ -17,6 +14,8 @@ const DEFAULT_TIMEOUT_FAILURE_RE =
   /(?:timed?\s*out|timeout|exceeded .* timeout|INFRASTRUCTURE TIMEOUT)/i;
 const LOCK_FAILURE_RE =
   /(?:deadlock|lock timeout|could not obtain lock|duplicate[- ]marker|duplicate key|too many clients|remaining connection slots|connection pool exhausted)/i;
+export const CONCURRENCY_REGRESSION_MIN_INCREASE_MS = 30_000;
+export const CONCURRENCY_REGRESSION_MIN_INCREASE_PERCENT = 25;
 
 export type StressShardResult = {
   label: string;
@@ -40,6 +39,26 @@ export type ConcurrencyStressReport = {
   safe: boolean;
   unsafeReasons: string[];
   shards: StressShardResult[];
+};
+
+export type ConcurrencyTimingMetric = {
+  baselineMs: number;
+  currentMs: number;
+  increaseMs: number;
+  increasePercent: number | null;
+  meaningfulRegression: boolean;
+};
+
+export type ConcurrencyStressComparison = {
+  schemaVersion: 1;
+  status: "NO BASELINE" | "PASS" | "REGRESSION";
+  baselineAvailable: boolean;
+  baselineHealthy: boolean;
+  note: string;
+  minimumIncreaseMs: number;
+  minimumIncreasePercent: number;
+  setup: ConcurrencyTimingMetric | null;
+  totalWallClock: ConcurrencyTimingMetric | null;
 };
 
 export type StressRunStep = (
@@ -111,6 +130,154 @@ export function formatConcurrencyStressMarkdown(
   ].join("\n");
 }
 
+function timingMetric(
+  baselineMs: number,
+  currentMs: number,
+): ConcurrencyTimingMetric {
+  const increaseMs = currentMs - baselineMs;
+  const increasePercent =
+    baselineMs > 0 ? (increaseMs / baselineMs) * 100 : null;
+  return {
+    baselineMs,
+    currentMs,
+    increaseMs,
+    increasePercent,
+    meaningfulRegression:
+      increaseMs >= CONCURRENCY_REGRESSION_MIN_INCREASE_MS &&
+      (increasePercent === null ||
+        increasePercent >= CONCURRENCY_REGRESSION_MIN_INCREASE_PERCENT),
+  };
+}
+
+function isHealthyBaseline(
+  report: ConcurrencyStressReport | undefined,
+): report is ConcurrencyStressReport {
+  return (
+    report?.schemaVersion === 1 &&
+    report.safe === true &&
+    Number.isFinite(report.setupElapsedMs) &&
+    Number.isFinite(report.totalElapsedMs)
+  );
+}
+
+export function compareConcurrencyStressReports(
+  current: ConcurrencyStressReport,
+  baseline?: ConcurrencyStressReport,
+): ConcurrencyStressComparison {
+  if (!isHealthyBaseline(baseline)) {
+    return {
+      schemaVersion: 1,
+      status: "NO BASELINE",
+      baselineAvailable: baseline !== undefined,
+      baselineHealthy: false,
+      note:
+        baseline === undefined
+          ? "No prior healthy calibration was found."
+          : "The available prior calibration was not healthy and was ignored.",
+      minimumIncreaseMs: CONCURRENCY_REGRESSION_MIN_INCREASE_MS,
+      minimumIncreasePercent: CONCURRENCY_REGRESSION_MIN_INCREASE_PERCENT,
+      setup: null,
+      totalWallClock: null,
+    };
+  }
+
+  const setup = timingMetric(baseline.setupElapsedMs, current.setupElapsedMs);
+  const totalWallClock = timingMetric(
+    baseline.totalElapsedMs,
+    current.totalElapsedMs,
+  );
+  return {
+    schemaVersion: 1,
+    status:
+      setup.meaningfulRegression || totalWallClock.meaningfulRegression
+        ? "REGRESSION"
+        : "PASS",
+    baselineAvailable: true,
+    baselineHealthy: true,
+    note: "Compared with the prior healthy calibration.",
+    minimumIncreaseMs: CONCURRENCY_REGRESSION_MIN_INCREASE_MS,
+    minimumIncreasePercent: CONCURRENCY_REGRESSION_MIN_INCREASE_PERCENT,
+    setup,
+    totalWallClock,
+  };
+}
+
+function formatMetric(metric: ConcurrencyTimingMetric | null): string {
+  if (!metric) return "not available";
+  const increasePercent =
+    metric.increasePercent === null
+      ? "n/a"
+      : `${metric.increasePercent.toFixed(1)}%`;
+  return `${metric.currentMs}ms (baseline ${metric.baselineMs}ms; +${metric.increaseMs}ms, ${increasePercent})`;
+}
+
+export function formatConcurrencyComparisonMarkdown(
+  comparison: ConcurrencyStressComparison,
+): string {
+  const status =
+    comparison.status === "REGRESSION"
+      ? "ALERT — meaningful regression detected"
+      : comparison.status;
+  const regressionMetrics = [
+    comparison.setup?.meaningfulRegression ? "setup time" : null,
+    comparison.totalWallClock?.meaningfulRegression
+      ? "total wall-clock time"
+      : null,
+  ].filter((metric): metric is string => metric !== null);
+  return [
+    "# API concurrency calibration comparison",
+    "",
+    `Result: ${status}`,
+    `Baseline: ${comparison.note}`,
+    `Threshold: at least ${comparison.minimumIncreaseMs}ms and ${comparison.minimumIncreasePercent}% slower`,
+    "",
+    "| Metric | Current | Meaningful regression |",
+    "| --- | --- | --- |",
+    `| Setup time | ${formatMetric(comparison.setup)} | ${
+      comparison.setup?.meaningfulRegression ? "yes" : "no"
+    } |`,
+    `| Total wall-clock time | ${formatMetric(comparison.totalWallClock)} | ${
+      comparison.totalWallClock?.meaningfulRegression ? "yes" : "no"
+    } |`,
+    "",
+    regressionMetrics.length > 0
+      ? `ALERT: ${regressionMetrics.join(" and ")} exceeded the calibration threshold.`
+      : comparison.status === "NO BASELINE"
+        ? "No comparison was possible; retain this healthy run as the next baseline."
+        : "No meaningful setup or total wall-clock regression detected.",
+    "",
+  ].join("\n");
+}
+
+async function writeConcurrencyComparison(
+  outputDirectory: string,
+  current: ConcurrencyStressReport,
+): Promise<void> {
+  const baselinePath = process.env.RELEASE_CONCURRENCY_BASELINE_JSON;
+  let baseline: ConcurrencyStressReport | undefined;
+  if (baselinePath) {
+    try {
+      baseline = JSON.parse(
+        await readFile(baselinePath, "utf8"),
+      ) as ConcurrencyStressReport;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Could not read calibration baseline: ${message}`);
+    }
+  }
+  const comparison = compareConcurrencyStressReports(current, baseline);
+  await writeFile(
+    join(outputDirectory, "release-concurrency-comparison.json"),
+    `${JSON.stringify(comparison, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    join(outputDirectory, "release-concurrency-comparison.md"),
+    formatConcurrencyComparisonMarkdown(comparison),
+    "utf8",
+  );
+}
+
 export async function runConcurrencyStress(
   steps: readonly ReleaseStep[] = RELEASE_CHECK_API_SHARD_STEPS,
   options: {
@@ -121,9 +288,12 @@ export async function runConcurrencyStress(
     now?: () => number;
   } = {},
 ): Promise<ConcurrencyStressReport> {
-  const concurrencyCap = options.concurrencyCap ?? RELEASE_CHECK_API_CONCURRENCY;
+  const concurrencyCap =
+    options.concurrencyCap ?? RELEASE_CHECK_API_CONCURRENCY;
   if (!Number.isInteger(concurrencyCap) || concurrencyCap < 1) {
-    throw new Error(`Concurrency cap must be a positive integer (received ${concurrencyCap}).`);
+    throw new Error(
+      `Concurrency cap must be a positive integer (received ${concurrencyCap}).`,
+    );
   }
   const outputDirectory =
     options.outputDirectory ??
@@ -171,12 +341,16 @@ export async function runConcurrencyStress(
       activeShards += 1;
       peakActiveShards = Math.max(peakActiveShards, activeShards);
       const safeLabel = step.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const shardOutputPath = join(outputDirectory, `${index + 1}-${safeLabel}.log`);
+      const shardOutputPath = join(
+        outputDirectory,
+        `${index + 1}-${safeLabel}.log`,
+      );
       try {
         const result = await runStepFn(step, {
           logPath: shardOutputPath,
           onOutput: () => {
-            if (!firstOutputAt.has(step.label)) firstOutputAt.set(step.label, now());
+            if (!firstOutputAt.has(step.label))
+              firstOutputAt.set(step.label, now());
           },
         });
         const failure = classifyStressFailure(result.status, result.output);
@@ -203,9 +377,8 @@ export async function runConcurrencyStress(
 
   if (setupResult.status === "PASS") {
     await Promise.all(
-      Array.from(
-        { length: Math.min(concurrencyCap, steps.length) },
-        () => runNext(),
+      Array.from({ length: Math.min(concurrencyCap, steps.length) }, () =>
+        runNext(),
       ),
     );
   } else {
@@ -233,7 +406,9 @@ export async function runConcurrencyStress(
   const totalElapsedMs = now() - laneStartedAt;
   const unsafeReasons: string[] = [];
   if (setupResult.status !== "PASS") {
-    unsafeReasons.push(`disposable database setup returned ${setupResult.status}`);
+    unsafeReasons.push(
+      `disposable database setup returned ${setupResult.status}`,
+    );
   }
   if (peakActiveShards > concurrencyCap) {
     unsafeReasons.push(
@@ -280,6 +455,7 @@ export async function runConcurrencyStress(
     formatConcurrencyStressMarkdown(report, outputDirectory),
     "utf8",
   );
+  await writeConcurrencyComparison(outputDirectory, report);
   return report;
 }
 
@@ -311,6 +487,9 @@ async function main(): Promise<void> {
     );
     console.log(
       "Set RELEASE_CONCURRENCY_EVIDENCE_DIR to retain reports at a chosen path.",
+    );
+    console.log(
+      "Set RELEASE_CONCURRENCY_BASELINE_JSON to compare setup and wall-clock time with a healthy prior report.",
     );
     console.log(
       "Requires RELEASE_CONCURRENCY_APPROVED_DISPOSABLE_DB=1 and a CI/test environment.",

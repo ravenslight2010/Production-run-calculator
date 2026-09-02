@@ -143,8 +143,10 @@ or reuse release evidence.
 
 The lane writes `release-concurrency-stress.json` and
 `release-concurrency-stress.md` under a disposable `tmp/` directory. Set
-`RELEASE_CONCURRENCY_EVIDENCE_DIR` to retain them at a chosen path. Reports
-record:
+`RELEASE_CONCURRENCY_EVIDENCE_DIR` to retain them at a chosen path. When
+`RELEASE_CONCURRENCY_BASELINE_JSON` points at a prior healthy report, it also
+writes `release-concurrency-comparison.json` and
+`release-concurrency-comparison.md`. Reports record:
 
 - setup time: the elapsed time for the same schema push that prepares the
   disposable CI database (the shards then perform their normal per-fixture
@@ -154,6 +156,17 @@ record:
 - timeout failures and lock/setup failures, including deadlocks, duplicate
   markers, connection exhaustion, and related Postgres symptoms; and
 - total wall-clock time.
+
+The manual GitHub Actions workflow
+`.github/workflows/release-concurrency-calibration.yml` provisions disposable
+Postgres, sets the explicit disposable-database acknowledgement, and retains
+the JSON, Markdown, database-setup log, and per-shard logs in the separate
+`release-concurrency-calibration-<run-id>` artifact. It looks through prior
+successful calibration runs for the newest healthy report and compares setup
+and total wall-clock time. A slowdown is meaningful when it is both at least
+30 seconds and at least 25% slower than that baseline; the comparison is
+highlighted in the workflow summary. The workflow is manual-only and is not a
+release gate.
 
 Any non-passing shard, timeout, lock/setup failure, missing shard startup, or
 observed cap violation fails the lane with a clear `Concurrency cap unsafe`

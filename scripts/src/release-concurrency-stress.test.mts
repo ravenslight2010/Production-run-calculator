@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
+  compareConcurrencyStressReports,
   formatConcurrencyStressMarkdown,
+  formatConcurrencyComparisonMarkdown,
   runConcurrencyStress,
   validateStressEnvironment,
   type StressRunStep,
@@ -34,6 +36,12 @@ async function run(): Promise<void> {
     ),
     "the disposable lane must not alter the production release gate inventory",
   );
+  assert.ok(
+    releaseGateLabelsForMode("full").every(
+      (label) => !label.includes("concurrency stress"),
+    ),
+    "the disposable lane must not alter the full release gate inventory",
+  );
 
   let active = 0;
   let peak = 0;
@@ -63,6 +71,38 @@ async function run(): Promise<void> {
     formatConcurrencyStressMarkdown(healthy, "tmp/stress"),
     /Peak active shards: 2/,
   );
+  const noBaseline = compareConcurrencyStressReports(healthy);
+  assert.equal(noBaseline.status, "NO BASELINE");
+  assert.equal(noBaseline.setup, null);
+  assert.match(
+    formatConcurrencyComparisonMarkdown(noBaseline),
+    /No comparison was possible/,
+  );
+  const baseline = {
+    ...healthy,
+    setupElapsedMs: 100_000,
+    totalElapsedMs: 200_000,
+  };
+  const regressed = compareConcurrencyStressReports(
+    {
+      ...healthy,
+      setupElapsedMs: 130_000,
+      totalElapsedMs: 250_000,
+    },
+    baseline,
+  );
+  assert.equal(regressed.status, "REGRESSION");
+  assert.equal(regressed.setup?.meaningfulRegression, true);
+  assert.equal(regressed.totalWallClock?.meaningfulRegression, true);
+  assert.match(
+    formatConcurrencyComparisonMarkdown(regressed),
+    /ALERT: setup time and total wall-clock time/,
+  );
+  const withinNoise = compareConcurrencyStressReports(
+    { ...healthy, setupElapsedMs: 129_999, totalElapsedMs: 249_999 },
+    baseline,
+  );
+  assert.equal(withinNoise.status, "PASS");
   assert.doesNotThrow(() =>
     validateStressEnvironment({
       DATABASE_URL: "postgresql://disposable.example/test",

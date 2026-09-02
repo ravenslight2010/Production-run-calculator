@@ -1,0 +1,125 @@
+name: Release concurrency calibration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  release-concurrency-calibration:
+    name: Disposable Postgres concurrency calibration
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: release_concurrency_calibration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d release_concurrency_calibration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/release_concurrency_calibration
+      SESSION_SECRET: release-concurrency-calibration-ci-session
+      STAFF_SIGNUP_CODE: release-concurrency-calibration-ci
+      NODE_ENV: test
+      E2E_TEST_DB: "1"
+      RELEASE_CONCURRENCY_APPROVED_DISPOSABLE_DB: "1"
+      RELEASE_CONCURRENCY_EVIDENCE_DIR: release-concurrency-calibration
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch prior healthy calibration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline_root="$GITHUB_WORKSPACE/calibration-baseline"
+          mkdir -p "$baseline_root"
+          workflow_path="release-concurrency-calibration.yml"
+          run_ids="$(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_path}/runs?status=success&per_page=100" \
+              --jq '.workflow_runs[].id'
+          )"
+
+          while read -r run_id; do
+            if [[ -z "$run_id" || "$run_id" == "$GITHUB_RUN_ID" ]]; then
+              continue
+            fi
+            artifact_id="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?per_page=100" \
+                --jq '.artifacts[] | select(.expired == false) | select(.name | startswith("release-concurrency-calibration-")) | .id' |
+                head -n 1
+            )"
+            if [[ -z "$artifact_id" ]]; then
+              continue
+            fi
+
+            candidate="$baseline_root/candidate"
+            rm -rf "$candidate"
+            mkdir -p "$candidate"
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+              > "$baseline_root/candidate.zip"
+            unzip -q "$baseline_root/candidate.zip" -d "$candidate"
+            report_path="$(find "$candidate" -type f -name release-concurrency-stress.json -print -quit)"
+            if [[ -n "$report_path" ]] &&
+              jq -e '(.schemaVersion == 1) and (.safe == true) and
+                (.setupElapsedMs | numbers) and (.totalElapsedMs | numbers)' \
+                "$report_path" >/dev/null; then
+              cp "$report_path" "$baseline_root/release-concurrency-stress.json"
+              echo "RELEASE_CONCURRENCY_BASELINE_JSON=$baseline_root/release-concurrency-stress.json" >> "$GITHUB_ENV"
+              echo "Using healthy calibration from workflow run ${run_id}."
+              exit 0
+            fi
+          done <<< "$run_ids"
+
+          echo "No prior healthy calibration artifact found; this run will establish the baseline."
+
+      - name: Run release concurrency calibration
+        run: pnpm run check:release-concurrency
+
+      - name: Add calibration comparison to job summary
+        if: always()
+        run: |
+          if [[ -f release-concurrency-calibration/release-concurrency-comparison.md ]]; then
+            cat release-concurrency-calibration/release-concurrency-comparison.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload calibration reports and shard logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-concurrency-calibration-${{ github.run_id }}
+          path: release-concurrency-calibration
+          if-no-files-found: warn
+          retention-days: 90
