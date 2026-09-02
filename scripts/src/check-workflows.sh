@@ -4,6 +4,8 @@ set -euo pipefail
 
 workspace_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow_dir="$workspace_root/.github/workflows"
+actionlint_package="$workspace_root/scripts/package.json"
+actionlint_workflow="$workflow_dir/workflow-lint.yml"
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -11,6 +13,47 @@ mapfile -t workflow_files < <(
 
 if (( ${#workflow_files[@]} == 0 )); then
   echo "Workflow lint failed: no GitHub Actions workflow files were found in $workflow_dir." >&2
+  exit 1
+fi
+
+if [[ ! -f "$actionlint_package" || ! -f "$actionlint_workflow" ]]; then
+  echo "Workflow lint version check failed: could not find the actionlint version declarations." >&2
+  echo "Expected $actionlint_package and $actionlint_workflow." >&2
+  exit 1
+fi
+
+local_actionlint_version="$(
+  sed -nE \
+    's/^[[:space:]]*"github-actionlint"[[:space:]]*:[[:space:]]*"([^"]+)"[[:space:]]*,?[[:space:]]*$/\1/p' \
+    "$actionlint_package" | head -n1
+)"
+ci_actionlint_version="$(
+  sed -nE \
+    's/^[[:space:]]*ACTIONLINT_VERSION:[[:space:]]*"?([^[:space:]#"]+)"?[[:space:]]*(#.*)?$/\1/p' \
+    "$actionlint_workflow" | head -n1
+)"
+
+echo "Configured actionlint versions:"
+echo "  local wrapper (scripts/package.json): ${local_actionlint_version:-<missing>}"
+echo "  CI workflow (.github/workflows/workflow-lint.yml): ${ci_actionlint_version:-<missing>}"
+
+if [[ -z "$local_actionlint_version" || -z "$ci_actionlint_version" ]]; then
+  cat >&2 <<'EOF'
+Workflow lint version check failed because one or both actionlint versions are
+not configured. Set the github-actionlint devDependency and ACTIONLINT_VERSION
+to the same release.
+EOF
+  exit 1
+fi
+
+if [[ "$local_actionlint_version" != "$ci_actionlint_version" ]]; then
+  cat >&2 <<'EOF'
+Workflow lint version check failed: the local actionlint wrapper and CI use
+different releases.
+
+Update scripts/package.json and .github/workflows/workflow-lint.yml to the same
+actionlint version, then run `pnpm install` to refresh pnpm-lock.yaml.
+EOF
   exit 1
 fi
 
