@@ -4,6 +4,13 @@ import { randomUUID } from "node:crypto";
 import { logger } from "./logger";
 
 export type OperationOutcome = "success" | "error" | "degraded";
+export type CacheMaintenanceOutcome = "success" | "error";
+
+type CacheMaintenanceLogger = {
+  info?: (obj: unknown, msg?: string) => void;
+};
+
+const MAX_CACHE_MAINTENANCE_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
 
 const OPERATION_NAMES: Array<[RegExp, string]> = [
   [/\/sync(?:\/|$)/, "sync"],
@@ -22,6 +29,42 @@ export function safeQueueAgeMs(queuedAt: unknown, now = Date.now()): number | un
   if (typeof queuedAt !== "number" || !Number.isFinite(queuedAt)) return undefined;
   const age = now - queuedAt;
   return age >= 0 && age <= 7 * 24 * 60 * 60 * 1000 ? Math.round(age) : undefined;
+}
+
+function safeCacheMaintenanceWaitMs(waitDurationMs: unknown): number {
+  if (typeof waitDurationMs !== "number" || !Number.isFinite(waitDurationMs)) return 0;
+  return Math.min(MAX_CACHE_MAINTENANCE_WAIT_MS, Math.max(0, Math.round(waitDurationMs)));
+}
+
+/**
+ * Emit bounded cache-maintenance diagnostics without retaining cache keys or
+ * any request/provider data. Telemetry is best-effort and must never alter
+ * cache behavior if a logger is unavailable or throws.
+ */
+export function recordCacheMaintenance(
+  fields: {
+    scope: "live" | "sandbox";
+    operation: "prune";
+    waitDurationMs: number;
+    outcome: CacheMaintenanceOutcome;
+  },
+  log: CacheMaintenanceLogger = logger,
+): void {
+  try {
+    log.info?.(
+      {
+        event: "cache_maintenance",
+        scope: fields.scope,
+        operation: fields.operation,
+        waitDurationMs: safeCacheMaintenanceWaitMs(fields.waitDurationMs),
+        outcome: fields.outcome,
+      },
+      "cache maintenance completed",
+    );
+  } catch {
+    // Observability is intentionally fail-safe. A broken logger must not turn
+    // an otherwise successful cache/provider operation into a failure.
+  }
 }
 
 function numericHeader(res: Response, name: string): number | undefined {

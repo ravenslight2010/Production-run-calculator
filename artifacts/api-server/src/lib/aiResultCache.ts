@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { aiResultCacheTable, db } from "@workspace/db";
-import { currentScope } from "../lib/requestScope";
+import { currentScope, type Scope } from "../lib/requestScope";
+import { recordCacheMaintenance } from "./observability";
 
 export const AI_RESULT_CACHE_NAMESPACE = "ai-results:v1";
 export const AI_RESULT_CACHE_TTL_MS = 15 * 60_000;
@@ -72,10 +73,10 @@ type InFlightValue = Promise<AiCacheResult<unknown>>;
 const inFlight = new Map<string, InFlightValue>();
 
 export type AiResultCacheStore = {
-  read: (scope: string, key: string) => Promise<{ value: unknown; expiresAt: Date } | null>;
-  remove: (scope: string, key: string) => Promise<void>;
-  write: (scope: string, key: string, value: unknown, expiresAt: Date) => Promise<void>;
-  prune: (scope: string) => Promise<void>;
+  read: (scope: Scope, key: string) => Promise<{ value: unknown; expiresAt: Date } | null>;
+  remove: (scope: Scope, key: string) => Promise<void>;
+  write: (scope: Scope, key: string, value: unknown, expiresAt: Date) => Promise<void>;
+  prune: (scope: Scope, log?: CacheLogger) => Promise<void>;
   /**
    * Serialize miss resolution across API processes. The callback receives a
    * transaction-bound store so its re-read, provider call, and write stay
@@ -137,27 +138,40 @@ function createDatabaseCacheStore(queryDb: CacheQueryDb): AiResultCacheStore {
           set: { result: value, expiresAt, updatedAt: new Date() },
         });
     },
-    async prune(scope) {
+    async prune(scope, log) {
       // Writes for different keys intentionally run concurrently, so pruning
       // needs a scope-wide lock of its own. This is called from the
       // key-locked transaction above, keeping the row-count snapshot and
       // deletes serialized without holding the lock during provider work.
-      await queryDb.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtextextended(${
-          `${AI_RESULT_CACHE_NAMESPACE}:${scope}:prune`
-        }, 0))`,
-      );
-      await queryDb
-        .delete(aiResultCacheTable)
-        .where(and(eq(aiResultCacheTable.scope, scope), lt(aiResultCacheTable.expiresAt, new Date())));
-      const rows = await queryDb
-        .select({ id: aiResultCacheTable.id })
-        .from(aiResultCacheTable)
-        .where(eq(aiResultCacheTable.scope, scope))
-        .orderBy(desc(aiResultCacheTable.updatedAt), desc(aiResultCacheTable.id));
-      if (rows.length <= AI_RESULT_CACHE_MAX_ROWS) return;
-      for (const row of rows.slice(AI_RESULT_CACHE_MAX_ROWS)) {
-        await queryDb.delete(aiResultCacheTable).where(eq(aiResultCacheTable.id, row.id));
+      const waitStartedAt = performance.now();
+      let waitDurationMs = 0;
+      let outcome: "success" | "error" = "success";
+      try {
+        await queryDb.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${
+            `${AI_RESULT_CACHE_NAMESPACE}:${scope}:prune`
+          }, 0))`,
+        );
+        waitDurationMs = performance.now() - waitStartedAt;
+
+        await queryDb
+          .delete(aiResultCacheTable)
+          .where(and(eq(aiResultCacheTable.scope, scope), lt(aiResultCacheTable.expiresAt, new Date())));
+        const rows = await queryDb
+          .select({ id: aiResultCacheTable.id })
+          .from(aiResultCacheTable)
+          .where(eq(aiResultCacheTable.scope, scope))
+          .orderBy(desc(aiResultCacheTable.updatedAt), desc(aiResultCacheTable.id));
+        if (rows.length <= AI_RESULT_CACHE_MAX_ROWS) return;
+        for (const row of rows.slice(AI_RESULT_CACHE_MAX_ROWS)) {
+          await queryDb.delete(aiResultCacheTable).where(eq(aiResultCacheTable.id, row.id));
+        }
+      } catch (error) {
+        outcome = "error";
+        waitDurationMs = performance.now() - waitStartedAt;
+        throw error;
+      } finally {
+        recordCacheMaintenance({ scope, operation: "prune", waitDurationMs, outcome }, log);
       }
     },
   };
@@ -260,7 +274,7 @@ async function executeCache<T>(opts: {
     try {
       const expiresAt = new Date(Date.now() + (opts.ttlMs ?? AI_RESULT_CACHE_TTL_MS));
       await store.write(scope, opts.key, loaded.value, expiresAt);
-      await store.prune(scope);
+      await store.prune(scope, opts.log);
     } catch (err) {
       opts.log?.error?.({ err, ...fields }, "ai result cache write failed; continuing");
     }
