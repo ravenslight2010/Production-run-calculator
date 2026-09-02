@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const realMobileBrowserWsEndpoint =
+  process.env.PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT;
 
 /**
  * The maintained mobile surface is the responsive web app. Keep this focused
@@ -31,5 +33,21 @@ export default defineConfig({
       name: "ai-outage-phone",
       use: { ...devices["Pixel 5"] },
     },
+    // A device service supplies a Playwright/CDP endpoint connected to Android
+    // Chrome on a physical device. Do not replace this with a Playwright device
+    // descriptor: desktop Chromium emulation cannot exercise the real keyboard,
+    // viewport chrome, or physical touch hit targets.
+    ...(realMobileBrowserWsEndpoint
+      ? [
+          {
+            name: "real-mobile-chromium",
+            use: {
+              connectOptions: {
+                wsEndpoint: realMobileBrowserWsEndpoint,
+              },
+            },
+          },
+        ]
+      : []),
   ],
 });

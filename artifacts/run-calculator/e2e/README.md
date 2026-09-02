@@ -10,7 +10,7 @@ classification, and bounded coverage gaps, see
 | --- | --- | --- |
 | `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
-| `playwright.ai-outage-phone.config.ts` | isolated manager account, non-destructive | runs the AI outage reviewability journey at a Pixel 5 viewport; no global setup; the account is removed in `afterAll` |
+| `playwright.ai-outage-phone.config.ts` | isolated manager account, non-destructive | runs the AI outage reviewability journey at a Pixel 5 viewport, or against physical Android Chrome when `PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT` is set; no global setup; the account is removed in `afterAll` |
 | `playwright.a11y.config.ts` | isolated sandbox, non-destructive | no global setup; axe scans public and sandbox-authenticated screens without deleting live-day data |
 | `playwright.visual.config.ts` | isolated account, non-destructive | no global setup; the visual suite creates unique accounts and removes them in `afterAll` |
 | `playwright.management-performance.config.ts` | isolated account, non-destructive | authenticated startup and deferred staff-management budgets; created accounts are removed in `afterAll` |
@@ -69,6 +69,13 @@ pnpm --filter @workspace/run-calculator run test:pwa-handoff
 pnpm --filter @workspace/run-calculator run test:e2e:phone
 pnpm --filter @workspace/run-calculator run test:e2e:ai-outage:phone
 pnpm --filter @workspace/run-calculator run test:e2e:a11y
+```
+
+Run the same AI outage reviewability journey on a connected physical Android
+Chrome device. The command fails closed when no device endpoint is configured:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:ai-outage:phone:device
 ```
 
 Run the authenticated startup budget guard separately from the destructive
