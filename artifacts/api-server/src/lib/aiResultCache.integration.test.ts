@@ -193,6 +193,83 @@ describe("AI result cache persistence and scope isolation", () => {
     expect(rows[0]?.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
+  it("lets a second cache owner retry a failed provider request without persisting the failure", async () => {
+    const firstOwner = await import("./aiResultCache" + "?owner=failure-first");
+    const secondOwner = await import("./aiResultCache" + "?owner=failure-second");
+    await db.insert(aiResultCacheTable).values({
+      scope: "live",
+      namespace: firstOwner.AI_RESULT_CACHE_NAMESPACE,
+      operationKey: cacheKey(firstOwner),
+      result: { answer: 42 },
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    let providerCalls = 0;
+    let signalFirstProviderStarted!: () => void;
+    let releaseFirstProvider!: () => void;
+    const firstProviderStarted = new Promise<void>((resolve) => {
+      signalFirstProviderStarted = resolve;
+    });
+    const firstProviderMayFail = new Promise<void>((resolve) => {
+      releaseFirstProvider = resolve;
+    });
+    let signalSecondProviderStarted!: () => void;
+    let releaseSecondProvider!: () => void;
+    const secondProviderStarted = new Promise<void>((resolve) => {
+      signalSecondProviderStarted = resolve;
+    });
+    const secondProviderMayFinish = new Promise<void>((resolve) => {
+      releaseSecondProvider = resolve;
+    });
+    const providerError = new Error("provider unavailable");
+    const load = async () => {
+      providerCalls += 1;
+      if (providerCalls === 1) {
+        signalFirstProviderStarted();
+        await firstProviderMayFail;
+        throw providerError;
+      }
+      signalSecondProviderStarted();
+      await secondProviderMayFinish;
+      return { answer: "provider recovered" };
+    };
+
+    const first = readOrCreate("live", load, firstOwner);
+    await firstProviderStarted;
+    const second = readOrCreate("live", load, secondOwner);
+
+    // The second owner is waiting on the advisory lock while the first owner
+    // fails. Releasing it makes the retry acquire the lock and re-read the DB.
+    releaseFirstProvider();
+    await expect(first).rejects.toBe(providerError);
+    await secondProviderStarted;
+
+    // The failed owner must leave neither the seeded malformed row nor an
+    // encoded provider error behind for the retrying owner to consume.
+    expect(await db.select().from(aiResultCacheTable)).toHaveLength(0);
+
+    releaseSecondProvider();
+    await expect(second).resolves.toEqual({
+      value: { answer: "provider recovered" },
+      hit: false,
+    });
+    expect(providerCalls).toBe(2);
+
+    const rows = await db.select().from(aiResultCacheTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.result).toEqual({ answer: "provider recovered" });
+    expect(rows[0]?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    // Persistence is shared by both isolated owners after recovery.
+    await expect(
+      readOrCreate("live", async () => ({ answer: "provider should not run" }), firstOwner),
+    ).resolves.toEqual({
+      value: { answer: "provider recovered" },
+      hit: true,
+    });
+    expect(providerCalls).toBe(2);
+  });
+
   it("does not share a same-key result between request scopes", async () => {
     const liveLoad = async () => ({ answer: "live result" });
     const sandboxLoad = async () => ({ answer: "sandbox result" });
