@@ -267,6 +267,15 @@ async function openSettings(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
+async function hideDevelopmentBanner(page: Page): Promise<void> {
+  // The injected Replit banner can cover fixed mobile controls. It is not
+  // product UI and must not turn a phone reviewability check into a hit-target
+  // failure.
+  await page.addStyleTag({
+    content: "#replit-dev-banner { display: none !important; }",
+  });
+}
+
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase("AI outage reviewability browser check");
 });
@@ -309,6 +318,7 @@ test("keeps manager production data reviewable when optional AI is unavailable",
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await dismissOnboardingIfPresent(page, { visibilityTimeout: 5_000 });
+  await hideDevelopmentBanner(page);
 
   // ExcelImportDialog: deterministic row/mapping controls survive the
   // unavailable match-import enrichment.
