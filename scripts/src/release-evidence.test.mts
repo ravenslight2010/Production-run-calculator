@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   defaultReleaseEvidenceDir,
@@ -31,6 +32,7 @@ async function fixture(
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "release-evidence-"));
   for (const file of files) {
+    if (file === RELEASE_CHECKPOINT_REPORT) continue;
     const path = join(root, file);
     await mkdir(join(path, ".."), { recursive: true });
     await writeFile(
@@ -249,6 +251,32 @@ async function run(): Promise<void> {
     "an incomplete report is valid evidence only when explicitly marked NO-GO",
   );
   assert.match(incompleteReport, /^Decision: NO-GO$/m);
+  const checkpointReport = formatReleaseReport(
+    [{ label: "gate one", status: "PASS", elapsedMs: 100 }],
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "NO-GO",
+      expectedLabels: ["gate one", "gate two"],
+      reportKind: "checkpoint",
+    },
+  );
+  assert.match(
+    checkpointReport,
+    /^# Release Check Checkpoint — INCOMPLETE \/ NO-GO$/m,
+  );
+  assert.match(checkpointReport, /^Report status: INCOMPLETE CHECKPOINT$/m);
+  assert.match(checkpointReport, /^Retained evidence: NOT UPDATED$/m);
+  assert.match(
+    checkpointReport,
+    /This is an incomplete checkpoint, not a current retained release report\./,
+  );
+  assert.match(
+    checkpointReport,
+    /Retained report: release-check-report\.md \(left unchanged by this checkpoint\)\./,
+  );
   const partialKnownContractReport = formatReleaseReport(
     [
       {
@@ -416,6 +444,21 @@ async function run(): Promise<void> {
       "an allowlisted evidence set should pass",
     );
 
+    await writeFile(
+      join(root, RELEASE_CHECKPOINT_REPORT),
+      checkpointReport,
+      "utf8",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      /incomplete checkpoint.*not retained release evidence.*left unchanged.*--resume/,
+      "an active checkpoint must not make an older retained report look current",
+    );
+    await rm(join(root, RELEASE_CHECKPOINT_REPORT));
     await rm(join(root, "release-check-report.md"));
     await assert.rejects(
       verifyReleaseEvidence(root),

@@ -56,6 +56,7 @@ export type ReleaseEvidenceOptions = {
   currentRevision?: string;
   expectedMode?: "standard" | "full";
   expectedLabels?: readonly string[];
+  allowIncompleteCheckpoint?: boolean;
 };
 
 export type BrowserDurationRegression = {
@@ -169,6 +170,7 @@ const fullBrowserReportPath = resolve(
 );
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
+  "release-check-checkpoint.md",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
   "clean-start/preview-home.png",
@@ -179,6 +181,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check.log",
   "release-check-state.json",
 ] as const;
+export const RELEASE_CHECKPOINT_REPORT = "release-check-checkpoint.md";
 
 export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
@@ -579,6 +582,33 @@ export async function verifyReleaseEvidence(
   }
   const reportPath = resolve(evidenceRoot, "release-check-report.md");
   const report = await readFile(reportPath, "utf8");
+  let checkpointReport = "";
+  try {
+    checkpointReport = await readFile(
+      resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT),
+      "utf8",
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(
+        `Could not read release checkpoint ${RELEASE_CHECKPOINT_REPORT}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  if (
+    checkpointReport.trim() !== "" &&
+    !options.allowIncompleteCheckpoint
+  ) {
+    throw new Error(
+      [
+        `Release check has an incomplete checkpoint at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence.`,
+        "The retained release-check-report.md was left unchanged.",
+        "Resume with `pnpm run release:check -- --resume` (or the full-mode equivalent), or rerun the release check without --resume before verifying retained evidence.",
+      ].join(" "),
+    );
+  }
   const reportMode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
     | "standard"
     | "full"
@@ -1051,8 +1081,10 @@ export function formatReleaseReport(
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
+    reportKind?: "retained" | "checkpoint";
   } = {},
 ): string {
+  const isCheckpoint = metadata.reportKind === "checkpoint";
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
@@ -1116,11 +1148,19 @@ export function formatReleaseReport(
           "",
         ];
   const lines = [
-    "# Release Check Report",
+    isCheckpoint
+      ? "# Release Check Checkpoint — INCOMPLETE / NO-GO"
+      : "# Release Check Report",
     "",
     `Generated: ${new Date().toISOString()}`,
     `Revision: ${revision}`,
     `Mode: ${mode}`,
+    ...(isCheckpoint
+      ? [
+          "Report status: INCOMPLETE CHECKPOINT",
+          "Retained evidence: NOT UPDATED",
+        ]
+      : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
@@ -1192,6 +1232,26 @@ export function formatReleaseReport(
     `Interrupted gates: ${summarize(interrupted)}`,
     `Not-reached gates: ${summarize(notReached)}`,
     "Accepted exceptions: none",
+    ...(isCheckpoint
+      ? [
+          "",
+          "## Checkpoint recovery",
+          "",
+          "This is an incomplete checkpoint, not a current retained release report.",
+          `Gates not reached: ${summarize(notReached)}`,
+          `Resume: ${
+            mode === "full"
+              ? "pnpm run release:check:full -- --resume"
+              : "pnpm run release:check -- --resume"
+          }`,
+          `Regenerate: ${
+            mode === "full"
+              ? "pnpm run release:check:full"
+              : "pnpm run release:check"
+          }`,
+          "Retained report: release-check-report.md (left unchanged by this checkpoint).",
+        ]
+      : []),
     "",
     `Decision: ${decision}`,
     "",
@@ -1206,12 +1266,17 @@ async function writeReleaseReport(
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
+    reportKind?: "retained" | "checkpoint";
   },
 ): Promise<string> {
+  const reportFile =
+    metadata.reportKind === "checkpoint"
+      ? RELEASE_CHECKPOINT_REPORT
+      : "release-check-report.md";
   const reportPath = resolve(
     rootDir,
     releaseEvidenceDir,
-    "release-check-report.md",
+    reportFile,
   );
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
@@ -1276,7 +1341,7 @@ async function writeReleaseReport(
     ),
     "utf8",
   );
-  return `${releaseEvidenceDir}/release-check-report.md`;
+  return `${releaseEvidenceDir}/${reportFile}`;
 }
 
 type ReleaseCheckpoint = {
@@ -1420,6 +1485,10 @@ async function main(): Promise<void> {
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
   const checkpointPath = resolve(evidenceRoot, "release-check-state.json");
+  const checkpointReportPath = resolve(
+    evidenceRoot,
+    RELEASE_CHECKPOINT_REPORT,
+  );
   const logPath = resolve(evidenceRoot, "release-check.log");
   await mkdir(evidenceRoot, { recursive: true });
   const resume = process.argv.includes("--resume");
@@ -1458,6 +1527,7 @@ async function main(): Promise<void> {
       } completed gate(s).`,
     );
   } else {
+    await rm(checkpointReportPath, { force: true });
     await writeFile(
       logPath,
       `Release check ${new Date().toISOString()} revision ${revision} mode ${
@@ -1707,7 +1777,9 @@ async function main(): Promise<void> {
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
         expectedMode: fullRun ? "full" : "standard",
+        allowIncompleteCheckpoint: true,
       });
+      await rm(checkpointReportPath, { force: true });
       await writeFile(checkpointPath, "", "utf8");
       console.log(`\nRelease report: ${reportPath}`);
     } catch (error) {
@@ -1723,11 +1795,11 @@ async function main(): Promise<void> {
   }
 
   try {
-    console.log(
-      `\nRelease report: ${await writeReleaseReport(results, {
+    const checkpointReportPath = await writeReleaseReport(results, {
         revision,
         decision: "NO-GO",
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+        reportKind: "checkpoint",
         timing: {
           totalElapsedMs: stageTimings.reduce(
             (total, stage) => total + stage.elapsedMs,
@@ -1735,7 +1807,21 @@ async function main(): Promise<void> {
           ),
           stages: stageTimings,
         },
-      })}`,
+      });
+    console.log(
+      `\nRelease checkpoint (INCOMPLETE / NO-GO; not retained evidence): ${checkpointReportPath}`,
+    );
+    console.log(
+      `Resume: ${
+        fullRun
+          ? "pnpm run release:check:full -- --resume"
+          : "pnpm run release:check -- --resume"
+      }`,
+    );
+    console.log(
+      `Regenerate: ${
+        fullRun ? "pnpm run release:check:full" : "pnpm run release:check"
+      }`,
     );
   } catch (error) {
     console.error(

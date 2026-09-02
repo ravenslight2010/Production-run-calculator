@@ -288,6 +288,12 @@ async function run(): Promise<void> {
       await mkdir(join(path, ".."), { recursive: true });
       await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
     }
+    const priorRetainedReport = "# Prior retained release report\nDecision: GO\n";
+    await writeFile(
+      join(evidenceDir, "release-check-report.md"),
+      priorRetainedReport,
+      "utf8",
+    );
 
     const interrupted = await runReleaseCheck(evidenceDir, steps);
     assert.equal(interrupted.code, 1, interrupted.output);
@@ -314,6 +320,29 @@ async function run(): Promise<void> {
       "the interrupted run must checkpoint the failed gate, not omit it",
     );
     assert.equal(await readFile(marker, "utf8"), "started\n");
+    assert.equal(
+      await readFile(join(evidenceDir, "release-check-report.md"), "utf8"),
+      priorRetainedReport,
+      "an interrupted run must not overwrite the prior retained report",
+    );
+    const checkpointReport = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    assert.match(
+      checkpointReport,
+      /^# Release Check Checkpoint — INCOMPLETE \/ NO-GO$/m,
+    );
+    assert.match(checkpointReport, /^Report status: INCOMPLETE CHECKPOINT$/m);
+    assert.match(
+      checkpointReport,
+      /Gates not reached: fixture gate three \(NOT REACHED\)/,
+    );
+    assert.match(
+      interrupted.output,
+      /Release checkpoint \(INCOMPLETE \/ NO-GO; not retained evidence\):/,
+      "the console must distinguish a checkpoint from retained evidence",
+    );
 
     const resumed = await runReleaseCheck(evidenceDir, steps, ["--resume"]);
     assert.equal(resumed.code, 0, resumed.output);
@@ -350,6 +379,10 @@ async function run(): Promise<void> {
       await readFile(checkpointPath, "utf8"),
       "",
       "only a fully successful resumed run may clear its checkpoint",
+    );
+    await assert.rejects(
+      readFile(join(evidenceDir, "release-check-checkpoint.md"), "utf8"),
+      "a successful resumed run must remove its stale checkpoint report",
     );
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
@@ -693,6 +726,13 @@ async function runFullModeScenario(): Promise<void> {
         { encoding: "utf8" },
       );
     }
+    const priorRetainedReport =
+      "# Prior retained full release report\nDecision: GO\n";
+    await writeFile(
+      join(evidenceDir, "release-check-report.md"),
+      priorRetainedReport,
+      "utf8",
+    );
 
     const interrupted = await runReleaseCheck(evidenceDir, steps, ["--full"]);
     assert.equal(interrupted.code, 1, interrupted.output);
@@ -727,14 +767,30 @@ async function runFullModeScenario(): Promise<void> {
       join(evidenceDir, "release-check-report.md"),
       "utf8",
     );
-    assert.match(interruptedReport, /^Mode: full$/m);
-    assert.match(interruptedReport, /^Decision: NO-GO$/m);
-    assert.match(
+    assert.equal(
       interruptedReport,
+      priorRetainedReport,
+      "an interrupted full run must leave the prior retained report untouched",
+    );
+    const interruptedCheckpointReport = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    assert.match(interruptedCheckpointReport, /^Mode: full$/m);
+    assert.match(
+      interruptedCheckpointReport,
+      /^# Release Check Checkpoint — INCOMPLETE \/ NO-GO$/m,
+    );
+    assert.match(
+      interruptedCheckpointReport,
+      /^Report status: INCOMPLETE CHECKPOINT$/m,
+    );
+    assert.match(
+      interruptedCheckpointReport,
       /\| full browser E2E suite \| INFRASTRUCTURE TIMEOUT \|/,
     );
     assert.doesNotMatch(
-      interruptedReport,
+      interruptedCheckpointReport,
       /^Decision: GO$/m,
       "an interrupted full browser gate must not produce a passing report",
     );
@@ -789,6 +845,10 @@ async function runFullModeScenario(): Promise<void> {
       await readFile(checkpointPath, "utf8"),
       "",
       "full mode may clear its checkpoint only after every gate passes",
+    );
+    await assert.rejects(
+      readFile(join(evidenceDir, "release-check-checkpoint.md"), "utf8"),
+      "full resume must remove its stale checkpoint report",
     );
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
