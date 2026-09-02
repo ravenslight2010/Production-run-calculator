@@ -644,6 +644,80 @@ describe("AI result cache persistence and scope isolation", () => {
     }
   });
 
+  it("records a bounded error event when real pruning fails without failing the request", async () => {
+    const log = { info: vi.fn() };
+    const expiredKey = "prune-failure-expired";
+    const triggerName = "ai_result_cache_prune_failure_trigger";
+    const functionName = "ai_result_cache_prune_failure";
+
+    await db.insert(aiResultCacheTable).values({
+      scope: "live",
+      namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+      operationKey: expiredKey,
+      result: { answer: "expired result" },
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await pool.query(`
+      CREATE FUNCTION ${functionName}() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'controlled cache prune failure';
+      END;
+      $$;
+    `);
+    await pool.query(`
+      CREATE TRIGGER ${triggerName}
+      BEFORE DELETE ON ai_result_cache
+      FOR EACH ROW EXECUTE FUNCTION ${functionName}();
+    `);
+
+    try {
+      await expect(
+        readOrCreate(
+          "live",
+          async () => ({ answer: "provider result survives prune failure" }),
+          cache,
+          "prompt contains request data that must not be logged",
+          log,
+        ),
+      ).resolves.toEqual({
+        value: { answer: "provider result survives prune failure" },
+        hit: false,
+      });
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS ${triggerName} ON ai_result_cache`);
+      await pool.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+    }
+
+    expect(log.info).toHaveBeenCalledTimes(1);
+    const [fields, message] = log.info.mock.calls[0] as [
+      Record<string, unknown>,
+      string,
+    ];
+    expect(Object.keys(fields).sort()).toEqual([
+      "event",
+      "operation",
+      "outcome",
+      "scope",
+      "waitDurationMs",
+    ]);
+    expect(fields).toMatchObject({
+      event: "cache_maintenance",
+      scope: "live",
+      operation: "prune",
+      outcome: "error",
+    });
+    expect(fields.waitDurationMs).toEqual(expect.any(Number));
+    expect(fields.waitDurationMs).toBeGreaterThanOrEqual(0);
+    expect(fields.waitDurationMs).toBeLessThanOrEqual(
+      7 * 24 * 60 * 60 * 1000,
+    );
+    expect(Number.isInteger(fields.waitDurationMs)).toBe(true);
+    expect(fields).not.toHaveProperty("prompt");
+    expect(fields).not.toHaveProperty("result");
+    expect(message).toBe("cache maintenance completed");
+  });
+
   it("removes expired rows before pruning the recovered result", async () => {
     const targetKey = cacheKey();
     const now = Date.now();
