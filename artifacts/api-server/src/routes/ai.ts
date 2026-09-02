@@ -48,6 +48,7 @@ import {
 } from "./aiFillMissing";
 import {
   buildMatchImportPrompt,
+  resolveDeterministicMatchImport,
   sanitizeMatchImport,
   validateMatchImportBody,
 } from "./aiMatchImport";
@@ -59,6 +60,7 @@ import {
 } from "./aiParseSpecSheet";
 import {
   buildMatchPremixPrompt,
+  resolveDeterministicMatchPremix,
   sanitizeMatchPremix,
   validateMatchPremixBody,
 } from "./aiMatchPremix";
@@ -439,6 +441,24 @@ router.post(
       return;
     }
 
+    // An empty live day has no operational recommendations to calculate or
+    // review. Keep the endpoint useful without turning an empty state into a
+    // paid model request.
+    if (
+      validation.data.runs.length === 0 &&
+      (validation.data.scheduledRuns?.length ?? 0) === 0 &&
+      (validation.data.historyRuns?.length ?? 0) === 0
+    ) {
+      res.json({
+        recommendations: [],
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        note: "No production data is available to optimize yet.",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
     const { system, user } = buildOptimizePrompt(validation.data);
     const userPrompt = await groundPromptWithMemory(req.log, user);
 
@@ -455,8 +475,14 @@ router.post(
       });
       content = response.choices[0]?.message?.content ?? "";
     } catch (err) {
-      req.log.error({ err }, "ai-optimize call failed");
-      res.status(502).json({ error: "AI provider error" });
+      req.log.error({ err }, "ai-optimize call failed; returning no-AI state");
+      res.json({
+        recommendations: [],
+        aiGenerated: false,
+        aiStatus: "unavailable",
+        note: "AI optimization is unavailable. No recommendations were applied.",
+        generatedAt: Date.now(),
+      });
       return;
     }
 
@@ -465,7 +491,13 @@ router.post(
       raw = JSON.parse(content);
     } catch {
       req.log.warn({ content: content.slice(0, 200) }, "ai-optimize non-JSON response");
-      res.json({ recommendations: [], generatedAt: Date.now() });
+      res.json({
+        recommendations: [],
+        aiGenerated: false,
+        aiStatus: "unavailable",
+        note: "AI returned no usable optimization recommendations.",
+        generatedAt: Date.now(),
+      });
       return;
     }
 
@@ -945,6 +977,20 @@ router.post(
             currentProfiles: toCurrentReconcileProfiles(validation.data),
           });
 
+    // There is nothing to narrate when both deterministic comparisons are
+    // clean. Return the authoritative empty diff without loading memory or
+    // spending an AI call.
+    if (discrepancies.length === 0 && profileDiscrepancies.length === 0) {
+      res.json({
+        specSheetId: validation.data.specSheetId,
+        discrepancies,
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
     // Advisory plain-language summary. Fail-safe: any AI error still returns the
     // deterministic discrepancies (with an empty summary) rather than a 502.
     const model = pickModel("full");
@@ -1012,6 +1058,8 @@ router.post(
 
     res.json({
       ...cachedSpecBody!,
+      aiGenerated: !!cachedSpecBody!.summary,
+      aiStatus: cachedSpecBody!.summary ? "enriched" : "unavailable",
       generatedAt: Date.now(),
     });
   },
@@ -1038,6 +1086,16 @@ router.post(
     }
 
     const discrepancies = toMixDiscrepancies(validation.data);
+
+    if (discrepancies.length === 0) {
+      res.json({
+        discrepancies,
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
 
     // Advisory plain-language summary. Fail-safe: any AI error still returns a
     // (empty) summary rather than a 502 — the deterministic diff already lives
@@ -1094,6 +1152,8 @@ router.post(
 
     res.json({
       ...cachedMixBody!,
+      aiGenerated: !!cachedMixBody!.summary,
+      aiStatus: cachedMixBody!.summary ? "enriched" : "unavailable",
       generatedAt: Date.now(),
     });
   },
@@ -1375,34 +1435,92 @@ router.post(
     );
     const userPrompt = await groundPromptWithMemory(req.log, user);
 
-    let content = "";
+    type ProactiveCacheBody = {
+      alert: ReturnType<typeof sanitizeProactiveAlert>["alert"];
+      note?: string;
+      aiStatus: "enriched" | "unavailable";
+    };
+    let cachedProactiveBody: ProactiveCacheBody;
+    const model = pickModel("full");
     try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
+      const cached = await cachedAiResponse<ProactiveCacheBody>(req, res, {
+        operation: "proactive-alert",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is ProactiveCacheBody =>
+          isObject(value) &&
+          "alert" in value &&
+          (value.alert === null || isObject(value.alert)) &&
+          (value.note === undefined || typeof value.note === "string") &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
+        load: async () => {
+          let content = "";
+          try {
+            const response = await openai.chat.completions.create({
+              model,
+              max_completion_tokens: 2048,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: userPrompt },
+              ],
+            });
+            content = response.choices[0]?.message?.content ?? "";
+          } catch (err) {
+            req.log.error({ err }, "ai-proactive-alert call failed; using no-AI state");
+            return {
+              value: {
+                alert: null,
+                note: "AI is unavailable. Deterministic stock and production checks remain available.",
+                aiStatus: "unavailable" as const,
+              },
+              // Cache the bounded no-AI state for this unchanged risk snapshot.
+              cacheable: true,
+            };
+          }
+
+          let raw: unknown;
+          try {
+            raw = JSON.parse(content);
+          } catch {
+            req.log.warn({ content: content.slice(0, 200) }, "ai-proactive-alert non-JSON response");
+            return {
+              value: {
+                alert: null,
+                note: "AI returned no usable alert. Deterministic checks remain available.",
+                aiStatus: "unavailable" as const,
+              },
+              cacheable: true,
+            };
+          }
+
+          const { alert, note } = sanitizeProactiveAlert(raw, validation.data);
+          return {
+            value: {
+              alert,
+              ...(note ? { note } : {}),
+              aiStatus: "enriched" as const,
+            },
+            cacheable: true,
+          };
+        },
       });
-      content = response.choices[0]?.message?.content ?? "";
+      cachedProactiveBody = cached.value;
     } catch (err) {
-      req.log.error({ err }, "ai-proactive-alert call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
+      if (err instanceof AiCostLimitError) {
+        res.json({
+          alert: null,
+          aiStatus: "unavailable",
+          note: "AI cost limit reached. Deterministic checks remain available.",
+          generatedAt: Date.now(),
+        });
+        return;
+      }
+      throw err;
     }
 
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-proactive-alert non-JSON response");
-      res.json({ alert: null, generatedAt: Date.now() });
-      return;
-    }
-
-    const { alert, note } = sanitizeProactiveAlert(raw, validation.data);
+    const { alert, note } = cachedProactiveBody;
 
     // Record notable triggers back through the shared facility-memory write path
     // (best-effort) so the watcher's timing improves over time. A write failure
@@ -1423,6 +1541,7 @@ router.post(
 
     res.json({
       alert,
+      aiStatus: cachedProactiveBody.aiStatus,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
@@ -1652,7 +1771,14 @@ router.post(
         return;
       }
       if (err instanceof AiResponseError) {
-        res.status(err.status).json({ error: err.error });
+        res.json({
+          forecast: null,
+          forecasts: [],
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI forecasting is unavailable. No forecast was produced.",
+          generatedAt: Date.now(),
+        });
         return;
       }
       throw err;
@@ -2144,7 +2270,25 @@ router.post(
       return;
     }
 
-    const { system, user } = buildMatchImportPrompt(validation.data);
+    const deterministic = resolveDeterministicMatchImport(validation.data);
+    const deterministicMatches = deterministic.resolved;
+    const unresolved = deterministic.unresolved;
+    if (
+      unresolved.unmatchedBrands.length === 0 &&
+      unresolved.unmatchedFlavors.length === 0 &&
+      (unresolved.unmatchedIngredients ?? []).length === 0 &&
+      (unresolved.unmatchedAppTypes ?? []).length === 0 &&
+      (unresolved.unmatchedPepTypes ?? []).length === 0
+    ) {
+      res.json({
+        ...deterministicMatches,
+        aiGenerated: false,
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
+    const { system, user } = buildMatchImportPrompt(unresolved);
     const userPrompt = await groundPromptWithMemory(req.log, user, {
       correctionDomains: ["brand", "flavor"],
     });
@@ -2226,7 +2370,7 @@ router.post(
             appTypeMatches,
             pepTypeMatches,
             note,
-          } = sanitizeMatchImport(raw, validation.data);
+          } = sanitizeMatchImport(raw, unresolved);
           const verdicts = await reviewSuggestions({
             featureLabel: "spreadsheet name matches to existing saved names",
             instructions:
@@ -2256,26 +2400,41 @@ router.post(
             log: req.log,
           });
           const value: MatchImportCacheBody = {
-            brandMatches: brandMatches.map((m, i) => {
-              const v = verdicts.get(`brand-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            flavorMatches: flavorMatches.map((m, i) => {
-              const v = verdicts.get(`flavor-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            ingredientMatches: ingredientMatches.map((m, i) => {
-              const v = verdicts.get(`ingredient-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            appTypeMatches: appTypeMatches.map((m, i) => {
-              const v = verdicts.get(`app-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            pepTypeMatches: pepTypeMatches.map((m, i) => {
-              const v = verdicts.get(`pep-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
+            brandMatches: [
+              ...deterministicMatches.brandMatches,
+              ...brandMatches.map((m, i) => {
+                const v = verdicts.get(`brand-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            flavorMatches: [
+              ...deterministicMatches.flavorMatches,
+              ...flavorMatches.map((m, i) => {
+                const v = verdicts.get(`flavor-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            ingredientMatches: [
+              ...deterministicMatches.ingredientMatches,
+              ...ingredientMatches.map((m, i) => {
+                const v = verdicts.get(`ingredient-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            appTypeMatches: [
+              ...deterministicMatches.appTypeMatches,
+              ...appTypeMatches.map((m, i) => {
+                const v = verdicts.get(`app-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            pepTypeMatches: [
+              ...deterministicMatches.pepTypeMatches,
+              ...pepTypeMatches.map((m, i) => {
+                const v = verdicts.get(`pep-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
             ...(note ? { note } : {}),
           };
           return { value, cacheable: rawIsValidShape };
@@ -2288,13 +2447,19 @@ router.post(
         return;
       }
       if (err instanceof AiResponseError) {
-        res.status(err.status).json({ error: err.error });
+        res.json({
+          ...deterministicMatches,
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI matching is unavailable; deterministic matches were retained for review.",
+          generatedAt: Date.now(),
+        });
         return;
       }
       throw err;
     }
 
-    res.json({ ...cachedMatchBody!, generatedAt: Date.now() });
+    res.json({ ...cachedMatchBody!, aiGenerated: true, generatedAt: Date.now() });
   },
 );
 
@@ -2507,7 +2672,18 @@ router.post(
       return;
     }
 
-    const { system, user } = buildMatchPremixPrompt(validation.data);
+    const deterministic = resolveDeterministicMatchPremix(validation.data);
+    if (deterministic.unresolvedNames.length === 0) {
+      res.json({
+        matches: deterministic.matches,
+        aiGenerated: false,
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
+    const aiInput = { ...validation.data, unmatchedNames: deterministic.unresolvedNames };
+    const { system, user } = buildMatchPremixPrompt(aiInput);
     const userPrompt = await groundPromptWithMemory(req.log, user, {
       correctionDomains: ["brand", "flavor"],
     });
@@ -2551,7 +2727,7 @@ router.post(
           }
           const raw = result.raw;
           const rawIsValidShape = isObject(raw) && Array.isArray(raw.matches);
-          const matches = sanitizeMatchPremix(raw, validation.data);
+          const matches = sanitizeMatchPremix(raw, aiInput);
           const verdicts = await reviewSuggestions({
             featureLabel: "premix product names matched to existing saved brand/flavor products",
             instructions:
@@ -2578,13 +2754,23 @@ router.post(
         return;
       }
       if (err instanceof AiResponseError) {
-        res.status(err.status).json({ error: err.error });
+        res.json({
+          matches: deterministic.matches,
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI matching is unavailable; deterministic matches were retained for review.",
+          generatedAt: Date.now(),
+        });
         return;
       }
       throw err;
     }
 
-    res.json({ ...cachedPremixBody!, generatedAt: Date.now() });
+    res.json({
+      matches: [...deterministic.matches, ...(cachedPremixBody?.matches ?? [])],
+      aiGenerated: true,
+      generatedAt: Date.now(),
+    });
   },
 );
 
@@ -2696,7 +2882,13 @@ router.post(
         return;
       }
       if (err instanceof AiResponseError) {
-        res.status(err.status).json({ error: err.error });
+        res.json({
+          suggestions: [],
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI merge suggestions are unavailable. No changes were applied.",
+          generatedAt: Date.now(),
+        });
         return;
       }
       throw err;

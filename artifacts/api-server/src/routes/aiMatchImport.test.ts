@@ -3,6 +3,7 @@ import {
   validateMatchImportBody,
   sanitizeMatchImport,
   conflictingProductLine,
+  resolveDeterministicMatchImport,
   type MatchImportInput,
 } from "./aiMatchImport";
 
@@ -55,6 +56,52 @@ describe("validateMatchImportBody contract", () => {
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
+  });
+});
+
+describe("resolveDeterministicMatchImport", () => {
+  it("resolves normalized names locally and leaves only unknown values", () => {
+    const out = resolveDeterministicMatchImport(
+      input({
+        brands: ["Aldo's", "Acme"],
+        brandFlavors: { "Aldo's": ["Classic"] },
+        unmatchedBrands: ["Aldos", "Unseen"],
+        unmatchedFlavors: [
+          { brand: "Aldos", flavor: "Classic" },
+          { brand: "Unseen", flavor: "New" },
+        ],
+        unmatchedIngredients: [{ kind: "dough", name: "Flour" }],
+        unmatchedAppTypes: ["Spreader"],
+        unmatchedPepTypes: ["Cup & Char"],
+      }),
+    );
+    expect(out.resolved.brandMatches).toEqual([{ candidate: "Aldos", match: "Aldo's" }]);
+    expect(out.resolved.flavorMatches).toEqual([
+      { brand: "Aldo's", candidate: "Classic", match: "Classic" },
+    ]);
+    expect(out.resolved.ingredientMatches).toEqual([
+      { kind: "dough", candidate: "Flour", match: "Flour" },
+    ]);
+    expect(out.unresolved.unmatchedBrands).toEqual(["Unseen"]);
+    expect(out.unresolved.unmatchedFlavors).toEqual([{ brand: "Unseen", flavor: "New" }]);
+    expect(out.unresolved.unmatchedIngredients).toEqual([]);
+    expect(out.unresolved.unmatchedAppTypes).toEqual([]);
+    expect(out.unresolved.unmatchedPepTypes).toEqual([]);
+  });
+
+  it("does not silently resolve a conflicting brand product line", () => {
+    const out = resolveDeterministicMatchImport(
+      input({
+        brands: ["Basha's Original Pizzas"],
+        unmatchedBrands: ["Basha's Ultra Thin Crust Pizzas"],
+        unmatchedFlavors: [],
+        unmatchedIngredients: [],
+        unmatchedAppTypes: [],
+        unmatchedPepTypes: [],
+      }),
+    );
+    expect(out.resolved.brandMatches).toEqual([]);
+    expect(out.unresolved.unmatchedBrands).toEqual(["Basha's Ultra Thin Crust Pizzas"]);
   });
 });
 

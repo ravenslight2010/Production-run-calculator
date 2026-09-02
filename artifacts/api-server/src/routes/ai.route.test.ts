@@ -294,10 +294,16 @@ describe("POST /ai/optimize — run-id cross-check glue (knownRunIds passed)", (
 });
 
 describe("POST /ai/optimize — model failure glue", () => {
-  it("returns 502 when the model call throws", async () => {
+  it("returns a clear no-AI state when the model call throws", async () => {
     mock.shouldThrow = true;
     const res = await postOptimize(makeBody());
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      recommendations: unknown[];
+      aiStatus: string;
+    };
+    expect(json.recommendations).toEqual([]);
+    expect(json.aiStatus).toBe("unavailable");
   });
 
   it("returns an empty recommendation set when the model emits non-JSON", async () => {

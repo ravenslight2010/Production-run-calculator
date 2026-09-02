@@ -188,14 +188,14 @@ describe("bounded retry on malformed model output (first malformed, second good)
 
   it("/ai/match-import retries once and returns the good second matches", async () => {
     const good = JSON.stringify({
-      brandMatches: [{ candidate: "Lowe's", match: "Lowes" }],
+      brandMatches: [{ candidate: "Unknown Brand", match: "Lowes" }],
       flavorMatches: [],
     });
     mock.queue = [TRUNCATED_REPLY, good];
     const res = await post("/ai/match-import", {
       brands: ["Lowes"],
       brandFlavors: { Lowes: ["Pepperoni"] },
-      unmatchedBrands: ["Lowe's"],
+      unmatchedBrands: ["Unknown Brand"],
       unmatchedFlavors: [],
     });
     expect(res.status).toBe(200);
@@ -207,13 +207,13 @@ describe("bounded retry on malformed model output (first malformed, second good)
 
   it("/ai/match-premix retries once and returns the good second matches", async () => {
     const good = JSON.stringify({
-      matches: [{ name: "Lowes Pepperoni Mix", brand: "Lowes", flavor: "Pepperoni" }],
+      matches: [{ name: "Lowes Mystery Mix", brand: "Lowes", flavor: "Pepperoni" }],
     });
     mock.queue = [TRUNCATED_REPLY, good];
     const res = await post("/ai/match-premix", {
       brands: ["Lowes"],
       brandFlavors: { Lowes: ["Pepperoni"] },
-      unmatchedNames: ["Lowes Pepperoni Mix"],
+      unmatchedNames: ["Lowes Mystery Mix"],
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { matches: Array<{ brand: string }> };
@@ -388,19 +388,23 @@ describe("shared retry semantics (pinned once — same helper on every route)", 
     expect(mock.queue).toHaveLength(1);
   });
 
-  it("still 502s immediately on a provider error (no retry of thrown calls)", async () => {
+  it("returns a clear no-AI state immediately on a provider error", async () => {
     mock.shouldThrow = true;
     const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: unknown[]; aiStatus: string };
+    expect(body.suggestions).toHaveLength(0);
+    expect(body.aiStatus).toBe("unavailable");
     expect(mock.mainCalls).toBe(1);
   });
 
-  it("retries a 429 rate-limit rejection once, then returns HTTP 429 with a friendly message", async () => {
+  it("retries a 429 rate-limit rejection once, then returns a no-AI state", async () => {
     mock.shouldThrow429 = true;
     const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe(AI_RATE_LIMITED_MESSAGE);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: unknown[]; aiStatus: string };
+    expect(body.suggestions).toHaveLength(0);
+    expect(body.aiStatus).toBe("unavailable");
     // A 429 rejection is free, so exactly one retry happens (2 attempts total).
     expect(mock.mainCalls).toBe(2);
   });
