@@ -69,9 +69,8 @@ function runStoppedSummary(
   evidenceDir: string,
   summaryPath: string,
   mode: "standard" | "full",
+  artifactUrl: string,
 ): Promise<{ code: number; output: string }> {
-  const artifactUrl =
-    "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
   return new Promise((resolveRun, reject) => {
     const child = spawn("bash", [stoppedSummaryScript], {
       cwd: rootDir,
@@ -107,65 +106,101 @@ function runStoppedSummary(
 async function runStoppedSummaryScenario(): Promise<void> {
   const artifactUrl =
     "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
-  for (const mode of ["standard", "full"] as const) {
-    const evidenceDir = await mkdtemp(join(tmpdir(), `release-summary-${mode}-`));
-    const summaryPath = join(evidenceDir, "step-summary.md");
-    try {
-      await writeFile(
-        join(evidenceDir, "release-check-checkpoint.md"),
-        "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
-        "utf8",
-      );
-      const result = await runStoppedSummary(
-        evidenceDir,
-        summaryPath,
-        mode,
-      );
-      assert.equal(result.code, 0, result.output);
-      assert.equal(result.output, "", "summary capture must not emit release evidence");
+  const artifactScenarios = [
+    { name: "uploaded", artifactUrl },
+    { name: "upload-failed", artifactUrl: "" },
+  ] as const;
 
-      const expected = [
-        "## Release check stopped — NO-GO",
-        "",
-        mode === "full"
-          ? "The full release check stopped before all gates completed."
-          : "The release check stopped before all gates completed.",
-        "",
-        `[Download the stopped-check checkpoint artifact](${artifactUrl})`,
-        "",
-        "**This checkpoint is not retained release evidence and cannot support a GO decision.**",
-        "",
-        "Resume the incomplete check with:",
-        "```text",
-        mode === "full"
-          ? "pnpm run release:check:full -- --resume"
-          : "pnpm run release:check -- --resume",
-        "```",
-        "",
-        "Or regenerate the retained report from a fresh run with:",
-        "```text",
-        mode === "full"
-          ? "pnpm run release:check:full"
-          : "pnpm run release:check",
-        "```",
-        "",
-      ].join("\n");
-      const summary = await readFile(summaryPath, "utf8");
-      assert.equal(
-        summary,
-        expected,
-        `${mode} stopped summary must remain an exact, auditable contract`,
+  for (const mode of ["standard", "full"] as const) {
+    for (const artifactScenario of artifactScenarios) {
+      const evidenceDir = await mkdtemp(
+        join(tmpdir(), `release-summary-${mode}-${artifactScenario.name}-`),
       );
-      assert.match(summary, /not retained release evidence/);
-      assert.match(summary, /NO-GO/);
-      assert.doesNotMatch(summary, /^Decision: GO$/m);
-    } finally {
-      await rm(evidenceDir, { recursive: true, force: true });
+      const summaryPath = join(evidenceDir, "step-summary.md");
+      try {
+        await writeFile(
+          join(evidenceDir, "release-check-checkpoint.md"),
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+          "utf8",
+        );
+        const result = await runStoppedSummary(
+          evidenceDir,
+          summaryPath,
+          mode,
+          artifactScenario.artifactUrl,
+        );
+        assert.equal(result.code, 0, result.output);
+        assert.equal(
+          result.output,
+          "",
+          "summary capture must not emit release evidence",
+        );
+
+        const artifactLine = artifactScenario.artifactUrl
+          ? `[Download the stopped-check checkpoint artifact](${artifactScenario.artifactUrl})`
+          : "The checkpoint artifact was not uploaded successfully.";
+        const resumeCommand =
+          mode === "full"
+            ? "pnpm run release:check:full -- --resume"
+            : "pnpm run release:check -- --resume";
+        const regenerateCommand =
+          mode === "full"
+            ? "pnpm run release:check:full"
+            : "pnpm run release:check";
+        const expected = [
+          "## Release check stopped — NO-GO",
+          "",
+          mode === "full"
+            ? "The full release check stopped before all gates completed."
+            : "The release check stopped before all gates completed.",
+          "",
+          artifactLine,
+          "",
+          "**This checkpoint is not retained release evidence and cannot support a GO decision.**",
+          "",
+          "Resume the incomplete check with:",
+          "```text",
+          resumeCommand,
+          "```",
+          "",
+          "Or regenerate the retained report from a fresh run with:",
+          "```text",
+          regenerateCommand,
+          "```",
+          "",
+        ].join("\n");
+        const summary = await readFile(summaryPath, "utf8");
+        assert.equal(
+          summary,
+          expected,
+          `${mode}/${artifactScenario.name} stopped summary must remain an exact, auditable contract`,
+        );
+        if (artifactScenario.artifactUrl === "") {
+          assert.match(
+            summary,
+            /The checkpoint artifact was not uploaded successfully\./,
+            `${mode} must explain when the checkpoint artifact upload fails`,
+          );
+        }
+        assert.match(summary, /not retained release evidence/);
+        assert.ok(
+          summary.includes(resumeCommand),
+          `${mode} summary must include the matching resume command`,
+        );
+        assert.ok(
+          summary.includes(regenerateCommand),
+          `${mode} summary must include the matching regenerate command`,
+        );
+        assert.match(summary, /NO-GO/);
+        assert.doesNotMatch(summary, /^Decision: GO$/m);
+      } finally {
+        await rm(evidenceDir, { recursive: true, force: true });
+      }
     }
   }
 
   console.log(
-    "Stopped release summary contract passed (standard/full; non-retained verification only).",
+    "Stopped release summary contract passed (standard/full; artifact link and upload-failure; non-retained verification only).",
   );
 }
 
