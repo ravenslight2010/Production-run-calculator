@@ -7394,6 +7394,7 @@ components:
         - summary
         - generatedAt
         - aiGenerated
+        - aiStatus
       properties:
         anomalies:
           type: array
@@ -7414,6 +7415,10 @@ components:
         aiGenerated:
           type: boolean
           description: True when the AI narrated; false otherwise
+        aiStatus:
+          type: string
+          enum: [deterministic, enriched, unavailable]
+          description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
 
     ScheduleOptimizeRunInput:
       type: object

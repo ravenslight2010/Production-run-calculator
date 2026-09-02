@@ -2084,6 +2084,18 @@ export interface Anomaly {
   description: string;
 }
 
+/**
+ * Whether the response is deterministic-only, AI-enriched, or missing AI narration
+ */
+export type AnomalyResultAiStatus = typeof AnomalyResultAiStatus[keyof typeof AnomalyResultAiStatus];
+
+
+export const AnomalyResultAiStatus = {
+  deterministic: 'deterministic',
+  enriched: 'enriched',
+  unavailable: 'unavailable',
+} as const;
+
 export interface AnomalyResult {
   anomalies: Anomaly[];
   checkedRuns: number;
@@ -2095,6 +2107,8 @@ export interface AnomalyResult {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
+  /** Whether the response is deterministic-only, AI-enriched, or missing AI narration */
+  aiStatus: AnomalyResultAiStatus;
 }
 
 /**

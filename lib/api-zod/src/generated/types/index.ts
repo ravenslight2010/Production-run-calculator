@@ -23,6 +23,7 @@ export * from './anomaly';
 export * from './anomalyInput';
 export * from './anomalyMetric';
 export * from './anomalyResult';
+export * from './anomalyResultAiStatus';
 export * from './anomalyRunInput';
 export * from './anomalySeverity';
 export * from './appendConversationInput';

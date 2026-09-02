@@ -1869,7 +1869,8 @@ export const AiAnomaliesResponse = zod.object({
   "summary": zod.string().describe('Plain-language narration (AI), or empty when nothing was flagged \/ AI unavailable'),
   "note": zod.string().optional().describe('Optional explanation (e.g. not enough history to judge)'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise')
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
