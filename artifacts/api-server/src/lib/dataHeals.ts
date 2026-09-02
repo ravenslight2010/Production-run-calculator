@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import {
   db,
   dataHealsTable,
@@ -14,6 +14,7 @@ import {
   brandProfilesTable,
   savedSpecSheetsTable,
   incidentsTable,
+  ingredientsTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import {
@@ -69,6 +70,7 @@ import {
   SEA_SALT_SAUCE_TARGETS,
   SEA_SALT_MIX_TARGETS,
 } from "./seaSaltHeal";
+import { planIngredientDuplicateMerges } from "./ingredientDuplicateHeal";
 
 // One-time data heals, applied at boot (best-effort, after listen — like
 // seedRoles). Each heal claims its marker row in data_heals FIRST, inside the
@@ -3686,6 +3688,7 @@ async function runHistoricalHealResultBackfill(): Promise<void> {
 
 export async function runDataHeals(): Promise<void> {
   await runHistoricalHealResultBackfill();
+  await runIngredientActiveNameDedupe();
   await runLiveProfileRecipeLinkRepair();
   await runCrbIngredientHeal();
   await runCrbDoughFamilyConsolidation();
@@ -3734,6 +3737,64 @@ export async function runDataHeals(): Promise<void> {
   await runAug19SavedSpecProfileRepairV2();
   await runFreshDeviceRunContaminationCleanup();
   await runResolvedIncidentWorkflowReconciliation();
+}
+
+const INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID =
+  "ingredient-active-name-dedupe-v1";
+
+export async function runIngredientActiveNameDedupe(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(ingredientsTable).for("update");
+    const plans = planIngredientDuplicateMerges(rows);
+    const updatedAt = new Date();
+    let duplicatesMerged = 0;
+
+    for (const plan of plans) {
+      await tx
+        .update(ingredientsTable)
+        .set({ categories: plan.categories, updatedAt })
+        .where(
+          and(
+            eq(ingredientsTable.id, plan.canonicalId),
+            eq(ingredientsTable.scope, plan.scope),
+          ),
+        );
+      await tx
+        .update(ingredientsTable)
+        .set({
+          mergedInto: plan.canonicalId,
+          enabled: false,
+          updatedAt,
+        })
+        .where(
+          and(
+            eq(ingredientsTable.scope, plan.scope),
+            inArray(ingredientsTable.id, plan.duplicateIds),
+          ),
+        );
+      duplicatesMerged += plan.duplicateIds.length;
+    }
+
+    const result = {
+      groupsMerged: plans.length,
+      duplicatesMerged,
+    };
+    await tx
+      .update(dataHealsTable)
+      .set({ result })
+      .where(eq(dataHealsTable.id, INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID));
+    logger.info(
+      { heal: INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID, ...result },
+      "Data heal applied",
+    );
+  });
 }
 
 // ── Incident resolved-status/workflow-state reconciliation ───────────────────
