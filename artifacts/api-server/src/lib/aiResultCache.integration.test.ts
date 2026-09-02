@@ -394,6 +394,155 @@ describe("AI result cache persistence and scope isolation", () => {
     expect(rows.some((row) => row.operationKey === "contention-seed-0")).toBe(false);
   });
 
+  it("keeps live and sandbox recovery independent while live pruning is contended", async () => {
+    const [liveOwner, sandboxOwner] = await Promise.all([
+      import("./aiResultCache" + "?scope-contention-live"),
+      import("./aiResultCache" + "?scope-contention-sandbox"),
+    ]);
+    const now = Date.now();
+    const seededUpdatedAt = new Date(now - 60_000);
+    const expiredAt = new Date(now - 30_000);
+    const freshAt = new Date(now + 60_000);
+    const seedRows = (scope: Scope, prefix: string) => [
+      ...Array.from({ length: cache.AI_RESULT_CACHE_MAX_ROWS }, (_, index) => ({
+        scope,
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: `${prefix}-old-${index}`,
+        result: { answer: `${prefix} old ${index}` },
+        expiresAt: freshAt,
+        createdAt: seededUpdatedAt,
+        updatedAt: seededUpdatedAt,
+      })),
+      {
+        scope,
+        namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+        operationKey: `${prefix}-expired`,
+        result: { answer: `${prefix} expired` },
+        expiresAt: expiredAt,
+        createdAt: seededUpdatedAt,
+        updatedAt: seededUpdatedAt,
+      },
+    ];
+
+    await db.insert(aiResultCacheTable).values([
+      ...seedRows("live", "live"),
+      ...seedRows("sandbox", "sandbox"),
+    ]);
+
+    const livePruneLock = await pool.connect();
+    await livePruneLock.query("BEGIN");
+    await livePruneLock.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`${liveOwner.AI_RESULT_CACHE_NAMESPACE}:live:prune`],
+    );
+
+    let signalLiveProviderStarted!: () => void;
+    let releaseLiveProvider!: () => void;
+    const liveProviderStarted = new Promise<void>((resolve) => {
+      signalLiveProviderStarted = resolve;
+    });
+    const liveProviderMayFinish = new Promise<void>((resolve) => {
+      releaseLiveProvider = resolve;
+    });
+    const liveRecovery = readOrCreate(
+      "live",
+      async () => {
+        signalLiveProviderStarted();
+        await liveProviderMayFinish;
+        return { answer: "live fresh result" };
+      },
+      liveOwner,
+    );
+    await liveProviderStarted;
+    releaseLiveProvider();
+
+    let signalSandboxProviderStarted!: () => void;
+    const sandboxProviderStarted = new Promise<void>((resolve) => {
+      signalSandboxProviderStarted = resolve;
+    });
+    const sandboxRecovery = readOrCreate(
+      "sandbox",
+      async () => {
+        signalSandboxProviderStarted();
+        return { answer: "sandbox fresh result" };
+      },
+      sandboxOwner,
+    );
+
+    try {
+      // The live recovery is blocked on its held prune lock. A scope-qualified
+      // lock must still let sandbox acquire its own key and prune locks.
+      await expect(
+        Promise.race([
+          sandboxRecovery,
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("sandbox recovery waited on live pruning")),
+              5_000,
+            ),
+          ),
+        ]),
+      ).resolves.toEqual({
+        value: { answer: "sandbox fresh result" },
+        hit: false,
+      });
+      await sandboxProviderStarted;
+
+      const rowsWhileLiveIsBlocked = await db.select().from(aiResultCacheTable);
+      const liveRowsWhileBlocked = rowsWhileLiveIsBlocked.filter(
+        (row) => row.scope === "live",
+      );
+      expect(liveRowsWhileBlocked).toHaveLength(cache.AI_RESULT_CACHE_MAX_ROWS + 1);
+      expect(
+        liveRowsWhileBlocked.some((row) => row.operationKey === "live-expired"),
+      ).toBe(true);
+      expect(
+        liveRowsWhileBlocked.some((row) => row.operationKey === "live-old-0"),
+      ).toBe(true);
+
+      const sandboxRows = rowsWhileLiveIsBlocked.filter(
+        (row) => row.scope === "sandbox",
+      );
+      expect(
+        sandboxRows,
+      ).toHaveLength(cache.AI_RESULT_CACHE_MAX_ROWS);
+      expect(
+        sandboxRows.some((row) => row.operationKey === "sandbox-old-0"),
+      ).toBe(false);
+      expect(
+        sandboxRows.some((row) => row.operationKey === "sandbox-expired"),
+      ).toBe(false);
+    } finally {
+      await livePruneLock.query("ROLLBACK");
+      livePruneLock.release();
+    }
+
+    await expect(liveRecovery).resolves.toEqual({
+      value: { answer: "live fresh result" },
+      hit: false,
+    });
+
+    const rows = await db.select().from(aiResultCacheTable);
+    const targetKey = cacheKey(liveOwner);
+    for (const [scope, prefix, expectedAnswer] of [
+      ["live", "live", "live fresh result"],
+      ["sandbox", "sandbox", "sandbox fresh result"],
+    ] as const) {
+      const scopedRows = rows.filter((row) => row.scope === scope);
+      expect(scopedRows).toHaveLength(cache.AI_RESULT_CACHE_MAX_ROWS);
+      expect(scopedRows.every((row) => row.scope === scope)).toBe(true);
+      expect(scopedRows.some((row) => row.operationKey === `${prefix}-expired`)).toBe(
+        false,
+      );
+      expect(scopedRows.some((row) => row.operationKey === `${prefix}-old-0`)).toBe(
+        false,
+      );
+      expect(scopedRows.find((row) => row.operationKey === targetKey)?.result).toEqual({
+        answer: expectedAnswer,
+      });
+    }
+  });
+
   it("removes expired rows before pruning the recovered result", async () => {
     const targetKey = cacheKey();
     const now = Date.now();
