@@ -240,6 +240,28 @@ test_rejects_invalid_ci_actionlint_release() {
   echo "PASS: reports invalid CI release before linting"
 }
 
+test_rejects_both_invalid_actionlint_releases() {
+  local workspace
+  workspace=$(make_workspace invalid-both latest v1.7.12)
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected both invalid actionlint releases to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): latest"
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): v1.7.12"
+  assert_contains "$CHECK_OUTPUT" \
+    "Invalid local actionlint release in scripts/package.json: latest."
+  assert_contains "$CHECK_OUTPUT" \
+    "Invalid CI actionlint release in .github/workflows/workflow-lint.yml: v1.7.12."
+  assert_contains "$CHECK_OUTPUT" "Use a numeric major.minor.patch release such as 1.7.12."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected both invalid releases to fail before actionlint ran.\n' >&2
+    return 1
+  }
+  echo "PASS: reports both invalid releases before linting"
+}
+
 test_accepts_matching_versions
 test_rejects_mismatched_versions
 test_rejects_missing_actionlint_declaration
@@ -248,3 +270,4 @@ test_rejects_malformed_local_actionlint_declaration
 test_rejects_malformed_ci_actionlint_declaration
 test_rejects_invalid_local_actionlint_release
 test_rejects_invalid_ci_actionlint_release
+test_rejects_both_invalid_actionlint_releases
