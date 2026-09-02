@@ -20,6 +20,7 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { clearAiResultCacheForTests } from "../lib/aiResultCache";
 
 // ── Single shared mock-state object (one vi.hoisted call matches the pattern ──
 // that provably works in forecastAccuracy.route.test.ts). Splitting state across
@@ -120,7 +121,8 @@ afterAll(async () => {
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  await clearAiResultCacheForTests();
   mock.calls = [];
   mock.reply = "";
   mock.verifyResult = true;

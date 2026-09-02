@@ -23,6 +23,7 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { setAiRateLimitBackoffMsForTests, AI_RATE_LIMITED_MESSAGE } from "../lib/aiJsonRetry";
+import { clearAiResultCacheForTests } from "../lib/aiResultCache";
 
 // Queue-based mock of the OpenAI chat client: each call shifts the next reply
 // off `queue`; when the queue is empty (e.g. the advisory reviewer's extra
@@ -103,7 +104,8 @@ afterAll(async () => {
 
 let userCounter = 0;
 let prevBackoff: number;
-beforeEach(() => {
+beforeEach(async () => {
+  await clearAiResultCacheForTests();
   mock.queue = [];
   mock.shouldThrow = false;
   mock.shouldThrow429 = false;
