@@ -128,7 +128,9 @@ fi
 # Report what triggered the check.
 if [ -n "${MODEL_VALUE_CHANGE}" ]; then
   echo "Detected AI_MODELS value change in ${MODELS_FILE}:"
-  echo "${MODEL_VALUE_CHANGE}" | sed 's/^/  /'
+  while IFS= read -r model_change_line; do
+    printf '  %s\n' "${model_change_line}"
+  done <<< "${MODEL_VALUE_CHANGE}"
   echo ""
 fi
 if [ -n "${PROMPT_MEANINGFUL_CHANGE}" ]; then
