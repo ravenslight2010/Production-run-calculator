@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const realMobileBrowserWsEndpoint =
-  process.env.PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT;
+  process.env.PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT?.trim();
 
 /**
  * The maintained mobile surface is the responsive web app. Keep this focused
