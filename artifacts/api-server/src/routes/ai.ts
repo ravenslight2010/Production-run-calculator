@@ -1834,6 +1834,7 @@ router.post(
         stats,
         generatedAt: Date.now(),
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
@@ -1906,7 +1907,11 @@ router.post(
       throw err;
     }
 
-    res.json({ ...cachedSummaryBody!, generatedAt: Date.now() });
+    res.json({
+      ...cachedSummaryBody!,
+      generatedAt: Date.now(),
+      aiStatus: cachedSummaryBody!.aiGenerated ? "enriched" : "unavailable",
+    });
   },
 );
 
@@ -2056,6 +2061,7 @@ router.post(
         summary: "",
         note: "Not enough runs to reorder.",
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
@@ -2065,6 +2071,7 @@ router.post(
         summary: "",
         note: "Runs are already in a good order.",
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
@@ -2090,7 +2097,7 @@ router.post(
         { err },
         "ai-schedule-optimize call failed; returning order without narration",
       );
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({ ...baseResponse, summary: "", aiGenerated: false, aiStatus: "unavailable" });
       return;
     }
 
@@ -2102,7 +2109,7 @@ router.post(
         { content: content.slice(0, 200) },
         "ai-schedule-optimize non-JSON response",
       );
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({ ...baseResponse, summary: "", aiGenerated: false, aiStatus: "unavailable" });
       return;
     }
 
@@ -2111,6 +2118,7 @@ router.post(
       ...baseResponse,
       summary: narrated ?? "",
       aiGenerated: narrated != null,
+      aiStatus: narrated != null ? "enriched" : "unavailable",
     });
   },
 );

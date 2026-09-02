@@ -6,6 +6,8 @@
  * the optional endpoints. It then uses the real manager UI to verify:
  *   - Excel import mappings remain reviewable;
  *   - spec and premix reconciliation discrepancies remain visible;
+ *   - recap stats remain visible;
+ *   - schedule order and its apply control remain visible;
  *   - forecast data remains visible; and
  *   - optimization recommendations remain visible.
  *
@@ -187,6 +189,47 @@ async function installFixtureRoutes(page: Page): Promise<void> {
       });
       return;
     }
+    if (path.endsWith("/summary")) {
+      await route.fulfill({
+        json: {
+          ...base,
+          summary: "24 cases made against 30 planned; the shift stayed on track.",
+          stats: {
+            scope: "day",
+            date: "2099-01-01",
+            runsPlanned: 2,
+            runsFinished: 1,
+            casesPlanned: 30,
+            casesProduced: 24,
+            attainmentPct: 80,
+            totalDowntimeMinutes: 12,
+            totalStoppages: 2,
+            topDowntime: { label: "Classic", minutes: 12 },
+            unfinishedRuns: ["Aldo's — Imported Flavor"],
+            incidentCount: 1,
+            wasteFlaggedCount: 0,
+            hasData: true,
+          },
+          aiGenerated: false,
+        },
+      });
+      return;
+    }
+    if (path.endsWith("/schedule-optimize")) {
+      await route.fulfill({
+        json: {
+          ...base,
+          order: ["schedule-run-2", "schedule-run-1"],
+          changed: true,
+          improved: true,
+          before: { allergenViolations: 1, ruleViolations: 1, changeovers: 3 },
+          after: { allergenViolations: 0, ruleViolations: 0, changeovers: 1 },
+          summary: "",
+          aiGenerated: false,
+        },
+      });
+      return;
+    }
     if (path.endsWith("/optimize")) {
       await route.fulfill({
         json: {
@@ -320,11 +363,37 @@ test("keeps manager production data reviewable when optional AI is unavailable",
     "AI reconciliation unavailable. Deterministic results are still available.",
   );
 
-  // AssistantTab: forecast plan and optimization recommendation both render
-  // from successful unavailable responses.
+  // AssistantTab: recap, schedule, forecast, and optimization results all
+  // render from successful unavailable responses.
   await page.getByRole("button", { name: "Close settings" }).click();
   await openMoreMenu(page);
   await page.getByRole("menuitem", { name: "AI Assistant", exact: true }).click();
+
+  await page.getByTestId("button-summary-day").click();
+  const summaryResult = page.getByTestId("summary-result");
+  await expect(summaryResult).toContainText("24 cases made against 30 planned");
+  await expect(summaryResult.getByText("1/2", { exact: true })).toBeVisible();
+  await expect(summaryResult.getByText("80%", { exact: true })).toBeVisible();
+  await expect(summaryResult.getByText("24", { exact: true })).toBeVisible();
+  await expect(summaryResult.getByText("12m", { exact: true })).toBeVisible();
+  await expect(
+    summaryResult.getByText(
+      "AI recap unavailable. Deterministic results are still available.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+
+  await page.getByTestId("button-schedule-optimize").click();
+  const scheduleResult = page.getByTestId("schedule-result");
+  await expect(scheduleResult.getByTestId("schedule-order-0")).toContainText("schedule-run-2");
+  await expect(scheduleResult.getByTestId("schedule-order-1")).toContainText("schedule-run-1");
+  await expect(scheduleResult.getByTestId("button-schedule-apply")).toBeVisible();
+  await expect(
+    scheduleResult.getByText(
+      "AI schedule narration unavailable. Deterministic results are still available.",
+      { exact: true },
+    ),
+  ).toBeVisible();
 
   await page.getByTestId("button-forecast").click();
   await expect(page.getByText("Run the Classic line first.", { exact: true })).toBeVisible();
