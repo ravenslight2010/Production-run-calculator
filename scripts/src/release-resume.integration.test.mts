@@ -18,6 +18,13 @@ type FixtureStep = {
 
 const rootDir = resolve(new URL("../../", import.meta.url).pathname);
 const releaseCheck = join(rootDir, "scripts", "src", "release-check.mts");
+const onboardingGuard = join(
+  rootDir,
+  "artifacts",
+  "run-calculator",
+  "e2e",
+  "onboarding-guard.mjs",
+);
 
 function runReleaseCheck(
   evidenceDir: string,
@@ -462,6 +469,87 @@ async function runParallelResumeScenario(): Promise<void> {
   }
 }
 
+async function runOnboardingGuardStopScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(join(tmpdir(), "release-onboarding-"));
+  const fixtureDir = await mkdtemp(join(tmpdir(), "release-onboarding-specs-"));
+  const browserMarker = join(fixtureDir, "browser-evidence-started");
+  const browserEvidenceGate = [
+    "const fs = require('node:fs');",
+    "fs.writeFileSync(process.env.RELEASE_BROWSER_EVIDENCE_MARKER, 'started\\n');",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: "onboarding bypass guard",
+      command: process.execPath,
+      args: [onboardingGuard],
+      env: { ONBOARDING_GUARD_E2E_DIRECTORY: fixtureDir },
+      stage: "browser-guard",
+    },
+    {
+      label: "browser evidence gate",
+      command: process.execPath,
+      args: ["-e", browserEvidenceGate],
+      env: { RELEASE_BROWSER_EVIDENCE_MARKER: browserMarker },
+      stage: "browser-evidence",
+    },
+  ];
+
+  try {
+    await writeFile(
+      join(fixtureDir, "bypasses-onboarding.spec.ts"),
+      "page.locator('#accessCode');\n",
+      "utf8",
+    );
+
+    const result = await runReleaseCheck(evidenceDir, steps);
+    assert.equal(result.code, 1, result.output);
+    assert.match(
+      result.output,
+      /bypasses-onboarding\.spec\.ts: browser sign-up must use signUpAndHandleOnboarding from onboarding\.ts/,
+      "the failed onboarding guard must retain its actionable message",
+    );
+    assert.match(
+      result.output,
+      /browser-guard has a failed gate; later stages were not started\./,
+      "the runner must stop after the onboarding guard stage",
+    );
+    assert.deepEqual(
+      await readFile(
+        join(evidenceDir, "release-check-state.json"),
+        "utf8",
+      ).then((contents) => {
+        const checkpoint = JSON.parse(contents) as {
+          results: Array<{ label: string; passed: boolean; status: string }>;
+        };
+        return checkpoint.results.map(({ label, passed, status }) => ({
+          label,
+          passed,
+          status,
+        }));
+      }),
+      [
+        {
+          label: "onboarding bypass guard",
+          passed: false,
+          status: "FAIL",
+        },
+      ],
+      "the runner must checkpoint the failed onboarding gate",
+    );
+    await assert.rejects(
+      readFile(browserMarker, "utf8"),
+      "the later browser evidence gate must not start",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(fixtureDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release onboarding guard scenario passed (actionable failure stops browser evidence).",
+  );
+}
+
 async function runApiShardConcurrencyScenario(): Promise<void> {
   const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-api-cap-"));
   const markerDir = await mkdtemp(join(tmpdir(), "release-resume-api-cap-marker-"));
@@ -774,6 +862,7 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
 }
 
 await run();
+await runOnboardingGuardStopScenario();
 await runParallelStageScenario();
 await runApiShardConcurrencyScenario();
 await runParallelResumeScenario();

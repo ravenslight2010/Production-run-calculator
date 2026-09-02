@@ -2,7 +2,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const e2eDirectory = dirname(fileURLToPath(import.meta.url));
+const e2eDirectory =
+  process.env.ONBOARDING_GUARD_E2E_DIRECTORY ??
+  dirname(fileURLToPath(import.meta.url));
 const files = (await readdir(e2eDirectory))
   .filter((file) => file.endsWith(".spec.ts"))
   .sort();
