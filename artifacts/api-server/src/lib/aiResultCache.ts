@@ -88,7 +88,7 @@ export type AiResultCacheStore = {
   ) => Promise<T>;
 };
 
-type CacheQueryDb = Pick<typeof db, "select" | "delete" | "insert">;
+type CacheQueryDb = Pick<typeof db, "select" | "delete" | "insert" | "execute">;
 
 function createDatabaseCacheStore(queryDb: CacheQueryDb): AiResultCacheStore {
   return {
@@ -138,6 +138,15 @@ function createDatabaseCacheStore(queryDb: CacheQueryDb): AiResultCacheStore {
         });
     },
     async prune(scope) {
+      // Writes for different keys intentionally run concurrently, so pruning
+      // needs a scope-wide lock of its own. This is called from the
+      // key-locked transaction above, keeping the row-count snapshot and
+      // deletes serialized without holding the lock during provider work.
+      await queryDb.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${
+          `${AI_RESULT_CACHE_NAMESPACE}:${scope}:prune`
+        }, 0))`,
+      );
       await queryDb
         .delete(aiResultCacheTable)
         .where(and(eq(aiResultCacheTable.scope, scope), lt(aiResultCacheTable.expiresAt, new Date())));

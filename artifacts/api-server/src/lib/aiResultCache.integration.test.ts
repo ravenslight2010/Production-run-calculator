@@ -40,12 +40,15 @@ const valid = (value: unknown): value is { answer: string } =>
   value !== null &&
   typeof (value as { answer?: unknown }).answer === "string";
 
-function cacheKey(cacheModule: CacheModule = cache): string {
+function cacheKey(
+  cacheModule: CacheModule = cache,
+  request = "same grounded request",
+): string {
   return cacheModule.fingerprintAiOperation({
     operation,
     model: "integration-model",
     system: "integration-system",
-    user: "same grounded request",
+    user: request,
   });
 }
 
@@ -53,11 +56,12 @@ function readOrCreate(
   scope: Scope,
   load: () => Promise<{ answer: string }>,
   cacheModule: CacheModule = cache,
+  request = "same grounded request",
 ): Promise<AiCacheResult<{ answer: string }>> {
   return runWithScope(scope, () =>
     cacheModule.getOrCreateAiResult({
       operation,
-      key: cacheKey(cacheModule),
+      key: cacheKey(cacheModule, request),
       validate: valid,
       load: async () => ({ value: await load() }),
     }),
@@ -312,6 +316,82 @@ describe("AI result cache persistence and scope isolation", () => {
       answer: "recovered at row limit",
     });
     expect(rows.some((row) => row.operationKey === "row-limit-seed-0")).toBe(false);
+  });
+
+  it("keeps the row cap deterministic when different cache owners recover concurrently", async () => {
+    const owners = await Promise.all([
+      import("./aiResultCache" + "?contention-owner-0"),
+      import("./aiResultCache" + "?contention-owner-1"),
+      import("./aiResultCache" + "?contention-owner-2"),
+      import("./aiResultCache" + "?contention-owner-3"),
+    ]);
+    const now = Date.now();
+    const seededUpdatedAt = new Date(now - 60_000);
+    const expiredAt = new Date(now - 30_000);
+    const freshAt = new Date(now + 60_000);
+    await db.insert(aiResultCacheTable).values(
+      [
+        ...Array.from({ length: cache.AI_RESULT_CACHE_MAX_ROWS }, (_, index) => ({
+          scope: "live",
+          namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+          operationKey: `contention-seed-${index}`,
+          result: { answer: `seed-${index}` },
+          expiresAt: freshAt,
+          createdAt: seededUpdatedAt,
+          updatedAt: seededUpdatedAt,
+        })),
+        ...Array.from({ length: 2 }, (_, index) => ({
+          scope: "live",
+          namespace: cache.AI_RESULT_CACHE_NAMESPACE,
+          operationKey: `contention-expired-${index}`,
+          result: { answer: `expired-${index}` },
+          expiresAt: expiredAt,
+          createdAt: seededUpdatedAt,
+          updatedAt: seededUpdatedAt,
+        })),
+      ],
+    );
+
+    let providersStarted = 0;
+    let signalAllProvidersStarted!: () => void;
+    let releaseProviders!: () => void;
+    const allProvidersStarted = new Promise<void>((resolve) => {
+      signalAllProvidersStarted = resolve;
+    });
+    const providersMayFinish = new Promise<void>((resolve) => {
+      releaseProviders = resolve;
+    });
+    const requests = owners.map((owner, index) =>
+      readOrCreate(
+        "live",
+        async () => {
+          providersStarted += 1;
+          if (providersStarted === owners.length) signalAllProvidersStarted();
+          await providersMayFinish;
+          return { answer: `fresh-${index}` };
+        },
+        owner,
+        `contention request ${index}`,
+      ),
+    );
+
+    await allProvidersStarted;
+    releaseProviders();
+    await expect(Promise.all(requests)).resolves.toHaveLength(owners.length);
+
+    const rows = await db.select().from(aiResultCacheTable);
+    expect(rows).toHaveLength(cache.AI_RESULT_CACHE_MAX_ROWS);
+    expect(rows.every((row) => row.expiresAt.getTime() > Date.now())).toBe(true);
+    for (const [index, owner] of owners.entries()) {
+      const freshKey = cacheKey(owner, `contention request ${index}`);
+      expect(rows.find((row) => row.operationKey === freshKey)?.result).toEqual({
+        answer: `fresh-${index}`,
+      });
+    }
+    expect(
+      rows.some((row) => row.operationKey.startsWith("contention-expired-")),
+    ).toBe(false);
+    expect(rows.some((row) => row.operationKey === "contention-seed-0")).toBe(false);
   });
 
   it("removes expired rows before pruning the recovered result", async () => {
