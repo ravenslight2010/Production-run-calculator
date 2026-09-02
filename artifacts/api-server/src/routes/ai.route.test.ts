@@ -528,6 +528,41 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     expect(json.aiStatus).toBe("unavailable");
     expect(mock.calls).toBe(1);
   });
+
+  it("preserves deterministic stats while labeling usable narration as enriched", async () => {
+    mock.nextContent = JSON.stringify({
+      summary: "Acme finished strongly while Beta needs attention.",
+    });
+    const res = await postSummary(makeSummaryBody());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      summary: string;
+      stats: Record<string, unknown>;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.stats).toEqual({
+      scope: "day",
+      date: "2026-06-18",
+      runsPlanned: 2,
+      runsFinished: 1,
+      casesPlanned: 150,
+      casesProduced: 110,
+      attainmentPct: 73,
+      totalDowntimeMinutes: 16,
+      totalStoppages: 3,
+      topDowntime: { label: "Beta Pepperoni", minutes: 12 },
+      unfinishedRuns: ["Beta Pepperoni"],
+      incidentCount: 1,
+      wasteFlaggedCount: 2,
+      hasData: true,
+    });
+    expect(json.summary).toBe("Acme finished strongly while Beta needs attention.");
+    expect(json.aiGenerated).toBe(true);
+    expect(json.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
 });
 
 describe("POST /ai/schedule-optimize — deterministic and fallback glue", () => {
@@ -653,6 +688,38 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
     });
     expect(json.aiGenerated).toBe(false);
     expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves deterministic order and metrics while labeling usable narration as enriched", async () => {
+    mock.nextContent = JSON.stringify({
+      summary: "Move the egg run later to reduce allergen risk.",
+    });
+    const res = await postScheduleOptimize(makeScheduleBody());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      order: string[];
+      before: Record<string, number>;
+      after: Record<string, number>;
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.order).toEqual(["run-cheese", "run-veggie", "run-egg"]);
+    expect(json.before).toEqual({
+      allergenViolations: 1,
+      ruleViolations: 0,
+      changeovers: 1,
+    });
+    expect(json.after).toEqual({
+      allergenViolations: 0,
+      ruleViolations: 0,
+      changeovers: 2,
+    });
+    expect(json.summary).toBe("Move the egg run later to reduce allergen risk.");
+    expect(json.aiGenerated).toBe(true);
+    expect(json.aiStatus).toBe("enriched");
     expect(mock.calls).toBe(1);
   });
 });
