@@ -156,7 +156,29 @@ EOF
   echo "PASS: reports missing workflow declaration before linting"
 }
 
-test_rejects_malformed_actionlint_declaration() {
+test_rejects_malformed_local_actionlint_declaration() {
+  local workspace
+  workspace=$(make_workspace_with_declarations \
+    malformed-package \
+    '"github-actionlint": 1.7.12' \
+    'ACTIONLINT_VERSION: 1.7.12')
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a malformed local actionlint declaration to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): <malformed>"
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): 1.7.12"
+  assert_contains "$CHECK_OUTPUT" "Malformed local actionlint declaration: scripts/package.json."
+  assert_contains "$CHECK_OUTPUT" "not configured or malformed."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the malformed local declaration to fail before actionlint ran.\n' >&2
+    return 1
+  }
+  echo "PASS: reports malformed local declaration before linting"
+}
+
+test_rejects_malformed_ci_actionlint_declaration() {
   local workspace
   workspace=$(make_workspace_with_declarations \
     malformed-ci \
@@ -164,22 +186,23 @@ test_rejects_malformed_actionlint_declaration() {
     'ACTIONLINT_VERSION: "1.7.12 trailing"')
   run_check "$workspace"
   [[ "$CHECK_STATUS" -eq 1 ]] || {
-    printf 'Expected a malformed actionlint declaration to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    printf 'Expected a malformed CI actionlint declaration to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
     return 1
   }
   assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): 1.7.12"
-  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): <missing>"
-  assert_contains "$CHECK_OUTPUT" "Set the github-actionlint devDependency and ACTIONLINT_VERSION"
-  assert_contains "$CHECK_OUTPUT" "to the same release."
+  assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): <malformed>"
+  assert_contains "$CHECK_OUTPUT" "Malformed CI actionlint declaration: .github/workflows/workflow-lint.yml."
+  assert_contains "$CHECK_OUTPUT" "not configured or malformed."
   [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
-    printf 'Expected the malformed declaration to fail before actionlint ran.\n' >&2
+    printf 'Expected the malformed CI declaration to fail before actionlint ran.\n' >&2
     return 1
   }
-  echo "PASS: reports malformed actionlint declarations before linting"
+  echo "PASS: reports malformed CI declaration before linting"
 }
 
 test_accepts_matching_versions
 test_rejects_mismatched_versions
 test_rejects_missing_actionlint_declaration
 test_rejects_missing_workflow_declaration_file
-test_rejects_malformed_actionlint_declaration
+test_rejects_malformed_local_actionlint_declaration
+test_rejects_malformed_ci_actionlint_declaration

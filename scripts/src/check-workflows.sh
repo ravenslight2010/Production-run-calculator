@@ -17,37 +17,64 @@ if (( ${#workflow_files[@]} == 0 )); then
 fi
 
 local_actionlint_version=""
+local_actionlint_state="missing"
 if [[ -f "$actionlint_package" ]]; then
+  if grep -Eq '^[[:space:]]*"github-actionlint"[[:space:]]*:' "$actionlint_package"; then
+    local_actionlint_state="malformed"
+  fi
   local_actionlint_version="$(
     sed -nE \
       's/^[[:space:]]*"github-actionlint"[[:space:]]*:[[:space:]]*"([^"]+)"[[:space:]]*,?[[:space:]]*$/\1/p' \
       "$actionlint_package" | head -n1
   )"
+  if [[ -n "$local_actionlint_version" ]]; then
+    local_actionlint_state="configured"
+  fi
 fi
 
 ci_actionlint_version=""
+ci_actionlint_state="missing"
 if [[ -f "$actionlint_workflow" ]]; then
+  if grep -Eq '^[[:space:]]*ACTIONLINT_VERSION:' "$actionlint_workflow"; then
+    ci_actionlint_state="malformed"
+  fi
   ci_actionlint_version="$(
     sed -nE \
       's/^[[:space:]]*ACTIONLINT_VERSION:[[:space:]]*"?([^[:space:]#"]+)"?[[:space:]]*(#.*)?$/\1/p' \
       "$actionlint_workflow" | head -n1
   )"
+  if [[ -n "$ci_actionlint_version" ]]; then
+    ci_actionlint_state="configured"
+  fi
+fi
+
+local_actionlint_display="${local_actionlint_version:-<missing>}"
+if [[ "$local_actionlint_state" == "malformed" ]]; then
+  local_actionlint_display="<malformed>"
+fi
+ci_actionlint_display="${ci_actionlint_version:-<missing>}"
+if [[ "$ci_actionlint_state" == "malformed" ]]; then
+  ci_actionlint_display="<malformed>"
 fi
 
 echo "Configured actionlint versions:"
-echo "  local wrapper (scripts/package.json): ${local_actionlint_version:-<missing>}"
-echo "  CI workflow (.github/workflows/workflow-lint.yml): ${ci_actionlint_version:-<missing>}"
+echo "  local wrapper (scripts/package.json): ${local_actionlint_display}"
+echo "  CI workflow (.github/workflows/workflow-lint.yml): ${ci_actionlint_display}"
 
-if [[ -z "$local_actionlint_version" || -z "$ci_actionlint_version" ]]; then
-  if [[ ! -f "$actionlint_package" ]]; then
+if [[ "$local_actionlint_state" != "configured" || "$ci_actionlint_state" != "configured" ]]; then
+  if [[ "$local_actionlint_state" == "malformed" ]]; then
+    echo "Malformed local actionlint declaration: scripts/package.json." >&2
+  elif [[ "$local_actionlint_state" == "missing" ]]; then
     echo "Missing local actionlint declaration: scripts/package.json." >&2
   fi
-  if [[ ! -f "$actionlint_workflow" ]]; then
+  if [[ "$ci_actionlint_state" == "malformed" ]]; then
+    echo "Malformed CI actionlint declaration: .github/workflows/workflow-lint.yml." >&2
+  elif [[ "$ci_actionlint_state" == "missing" ]]; then
     echo "Missing CI actionlint declaration: .github/workflows/workflow-lint.yml." >&2
   fi
   cat >&2 <<'EOF'
 Workflow lint version check failed because one or both actionlint versions are
-not configured. Set the github-actionlint devDependency and ACTIONLINT_VERSION
+not configured or malformed. Set the github-actionlint devDependency and ACTIONLINT_VERSION
 to the same release.
 EOF
   exit 1
