@@ -11,6 +11,9 @@ type FixtureStep = {
   args: string[];
   timeoutMs?: number;
   env?: Record<string, string>;
+  stage?: string;
+  concurrencyLimit?: number;
+  group?: string;
 };
 
 const rootDir = resolve(new URL("../../", import.meta.url).pathname);
@@ -20,6 +23,7 @@ function runReleaseCheck(
   evidenceDir: string,
   steps: FixtureStep[],
   args: string[] = [],
+  envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolveRun, reject) => {
     const child = spawn(
@@ -31,6 +35,7 @@ function runReleaseCheck(
           ...process.env,
           RELEASE_EVIDENCE_DIR: evidenceDir,
           RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify(steps),
+          ...envOverrides,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -45,6 +50,109 @@ function runReleaseCheck(
     child.once("error", reject);
     child.once("close", (code) => resolveRun({ code: code ?? 1, output }));
   });
+}
+
+async function runParallelStageScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-parallel-"));
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-parallel-marker-"),
+  );
+  const firstMarker = join(markerDir, "first.json");
+  const secondMarker = join(markerDir, "second.json");
+  const afterMarker = join(markerDir, "after");
+  const delayedGate = [
+    "const fs = require('node:fs');",
+    "const marker = process.env.RELEASE_PARALLEL_MARKER;",
+    "const delay = Number(process.env.RELEASE_PARALLEL_DELAY);",
+    "const start = Date.now();",
+    "setTimeout(() => {",
+    "  fs.writeFileSync(marker, JSON.stringify({ start, end: Date.now() }));",
+    "  process.exit(0);",
+    "}, delay);",
+  ].join("");
+  const afterGate = [
+    "const fs = require('node:fs');",
+    "fs.writeFileSync(process.env.RELEASE_PARALLEL_MARKER, String(Date.now()));",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: "parallel slow gate",
+      command: process.execPath,
+      args: ["-e", delayedGate],
+      env: {
+        RELEASE_PARALLEL_MARKER: firstMarker,
+        RELEASE_PARALLEL_DELAY: "240",
+      },
+      stage: "parallel-fixtures",
+    },
+    {
+      label: "parallel fast gate",
+      command: process.execPath,
+      args: ["-e", delayedGate],
+      env: {
+        RELEASE_PARALLEL_MARKER: secondMarker,
+        RELEASE_PARALLEL_DELAY: "40",
+      },
+      stage: "parallel-fixtures",
+    },
+    {
+      label: "barrier gate",
+      command: process.execPath,
+      args: ["-e", afterGate],
+      env: { RELEASE_PARALLEL_MARKER: afterMarker },
+      stage: "after-parallel",
+    },
+  ];
+
+  try {
+    for (const file of [
+      "clean-start/clean-start-evidence.json",
+      "clean-start/browser-result.json",
+      "clean-start/preview-home.png",
+      "clean-start/startup-api.log",
+      "clean-start/startup-web.log",
+      "clean-start/startup-mockup.log",
+    ]) {
+      const path = join(evidenceDir, file);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
+    }
+    const result = await runReleaseCheck(evidenceDir, steps, [], {
+      RELEASE_CHECK_MAX_CONCURRENCY: "2",
+    });
+    assert.equal(result.code, 0, result.output);
+    const first = JSON.parse(await readFile(firstMarker, "utf8")) as {
+      start: number;
+      end: number;
+    };
+    const second = JSON.parse(await readFile(secondMarker, "utf8")) as {
+      start: number;
+      end: number;
+    };
+    const barrierStarted = Number(await readFile(afterMarker, "utf8"));
+    assert.ok(
+      first.start < second.end && second.start < first.end,
+      "parallel fixture gates should overlap",
+    );
+    assert.ok(
+      barrierStarted >= Math.max(first.end, second.end),
+      "the next stage must wait for every parallel gate",
+    );
+
+    const report = await readFile(
+      join(evidenceDir, "release-check-report.md"),
+      "utf8",
+    );
+    assert.ok(
+      report.indexOf("| parallel slow gate | PASS |") <
+        report.indexOf("| parallel fast gate | PASS |"),
+      "the report must use declared step order, not completion order",
+    );
+    assert.match(report, /^Total wall-clock: \d+s$/m);
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
 }
 
 async function getCurrentRevision(): Promise<string> {
@@ -242,6 +350,116 @@ async function run(): Promise<void> {
   }
 
   console.log("Release resume integration test passed (checkpoint, rerun, log, report).");
+}
+
+async function runParallelResumeScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-parallel-retry-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-parallel-retry-marker-"),
+  );
+  const passedMarker = join(markerDir, "passed");
+  const retryMarker = join(markerDir, "retry");
+  const afterMarker = join(markerDir, "after");
+  const onceGate = [
+    "const fs = require('node:fs');",
+    "fs.appendFileSync(process.env.RELEASE_PARALLEL_MARKER, 'started\\n');",
+  ].join("");
+  const timeoutThenPassGate = [
+    "const fs = require('node:fs');",
+    "const marker = process.env.RELEASE_PARALLEL_MARKER;",
+    "if (!fs.existsSync(marker)) {",
+    "  fs.writeFileSync(marker, 'timed-out\\n');",
+    "  setTimeout(() => {}, 10_000);",
+    "} else {",
+    "  fs.appendFileSync(marker, 'resumed\\n');",
+    "  process.exit(0);",
+    "}",
+  ].join("");
+  const afterGate = [
+    "const fs = require('node:fs');",
+    "fs.writeFileSync(process.env.RELEASE_PARALLEL_MARKER, 'started\\n');",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: "parallel passed gate",
+      command: process.execPath,
+      args: ["-e", onceGate],
+      env: { RELEASE_PARALLEL_MARKER: passedMarker },
+      stage: "parallel-resume-fixtures",
+    },
+    {
+      label: "parallel retry gate",
+      command: process.execPath,
+      args: ["-e", timeoutThenPassGate],
+      timeoutMs: 250,
+      env: { RELEASE_PARALLEL_MARKER: retryMarker },
+      stage: "parallel-resume-fixtures",
+    },
+    {
+      label: "parallel resume barrier",
+      command: process.execPath,
+      args: ["-e", afterGate],
+      env: { RELEASE_PARALLEL_MARKER: afterMarker },
+      stage: "after-parallel-resume",
+    },
+  ];
+
+  try {
+    for (const file of [
+      "clean-start/clean-start-evidence.json",
+      "clean-start/browser-result.json",
+      "clean-start/preview-home.png",
+      "clean-start/startup-api.log",
+      "clean-start/startup-web.log",
+      "clean-start/startup-mockup.log",
+    ]) {
+      const path = join(evidenceDir, file);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
+    }
+    const interrupted = await runReleaseCheck(evidenceDir, steps, [], {
+      RELEASE_CHECK_MAX_CONCURRENCY: "2",
+    });
+    assert.equal(interrupted.code, 1, interrupted.output);
+    const checkpoint = JSON.parse(
+      await readFile(join(evidenceDir, "release-check-state.json"), "utf8"),
+    ) as { results: Array<{ label: string; passed: boolean; status: string }> };
+    assert.deepEqual(
+      checkpoint.results.map(({ label, passed, status }) => [
+        label,
+        passed,
+        status,
+      ]),
+      [
+        ["parallel passed gate", true, "PASS"],
+        ["parallel retry gate", false, "INFRASTRUCTURE TIMEOUT"],
+      ],
+      "a partially completed parallel stage must checkpoint each child in step order",
+    );
+    assert.equal(await readFile(passedMarker, "utf8"), "started\n");
+
+    const resumed = await runReleaseCheck(evidenceDir, steps, ["--resume"], {
+      RELEASE_CHECK_MAX_CONCURRENCY: "2",
+    });
+    assert.equal(resumed.code, 0, resumed.output);
+    assert.match(resumed.output, /Resuming after 1 completed gate\(s\)\./);
+    assert.equal(
+      await readFile(passedMarker, "utf8"),
+      "started\n",
+      "resume must not rerun a passed child from a partially completed group",
+    );
+    assert.equal(
+      await readFile(retryMarker, "utf8"),
+      "timed-out\nresumed\n",
+      "resume must rerun the failed child before the next stage",
+    );
+    assert.equal(await readFile(afterMarker, "utf8"), "started\n");
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
 }
 
 async function runFullModeScenario(): Promise<void> {
@@ -492,6 +710,8 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
 }
 
 await run();
+await runParallelStageScenario();
+await runParallelResumeScenario();
 await runFullModeScenario();
 await runStaleCheckpointScenarios();
 await runDamagedCheckpointScenarios();

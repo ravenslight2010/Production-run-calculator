@@ -12,10 +12,10 @@ export default defineConfig({
     // observed work without turning a real lock problem into a long stall.
     hookTimeout: 120_000,
     testTimeout: 30_000,
-    // The integration files each create and migrate a temporary database.
-    // Running them concurrently can saturate Postgres and make unrelated
-    // beforeAll hooks time out. One worker keeps setup and cleanup bounded and
-    // reproducible in constrained environments.
+    // Each integration shard creates and migrates a temporary database. Keep
+    // the tests inside a shard serialized; the release runner may execute at
+    // most two independent API shards at once so Postgres setup remains
+    // bounded and reproducible.
     minWorkers: 1,
     maxWorkers: 1,
   },

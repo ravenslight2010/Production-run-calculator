@@ -19,6 +19,14 @@ export type ReleaseStep = {
   timeoutMs?: number;
   warningMs?: number;
   group?: string;
+  /**
+   * Steps in the same stage share a dependency barrier. Steps without an
+   * explicit stage retain the historical one-step-at-a-time behavior; this is
+   * also useful for the small fixture used by the resume integration test.
+   */
+  stage?: string;
+  /** Optional per-stage limit, used to keep stateful browser work serial. */
+  concurrencyLimit?: number;
 };
 
 type StepStatus =
@@ -32,6 +40,16 @@ export type ReleaseStepResult = {
   label: string;
   status: StepStatus;
   elapsedMs: number;
+};
+
+export type ReleaseStageTiming = {
+  stage: string;
+  elapsedMs: number;
+};
+
+export type ReleaseTiming = {
+  totalElapsedMs: number;
+  stages: readonly ReleaseStageTiming[];
 };
 
 export type ReleaseEvidenceOptions = {
@@ -49,11 +67,13 @@ export type BrowserDurationRegression = {
 };
 
 // The third integration shard contains the capability matrix and the
-// remaining integration fixtures. It is intentionally serialized by the API
-// Vitest config, so it can exceed four minutes on the release environment even
-// when every test is healthy.
+// remaining integration fixtures. It is serialized inside its own Vitest
+// process, so it can exceed four minutes on the release environment even when
+// every test is healthy.
 const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 const API_SHARD_WARNING_MS = 6 * 60_000;
+export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
+export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
 // reset or observe shared disposable live-day state. Its 113 cases can exceed
 // the API shard budget on a cold release environment, so give the complete
@@ -164,34 +184,42 @@ const steps: ReleaseStep[] = [
   {
     label: "production dependency audit",
     args: ["run", "audit:prod"],
+    stage: "prerequisites",
   },
   {
     label: "generated API client freshness",
     args: ["run", "check:api-generated"],
+    stage: "prerequisites",
   },
   {
     label: "shared library typechecks",
     args: ["run", "typecheck:libs"],
+    stage: "shared-output",
   },
   {
     label: "API server typecheck",
     args: ["--filter", "@workspace/api-server", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "run calculator typecheck",
     args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "mockup sandbox typecheck",
     args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "scripts typecheck",
     args: ["--filter", "@workspace/scripts", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "recovery evidence audit",
     args: ["run", "audit:recovery"],
+    stage: "prerequisites",
   },
   {
     label: "clean-start smoke",
@@ -202,6 +230,8 @@ const steps: ReleaseStep[] = [
       CLEAN_START_MOCKUP_PORT: "18180",
       CLEAN_START_EVIDENCE_DIR: cleanStartEvidenceDir,
     },
+    stage: "clean-start",
+    concurrencyLimit: 1,
   },
   {
     label: "API unit tests (release shard 1/6)",
@@ -209,6 +239,7 @@ const steps: ReleaseStep[] = [
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
+    stage: "release-tests",
   },
   {
     label: "API integration tests (release shard 2/6)",
@@ -221,6 +252,7 @@ const steps: ReleaseStep[] = [
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
+    stage: "release-tests",
   },
   {
     label: "API integration tests (release shard 3/6)",
@@ -233,6 +265,7 @@ const steps: ReleaseStep[] = [
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
+    stage: "release-tests",
   },
   {
     label: "API integration tests (release shard 4/6)",
@@ -245,6 +278,7 @@ const steps: ReleaseStep[] = [
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
+    stage: "release-tests",
   },
   {
     label: "API sync tests (release shard 5/6)",
@@ -252,6 +286,7 @@ const steps: ReleaseStep[] = [
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
+    stage: "release-tests",
   },
   {
     label: "API sync SSE tests (release shard 6/6)",
@@ -259,42 +294,52 @@ const steps: ReleaseStep[] = [
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
+    stage: "release-tests",
   },
   {
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "production rules tests",
     args: ["--filter", "@workspace/production-rules", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "inventory math tests",
     args: ["--filter", "@workspace/inventory-math", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "spec reconcile tests",
     args: ["--filter", "@workspace/spec-reconcile", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "spec import tests",
     args: ["--filter", "@workspace/spec-import", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "scheduled recipe check tests",
     args: ["--filter", "@workspace/scheduled-recipe-check", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "spec export tests",
     args: ["--filter", "@workspace/spec-export", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "corpus tests",
     args: ["--filter", "@workspace/corpus-harness", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "model-bump check",
     args: ["--filter", "@workspace/scripts", "run", "check-model-bump"],
+    stage: "release-tests",
   },
   {
     label: "operational evidence check",
@@ -304,6 +349,7 @@ const steps: ReleaseStep[] = [
       "run",
       "check-operational-skill-evidence",
     ],
+    stage: "release-tests",
   },
   {
     label: "browser smoke tests",
@@ -313,6 +359,8 @@ const steps: ReleaseStep[] = [
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
+    stage: "browser-smoke",
+    concurrencyLimit: 1,
   },
   {
     label: "browser accessibility tests",
@@ -322,6 +370,8 @@ const steps: ReleaseStep[] = [
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
+    stage: "browser-accessibility",
+    concurrencyLimit: 1,
   },
 ];
 
@@ -336,6 +386,8 @@ if (fullRun) {
     },
     timeoutMs: FULL_BROWSER_TIMEOUT_MS,
     warningMs: FULL_BROWSER_WARNING_MS,
+    stage: "browser-full",
+    concurrencyLimit: 1,
   });
 }
 
@@ -390,6 +442,37 @@ if (fixtureSteps !== undefined) {
   }
 }
 
+export function releaseStepStage(step: ReleaseStep, index: number): string {
+  return step.stage ?? `serial-${index}`;
+}
+
+export function releaseConcurrencyLimit(
+  step: ReleaseStep,
+  configuredLimit = RELEASE_CHECK_DEFAULT_CONCURRENCY,
+): number {
+  if (step.concurrencyLimit !== undefined) {
+    return Math.max(1, Math.floor(step.concurrencyLimit));
+  }
+  if (step.group === "api-test-shards") {
+    return Math.min(configuredLimit, RELEASE_CHECK_API_CONCURRENCY);
+  }
+  return configuredLimit;
+}
+
+function configuredReleaseConcurrency(): number {
+  const configured = process.env.RELEASE_CHECK_MAX_CONCURRENCY;
+  if (configured === undefined || configured.trim() === "") {
+    return RELEASE_CHECK_DEFAULT_CONCURRENCY;
+  }
+  const value = Number(configured);
+  if (!Number.isInteger(value) || value < 1 || value > 16) {
+    throw new Error(
+      `RELEASE_CHECK_MAX_CONCURRENCY must be an integer from 1 to 16 (received ${configured}).`,
+    );
+  }
+  return value;
+}
+
 function printHelp(): void {
   console.log("Usage:");
   console.log("  pnpm run release:check       Safe standard release gates");
@@ -417,6 +500,9 @@ function printHelp(): void {
   );
   console.log(
     "The API test gate runs six bounded shards; sync SSE tests run separately.",
+  );
+  console.log(
+    `Parallel release stages use at most ${RELEASE_CHECK_DEFAULT_CONCURRENCY} children by default; API/database shards are capped at ${RELEASE_CHECK_API_CONCURRENCY}. Set RELEASE_CHECK_MAX_CONCURRENCY=1 for constrained local environments.`,
   );
 }
 
@@ -795,8 +881,17 @@ export function validateReleaseReport(
 
 export function runStep(
   step: ReleaseStep,
-  options: { logPath?: string } = {},
-): Promise<{ exitCode: number; elapsedMs: number; status: StepStatus }> {
+  options: {
+    logPath?: string;
+    signal?: AbortSignal;
+    deferLog?: boolean;
+  } = {},
+): Promise<{
+  exitCode: number;
+  elapsedMs: number;
+  status: StepStatus;
+  output?: string;
+}> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn(step.command ?? "pnpm", step.args, {
@@ -805,10 +900,12 @@ export function runStep(
       stdio: options.logPath ? ["ignore", "pipe", "pipe"] : "inherit",
     });
     let logWrite = Promise.resolve();
+    let capturedOutput = "";
     const capture = (chunk: Buffer): void => {
       const text = chunk.toString();
+      capturedOutput += text;
       process.stdout.write(text);
-      if (options.logPath) {
+      if (options.logPath && !options.deferLog) {
         logWrite = logWrite.then(() => appendFile(options.logPath!, text));
       }
     };
@@ -818,11 +915,15 @@ export function runStep(
     }
     let settled = false;
     let warningTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortHandler: (() => void) | undefined;
     const finish = (code: number, status?: StepStatus): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       if (warningTimer) clearTimeout(warningTimer);
+      if (abortHandler) {
+        options.signal?.removeEventListener("abort", abortHandler);
+      }
       const elapsedMs = Date.now() - startedAt;
       console.log(`${step.label} elapsed ${Math.round(elapsedMs / 1000)}s`);
       void logWrite.then(() =>
@@ -830,6 +931,7 @@ export function runStep(
           exitCode: code,
           elapsedMs,
           status: status ?? (code === 0 ? "PASS" : "FAIL"),
+          output: capturedOutput,
         }),
       );
     };
@@ -862,6 +964,17 @@ export function runStep(
             finish(124, "INFRASTRUCTURE TIMEOUT");
           }, step.timeoutMs);
 
+    abortHandler = () => {
+      console.error(`${step.label} interrupted by the release runner`);
+      child.kill("SIGTERM");
+      finish(1, "INFRASTRUCTURE ERROR");
+    };
+    if (options.signal?.aborted) {
+      abortHandler();
+    } else {
+      options.signal?.addEventListener("abort", abortHandler, { once: true });
+    }
+
     child.once("error", (error) => {
       console.error(`Could not start ${step.label}: ${error.message}`);
       finish(1, "INFRASTRUCTURE ERROR");
@@ -892,6 +1005,7 @@ export function formatReleaseReport(
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
+    timing?: ReleaseTiming;
   } = {},
 ): string {
   const evidenceLink = (file: string, label: string): string =>
@@ -941,6 +1055,21 @@ export function formatReleaseReport(
     results.every((result) => result.status === "PASS")
       ? "GO"
       : "NO-GO");
+  const timing = metadata.timing;
+  const timingLines =
+    timing === undefined
+      ? ["Timing: unavailable", ""]
+      : [
+          `Total wall-clock: ${Math.round(timing.totalElapsedMs / 1000)}s`,
+          "",
+          "| Stage | Wall-clock |",
+          "| --- | ---: |",
+          ...timing.stages.map(
+            (stage) =>
+              `| ${stage.stage} | ${Math.round(stage.elapsedMs / 1000)}s |`,
+          ),
+          "",
+        ];
   const lines = [
     "# Release Check Report",
     "",
@@ -962,6 +1091,9 @@ export function formatReleaseReport(
         )}s | \`${commandFor(result.label)}\` |`,
     ),
     "",
+    "## Timing",
+    "",
+    ...timingLines,
     "## Preview evidence",
     "",
     cleanStartResult === undefined || cleanStartResult.status === "NOT REACHED"
@@ -1028,6 +1160,7 @@ async function writeReleaseReport(
     revision: string;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
+    timing?: ReleaseTiming;
   },
 ): Promise<string> {
   const reportPath = resolve(
@@ -1093,6 +1226,7 @@ async function writeReleaseReport(
         ...metadata,
         environment: process.env.CI ? "CI release validation" : "local release validation",
         browserDurationRegressions,
+        timing: metadata.timing,
       },
     ),
     "utf8",
@@ -1104,6 +1238,7 @@ type ReleaseCheckpoint = {
   revision: string;
   mode: "standard" | "full";
   results: Array<ReleaseStepResult & { passed: boolean }>;
+  timing?: ReleaseTiming;
 };
 
 const STALE_CHECKPOINT_MESSAGE =
@@ -1124,6 +1259,30 @@ async function writeCheckpoint(
     )}\n`,
     "utf8",
   );
+}
+
+function upsertReleaseResult(
+  results: Array<ReleaseStepResult & { passed: boolean }>,
+  result: ReleaseStepResult & { passed: boolean },
+): Array<ReleaseStepResult & { passed: boolean }> {
+  const next = new Map(results.map((item) => [item.label, item] as const));
+  next.set(result.label, result);
+  return steps
+    .map((step) => next.get(step.label))
+    .filter(
+      (item): item is ReleaseStepResult & { passed: boolean } =>
+        item !== undefined,
+    );
+}
+
+function upsertStageTiming(
+  timings: readonly ReleaseStageTiming[],
+  timing: ReleaseStageTiming,
+): ReleaseStageTiming[] {
+  return [
+    ...timings.filter((existing) => existing.stage !== timing.stage),
+    timing,
+  ];
 }
 
 async function readCheckpoint(
@@ -1219,7 +1378,15 @@ async function main(): Promise<void> {
   const logPath = resolve(evidenceRoot, "release-check.log");
   await mkdir(evidenceRoot, { recursive: true });
   const resume = process.argv.includes("--resume");
+  let concurrencyLimit: number;
+  try {
+    concurrencyLimit = configuredReleaseConcurrency();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
   let results: Array<ReleaseStepResult & { passed: boolean }> = [];
+  let stageTimings: ReleaseStageTiming[] = [];
   if (resume) {
     let checkpoint: ReleaseCheckpoint | undefined;
     try {
@@ -1233,12 +1400,18 @@ async function main(): Promise<void> {
       console.error("No incomplete release checkpoint exists for this revision.");
       process.exit(1);
     }
-    const firstUnpassed = checkpoint.results.findIndex((result) => !result.passed);
-    results =
-      firstUnpassed === -1
-        ? checkpoint.results
-        : checkpoint.results.slice(0, firstUnpassed);
-    console.log(`Resuming after ${results.length} completed gate(s).`);
+    results = checkpoint.results.reduce(
+      (current, result) => upsertReleaseResult(current, result),
+      [],
+    );
+    stageTimings = checkpoint.timing?.stages
+      ? [...checkpoint.timing.stages]
+      : [];
+    console.log(
+      `Resuming after ${
+        results.filter((result) => result.passed).length
+      } completed gate(s).`,
+    );
   } else {
     await writeFile(
       logPath,
@@ -1248,50 +1421,204 @@ async function main(): Promise<void> {
       "utf8",
     );
   }
-  let failedGroup: string | undefined;
   let releaseStatefulLock: (() => Promise<void>) | undefined;
-
-  try {
-    for (const [index, step] of steps.entries()) {
-      if (results.some((result) => result.label === step.label)) continue;
-      if (failedGroup !== undefined && step.group !== failedGroup) {
-        break;
-      }
-      if (step.label === "clean-start smoke" && !releaseStatefulLock) {
-        releaseStatefulLock = await acquireStatefulReleaseLock();
-      }
-      console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-      const effectiveStep =
-        step.label === FULL_BROWSER_GATE_LABEL
-          ? {
-              ...step,
-              env: { ...step.env, RELEASE_REVISION: revision },
-            }
-          : step;
-      const { exitCode, elapsedMs, status } = await runStep(effectiveStep, {
-        logPath,
-      });
-      const passed = exitCode === 0;
-      results.push({ label: step.label, passed, status, elapsedMs });
-      await writeCheckpoint(checkpointPath, {
+  let checkpointWrite = Promise.resolve();
+  const persistCheckpoint = (): Promise<void> => {
+    checkpointWrite = checkpointWrite.then(() =>
+      writeCheckpoint(checkpointPath, {
         revision,
         mode: fullRun ? "full" : "standard",
         results,
-      });
-      console.log(`${status} ${step.label}`);
-      if (!passed) {
-        if (step.group !== undefined) {
-          failedGroup = step.group;
-          console.error(
-            `\n${step.group} has a failed shard; running the remaining shards.`,
+        timing: {
+          totalElapsedMs: stageTimings.reduce(
+            (total, stage) => total + stage.elapsedMs,
+            0,
+          ),
+          stages: stageTimings,
+        },
+      }),
+    );
+    return checkpointWrite;
+  };
+  const interruptionController = new AbortController();
+  let interruptedBySignal = false;
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    if (interruptedBySignal) return;
+    interruptedBySignal = true;
+    console.error(`\nRelease check interrupted by ${signal}; saving checkpoint.`);
+    interruptionController.abort();
+  };
+  process.once("SIGINT", handleSignal);
+  process.once("SIGTERM", handleSignal);
+
+  try {
+    const stages = new Map<string, Array<{ step: ReleaseStep; index: number }>>();
+    for (const [index, step] of steps.entries()) {
+      const stage = releaseStepStage(step, index);
+      const stageSteps = stages.get(stage) ?? [];
+      stageSteps.push({ step, index });
+      stages.set(stage, stageSteps);
+    }
+
+    for (const [stage, stageSteps] of stages) {
+      if (interruptedBySignal) break;
+      const completed = new Set(
+        results.filter((result) => result.passed).map((result) => result.label),
+      );
+      const pending = stageSteps.filter(({ step }) => !completed.has(step.label));
+      if (pending.length === 0) continue;
+
+      if (
+        stageSteps.some(
+          ({ step }) =>
+            step.label === "clean-start smoke" ||
+            step.label.startsWith("browser "),
+        ) &&
+        !releaseStatefulLock
+      ) {
+        releaseStatefulLock = await acquireStatefulReleaseLock();
+      }
+
+      const stageStartedAt = Date.now();
+      console.log(
+        `\nStage ${stage}: ${pending.length} gate${
+          pending.length === 1 ? "" : "s"
+        } (max ${Math.min(
+          concurrencyLimit,
+          ...stageSteps.map(
+            ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
+          ),
+        )} concurrent).`,
+      );
+      const active = new Set<Promise<void>>();
+      const waiting = [...pending];
+      const stageLogs = new Map<string, string>();
+      let apiActive = 0;
+      const apiLimit = Math.min(
+        concurrencyLimit,
+        RELEASE_CHECK_API_CONCURRENCY,
+        ...stageSteps
+          .filter(({ step }) => step.group === "api-test-shards")
+          .map(({ step }) =>
+            releaseConcurrencyLimit(step, concurrencyLimit),
+          ),
+      );
+      const stageLimit = Math.min(
+        concurrencyLimit,
+        ...stageSteps.map(
+          ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
+        ),
+      );
+      const launchAvailable = (): void => {
+        if (interruptedBySignal) return;
+        while (waiting.length > 0 && active.size < stageLimit) {
+          const nextIndex = waiting.findIndex(
+            ({ step }) =>
+              step.group !== "api-test-shards" ||
+              apiActive < apiLimit,
           );
-          continue;
+          if (nextIndex === -1) return;
+          const [{ step, index }] = waiting.splice(nextIndex, 1);
+          if (step.group === "api-test-shards") apiActive += 1;
+          console.log(`[${index + 1}/${steps.length}] ${step.label}`);
+          let task: Promise<void>;
+          task = (async () => {
+            const effectiveStep =
+              step.label === FULL_BROWSER_GATE_LABEL
+                ? {
+                    ...step,
+                    env: { ...step.env, RELEASE_REVISION: revision },
+                  }
+                : step;
+            let result: ReleaseStepResult & { passed: boolean };
+            try {
+              const { exitCode, elapsedMs, status, output } = await runStep(
+                effectiveStep,
+                {
+                  logPath,
+                  signal: interruptionController.signal,
+                  deferLog: true,
+                },
+              );
+              stageLogs.set(step.label, output ?? "");
+              result = {
+                label: step.label,
+                passed: exitCode === 0,
+                status,
+                elapsedMs,
+              };
+            } catch (error) {
+              console.error(
+                `Could not complete ${step.label}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+              result = {
+                label: step.label,
+                passed: false,
+                status: "INFRASTRUCTURE ERROR",
+                elapsedMs: 0,
+              };
+              stageLogs.set(step.label, "");
+            }
+            results = upsertReleaseResult(results, result);
+            await persistCheckpoint();
+            console.log(`${result.status} ${step.label}`);
+          })().finally(() => {
+            active.delete(task);
+            if (step.group === "api-test-shards") apiActive -= 1;
+          });
+          active.add(task);
         }
-        console.error("\nRelease check stopped at the first failed gate.");
+      };
+
+      while (!interruptedBySignal && (waiting.length > 0 || active.size > 0)) {
+        launchAvailable();
+        if (active.size > 0) {
+          await Promise.race(active);
+        }
+      }
+      while (active.size > 0) {
+        await Promise.race(active);
+      }
+      for (const { step } of stageSteps) {
+        const output = stageLogs.get(step.label);
+        if (output !== undefined) {
+          await appendFile(logPath, `\n[${step.label}]\n${output}`);
+        }
+      }
+      if (interruptedBySignal) {
+        for (const { step } of waiting) {
+          const notReached: ReleaseStepResult & { passed: boolean } = {
+            label: step.label,
+            passed: false,
+            status: "NOT REACHED",
+            elapsedMs: 0,
+          };
+          results = upsertReleaseResult(results, notReached);
+          await persistCheckpoint();
+        }
+      }
+      await checkpointWrite;
+
+      stageTimings = upsertStageTiming(stageTimings, {
+        stage,
+        elapsedMs: Date.now() - stageStartedAt,
+      });
+      await persistCheckpoint();
+      const stageResults = results.filter(({ label }) =>
+        stageSteps.some(({ step }) => step.label === label),
+      );
+      if (stageResults.some((result) => !result.passed)) {
+        console.error(
+          `\n${stage} has a failed gate; later stages were not started.`,
+        );
         break;
       }
     }
   } finally {
+    process.removeListener("SIGINT", handleSignal);
+    process.removeListener("SIGTERM", handleSignal);
     await releaseStatefulLock?.();
   }
 
@@ -1324,6 +1651,13 @@ async function main(): Promise<void> {
         revision,
         decision: "GO",
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+        timing: {
+          totalElapsedMs: stageTimings.reduce(
+            (total, stage) => total + stage.elapsedMs,
+            0,
+          ),
+          stages: stageTimings,
+        },
       });
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
@@ -1349,6 +1683,13 @@ async function main(): Promise<void> {
         revision,
         decision: "NO-GO",
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+        timing: {
+          totalElapsedMs: stageTimings.reduce(
+            (total, stage) => total + stage.elapsedMs,
+            0,
+          ),
+          stages: stageTimings,
+        },
       })}`,
     );
   } catch (error) {

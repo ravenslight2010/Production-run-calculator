@@ -15,12 +15,16 @@ The standard run includes typechecks, security audit, recovery and operational
 evidence checks, clean-start startup health, API test shards, the explicitly
 listed bounded package-test gates (including `@workspace/spec-import`), and
 browser smoke/accessibility checks. Full mode is an opt-in command that adds
-the complete browser suite. API shards are serialized and have an eight-minute
-hard limit with a six-minute warning. The full browser suite is also
-serialized for disposable live-day safety and has a 30-minute hard limit with
-a 25-minute warning. This is a bounded execution budget, not a retry or an
-evidence-validation bypass: all 112 enumerated cases still need to complete
-and the retained report must pass the same revision-bound evidence verifier.
+the complete browser suite. Independent prerequisite, consumer-typecheck,
+API/package-test, and browser stages have explicit dependency barriers. The
+API/package-test stage runs at most four children by default, with no more than
+two API/database shards at once. Each API shard remains serialized internally
+and has an eight-minute hard limit with a six-minute warning. Browser stages
+remain strictly serial for disposable live-day safety. The full browser suite
+has a 30-minute hard limit with a 25-minute warning. This is a bounded
+execution budget, not a retry or an evidence-validation bypass: all 113
+enumerated cases still need to complete and the retained report must pass the
+same revision-bound evidence verifier.
 
 To run the full mode locally:
 
@@ -33,7 +37,9 @@ It records the run revision, total/complete/pass/skip/fail/not-run counts,
 wall-clock duration, and a sorted per-file duration table. The report is generated from
 Playwright's completed test results; a `GO` report requires all 113 cases to be
 enumerated and completed. The main config remains serial with `workers: 1`,
-with no retries or reduced test-match coverage.
+with no retries or reduced test-match coverage. The release report also records
+total wall-clock time and per-stage wall-clock durations so the scheduler's
+speedup can be compared with the existing per-gate timings.
 
 Each complete, passing full-suite run compares matching file paths with the
 prior complete, passing retained full-suite report before replacing it. An
@@ -71,10 +77,16 @@ stops after a bounded failure, retry with:
 pnpm run release:check -- --resume
 ```
 
-Resume is safe only for the same revision and mode. A fresh run discards the
-old checkpoint and starts a new log. An explicit `RELEASE_EVIDENCE_DIR`
-continues to select one exact evidence directory for deliberate single-run
-use. To verify the default full-mode evidence, use
+Resume is safe only for the same revision and mode. A parallel stage
+checkpoints each completed child, so `--resume` reruns failed or not-reached
+gates without rerunning passed gates, even when children finish out of order.
+A fresh run discards the old checkpoint and starts a new log. An explicit
+`RELEASE_EVIDENCE_DIR` continues to select one exact evidence directory for
+deliberate single-run use. To reduce local resource use, set
+`RELEASE_CHECK_MAX_CONCURRENCY=1` (valid values are 1 through 16); CI sets the
+documented default of 4. To diagnose one surface quickly, use its focused
+package command, but do not treat that partial check as release evidence. To
+verify the default full-mode evidence, use
 `pnpm run release:check:full -- --verify-evidence`.
 
 The standalone verifier reads the `Mode:` field in the selected report, so it

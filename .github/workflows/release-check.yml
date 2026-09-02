@@ -39,6 +39,7 @@ jobs:
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
       RELEASE_EVIDENCE_DIR: release-evidence
+      RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
     steps:
       - name: Checkout
@@ -109,6 +110,7 @@ jobs:
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
       RELEASE_EVIDENCE_DIR: release-evidence-full
+      RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
     steps:
       - name: Checkout

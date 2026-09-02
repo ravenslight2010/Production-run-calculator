@@ -11,11 +11,11 @@ reported gap, not evidence of coverage.
 | --- | --- | --- | --- |
 | CI-wide shared-library unit tests | Every library package that exposes a `test` script | `.github/workflows/ci.yml`: `pnpm -r --filter "./lib/**" --if-present test` | Broad CI coverage; this is intentionally wider than the bounded release set |
 | Pure calculations and shared decision logic | Library package owning the function | Package `test` scripts; especially `inventory-math`, `production-rules`, `spec-reconcile`, `spec-import`, `scheduled-recipe-check`, and `spec-export` | Required when the library or its consumers change |
-| API route, validation, auth, and persistence contracts | API server route or shared API contract | `@workspace/api-server` unit and integration suites; `test:release:*` shards | Required for server, schema, auth, sync, and contract changes |
+| API route, validation, auth, and persistence contracts | API server route or shared API contract | `@workspace/api-server` unit and integration suites; `test:release:*` shards | Required for server, schema, auth, sync, and contract changes; release execution bounds independent shards at two concurrent database jobs |
 | Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
 | Concurrent sync and inventory mutations | Disposable-Postgres integration tests for live and scheduled-day sync merge retries, cross-date scheduled-write isolation, plus inventory row-lock/idempotency boundaries | `@workspace/api-server run test:release:concurrency` | Required only when sync conflict/retry (including future scheduled-day writes and cross-date isolation), inventory locking, consumption idempotency, or related transaction boundaries change; bounded to 180 seconds |
 | Web rendering and client state | Run Calculator components/hooks | `@workspace/run-calculator test`, typecheck, and focused rendered tests | Required for client or shared UI/state changes |
-| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, and sync-convergence commands; full release mode enumerates 113 cases with a 30-minute timeout and 25-minute warning | Required when navigation, reload, auth, persistence, or user-visible behavior changes |
+| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, and sync-convergence commands; full release mode enumerates 113 cases with a 30-minute timeout and 25-minute warning | Required when navigation, reload, auth, persistence, or user-visible behavior changes; release browser stages remain serial |
 | Accessibility | `accessibility-smoke.spec.ts` and axe checks | `test:e2e:a11y` | Required for interactive UI, semantic, focus, or layout changes |
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
 | PWA/service-worker handoff | `pwa-handoff.spec.ts` self-contained fixture | `test:pwa-handoff` | Required for PWA, service-worker, cache, or update-prompt changes |
@@ -107,3 +107,23 @@ command:
 The owner of each gap is the team changing that boundary. A gap becomes a
 release blocker when the corresponding feature is changed, not merely because
 the command exists.
+
+## Release scheduler contract
+
+The release runner uses dependency-aware stages rather than starting every gate
+at once:
+
+1. prerequisite checks may overlap;
+2. generated-client work completes before shared-output typechecks and their
+   consumers;
+3. consumer typechecks complete before the bounded API/package-test stage;
+4. clean-start completes before browser evidence starts;
+5. smoke, accessibility, and (in full mode) the destructive browser suite run
+   as separate serial barriers.
+
+The default scheduler cap is four children, configurable locally with
+`RELEASE_CHECK_MAX_CONCURRENCY`; API/database shards have a separate cap of
+two. A failure finishes the currently running stage, checkpoints all results,
+and prevents later stages from starting. Reports are ordered by the declared
+gate inventory, not child completion order, and include total and per-stage
+wall-clock timing.

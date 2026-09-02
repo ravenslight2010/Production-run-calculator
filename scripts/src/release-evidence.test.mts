@@ -11,9 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  RELEASE_CHECK_API_CONCURRENCY,
+  RELEASE_CHECK_DEFAULT_CONCURRENCY,
   defaultReleaseEvidenceDir,
   formatReleaseReport,
   parseBrowserDurationRegressions,
+  releaseConcurrencyLimit,
   releaseGateLabelsForMode,
   runStep,
   resolveReleaseEvidenceDir,
@@ -84,6 +87,26 @@ async function run(): Promise<void> {
     "release-evidence-single-run",
     "an explicit full-mode evidence directory must remain an exact override",
   );
+  assert.equal(RELEASE_CHECK_DEFAULT_CONCURRENCY, 4);
+  assert.equal(RELEASE_CHECK_API_CONCURRENCY, 2);
+  assert.equal(
+    releaseConcurrencyLimit({ label: "package", args: [] }, 4),
+    4,
+    "non-stateful work should use the bounded scheduler limit",
+  );
+  assert.equal(
+    releaseConcurrencyLimit(
+      { label: "api", args: [], group: "api-test-shards" },
+      4,
+    ),
+    2,
+    "API work should retain its lower database-aware limit",
+  );
+  assert.equal(
+    releaseConcurrencyLimit({ label: "browser", args: [], concurrencyLimit: 1 }, 4),
+    1,
+    "stateful browser work must remain serial",
+  );
 
   const timedOut = await runStep({
     label: "timed-out fixture",
@@ -124,6 +147,30 @@ async function run(): Promise<void> {
       expectedLabels: validLabels,
     }),
   );
+  const timedReport = formatReleaseReport(
+    validLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "GO",
+      timing: {
+        totalElapsedMs: 12_000,
+        stages: [
+          { stage: "prerequisites", elapsedMs: 2_000 },
+          { stage: "release-tests", elapsedMs: 10_000 },
+        ],
+      },
+    },
+  );
+  assert.match(timedReport, /^## Timing$/m);
+  assert.match(timedReport, /^Total wall-clock: 12s$/m);
+  assert.match(timedReport, /\| release-tests \| 10s \|/);
   const incompleteReport = formatReleaseReport(
     [
       { label: "gate one", status: "PASS", elapsedMs: 100 },
