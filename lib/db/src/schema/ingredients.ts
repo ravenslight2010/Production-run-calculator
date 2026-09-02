@@ -6,6 +6,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // Factory-wide ingredient catalog (Task #102). Ingredients used to be plain
 // names carried in each device's synced list (`ingredientTypes`,
@@ -55,10 +56,11 @@ export const ingredientsTable = pgTable(
   },
   (t) => [
     uniqueIndex("ingredients_id_scope_idx").on(t.id, t.scope),
-    // The active-name unique index is intentionally deferred for the first
-    // stage of the duplicate-data rollout. Production schema changes run
-    // before boot-time heals, so the existing duplicates must be soft-merged
-    // and verified live before this protection can be restored.
+    // Only one selectable identity may own a display name in a scope. Soft
+    // deleted and merged rows remain available for historical references.
+    uniqueIndex("ingredients_active_name_scope_idx")
+      .on(t.scope, sql`lower(btrim(${t.name}))`)
+      .where(sql`${t.enabled} = true AND ${t.mergedInto} IS NULL`),
   ],
 );
 
