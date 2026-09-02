@@ -102,6 +102,37 @@ vi.mock("../middlewares/costLimitMiddleware", async () => {
   };
 });
 
+// Stub DB-backed prompt grounding so the route contract tests only exercise
+// validation, deterministic shaping, provider failure handling, and response
+// metadata. Memory behavior is covered by its own route/library tests.
+vi.mock("./aiMemoryContext", () => ({
+  loadFacilityKnowledge: async () => [],
+  appendFacilityMemoryBlock: (prompt: string) => prompt,
+  appendFacilityMemoryBlock_v2: (prompt: string) => prompt,
+  groundPromptWithMemory: async (_log: unknown, prompt: string) => prompt,
+  recordFacilityKnowledge: async () => {},
+  recordConversationTurns: async () => {},
+}));
+
+vi.mock("./aiCorrectionsContext", () => ({
+  loadCorrections: async () => [],
+  appendCorrectionsBlock: (prompt: string) => prompt,
+}));
+
+// Cache behavior has dedicated tests in aiResultCache.test.ts and its
+// integration suite. Keep these route contract tests independent of a
+// database/cache table so provider fallback assertions stay fast and focused.
+vi.mock("../lib/aiResultCache", () => ({
+  AI_RESULT_CACHE_TTL_MS: 15 * 60_000,
+  fingerprintAiOperation: () => "route-test-cache-key",
+  getOrCreateAiResult: async (opts: {
+    load: () => Promise<{ value: unknown }>;
+  }) => {
+    const loaded = await opts.load();
+    return { value: loaded.value, hit: false };
+  },
+}));
+
 let server: Server;
 let baseUrl: string;
 
@@ -178,6 +209,85 @@ async function postOptimizeAsUser(user: string, body: unknown): Promise<Response
   return fetch(`${baseUrl}/ai/optimize`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-test-user": user },
+    body: JSON.stringify(body),
+  });
+}
+
+function makeSummaryBody(overrides: Record<string, unknown> = {}) {
+  return {
+    scope: "day",
+    date: "2026-06-18",
+    nowMs: 1_750_000_000_000,
+    runs: [
+      {
+        brand: "Acme",
+        flavor: "Cheese",
+        casesPlanned: 100,
+        casesProduced: 90,
+        finished: true,
+        downtimeMinutes: 4,
+        stoppageCount: 1,
+      },
+      {
+        brand: "Beta",
+        flavor: "Pepperoni",
+        casesPlanned: 50,
+        casesProduced: 20,
+        finished: false,
+        downtimeMinutes: 12,
+        stoppageCount: 2,
+      },
+    ],
+    incidentCount: 1,
+    wasteFlaggedCount: 2,
+    ...overrides,
+  };
+}
+
+function makeScheduleBody(overrides: Record<string, unknown> = {}) {
+  return {
+    runs: [
+      {
+        id: "run-egg",
+        label: "Run 1 · Egg",
+        brand: "Acme",
+        flavor: "Egg",
+        allergen: "egg",
+        dieType: "16in",
+      },
+      {
+        id: "run-cheese",
+        label: "Run 2 · Cheese",
+        brand: "Acme",
+        flavor: "Cheese",
+        allergen: "none",
+        dieType: "16in",
+      },
+      {
+        id: "run-veggie",
+        label: "Run 3 · Veggie",
+        brand: "Beta",
+        flavor: "Veggie",
+        allergen: "none",
+        dieType: "16in",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function postSummary(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/summary`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function postScheduleOptimize(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/schedule-optimize`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 }
@@ -338,6 +448,212 @@ describe("POST /ai/optimize — model failure glue", () => {
     expect(json.aiStatus).toBe("unavailable");
     expect(json.note).toContain("no usable");
     expect(typeof json.generatedAt).toBe("number");
+  });
+});
+
+describe("POST /ai/summary — deterministic and fallback glue", () => {
+  it("returns a deterministic no-AI recap for an empty day", async () => {
+    const res = await postSummary({
+      scope: "day",
+      date: "2026-06-18",
+      nowMs: 1_750_000_000_000,
+      runs: [],
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      summary: string;
+      stats: { hasData: boolean; runsPlanned: number };
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.stats).toMatchObject({ hasData: false, runsPlanned: 0 });
+    expect(json.summary).toContain("No production runs");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("preserves deterministic stats and reports unavailable when the provider throws", async () => {
+    mock.shouldThrow = true;
+    const res = await postSummary(makeSummaryBody());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      summary: string;
+      stats: Record<string, unknown>;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.stats).toEqual({
+      scope: "day",
+      date: "2026-06-18",
+      runsPlanned: 2,
+      runsFinished: 1,
+      casesPlanned: 150,
+      casesProduced: 110,
+      attainmentPct: 73,
+      totalDowntimeMinutes: 16,
+      totalStoppages: 3,
+      topDowntime: { label: "Beta Pepperoni", minutes: 12 },
+      unfinishedRuns: ["Beta Pepperoni"],
+      incidentCount: 1,
+      wasteFlaggedCount: 2,
+      hasData: true,
+    });
+    expect(json.summary).toContain("73% attainment");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves deterministic stats and reports unavailable for unusable output", async () => {
+    mock.nextContent = JSON.stringify({ summary: "   " });
+    const res = await postSummary(makeSummaryBody({ date: "2026-06-19" }));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      summary: string;
+      stats: { date: string; casesPlanned: number; casesProduced: number };
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.stats).toMatchObject({
+      date: "2026-06-19",
+      casesPlanned: 150,
+      casesProduced: 110,
+    });
+    expect(json.summary).toContain("73% attainment");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+});
+
+describe("POST /ai/schedule-optimize — deterministic and fallback glue", () => {
+  it("returns a deterministic no-AI response when the order is already optimal", async () => {
+    const res = await postScheduleOptimize({
+      runs: [
+        {
+          id: "run-cheese",
+          label: "Run 1 · Cheese",
+          brand: "Acme",
+          flavor: "Cheese",
+          allergen: "none",
+          dieType: "16in",
+        },
+        {
+          id: "run-veggie",
+          label: "Run 2 · Veggie",
+          brand: "Acme",
+          flavor: "Veggie",
+          allergen: "none",
+          dieType: "16in",
+        },
+        {
+          id: "run-egg",
+          label: "Run 3 · Egg",
+          brand: "Acme",
+          flavor: "Egg",
+          allergen: "egg",
+          dieType: "16in",
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      order: string[];
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.order).toEqual(["run-cheese", "run-veggie", "run-egg"]);
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("preserves deterministic order and metrics when the provider throws", async () => {
+    mock.shouldThrow = true;
+    const res = await postScheduleOptimize(makeScheduleBody());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      order: string[];
+      before: Record<string, number>;
+      after: Record<string, number>;
+      summary: string;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.order).toEqual(["run-cheese", "run-veggie", "run-egg"]);
+    expect(json.before).toEqual({
+      allergenViolations: 1,
+      ruleViolations: 0,
+      changeovers: 1,
+    });
+    expect(json.after).toEqual({
+      allergenViolations: 0,
+      ruleViolations: 0,
+      changeovers: 2,
+    });
+    expect(json.summary).toBe("");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves deterministic order and metrics for unusable output", async () => {
+    mock.nextContent = JSON.stringify({ summary: "   " });
+    const res = await postScheduleOptimize(makeScheduleBody({ runs: [
+      {
+        id: "run-egg-2",
+        label: "Run 1 · Egg",
+        brand: "Acme",
+        flavor: "Egg",
+        allergen: "egg",
+        dieType: "16in",
+      },
+      {
+        id: "run-cheese-2",
+        label: "Run 2 · Cheese",
+        brand: "Acme",
+        flavor: "Cheese",
+        allergen: "none",
+        dieType: "16in",
+      },
+      {
+        id: "run-veggie-2",
+        label: "Run 3 · Veggie",
+        brand: "Beta",
+        flavor: "Veggie",
+        allergen: "none",
+        dieType: "16in",
+      },
+    ] }));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      order: string[];
+      before: Record<string, number>;
+      after: Record<string, number>;
+      aiGenerated: boolean;
+      aiStatus: string;
+    };
+
+    expect(json.order).toEqual(["run-cheese-2", "run-veggie-2", "run-egg-2"]);
+    expect(json.before).toEqual({
+      allergenViolations: 1,
+      ruleViolations: 0,
+      changeovers: 1,
+    });
+    expect(json.after).toEqual({
+      allergenViolations: 0,
+      ruleViolations: 0,
+      changeovers: 2,
+    });
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
   });
 });
 

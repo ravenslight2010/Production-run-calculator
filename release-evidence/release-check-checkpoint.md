@@ -1,7 +1,7 @@
 # Release Check Checkpoint — INCOMPLETE / NO-GO
 
-Generated: 2026-09-02T19:33:14.392Z
-Revision: 36988ff7d4bf661ddd6fd40642fafebe0463e61e
+Generated: 2026-09-02T19:14:41.996Z
+Revision: 75b8f8cbba2bff65f8522b14714364983be800a0
 Mode: standard
 Report status: INCOMPLETE CHECKPOINT
 Retained evidence: NOT UPDATED
@@ -13,14 +13,14 @@ Evidence paths: release-evidence/ and retained files linked below
 
 | Gate | Result | Elapsed | Command |
 | --- | --- | ---: | --- |
-| production dependency audit | FAIL | 13s | `pnpm run audit:prod` |
-| generated API client freshness | PASS | 42s | `pnpm run check:api-generated` |
+| production dependency audit | FAIL | 2s | `pnpm run audit:prod` |
+| generated API client freshness | PASS | 47s | `pnpm run check:api-generated` |
 | shared library typechecks | NOT REACHED | 0s | `pnpm run typecheck:libs` |
 | API server typecheck | NOT REACHED | 0s | `pnpm --filter @workspace/api-server run typecheck` |
 | run calculator typecheck | NOT REACHED | 0s | `pnpm --filter @workspace/run-calculator run typecheck` |
 | mockup sandbox typecheck | NOT REACHED | 0s | `pnpm --filter @workspace/mockup-sandbox run typecheck` |
 | scripts typecheck | NOT REACHED | 0s | `pnpm --filter @workspace/scripts run typecheck` |
-| recovery evidence audit | PASS | 12s | `pnpm run audit:recovery` |
+| recovery evidence audit | PASS | 10s | `pnpm run audit:recovery` |
 | clean-start smoke | NOT REACHED | 0s | `pnpm run check:clean-start` |
 | API unit tests (release shard 1/6) | NOT REACHED | 0s | `pnpm --filter @workspace/api-server run test:release:unit` |
 | API integration tests (release shard 2/6) | NOT REACHED | 0s | `pnpm --filter @workspace/api-server run test:release:integration:1` |
@@ -44,11 +44,11 @@ Evidence paths: release-evidence/ and retained files linked below
 
 ## Timing
 
-Total wall-clock: 42s
+Total wall-clock: 47s
 
 | Stage | Wall-clock |
 | --- | ---: |
-| prerequisites | 42s |
+| prerequisites | 47s |
 
 ## Preview evidence
 
