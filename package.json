@@ -13,6 +13,7 @@
     "check:render-image": "pnpm --filter @workspace/scripts run check:render-image",
     "check:schema-safe-rollback": "pnpm --filter @workspace/scripts run check:schema-safe-rollback",
     "check:github-signed-commit-policy": "pnpm --filter @workspace/scripts run check:github-signed-commit-policy",
+    "check:retired-db-pool": "pnpm --filter @workspace/scripts run check:retired-db-pool",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
     "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",
     "check:shell-inventory": "bash ./scripts/src/check-shell-inventory.sh && bash ./lib/api-spec/check-generated.test.sh --shell-inventory-only",
