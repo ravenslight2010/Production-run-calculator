@@ -62,6 +62,26 @@ test("rejects malformed metadata, invalid names, and overlong editable bodies", 
   assert.ok(report.failures >= 3);
 });
 
+test("rejects a custom skill whose frontmatter name does not match its directory", async () => {
+  const root = await fixture();
+  await addSkill(
+    root,
+    ".local/custom_skills",
+    "inventory-audit",
+    "body\n",
+    "name: inventory-review\ndescription: present",
+  );
+  const report = await scanSkillCatalog({ projectRoot: root, roots });
+  const skill = report.skills.find((item) => item.path.endsWith("/inventory-audit/SKILL.md"));
+
+  assert.equal(report.failures, 1);
+  assert.deepEqual(skill?.findings.map((item) => item.code), ["name_directory_mismatch"]);
+  assert.match(
+    formatCatalogReport(report),
+    /FAIL .*inventory-audit\/SKILL\.md.*name must match directory 'inventory-audit'/,
+  );
+});
+
 test("finds broken local markdown targets but ignores external links", async () => {
   const root = await fixture();
   await addSkill(

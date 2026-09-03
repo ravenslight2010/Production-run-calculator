@@ -12,9 +12,9 @@ VALIDATOR = Path(__file__).with_name("quick_validate.py")
 
 
 class QuickValidateCliTest(unittest.TestCase):
-    def run_validator(self, skill_markdown):
+    def run_validator(self, skill_markdown, directory_name="fixture-skill"):
         with tempfile.TemporaryDirectory() as temporary_directory:
-            skill_directory = Path(temporary_directory) / "fixture-skill"
+            skill_directory = Path(temporary_directory) / directory_name
             skill_directory.mkdir()
             (skill_directory / "SKILL.md").write_text(skill_markdown, encoding="utf-8")
             return subprocess.run(
@@ -27,7 +27,7 @@ class QuickValidateCliTest(unittest.TestCase):
     def test_valid_folded_metadata_passes_without_site_packages(self):
         result = self.run_validator(
             "---\n"
-            "name: valid-skill\n"
+            "name: fixture-skill\n"
             "description: >\n"
             "  A valid fixture\n"
             "  with folded metadata.\n"
@@ -60,6 +60,16 @@ class QuickValidateCliTest(unittest.TestCase):
         self.assertEqual(
             result.stdout,
             "Name 'Not Valid' must use lowercase letters and digits separated by single hyphens\n",
+        )
+
+    def test_name_must_match_directory(self):
+        result = self.run_validator(
+            "---\nname: other-skill\ndescription: Present\n---\n"
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "Name 'other-skill' must match skill directory 'fixture-skill'\n",
         )
 
 

@@ -64,8 +64,11 @@ tools or metadata.
 
 ### 4. Check identity and destination
 
-Validate lowercase-hyphen names and require the directory name to match the
-frontmatter name. Compare candidates against every root in the catalog.
+Require every candidate identifier to match
+`^[a-z0-9]+(?:-[a-z0-9]+)*$` and require the frontmatter `name` to exactly
+match its directory. Human-readable titles such as `Inventory Audit` are not
+valid identifiers; use `inventory-audit/` with `name: inventory-audit`.
+Compare candidates against every root in the catalog.
 
 - Preserve existing authoritative skill identities.
 - Never silently overwrite an existing directory or resolve a duplicate by
@@ -113,6 +116,8 @@ destination directory, and fail if it exists. Keep core instructions concise;
 place detailed docs in `references/`, deterministic repeated work in
 `scripts/`, and output-only material in `assets/`. Do not copy unrelated
 manifests, caches, provider metadata, credentials, or executable artifacts.
+When adaptation changes an invalid upstream identifier, rename the destination
+directory and its frontmatter `name` together so they remain identical.
 
 Validate the installed skill with:
 

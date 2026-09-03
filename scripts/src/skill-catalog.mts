@@ -53,6 +53,7 @@ export type FindingCode =
   | "frontmatter_duplicate_field"
   | "missing_name"
   | "invalid_name"
+  | "name_directory_mismatch"
   | "name_too_long"
   | "missing_description"
   | "description_too_long"
@@ -256,6 +257,10 @@ async function readSkill(
   }
 
   const skillDirectory = dirname(skillPath);
+  const directoryName = basename(skillDirectory);
+  if (name && name !== directoryName) {
+    findings.push(finding("name_directory_mismatch"));
+  }
   for (const reference of localReferenceTargets(content)) {
     const targetPath = resolve(skillDirectory, reference.target);
     if (isWithin(skillDirectory, targetPath)) {
@@ -393,6 +398,7 @@ const FINDING_LABELS: Record<FindingCode, string> = {
   frontmatter_duplicate_field: "duplicate frontmatter field",
   missing_name: "missing name",
   invalid_name: "invalid name",
+  name_directory_mismatch: "name must match its directory",
   name_too_long: "name too long",
   missing_description: "missing description",
   description_too_long: "description too long",
@@ -402,9 +408,14 @@ const FINDING_LABELS: Record<FindingCode, string> = {
   duplicate_name: "duplicate name",
 };
 
-function formatFindings(findings: SkillFinding[]): string {
-  return findings
-    .map((item) => `${FINDING_LABELS[item.code]}${item.line ? ` (line ${item.line})` : ""}`)
+function formatSkillFindings(skill: SkillRecord): string {
+  return skill.findings
+    .map((item) => {
+      if (item.code === "name_directory_mismatch") {
+        return `name must match directory '${basename(dirname(skill.path))}'`;
+      }
+      return `${FINDING_LABELS[item.code]}${item.line ? ` (line ${item.line})` : ""}`;
+    })
     .join(", ");
 }
 
@@ -427,7 +438,7 @@ export function formatCatalogReport(report: CatalogReport): string {
   }
   for (const skill of report.skills) {
     const status = skill.status === "valid" ? "PASS" : skill.status === "warning" ? "WARN" : "FAIL";
-    const detail = skill.findings.length > 0 ? ` — ${formatFindings(skill.findings)}` : "";
+    const detail = skill.findings.length > 0 ? ` — ${formatSkillFindings(skill)}` : "";
     const displayName =
       skill.name && skill.name.length <= MAX_SKILL_NAME_LENGTH && SKILL_NAME_PATTERN.test(skill.name)
         ? skill.name

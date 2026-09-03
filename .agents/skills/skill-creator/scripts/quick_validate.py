@@ -99,6 +99,11 @@ def validate_skill(skill_path):
             f"Name '{name}' must use lowercase letters and digits "
             "separated by single hyphens"
         )
+    directory_name = Path(skill_path).resolve().name
+    if name != directory_name:
+        return False, (
+            f"Name '{name}' must match skill directory '{directory_name}'"
+        )
     if len(description) > MAX_DESCRIPTION_LENGTH:
         return False, (
             f"Description is too long ({len(description)} characters). "
