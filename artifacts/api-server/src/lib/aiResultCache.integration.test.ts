@@ -28,8 +28,10 @@ import type { AiCacheResult } from "./aiResultCache";
 
 type DbModule = typeof import("@workspace/db");
 type CacheModule = typeof import("./aiResultCache");
+type ObservabilityModule = typeof import("./observability");
 type CacheLog = {
   info: (fields: unknown, message?: string) => void;
+  warn?: (fields: unknown, message?: string) => void;
 };
 
 let db: DbModule["db"];
@@ -37,6 +39,7 @@ let pool: DbModule["pool"];
 let aiResultCacheTable: DbModule["aiResultCacheTable"];
 let cacheMaintenanceEventsTable: DbModule["cacheMaintenanceEventsTable"];
 let cache: CacheModule;
+let observability: ObservabilityModule;
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
@@ -127,6 +130,7 @@ beforeAll(async () => {
   aiResultCacheTable = dbMod.aiResultCacheTable;
   cacheMaintenanceEventsTable = dbMod.cacheMaintenanceEventsTable;
   cache = await import("./aiResultCache");
+  observability = await import("./observability");
   pool.on("error", () => {});
 }, 60_000);
 
@@ -146,7 +150,7 @@ afterAll(async () => {
 beforeEach(async () => {
   cache.clearAiResultInFlightForTests();
   await db.delete(aiResultCacheTable);
-  await db.delete(cacheMaintenanceEventsTable);
+  await observability.clearCacheMaintenanceDiagnosticsForTests();
 });
 
 describe("AI result cache persistence and scope isolation", () => {
@@ -719,6 +723,123 @@ describe("AI result cache persistence and scope isolation", () => {
     expect(fields).not.toHaveProperty("prompt");
     expect(fields).not.toHaveProperty("result");
     expect(message).toBe("cache maintenance completed");
+  });
+
+  it("keeps cache requests available and local recurrence visible when shared diagnostics reject", async () => {
+    const owner = await import("./aiResultCache" + "?diagnostics-outage");
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const expiredKey = "diagnostics-outage-expired";
+    const pruneTriggerName = "ai_result_cache_diagnostics_outage_prune_trigger";
+    const pruneFunctionName = "ai_result_cache_diagnostics_outage_prune";
+    const diagnosticsTriggerName = "cache_maintenance_diagnostics_outage_trigger";
+    const diagnosticsFunctionName = "cache_maintenance_diagnostics_outage";
+    const requestPayloads = Array.from(
+      { length: observability.CACHE_MAINTENANCE_FAILURE_THRESHOLD },
+      (_, index) => `private request payload ${index}`,
+    );
+    const resultPayloads = requestPayloads.map((_, index) => ({
+      answer: `private result payload ${index}`,
+    }));
+
+    await db.insert(aiResultCacheTable).values({
+      scope: "live",
+      namespace: owner.AI_RESULT_CACHE_NAMESPACE,
+      operationKey: expiredKey,
+      result: { answer: "expired private result" },
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await pool.query(`
+      CREATE FUNCTION ${pruneFunctionName}() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'controlled cache prune failure';
+      END;
+      $$;
+    `);
+    await pool.query(`
+      CREATE TRIGGER ${pruneTriggerName}
+      BEFORE DELETE ON ai_result_cache
+      FOR EACH ROW EXECUTE FUNCTION ${pruneFunctionName}();
+    `);
+    await pool.query(`
+      CREATE FUNCTION ${diagnosticsFunctionName}() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'controlled shared diagnostics outage';
+      END;
+      $$;
+    `);
+    await pool.query(`
+      CREATE TRIGGER ${diagnosticsTriggerName}
+      BEFORE INSERT OR DELETE ON cache_maintenance_events
+      FOR EACH ROW EXECUTE FUNCTION ${diagnosticsFunctionName}();
+    `);
+
+    try {
+      for (const [index, requestPayload] of requestPayloads.entries()) {
+        await expect(
+          readOrCreate(
+            "live",
+            async () => resultPayloads[index]!,
+            owner,
+            requestPayload,
+            log,
+          ),
+        ).resolves.toEqual({
+          value: resultPayloads[index],
+          hit: false,
+        });
+      }
+
+      await vi.waitFor(() => {
+        expect(log.warn).toHaveBeenCalledOnce();
+      });
+      expect(log.warn).toHaveBeenCalledWith(
+        {
+          event: "cache_maintenance_recurrence",
+          scope: "live",
+          operation: "prune",
+          recentErrorCount: observability.CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+          threshold: observability.CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+          windowMs: observability.CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+        },
+        "cache maintenance failures recurring",
+      );
+
+      expect(log.info).toHaveBeenCalledTimes(
+        observability.CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+      );
+      for (const [fields] of log.info.mock.calls) {
+        expect(Object.keys(fields as Record<string, unknown>).sort()).toEqual([
+          "event",
+          "operation",
+          "outcome",
+          "scope",
+          "waitDurationMs",
+        ]);
+      }
+      const diagnosticsOutput = JSON.stringify({
+        info: log.info.mock.calls,
+        warn: log.warn.mock.calls,
+      });
+      for (const requestPayload of requestPayloads) {
+        expect(diagnosticsOutput).not.toContain(requestPayload);
+        expect(diagnosticsOutput).not.toContain(cacheKey(owner, requestPayload));
+      }
+      for (const resultPayload of resultPayloads) {
+        expect(diagnosticsOutput).not.toContain(resultPayload.answer);
+      }
+      expect(diagnosticsOutput).not.toContain("expired private result");
+    } finally {
+      await pool.query(
+        `DROP TRIGGER IF EXISTS ${diagnosticsTriggerName} ON cache_maintenance_events`,
+      );
+      await pool.query(`DROP FUNCTION IF EXISTS ${diagnosticsFunctionName}()`);
+      await pool.query(`DROP TRIGGER IF EXISTS ${pruneTriggerName} ON ai_result_cache`);
+      await pool.query(`DROP FUNCTION IF EXISTS ${pruneFunctionName}()`);
+    }
+
+    await expect(db.select().from(cacheMaintenanceEventsTable)).resolves.toHaveLength(0);
   });
 
   it("aggregates maintenance failures across isolated API owners and scopes", async () => {
