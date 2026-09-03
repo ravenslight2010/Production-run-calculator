@@ -71,7 +71,12 @@ beforeAll(async () => {
   const app: Express = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.log = { info() {}, warn() {}, error() {}, debug() {} } as typeof req.log;
+    req.log = {
+      info() {},
+      warn() {},
+      error() {},
+      debug() {},
+    } as unknown as typeof req.log;
     next();
   });
   app.use("/api", router);

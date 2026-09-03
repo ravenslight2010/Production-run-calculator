@@ -10,9 +10,10 @@
     "typecheck": "pnpm exec tsc --build ../../lib/db ../../lib/api-zod ../../lib/integrations-openai-ai-server --force && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:release:unit": "vitest run --exclude '**/*.integration.test.ts'",
-    "test:release:integration:1": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' | sort) --shard=1/3",
-    "test:release:integration:2": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' | sort) --shard=2/3",
-    "test:release:integration:3": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' | sort) --shard=3/3",
+    "test:release:integration:1": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=1/3",
+    "test:release:integration:2": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=2/3",
+    "test:release:integration:3": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=3/3",
+    "test:release:roles": "vitest run src/routes/roles.integration.test.ts",
     "test:release:sync": "vitest run src/routes/sync.integration.test.ts --testNamePattern='^(?!.*\\/sync\\/events)'",
     "test:release:sync-sse": "vitest run src/routes/sync.integration.test.ts --testNamePattern='\\/sync\\/events'",
     "test:release:concurrency": "timeout 180s sh -c 'pnpm exec vitest run src/routes/inventory.integration.test.ts --testNamePattern=\"concurrent|parallel|same run twice\" && pnpm exec vitest run src/routes/sync.integration.test.ts --testNamePattern=\"concurrent|burst under pool pressure|repeated first-write burst\"'"

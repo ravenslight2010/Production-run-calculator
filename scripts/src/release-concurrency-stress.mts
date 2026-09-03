@@ -701,7 +701,7 @@ async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("Usage: pnpm run check:release-concurrency");
     console.log(
-      `Runs the six API release shards at the documented concurrency cap of ${RELEASE_CHECK_API_CONCURRENCY}.`,
+      `Runs the seven API release shards at the documented concurrency cap of ${RELEASE_CHECK_API_CONCURRENCY}.`,
     );
     console.log(
       "Set RELEASE_CONCURRENCY_EVIDENCE_DIR to retain reports at a chosen path.",

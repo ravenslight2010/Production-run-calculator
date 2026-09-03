@@ -67,10 +67,10 @@ export type BrowserDurationRegression = {
   increasePercent: number;
 };
 
-// The third integration shard contains the capability matrix and the
-// remaining integration fixtures. It is serialized inside its own Vitest
-// process, so it can exceed four minutes on the release environment even when
-// every test is healthy.
+// API integration files create and migrate disposable databases. Keep each
+// deterministic shard bounded, and isolate the startup-heavy capability suite
+// so its healthy runtime cannot push unrelated integration coverage past the
+// release window.
 export const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 export const API_SHARD_WARNING_MS = 6 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
@@ -185,7 +185,7 @@ export const RELEASE_CHECKPOINT_REPORT = "release-check-checkpoint.md";
 
 export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
-    label: "API unit tests (release shard 1/6)",
+    label: "API unit tests (release shard 1/7)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -193,7 +193,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 2/6)",
+    label: "API integration tests (release shard 2/7)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -206,7 +206,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 3/6)",
+    label: "API integration tests (release shard 3/7)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -219,7 +219,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 4/6)",
+    label: "API integration tests (release shard 4/7)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -232,7 +232,15 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync tests (release shard 5/6)",
+    label: "API role/capability tests (release shard 5/7)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:roles"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync tests (release shard 6/7)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -240,7 +248,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync SSE tests (release shard 6/6)",
+    label: "API sync SSE tests (release shard 7/7)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -529,7 +537,7 @@ function printHelp(): void {
     "The full browser suite requires a disposable isolated test database.",
   );
   console.log(
-    "The API test gate runs six bounded shards; sync SSE tests run separately.",
+    "The API test gate runs seven bounded shards; role/capability and sync SSE tests run separately.",
   );
   console.log(
     `Parallel release stages use at most ${RELEASE_CHECK_DEFAULT_CONCURRENCY} children by default; API/database shards are capped at ${RELEASE_CHECK_API_CONCURRENCY}. Set RELEASE_CHECK_MAX_CONCURRENCY=1 for constrained local environments.`,

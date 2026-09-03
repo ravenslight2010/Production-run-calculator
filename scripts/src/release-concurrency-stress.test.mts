@@ -239,7 +239,7 @@ async function testCalibrationHistoryWorkflow(): Promise<void> {
 }
 
 async function run(): Promise<void> {
-  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 6);
+  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 7);
   const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
   const fullReleaseGateInventory = releaseGateLabelsForMode("full");
   assert.ok(

@@ -194,7 +194,7 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
-beforeEach(async () => {
+async function resetRoleFixture(): Promise<void> {
   // The user-existence cache is module-level and outlives a single test; fixed
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
@@ -228,6 +228,10 @@ beforeEach(async () => {
     { userId: WAREHOUSE, role: "warehouse" },
     { userId: INVENTORY, role: "inventory" },
   ]);
+}
+
+beforeEach(async () => {
+  await resetRoleFixture();
 });
 
 // Issue a request as the given user (or signed out when userId is null). A real
@@ -765,45 +769,69 @@ const USER_BY_ROLE: Record<string, string> = {
 };
 
 describe("capability-based access control", () => {
-  describe("signed out → 401", () => {
+  it("rejects every protected route with 401 when signed out", async () => {
+    const itemId = await makeItem("ingredient:Target:lbs");
     for (const route of ROUTES) {
-      it(`rejects ${route.name} with 401`, async () => {
-        const itemId = await makeItem("ingredient:Target:lbs");
-        const res = await req(null, route.method, route.path({ itemId }), route.body);
-        expect(res.status).toBe(401);
-      });
+      const res = await req(null, route.method, route.path({ itemId }), route.body);
+      expect(res.status, `${route.name} signed-out status`).toBe(401);
     }
   });
 
-  // For every seeded role, each protected operation in this cross-capability
-  // matrix is allowed iff the role holds the route's capability — otherwise it
-  // must 403. This verifies the capability map drives access (e.g. inventory
-  // CRUD works for the inventory role, AI tools for the QC roles, production
-  // rules for supervisors).
-  for (const [roleName, caps] of Object.entries(ROLE_CAPS)) {
-    const user = USER_BY_ROLE[roleName];
-    describe(`${roleName}`, () => {
-      for (const route of ROUTES) {
-        // Import history is a scoped operational audit shared by profile and
-        // inventory managers. Writes remain individually validated by import
-        // type in the route, so this GET matrix only tests the shared read.
-        const allowed = route.name === "GET /import-history"
+  it("resolves the expected capabilities for every seeded role", async () => {
+    for (const [roleName, expectedCapabilities] of Object.entries(ROLE_CAPS)) {
+      const res = await req(USER_BY_ROLE[roleName], "GET", "/api/me");
+      expect(res.status, `${roleName} /me status`).toBe(200);
+      const body = await res.json() as { capabilities: Capability[] };
+      expect(
+        [...body.capabilities].sort(),
+        `${roleName} resolved capabilities`,
+      ).toEqual([...expectedCapabilities].sort());
+    }
+  });
+
+  // Route guards and role-to-capability resolution are orthogonal: every route
+  // is exercised with one role that has its required capability and one that
+  // does not, while the test above verifies the complete seeded role map.
+  for (const route of ROUTES) {
+    it(`enforces the capability required by ${route.name}`, async () => {
+      const itemId = await makeItem("ingredient:Target:lbs");
+      const roleHasRequiredCapability = ([, caps]: [string, Capability[]]) =>
+        route.name === "GET /import-history"
           ? caps.includes("manage-profiles") || caps.includes("manage-inventory")
           : caps.includes(route.capability);
-        if (allowed) {
-          it(`allows ${route.name} (${route.okStatus})`, async () => {
-            const itemId = await makeItem("ingredient:Target:lbs");
-            const res = await req(user, route.method, route.path({ itemId }), route.body);
-            expect(res.status).toBe(route.okStatus);
-          });
-        } else {
-          it(`forbids ${route.name} with 403`, async () => {
-            const itemId = await makeItem("ingredient:Target:lbs");
-            const res = await req(user, route.method, route.path({ itemId }), route.body);
-            expect(res.status).toBe(403);
-          });
-        }
+      const allowedRole =
+        Object.entries(ROLE_CAPS).find(
+          ([roleName, caps]) =>
+            roleName !== "manager" &&
+            roleHasRequiredCapability([roleName, caps]),
+        )?.[0] ??
+        Object.entries(ROLE_CAPS).find(roleHasRequiredCapability)?.[0];
+      const deniedRole = Object.entries(ROLE_CAPS).find(([, caps]) =>
+        route.name === "GET /import-history"
+          ? !caps.includes("manage-profiles") && !caps.includes("manage-inventory")
+          : !caps.includes(route.capability)
+      )?.[0];
+      if (!allowedRole || !deniedRole) {
+        throw new Error(`Missing allow/deny role fixture for ${route.name}`);
       }
+
+      const denied = await req(
+        USER_BY_ROLE[deniedRole],
+        route.method,
+        route.path({ itemId }),
+        route.body,
+      );
+      expect(denied.status, `${deniedRole} ${route.name} status`).toBe(403);
+
+      const allowed = await req(
+        USER_BY_ROLE[allowedRole],
+        route.method,
+        route.path({ itemId }),
+        route.body,
+      );
+      expect(allowed.status, `${allowedRole} ${route.name} status`).toBe(
+        route.okStatus,
+      );
     });
   }
 });
