@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CHECK_SCRIPT="${SCRIPT_DIR}/check-workflows.sh"
 RELEASE_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-check.yml"
+STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
 FAKE_ACTIONLINT_MARKER="${TEST_ROOT}/actionlint-called"
@@ -86,6 +87,58 @@ workflow_step_block() {
       print
     }
   ' "$RELEASE_WORKFLOW"
+}
+
+stable_branch_protection_step_block() {
+  local step_name="$1"
+  awk -v step_name="$step_name" '
+    $0 == "      - name: " step_name {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^      - name: / {
+      exit
+    }
+    found {
+      print
+    }
+  ' "$STABLE_BRANCH_PROTECTION_WORKFLOW"
+}
+
+test_stable_branch_protection_workflow_contract() {
+  local workflow_content
+  local check_block
+  local upload_block
+
+  workflow_content=$(<"$STABLE_BRANCH_PROTECTION_WORKFLOW")
+  assert_contains "$workflow_content" "  schedule:"
+  assert_contains "$workflow_content" "    - cron: '17 6 * * 1'"
+  assert_contains "$workflow_content" "  workflow_dispatch:"
+  assert_contains "$workflow_content" "permissions:"
+  assert_contains "$workflow_content" "  contents: read"
+  assert_contains "$workflow_content" "    timeout-minutes: 5"
+
+  check_block=$(stable_branch_protection_step_block "Check live main branch protection")
+  assert_contains "$check_block" "GH_TOKEN: \${{ github.token }}"
+  assert_contains "$check_block" "set +e"
+  assert_contains "$check_block" "bash scripts/src/check-github-signed-commit-policy.sh"
+  assert_contains "$check_block" "tee \"\$check_log\""
+  assert_contains "$check_block" "check_status=\${PIPESTATUS[0]}"
+  assert_contains "$check_block" "set -e"
+  assert_contains "$check_block" "cat \"\$check_log\""
+  assert_contains "$check_block" ">> \"\$GITHUB_STEP_SUMMARY\""
+  assert_contains "$check_block" "exit \"\$check_status\""
+
+  upload_block=$(stable_branch_protection_step_block "Retain protection check output")
+  assert_contains "$upload_block" "if: always()"
+  assert_contains "$upload_block" "uses: actions/upload-artifact@v4"
+  assert_contains "$upload_block" "name: stable-branch-protection-check"
+  assert_contains "$upload_block" \
+    "path: \${{ runner.temp }}/stable-branch-protection-check.txt"
+  assert_contains "$upload_block" "if-no-files-found: error"
+  assert_contains "$upload_block" "retention-days: 14"
+  echo "PASS: preserves stable branch protection drift-monitoring contract"
 }
 
 assert_stopped_summary_workflow_contract() {
@@ -409,3 +462,4 @@ test_rejects_invalid_local_actionlint_release
 test_rejects_invalid_ci_actionlint_release
 test_rejects_both_invalid_actionlint_releases
 test_release_workflow_preserves_stopped_summary_contract
+test_stable_branch_protection_workflow_contract
