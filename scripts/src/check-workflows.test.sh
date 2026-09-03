@@ -8,6 +8,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CHECK_SCRIPT="${SCRIPT_DIR}/check-workflows.sh"
 CI_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/ci.yml"
 RELEASE_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-check.yml"
+NIGHTLY_LARGE_SPEC_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/nightly-large-spec.yml"
 STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
@@ -55,6 +56,32 @@ jobs:
     steps:
       - run: echo ok
 EOF
+  cat > "${workspace}/.github/workflows/release-check.yml" <<'EOF'
+name: Release check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fixture-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
+  cat > "${workspace}/.github/workflows/nightly-large-spec.yml" <<'EOF'
+name: Nightly large-spec harness
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fixture-nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
   printf '%s\n' "$workspace"
 }
 
@@ -66,6 +93,16 @@ make_workspace() {
     "$name" \
     "\"github-actionlint\": \"${package_version}\"" \
     "ACTIONLINT_VERSION: ${ci_version}"
+}
+
+make_timeout_workflow_workspace() {
+  local name="$1"
+  local workspace
+  workspace=$(make_workspace "$name" 1.7.12 1.7.12)
+  cp "$RELEASE_WORKFLOW" "$workspace/.github/workflows/release-check.yml"
+  cp "$NIGHTLY_LARGE_SPEC_WORKFLOW" \
+    "$workspace/.github/workflows/nightly-large-spec.yml"
+  printf '%s\n' "$workspace"
 }
 
 run_check() {
@@ -714,6 +751,117 @@ test_rejects_non_positive_ci_job_timeout() {
   echo "PASS: rejects a non-positive CI timeout"
 }
 
+test_release_and_nightly_jobs_have_positive_timeouts() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace covered-workflows)
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf \
+      'Expected release and nightly workflow timeouts to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "Release check workflow jobs have positive timeout-minutes values."
+  assert_contains "$CHECK_OUTPUT" \
+    "Nightly large-spec workflow jobs have positive timeout-minutes values."
+  echo "PASS: checks positive timeouts for release and nightly jobs"
+}
+
+test_rejects_release_job_without_timeout() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace release-missing-timeout)
+  cat >> "$workspace/.github/workflows/release-check.yml" <<'EOF'
+  future-release-check:
+    name: Future release check
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf \
+      'Expected a release job without a timeout to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "future-release-check: missing timeout-minutes"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the missing release timeout to fail before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects a release job without a timeout"
+}
+
+test_rejects_non_positive_release_job_timeout() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace release-zero-timeout)
+  sed -i 's/^    timeout-minutes: 45$/    timeout-minutes: 0/' \
+    "$workspace/.github/workflows/release-check.yml"
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf \
+      'Expected a non-positive release timeout to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "release-check-standard: timeout-minutes must be a positive integer (found: 0)"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the non-positive release timeout to fail before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects a non-positive release timeout"
+}
+
+test_rejects_nightly_job_without_timeout() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace nightly-missing-timeout)
+  cat >> "$workspace/.github/workflows/nightly-large-spec.yml" <<'EOF'
+  future-nightly-check:
+    name: Future nightly check
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf \
+      'Expected a nightly job without a timeout to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "future-nightly-check: missing timeout-minutes"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the missing nightly timeout to fail before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects a nightly job without a timeout"
+}
+
+test_rejects_non_positive_nightly_job_timeout() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace nightly-zero-timeout)
+  sed -i 's/^    timeout-minutes: 20$/    timeout-minutes: 0/' \
+    "$workspace/.github/workflows/nightly-large-spec.yml"
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf \
+      'Expected a non-positive nightly timeout to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "gemini-live-benchmark: timeout-minutes must be a positive integer (found: 0)"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the non-positive nightly timeout to fail before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects a non-positive nightly timeout"
+}
+
 test_accepts_matching_versions
 test_accepts_quoted_ci_version_with_inline_comment
 test_accepts_quoted_ci_version_without_comment
@@ -729,6 +877,11 @@ test_rejects_both_invalid_actionlint_releases
 test_ci_jobs_have_positive_timeouts
 test_rejects_ci_job_without_timeout
 test_rejects_non_positive_ci_job_timeout
+test_release_and_nightly_jobs_have_positive_timeouts
+test_rejects_release_job_without_timeout
+test_rejects_non_positive_release_job_timeout
+test_rejects_nightly_job_without_timeout
+test_rejects_non_positive_nightly_job_timeout
 test_ci_runs_routine_scripts_tests
 test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract

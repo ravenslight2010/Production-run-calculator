@@ -7,6 +7,8 @@ workflow_dir="$workspace_root/.github/workflows"
 actionlint_package="$workspace_root/scripts/package.json"
 actionlint_workflow="$workflow_dir/workflow-lint.yml"
 ci_workflow="$workflow_dir/ci.yml"
+release_workflow="$workflow_dir/release-check.yml"
+nightly_large_spec_workflow="$workflow_dir/nightly-large-spec.yml"
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -113,78 +115,88 @@ EOF
   exit 1
 fi
 
-if [[ ! -f "$ci_workflow" ]]; then
-  echo "CI workflow timeout check failed: ${ci_workflow} is missing." >&2
-  exit 1
-fi
+check_workflow_timeouts() {
+  local workflow_label="$1"
+  local workflow_path="$2"
 
-ci_timeout_check_output="$(
-  awk '
-    function finish_job() {
-      if (current_job == "") {
-        return
+  if [[ ! -f "$workflow_path" ]]; then
+    echo "${workflow_label} workflow timeout check failed: ${workflow_path} is missing." >&2
+    return 1
+  fi
+
+  local timeout_check_output
+  timeout_check_output="$(
+    awk '
+      function finish_job() {
+        if (current_job == "") {
+          return
+        }
+        checked_jobs++
+        if (!saw_timeout) {
+          print "  " current_job ": missing timeout-minutes"
+          failures++
+        } else if (timeout_value !~ /^[1-9][0-9]*$/) {
+          print "  " current_job ": timeout-minutes must be a positive integer (found: " timeout_value ")"
+          failures++
+        }
       }
-      checked_jobs++
-      if (!saw_timeout) {
-        print "  " current_job ": missing timeout-minutes"
-        failures++
-      } else if (timeout_value !~ /^[1-9][0-9]*$/) {
-        print "  " current_job ": timeout-minutes must be a positive integer (found: " timeout_value ")"
-        failures++
+
+      $0 == "jobs:" {
+        in_jobs = 1
+        next
       }
-    }
 
-    $0 == "jobs:" {
-      in_jobs = 1
-      next
-    }
-
-    in_jobs && $0 ~ /^[^[:space:]]/ {
-      finish_job()
-      in_jobs = 0
-      next
-    }
-
-    in_jobs && $0 ~ /^  [[:alnum:]_-]+:[[:space:]]*(#.*)?$/ {
-      finish_job()
-      current_job = $0
-      sub(/^  /, "", current_job)
-      sub(/:.*/, "", current_job)
-      saw_timeout = 0
-      timeout_value = ""
-      next
-    }
-
-    in_jobs && current_job != "" && $0 ~ /^    timeout-minutes:[[:space:]]*/ {
-      timeout_value = $0
-      sub(/^    timeout-minutes:[[:space:]]*/, "", timeout_value)
-      sub(/[[:space:]]+#.*/, "", timeout_value)
-      gsub(/[[:space:]]/, "", timeout_value)
-      saw_timeout = 1
-      next
-    }
-
-    END {
-      if (in_jobs) {
+      in_jobs && $0 ~ /^[^[:space:]]/ {
         finish_job()
+        in_jobs = 0
+        next
       }
-      if (checked_jobs == 0) {
-        print "  no jobs found"
-        failures++
+
+      in_jobs && $0 ~ /^  [[:alnum:]_-]+:[[:space:]]*(#.*)?$/ {
+        finish_job()
+        current_job = $0
+        sub(/^  /, "", current_job)
+        sub(/:.*/, "", current_job)
+        saw_timeout = 0
+        timeout_value = ""
+        next
       }
-      exit(failures ? 1 : 0)
-    }
-  ' "$ci_workflow"
-)" || {
-  cat >&2 <<EOF
-CI workflow timeout check failed. Every job in .github/workflows/ci.yml must
+
+      in_jobs && current_job != "" && $0 ~ /^    timeout-minutes:[[:space:]]*/ {
+        timeout_value = $0
+        sub(/^    timeout-minutes:[[:space:]]*/, "", timeout_value)
+        sub(/[[:space:]]+#.*/, "", timeout_value)
+        gsub(/[[:space:]]/, "", timeout_value)
+        saw_timeout = 1
+        next
+      }
+
+      END {
+        if (in_jobs) {
+          finish_job()
+        }
+        if (checked_jobs == 0) {
+          print "  no jobs found"
+          failures++
+        }
+        exit(failures ? 1 : 0)
+      }
+    ' "$workflow_path"
+  )" || {
+    cat >&2 <<EOF
+${workflow_label} workflow timeout check failed. Every job in ${workflow_path} must
 declare a positive integer timeout-minutes value:
-$ci_timeout_check_output
+$timeout_check_output
 EOF
-  exit 1
+    return 1
+  }
+
+  echo "${workflow_label} workflow jobs have positive timeout-minutes values."
 }
 
-echo "CI workflow jobs have positive timeout-minutes values."
+check_workflow_timeouts "CI" "$ci_workflow"
+check_workflow_timeouts "Release check" "$release_workflow"
+check_workflow_timeouts "Nightly large-spec" "$nightly_large_spec_workflow"
 
 if [[ -n "${ACTIONLINT_BIN:-}" ]]; then
   actionlint_bin="$ACTIONLINT_BIN"
