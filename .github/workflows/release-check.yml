@@ -94,6 +94,8 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_BASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           RELEASE_MODE: standard
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check -- --resume
@@ -185,6 +187,8 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_BASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           RELEASE_MODE: full
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check:full -- --resume

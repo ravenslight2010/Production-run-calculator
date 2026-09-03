@@ -117,6 +117,10 @@ assert_stopped_summary_workflow_contract() {
   assert_contains "$summary_block" "CHECKPOINT_DIR: ${checkpoint_dir}"
   assert_contains "$summary_block" \
     "CHECKPOINT_ARTIFACT_URL: \${{ steps.${artifact_step_id}.outputs.artifact-url }}"
+  assert_contains "$summary_block" \
+    "RELEASE_BASE_REPOSITORY: \${{ github.repository }}"
+  assert_contains "$summary_block" \
+    "RELEASE_HEAD_REPOSITORY: \${{ github.event.pull_request.head.repo.full_name || github.repository }}"
   assert_contains "$summary_block" "RELEASE_MODE: ${mode}"
   assert_contains "$summary_block" "RESUME_COMMAND: ${resume_command}"
   assert_contains "$summary_block" "REGENERATE_COMMAND: ${regenerate_command}"

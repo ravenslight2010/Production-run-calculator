@@ -102,23 +102,48 @@ function runStoppedSummary(
 }
 
 async function runStoppedArtifactLinkVerificationScenario(): Promise<void> {
+  const artifactUrl =
+    "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
+  const scenarios = [
+    {
+      name: "same-repository-pull-request",
+      eventName: "pull_request",
+      baseRepository: "example/factory",
+      headRepository: "example/factory",
+    },
+    {
+      name: "forked-pull-request",
+      eventName: "pull_request",
+      baseRepository: "example/factory",
+      headRepository: "contributor/factory",
+    },
+  ] as const;
+
   for (const mode of ["standard", "full"] as const) {
-    const evidenceDir = await mkdtemp(
-      join(tmpdir(), `release-summary-${mode}-artifact-verification-`),
-    );
-    const fakeBinDir = await mkdtemp(
-      join(tmpdir(), `release-summary-${mode}-artifact-verification-bin-`),
-    );
-    const artifactUrl =
-      "https://github.com/example/factory/actions/runs/123456789/artifacts/987654321";
-    const callsPath = join(fakeBinDir, "curl-calls");
-    const fakeCurlPath = join(fakeBinDir, "curl");
-    const expectedArtifactName = `release-evidence-${mode}-123456789`;
-    await writeFile(
-      fakeCurlPath,
-      `#!/usr/bin/env bash
+    for (const scenario of scenarios) {
+      const evidenceDir = await mkdtemp(
+        join(
+          tmpdir(),
+          `release-summary-${mode}-${scenario.name}-artifact-verification-`,
+        ),
+      );
+      const fakeBinDir = await mkdtemp(
+        join(
+          tmpdir(),
+          `release-summary-${mode}-${scenario.name}-artifact-verification-bin-`,
+        ),
+      );
+      const callsPath = join(fakeBinDir, "curl-calls");
+      const fakeCurlPath = join(fakeBinDir, "curl");
+      const expectedArtifactName = `release-evidence-${mode}-123456789`;
+      await writeFile(
+        fakeCurlPath,
+        `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+if [[ "\${FAKE_CURL_MODE:-success}" == "deny" ]]; then
+  exit 22
+fi
 output_path=""
 previous=""
 for argument in "$@"; do
@@ -130,6 +155,87 @@ done
 if [[ "\${*: -1}" == */actions/artifacts/* ]]; then
   printf '{"name":"%s"}\\n' "$EXPECTED_ARTIFACT_NAME" > "$output_path"
 fi
+`,
+        { encoding: "utf8", mode: 0o755 },
+      );
+
+      try {
+        await writeFile(
+          join(evidenceDir, "release-check-checkpoint.md"),
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+          "utf8",
+        );
+        const result = await runStoppedSummary(
+          evidenceDir,
+          join(evidenceDir, "step-summary.md"),
+          mode,
+          artifactUrl,
+          {
+            CHECKPOINT_ARTIFACT_NAME: expectedArtifactName,
+            EXPECTED_ARTIFACT_NAME: expectedArtifactName,
+            GITHUB_API_URL: "https://api.example.test",
+            GITHUB_REPOSITORY: "example/factory",
+            GITHUB_TOKEN: "test-token",
+            PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+            RELEASE_BASE_REPOSITORY: scenario.baseRepository,
+            RELEASE_EVENT_NAME: scenario.eventName,
+            RELEASE_HEAD_REPOSITORY: scenario.headRepository,
+            VERIFY_CHECKPOINT_ARTIFACT_LINK: "1",
+          },
+        );
+        assert.equal(result.code, 0, result.output);
+        assert.doesNotMatch(
+          result.output,
+          /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/,
+          "artifact URLs must not be exposed in process output",
+        );
+        assert.doesNotMatch(
+          result.output,
+          /test-token/,
+          "workflow tokens must not be exposed in process output",
+        );
+
+        const curlCalls = await readFile(callsPath, "utf8");
+        assert.equal(
+          (
+            curlCalls.match(
+              /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/g,
+            ) ?? []
+          ).length,
+          1,
+          `${mode}/${scenario.name} uploaded artifact link should be probed exactly once`,
+        );
+        assert.match(
+          curlCalls,
+          /Authorization: Bearer test-token/,
+          `${mode}/${scenario.name} artifact link probe must authenticate`,
+        );
+        assert.match(
+          curlCalls,
+          /https:\/\/api\.example\.test\/repos\/example\/factory\/actions\/artifacts\/987654321/,
+          `${mode}/${scenario.name} artifact metadata should be checked by artifact id`,
+        );
+      } finally {
+        await rm(evidenceDir, { recursive: true, force: true });
+        await rm(fakeBinDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  for (const mode of ["standard", "full"] as const) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-fork-artifact-denied-`),
+    );
+    const fakeBinDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-fork-artifact-denied-bin-`),
+    );
+    const fakeCurlPath = join(fakeBinDir, "curl");
+    const expectedArtifactName = `release-evidence-${mode}-123456789`;
+    await writeFile(
+      fakeCurlPath,
+      `#!/usr/bin/env bash
+set -euo pipefail
+exit 22
 `,
       { encoding: "utf8", mode: 0o755 },
     );
@@ -147,40 +253,26 @@ fi
         artifactUrl,
         {
           CHECKPOINT_ARTIFACT_NAME: expectedArtifactName,
-          EXPECTED_ARTIFACT_NAME: expectedArtifactName,
           GITHUB_API_URL: "https://api.example.test",
           GITHUB_REPOSITORY: "example/factory",
           GITHUB_TOKEN: "test-token",
           PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+          RELEASE_BASE_REPOSITORY: "example/factory",
+          RELEASE_EVENT_NAME: "pull_request",
+          RELEASE_HEAD_REPOSITORY: "contributor/factory",
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1",
         },
       );
-      assert.equal(result.code, 0, result.output);
+      assert.equal(result.code, 1, result.output);
+      assert.match(
+        result.output,
+        /forked pull request: the artifact link did not resolve\. The read-only workflow token could not verify the uploaded artifact\./,
+        `${mode} fork access failure must explain the safe recovery path`,
+      );
       assert.doesNotMatch(
         result.output,
-        /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/,
-        "artifact URLs must not be exposed in process output",
-      );
-
-      const curlCalls = await readFile(callsPath, "utf8");
-      assert.equal(
-        (
-          curlCalls.match(
-            /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/g,
-          ) ?? []
-        ).length,
-        1,
-        `${mode} uploaded artifact link should be probed exactly once`,
-      );
-      assert.match(
-        curlCalls,
-        /Authorization: Bearer test-token/,
-        `${mode} artifact link probe must authenticate`,
-      );
-      assert.match(
-        curlCalls,
-        /https:\/\/api\.example\.test\/repos\/example\/factory\/actions\/artifacts\/987654321/,
-        `${mode} artifact metadata should be checked by artifact id`,
+        /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321|test-token/,
+        `${mode} fork access failure must not expose the URL or token`,
       );
     } finally {
       await rm(evidenceDir, { recursive: true, force: true });
@@ -188,7 +280,48 @@ fi
     }
   }
 
-  console.log("Stopped release artifact link verification passed.");
+  for (const mode of ["standard", "full"] as const) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-fork-artifact-missing-`),
+    );
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        join(evidenceDir, "step-summary.md"),
+        mode,
+        "",
+        {
+          CHECKPOINT_ARTIFACT_NAME: `release-evidence-${mode}-123456789`,
+          RELEASE_BASE_REPOSITORY: "example/factory",
+          RELEASE_EVENT_NAME: "pull_request",
+          RELEASE_HEAD_REPOSITORY: "contributor/factory",
+          VERIFY_CHECKPOINT_ARTIFACT_LINK: "1",
+        },
+      );
+      assert.equal(result.code, 1, result.output);
+      assert.match(
+        result.output,
+        /forked pull request: no artifact link was provided by the upload step\./,
+        `${mode} fork upload without a URL must fail with recovery guidance`,
+      );
+      assert.doesNotMatch(
+        result.output,
+        /test-token|https?:\/\//,
+        `${mode} missing fork artifact failure must not expose sensitive values`,
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log(
+    "Stopped release artifact link verification passed (same-repository and forked pull requests; read-only success and denied access).",
+  );
 }
 
 async function runStoppedSummaryScenario(): Promise<void> {

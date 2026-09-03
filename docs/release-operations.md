@@ -124,12 +124,15 @@ standard evidence.
 
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume
-command, and the matching fresh-run command. If GitHub does not provide an
-artifact URL, the summary says `The checkpoint artifact was not uploaded successfully.`
-instead of showing a broken link; the recovery commands and the
-non-retained-evidence warning are still included. GitHub may not expose that
-Markdown for cancelled jobs through an unauthenticated page or check-run API.
-The summary contract can therefore be checked without GitHub access:
+command, and the matching fresh-run command. The stopped-summary probe uses the
+base repository's read-only workflow token and the artifact ID, including for a
+`pull_request` from a fork. If GitHub does not provide an artifact URL, the
+summary says `The checkpoint artifact was not uploaded successfully.` instead
+of showing a broken link; forked pull requests also fail the probe with a
+non-sensitive recovery message because a missing or inaccessible artifact cannot
+support a download. GitHub may not expose that Markdown for cancelled jobs
+through an unauthenticated page or check-run API. The summary contract can
+therefore be checked without GitHub access:
 
 ```bash
 pnpm --filter @workspace/scripts run test:release-stopped-summary
@@ -140,7 +143,9 @@ files, prints a `non-retained verification only` marker, and must never be
 treated as retained release evidence or a GO decision. It verifies the exact
 standard and full Markdown with both an artifact URL and an empty artifact URL,
 including the explicit upload-failure message, the non-retained-evidence
-warning, and each mode's resume/regenerate commands.
+warning, each mode's resume/regenerate commands, and forked pull-request
+artifact access using a safe read-only-token fixture. The fixture never uses a
+real GitHub URL or token.
 
 The workflow-lint job runs a separate workflow guard that checks both standard
 and full jobs keep their `always()` stopped-summary step after the matching
