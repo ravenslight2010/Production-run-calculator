@@ -19,7 +19,10 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import {
   AiAnomaliesResponse,
+  AiMatchImportResponse,
+  AiMatchPremixResponse,
   AiScheduleOptimizeResponse,
+  AiSuggestMergesResponse,
   AiSummaryResponse,
 } from "@workspace/api-zod";
 import { MAX_RUNS } from "./aiOptimize";
@@ -30,6 +33,7 @@ import { MAX_RUNS } from "./aiOptimize";
 const mock = vi.hoisted(() => ({
   nextContent: "" as string | null,
   shouldThrow: false as boolean,
+  cachedValue: undefined as unknown,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   lastMessages: undefined as any,
   // The optimize route makes two model calls per request: the recommendations
@@ -133,6 +137,9 @@ vi.mock("../lib/aiResultCache", () => ({
   getOrCreateAiResult: async (opts: {
     load: () => Promise<{ value: unknown }>;
   }) => {
+    if (mock.cachedValue !== undefined) {
+      return { value: mock.cachedValue, hit: true };
+    }
     const loaded = await opts.load();
     return { value: loaded.value, hit: false };
   },
@@ -165,6 +172,7 @@ afterAll(async () => {
 beforeEach(() => {
   mock.nextContent = JSON.stringify({ recommendations: [] });
   mock.shouldThrow = false;
+  mock.cachedValue = undefined;
   mock.lastMessages = undefined;
   mock.firstMessages = undefined;
   mock.calls = 0;
@@ -324,6 +332,145 @@ function postAnomalies(body: unknown): Promise<Response> {
     body: JSON.stringify(body),
   });
 }
+
+function makeMatchImportBody(overrides: Record<string, unknown> = {}) {
+  return {
+    brands: ["Acme"],
+    brandFlavors: { Acme: ["Pepperoni"] },
+    unmatchedBrands: ["Unknown Brand"],
+    unmatchedFlavors: [{ brand: "Acme", flavor: "Unknown Flavor" }],
+    knownIngredients: { dough: ["Flour"], sauce: ["Tomato"], cheese: ["Mozzarella"] },
+    knownAppTypes: ["Spreader"],
+    knownPepTypes: ["Cup & Char"],
+    unmatchedIngredients: [{ kind: "dough", name: "Unknown Ingredient" }],
+    unmatchedAppTypes: ["Unknown Applicator"],
+    unmatchedPepTypes: ["Unknown Pepperoni"],
+    ...overrides,
+  };
+}
+
+function postMatchImport(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/match-import`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function makeMatchPremixBody(overrides: Record<string, unknown> = {}) {
+  return {
+    brands: ["Acme"],
+    brandFlavors: { Acme: ["Pepperoni"] },
+    unmatchedNames: ["Acme Pepperoni Mix"],
+    ...overrides,
+  };
+}
+
+function postMatchPremix(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/match-premix`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("AI import and matching response contracts", () => {
+  it("parses deterministic and enriched import matches with shared statuses", async () => {
+    const deterministic = await postMatchImport(
+      makeMatchImportBody({
+        unmatchedBrands: ["Acme"],
+        unmatchedFlavors: [{ brand: "Acme", flavor: "Pepperoni" }],
+        unmatchedIngredients: [],
+        unmatchedAppTypes: [],
+        unmatchedPepTypes: [],
+      }),
+    );
+    expect(deterministic.status).toBe(200);
+    const deterministicBody = AiMatchImportResponse.parse(await deterministic.json());
+    expect(deterministicBody.aiGenerated).toBe(false);
+    expect(deterministicBody.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+
+    mock.nextContent = JSON.stringify({
+      brandMatches: [{ candidate: "Unknown Brand", match: "Acme" }],
+      flavorMatches: [{ brand: "Acme", candidate: "Unknown Flavor", match: "Pepperoni" }],
+      ingredientMatches: [{ kind: "dough", candidate: "Unknown Ingredient", match: "Flour" }],
+      appTypeMatches: [{ candidate: "Unknown Applicator", match: "Spreader" }],
+      pepTypeMatches: [{ candidate: "Unknown Pepperoni", match: "Cup & Char" }],
+    });
+    const enriched = await postMatchImport(makeMatchImportBody());
+    expect(enriched.status).toBe(200);
+    const enrichedBody = AiMatchImportResponse.parse(await enriched.json());
+    expect(enrichedBody.aiGenerated).toBe(true);
+    expect(enrichedBody.aiStatus).toBe("enriched");
+  });
+
+  it("parses unavailable and malformed fallback import matches", async () => {
+    mock.shouldThrow = true;
+    const unavailable = await postMatchImport(makeMatchImportBody());
+    expect(unavailable.status).toBe(200);
+    const unavailableBody = AiMatchImportResponse.parse(await unavailable.json());
+    expect(unavailableBody.aiGenerated).toBe(false);
+    expect(unavailableBody.aiStatus).toBe("unavailable");
+
+    mock.shouldThrow = false;
+    mock.nextContent = "not JSON";
+    const fallback = await postMatchImport(makeMatchImportBody());
+    expect(fallback.status).toBe(200);
+    const fallbackBody = AiMatchImportResponse.parse(await fallback.json());
+    expect(fallbackBody.aiGenerated).toBe(false);
+    expect(fallbackBody.aiStatus).toBe("unavailable");
+  });
+
+  it("parses deterministic and enriched premix matches with shared statuses", async () => {
+    const deterministic = await postMatchPremix(
+      makeMatchPremixBody({ unmatchedNames: ["Acme Pepperoni Mix"] }),
+    );
+    expect(deterministic.status).toBe(200);
+    const deterministicBody = AiMatchPremixResponse.parse(await deterministic.json());
+    expect(deterministicBody.aiGenerated).toBe(false);
+    expect(deterministicBody.aiStatus).toBe("deterministic");
+
+    mock.nextContent = JSON.stringify({
+      matches: [{ name: "Unknown Acme Mix", brand: "Acme", flavor: "Pepperoni" }],
+    });
+    const enriched = await postMatchPremix(
+      makeMatchPremixBody({ unmatchedNames: ["Unknown Acme Mix"] }),
+    );
+    expect(enriched.status).toBe(200);
+    const enrichedBody = AiMatchPremixResponse.parse(await enriched.json());
+    expect(enrichedBody.aiGenerated).toBe(true);
+    expect(enrichedBody.aiStatus).toBe("enriched");
+  });
+
+  it("parses cached and fallback merge suggestions with the shared statuses", async () => {
+    mock.cachedValue = {
+      suggestions: [{ target: "Mozzarella", sources: ["Mozz"] }],
+      aiStatus: "enriched",
+    };
+    const enriched = await fetch(`${baseUrl}/ai/suggest-merges`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ names: ["Mozzarella", "Mozz"] }),
+    });
+    expect(enriched.status).toBe(200);
+    const enrichedBody = AiSuggestMergesResponse.parse(await enriched.json());
+    expect(enrichedBody.aiGenerated).toBe(true);
+    expect(enrichedBody.aiStatus).toBe("enriched");
+
+    mock.cachedValue = undefined;
+    mock.nextContent = "not JSON";
+    const fallback = await fetch(`${baseUrl}/ai/suggest-merges`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ names: ["Mozzarella", "Mozz"] }),
+    });
+    expect(fallback.status).toBe(200);
+    const fallbackBody = AiSuggestMergesResponse.parse(await fallback.json());
+    expect(fallbackBody.aiGenerated).toBe(false);
+    expect(fallbackBody.aiStatus).toBe("unavailable");
+  });
+});
 
 describe("POST /ai/optimize — request validation glue", () => {
   it("returns 400 for an invalid body and never calls the model", async () => {

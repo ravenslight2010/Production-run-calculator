@@ -1348,7 +1348,9 @@ export const AiSpecReconcileResponse = zod.object({
   "message": zod.string()
 })),
   "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number()
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1373,7 +1375,9 @@ export const AiMixReconcileBody = zod.object({
 
 export const AiMixReconcileResponse = zod.object({
   "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number()
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1484,6 +1488,7 @@ export const AiProactiveAlertResponse = zod.object({
   "impact": zod.enum(['high', 'medium', 'low'])
 }).describe('A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. \"behind-plan\", \"break-window\") so repeats of the same situation can be de-duped\/cooled down client-side; it is never run-instance or timestamp specific.'),zod.null()]).describe('The single nudge to surface now, or null when nothing applies'),
   "generatedAt": zod.number(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional message when no alert could be produced')
 })
 
@@ -2028,6 +2033,8 @@ export const AiMatchImportResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported pepperoni type names. Optional.'),
   "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional message when no matches could be made')
 })
 
@@ -2053,6 +2060,8 @@ export const AiMatchPremixResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional message when no matches could be made')
 })
 
@@ -2167,6 +2176,8 @@ export const AiSuggestMergesResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional brief overall comment from the model')
 })
 

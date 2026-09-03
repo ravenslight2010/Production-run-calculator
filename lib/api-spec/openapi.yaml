@@ -6481,6 +6481,8 @@ components:
         - specSheetId
         - discrepancies
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         specSheetId:
           type: integer
@@ -6493,6 +6495,11 @@ components:
           description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     MixComponentSpec:
       type: object
@@ -6728,12 +6735,19 @@ components:
       type: object
       required:
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         summary:
           type: string
           description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     MixAssistMix:
       type: object
@@ -6823,6 +6837,7 @@ components:
       required:
         - alert
         - generatedAt
+        - aiStatus
       properties:
         alert:
           oneOf:
@@ -6831,6 +6846,8 @@ components:
           description: The single nudge to surface now, or null when nothing applies
         generatedAt:
           type: number
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional message when no alert could be produced
@@ -9947,6 +9964,8 @@ components:
       required:
         - suggestions
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         suggestions:
           type: array
@@ -9955,6 +9974,11 @@ components:
         generatedAt:
           type: number
           description: Epoch ms when the suggestions were generated
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied merge suggestions; false for unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional brief overall comment from the model
@@ -10332,6 +10356,8 @@ components:
         - brandMatches
         - flavorMatches
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         brandMatches:
           type: array
@@ -10358,6 +10384,11 @@ components:
             $ref: "#/components/schemas/MatchImportNameMatch"
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional message when no matches could be made
@@ -10411,6 +10442,8 @@ components:
       required:
         - matches
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         matches:
           type: array
@@ -10418,6 +10451,11 @@ components:
             $ref: "#/components/schemas/MatchPremixMatch"
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional message when no matches could be made

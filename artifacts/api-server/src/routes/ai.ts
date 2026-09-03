@@ -1423,7 +1423,7 @@ router.post(
     // AI call entirely so an app left open overnight doesn't burn the cost cap
     // polling for nothing.
     if (!isDayActive(validation.data) && flaggedAtRisk.length === 0 && lowStock.length === 0) {
-      res.json({ alert: null, generatedAt: Date.now() });
+      res.json({ alert: null, aiStatus: "deterministic", generatedAt: Date.now() });
       return;
     }
 
@@ -2326,6 +2326,7 @@ router.post(
       res.json({
         ...deterministicMatches,
         aiGenerated: false,
+        aiStatus: "deterministic",
         generatedAt: Date.now(),
       });
       return;
@@ -2342,12 +2343,13 @@ router.post(
       ingredientMatches: unknown[];
       appTypeMatches: unknown[];
       pepTypeMatches: unknown[];
+      aiStatus: "enriched" | "unavailable";
       note?: string;
     };
     let cachedMatchBody: MatchImportCacheBody;
     const model = pickModel("cheap");
     try {
-      const cached = await cachedAiResponse(req, res, {
+      const cached = await cachedAiResponse<MatchImportCacheBody>(req, res, {
         operation: "match-import",
         model,
         system,
@@ -2363,7 +2365,8 @@ router.post(
           value.flavorMatches.every(isObject) &&
           value.ingredientMatches.every(isObject) &&
           value.appTypeMatches.every(isObject) &&
-          value.pepTypeMatches.every(isObject),
+          value.pepTypeMatches.every(isObject) &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-import",
@@ -2393,6 +2396,7 @@ router.post(
                 ingredientMatches: [],
                 appTypeMatches: [],
                 pepTypeMatches: [],
+                aiStatus: "unavailable",
               },
               cacheable: false,
             };
@@ -2478,6 +2482,7 @@ router.post(
                 return v ? { ...m, review: v } : m;
               }),
             ],
+            aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
           return { value, cacheable: rawIsValidShape };
@@ -2502,7 +2507,12 @@ router.post(
       throw err;
     }
 
-    res.json({ ...cachedMatchBody!, aiGenerated: true, generatedAt: Date.now() });
+    res.json({
+      ...cachedMatchBody!,
+      aiGenerated: cachedMatchBody!.aiStatus === "enriched",
+      aiStatus: cachedMatchBody!.aiStatus,
+      generatedAt: Date.now(),
+    });
   },
 );
 
@@ -2720,6 +2730,7 @@ router.post(
       res.json({
         matches: deterministic.matches,
         aiGenerated: false,
+        aiStatus: "deterministic",
         generatedAt: Date.now(),
       });
       return;
@@ -2731,7 +2742,10 @@ router.post(
       correctionDomains: ["brand", "flavor"],
     });
 
-    type MatchPremixCacheBody = { matches: unknown[] };
+    type MatchPremixCacheBody = {
+      matches: unknown[];
+      aiStatus: "enriched" | "unavailable";
+    };
     let cachedPremixBody: MatchPremixCacheBody;
     const model = pickModel("cheap");
     try {
@@ -2743,7 +2757,8 @@ router.post(
         validate: (value): value is MatchPremixCacheBody =>
           isObject(value) &&
           Array.isArray(value.matches) &&
-          value.matches.every(isObject),
+          value.matches.every(isObject) &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-premix",
@@ -2766,7 +2781,10 @@ router.post(
               const failure = aiCallFailureHttp(result, "AI provider error");
               throw new AiResponseError(failure.status, failure.error);
             }
-            return { value: { matches: [] }, cacheable: false };
+            return {
+              value: { matches: [], aiStatus: "unavailable" as const },
+              cacheable: false,
+            };
           }
           const raw = result.raw;
           const rawIsValidShape = isObject(raw) && Array.isArray(raw.matches);
@@ -2786,6 +2804,7 @@ router.post(
               const v = verdicts.get(`match-${i}`);
               return v ? { ...m, review: v } : m;
             }),
+            aiStatus: "enriched",
           };
           return { value, cacheable: rawIsValidShape };
         },
@@ -2811,7 +2830,8 @@ router.post(
 
     res.json({
       matches: [...deterministic.matches, ...(cachedPremixBody?.matches ?? [])],
-      aiGenerated: true,
+      aiGenerated: cachedPremixBody?.aiStatus === "enriched",
+      aiStatus: cachedPremixBody?.aiStatus,
       generatedAt: Date.now(),
     });
   },
@@ -2850,7 +2870,11 @@ router.post(
       correctionDomains: ["ingredient", "die"],
     });
 
-    type MergeCacheBody = { suggestions: unknown[]; note?: string };
+    type MergeCacheBody = {
+      suggestions: unknown[];
+      aiStatus: "enriched" | "unavailable";
+      note?: string;
+    };
     let cachedMergeBody: MergeCacheBody;
     const model = pickModel("cheap");
     try {
@@ -2863,6 +2887,7 @@ router.post(
           isObject(value) &&
           Array.isArray(value.suggestions) &&
           value.suggestions.every(isObject) &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable") &&
           (value.note === undefined || typeof value.note === "string"),
         load: async () => {
           const result = await fetchModelJsonWithRetry({
@@ -2916,6 +2941,7 @@ router.post(
               const v = verdicts.get(`merge-${i}`);
               return v ? { ...s, review: v } : s;
             }),
+            aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
           return { value, cacheable: rawIsValidShape };
@@ -2940,7 +2966,12 @@ router.post(
       throw err;
     }
 
-    res.json({ ...cachedMergeBody!, generatedAt: Date.now() });
+    res.json({
+      ...cachedMergeBody!,
+      aiGenerated: cachedMergeBody!.aiStatus === "enriched",
+      aiStatus: cachedMergeBody!.aiStatus,
+      generatedAt: Date.now(),
+    });
   },
 );
 

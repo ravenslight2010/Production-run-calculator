@@ -4,8 +4,14 @@ import { z } from "zod";
 import {
   AiAnomaliesResponse,
   AiForecastResponse,
+  AiMatchImportResponse,
+  AiMatchPremixResponse,
+  AiMixReconcileResponse,
+  AiProactiveAlertResponse,
   AiScheduleOptimizeResponse,
   AiSummaryResponse,
+  AiSpecReconcileResponse,
+  AiSuggestMergesResponse,
   CheckUsernameAvailableQueryParams,
   ListPasswordResetRequestsResponseItem,
   ListRunsResponseItem,
@@ -121,6 +127,54 @@ describe("generated Zod schema runtime contracts", () => {
         aiStatus,
       });
       expect(forecast.aiStatus).toBe(aiStatus);
+
+      const specReconcile = AiSpecReconcileResponse.parse({
+        specSheetId: 1,
+        discrepancies: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(specReconcile.aiStatus).toBe(aiStatus);
+
+      const mixReconcile = AiMixReconcileResponse.parse({
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(mixReconcile.aiStatus).toBe(aiStatus);
+
+      const proactive = AiProactiveAlertResponse.parse({
+        alert: null,
+        generatedAt: 1_750_000_000_000,
+        aiStatus,
+      });
+      expect(proactive.aiStatus).toBe(aiStatus);
+
+      const matchImport = AiMatchImportResponse.parse({
+        brandMatches: [],
+        flavorMatches: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(matchImport.aiStatus).toBe(aiStatus);
+
+      const matchPremix = AiMatchPremixResponse.parse({
+        matches: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(matchPremix.aiStatus).toBe(aiStatus);
+
+      const suggestMerges = AiSuggestMergesResponse.parse({
+        suggestions: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(suggestMerges.aiStatus).toBe(aiStatus);
     }
 
     expect(() =>
@@ -180,6 +234,16 @@ describe("generated Zod schema runtime contracts", () => {
         generatedAt: 1_750_000_000_000,
         aiGenerated: false,
         aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiMatchImportResponse.parse({
+        brandMatches: [],
+        flavorMatches: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "cached",
       }),
     ).toThrow(z.ZodError);
   });

@@ -5,12 +5,16 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { MergeSuggestion } from './mergeSuggestion';
 
 export interface SuggestMergesResult {
   suggestions: MergeSuggestion[];
   /** Epoch ms when the suggestions were generated */
   generatedAt: number;
+  /** True when the AI supplied merge suggestions; false for unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional brief overall comment from the model */
   note?: string;
 }

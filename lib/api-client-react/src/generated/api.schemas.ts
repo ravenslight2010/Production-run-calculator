@@ -1454,6 +1454,9 @@ export interface SpecReconcileResult {
   /** Advisory plain-language summary; absent/empty when the AI is unavailable */
   summary?: string;
   generatedAt: number;
+  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 export interface MixComponentSpec {
@@ -1594,6 +1597,9 @@ export interface MixReconcileResult {
   /** Advisory plain-language summary; absent/empty when the AI is unavailable */
   summary?: string;
   generatedAt: number;
+  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 export interface MixAssistMix {
@@ -1654,6 +1660,7 @@ export interface ProactiveAlertResult {
   /** The single nudge to surface now, or null when nothing applies */
   alert: ProactiveAlert | null;
   generatedAt: number;
+  aiStatus: AiStatus;
   /** Optional message when no alert could be produced */
   note?: string;
 }
@@ -3626,6 +3633,9 @@ export interface SuggestMergesResult {
   suggestions: MergeSuggestion[];
   /** Epoch ms when the suggestions were generated */
   generatedAt: number;
+  /** True when the AI supplied merge suggestions; false for unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional brief overall comment from the model */
   note?: string;
 }
@@ -3836,6 +3846,9 @@ export interface MatchImportResult {
   /** Confident matches for imported pepperoni type names. Optional. */
   pepTypeMatches?: MatchImportNameMatch[];
   generatedAt: number;
+  /** True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
 }
@@ -3867,6 +3880,9 @@ export interface MatchPremixMatch {
 export interface MatchPremixResult {
   matches: MatchPremixMatch[];
   generatedAt: number;
+  /** True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
 }

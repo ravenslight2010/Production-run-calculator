@@ -3,7 +3,7 @@
 - [Department browser evidence](department-browser-evidence.md) — responsive operational journeys should assert stable semantic state rather than layout-specific text nodes.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Cross-run autosave contamination](cross-run-autosave-contamination.md) — autosave useEffect([v]) reads run ID from dayStateRef (latest ref) but v can lag; lastFormRunIdRef guards prevent wrong product's data landing in another run's slot/profile.
-- [Doughball variant customers matching](doughball-variant-customers-matching.md) — customers arrays on CRB Dough variants were empty; pKey root weight overrode variant match; specific-flavor must beat catch-all; customers-match may override wrong stored weight.
+- [Doughball variants](doughball-variants.md) + [Doughball customer matching](doughball-variant-customers-matching.md) — variants collapse to one family recipe; specific-flavor matching must beat catch-all and may override a wrong stored weight.
 - [Near-exact link profile propagation](near-exact-link-profile-propagation.md) — linkSpecImportNamedRecipesToExisting profile field pass uses matchCleaned (layer-1 only); near-exact auto-renames need a separate nearExactApplied map or profile doughName/sauceName stays stale.
 - [SSE meta stamp source](sse-meta-stamp-source.md) — SSE LWW must use overlayRunMetaStamps(prev.runs) not raw React state; saveDayState stamps localStorage only, React state keeps old stamp, so startRun's startedAt gets erased by a stale SSE echo.
 - [LiveRunContext clock isolation](live-run-context-clock-isolation.md) — Home must not hold nowTime; clock + calc + auto-track live in LiveRunProvider; 11 sub-components call useLiveRun(); transform_home.py gotchas inside.
@@ -114,7 +114,6 @@
 - [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Batch upsert atomicity](batch-upsert-transaction.md) — batch master-data POSTs need ONE db.transaction; client heals persist the rename map pre-write or a partial failure strands local refs forever.
 - [Spec-import brand backfill](spec-import-brand-backfill.md) — unscoped parses get customer tags from the applicator grid (collect-only), unbranded pool rows heal on re-import, curated brands never re-scoped.
-- [Dough family collapse](dough-family-collapse.md) + [doughball variants](doughball-variants.md) — ONE recipe per dough family (variant names snap to base, never placeholder-minted); family recipe carries all variants' weight/per-tray, die auto-match blank-fill-only.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.
 - [Crust dough-name backstop](crust-dough-name-backstop.md) — AI can omit doughName from "Crust (X Recipe - dies)" rows; deterministic single-candidate backfill + library-row hydration on name-only imports.
 - [Cheese share oz basis](cheese-share-oz-basis.md) — Share % may use oz only with FULL oz coverage of lbs>0 rows; partial imported oz must be stripped (heal + editor clear) or shares go wild.
