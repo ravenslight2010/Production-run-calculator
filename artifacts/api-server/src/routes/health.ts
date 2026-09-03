@@ -25,7 +25,7 @@ router.get("/healthz", async (_req: Request, res: Response) => {
   if (!aiConfigured) checks.dependencies = { status: "error", detail: "ai_provider_not_configured" };
   const allHealthy = Object.values(checks).every((c) => c.status === "ok");
   const flatChecks = Object.fromEntries(Object.entries(checks).map(([key, value]) => [key, value.status]));
-  const diagnostics = { cacheMaintenance: getCacheMaintenanceDiagnostics() };
+  const diagnostics = { cacheMaintenance: await getCacheMaintenanceDiagnostics() };
   logger.info(
     { event: "health_check", outcome: allHealthy ? "success" : "degraded", checks: flatChecks, diagnostics },
     "health check completed",

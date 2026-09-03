@@ -35,6 +35,7 @@ type CacheLog = {
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let aiResultCacheTable: DbModule["aiResultCacheTable"];
+let cacheMaintenanceEventsTable: DbModule["cacheMaintenanceEventsTable"];
 let cache: CacheModule;
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -124,6 +125,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   aiResultCacheTable = dbMod.aiResultCacheTable;
+  cacheMaintenanceEventsTable = dbMod.cacheMaintenanceEventsTable;
   cache = await import("./aiResultCache");
   pool.on("error", () => {});
 }, 60_000);
@@ -144,6 +146,7 @@ afterAll(async () => {
 beforeEach(async () => {
   cache.clearAiResultInFlightForTests();
   await db.delete(aiResultCacheTable);
+  await db.delete(cacheMaintenanceEventsTable);
 });
 
 describe("AI result cache persistence and scope isolation", () => {
@@ -716,6 +719,66 @@ describe("AI result cache persistence and scope isolation", () => {
     expect(fields).not.toHaveProperty("prompt");
     expect(fields).not.toHaveProperty("result");
     expect(message).toBe("cache maintenance completed");
+  });
+
+  it("aggregates maintenance failures across isolated API owners and scopes", async () => {
+    const [liveOwner, sandboxOwner] = await Promise.all([
+      import("./observability" + "?aggregate-owner-live"),
+      import("./observability" + "?aggregate-owner-sandbox"),
+    ]);
+    const liveLog = { info: vi.fn(), warn: vi.fn() };
+    const sandboxLog = { info: vi.fn(), warn: vi.fn() };
+    const failure = {
+      operation: "prune" as const,
+      waitDurationMs: 8,
+      outcome: "error" as const,
+    };
+
+    await liveOwner.recordCacheMaintenance({ ...failure, scope: "live" }, liveLog);
+    await sandboxOwner.recordCacheMaintenance({ ...failure, scope: "sandbox" }, sandboxLog);
+    await liveOwner.recordCacheMaintenance({ ...failure, scope: "live" }, liveLog);
+    expect(liveLog.warn).not.toHaveBeenCalled();
+    expect(sandboxLog.warn).not.toHaveBeenCalled();
+
+    // The third failure is on a different module instance, modeling a second
+    // API process. It must cross the same shared threshold and emit one warning.
+    await sandboxOwner.recordCacheMaintenance({ ...failure, scope: "live" }, sandboxLog);
+    expect(liveLog.warn).not.toHaveBeenCalled();
+    expect(sandboxLog.warn).toHaveBeenCalledOnce();
+    expect(sandboxLog.warn).toHaveBeenCalledWith(
+      {
+        event: "cache_maintenance_recurrence",
+        scope: "live",
+        operation: "prune",
+        recentErrorCount: 3,
+        threshold: liveOwner.CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+        windowMs: liveOwner.CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+      },
+      "cache maintenance failures recurring",
+    );
+
+    const diagnostics = await liveOwner.getCacheMaintenanceDiagnostics(Date.now());
+    expect(diagnostics.live).toMatchObject({
+      status: "warning",
+      recentErrorCount: 3,
+    });
+    expect(diagnostics.sandbox).toMatchObject({
+      status: "ok",
+      recentErrorCount: 1,
+    });
+
+    for (let index = 0; index < liveOwner.CACHE_MAINTENANCE_FAILURE_MAX_EVENTS + 7; index += 1) {
+      await liveOwner.recordCacheMaintenance({ ...failure, scope: "live" }, liveLog);
+    }
+    const retained = (await db.select().from(cacheMaintenanceEventsTable)).filter(
+      (row) => row.scope === "live" && row.operation === "prune",
+    );
+    expect(retained).toHaveLength(liveOwner.CACHE_MAINTENANCE_FAILURE_MAX_EVENTS);
+    expect(
+      retained.every(
+        (row) => row.scope === "live" && row.operation === "prune",
+      ),
+    ).toBe(true);
   });
 
   it("removes expired rows before pruning the recovered result", async () => {

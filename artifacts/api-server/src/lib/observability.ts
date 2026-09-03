@@ -1,6 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 import type { Logger } from "pino";
 import { randomUUID } from "node:crypto";
+import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
+import { cacheMaintenanceEventsTable, db } from "@workspace/db";
 import { logger } from "./logger";
 
 export type OperationOutcome = "success" | "error" | "degraded";
@@ -18,6 +20,8 @@ export const CACHE_MAINTENANCE_FAILURE_WINDOW_MS = 5 * 60 * 1000;
 export const CACHE_MAINTENANCE_FAILURE_MAX_EVENTS = 100;
 const CACHE_MAINTENANCE_OPERATION = "prune" as const;
 const CACHE_MAINTENANCE_SCOPES: CacheMaintenanceScope[] = ["live", "sandbox"];
+const CACHE_MAINTENANCE_SHARED_MAX_ROWS = CACHE_MAINTENANCE_FAILURE_MAX_EVENTS;
+const CACHE_MAINTENANCE_SHARED_TIMEOUT_MS = 1_000;
 const cacheMaintenanceFailureTimes = new Map<string, number[]>();
 const cacheMaintenanceAlerts = new Set<string>();
 
@@ -67,25 +71,21 @@ function recentCacheMaintenanceFailures(scope: CacheMaintenanceScope, now: numbe
   return recent;
 }
 
-export function getCacheMaintenanceDiagnostics(
+export async function getCacheMaintenanceDiagnostics(
   now = Date.now(),
-): Record<CacheMaintenanceScope, CacheMaintenanceDiagnostic> {
-  return Object.fromEntries(
-    CACHE_MAINTENANCE_SCOPES.map((scope) => {
-      const recent = recentCacheMaintenanceFailures(scope, now);
-      const lastError = recent[recent.length - 1];
-      return [
-        scope,
-        {
-          status: recent.length >= CACHE_MAINTENANCE_FAILURE_THRESHOLD ? "warning" : "ok",
-          recentErrorCount: recent.length,
-          threshold: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
-          windowMs: CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
-          ...(lastError === undefined ? {} : { lastErrorAt: new Date(lastError).toISOString() }),
-        },
-      ];
+): Promise<Record<CacheMaintenanceScope, CacheMaintenanceDiagnostic>> {
+  const diagnostics = await Promise.all(
+    CACHE_MAINTENANCE_SCOPES.map(async (scope) => {
+      try {
+        return [scope, await readSharedCacheMaintenanceDiagnostic(scope, now)] as const;
+      } catch {
+        // Health diagnostics must remain available when the optional shared
+        // telemetry store is missing or unavailable.
+        return [scope, localCacheMaintenanceDiagnostic(scope, now)] as const;
+      }
     }),
-  ) as Record<CacheMaintenanceScope, CacheMaintenanceDiagnostic>;
+  );
+  return Object.fromEntries(diagnostics) as Record<CacheMaintenanceScope, CacheMaintenanceDiagnostic>;
 }
 
 function trackCacheMaintenanceFailure(
@@ -111,6 +111,158 @@ function trackCacheMaintenanceFailure(
   return { recentErrorCount: recent.length, shouldAlert };
 }
 
+function localCacheMaintenanceDiagnostic(
+  scope: CacheMaintenanceScope,
+  now: number,
+): CacheMaintenanceDiagnostic {
+  const recent = recentCacheMaintenanceFailures(scope, now);
+  const lastError = recent[recent.length - 1];
+  return {
+    status: recent.length >= CACHE_MAINTENANCE_FAILURE_THRESHOLD ? "warning" : "ok",
+    recentErrorCount: recent.length,
+    threshold: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+    windowMs: CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+    ...(lastError === undefined ? {} : { lastErrorAt: new Date(lastError).toISOString() }),
+  };
+}
+
+type SharedCacheMaintenanceResult = {
+  recentErrorCount: number;
+  shouldAlert: boolean;
+};
+
+function sharedCacheMaintenanceWhere(scope: CacheMaintenanceScope, cutoff: Date) {
+  return and(
+    eq(cacheMaintenanceEventsTable.scope, scope),
+    eq(cacheMaintenanceEventsTable.operation, CACHE_MAINTENANCE_OPERATION),
+    gte(cacheMaintenanceEventsTable.occurredAt, cutoff),
+  );
+}
+
+async function withSharedDiagnosticsTimeout<T>(work: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("cache maintenance diagnostics timed out")),
+          CACHE_MAINTENANCE_SHARED_TIMEOUT_MS,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function readSharedCacheMaintenanceDiagnostic(
+  scope: CacheMaintenanceScope,
+  now: number,
+): Promise<CacheMaintenanceDiagnostic> {
+  const cutoff = new Date(now - CACHE_MAINTENANCE_FAILURE_WINDOW_MS);
+  const rows = await withSharedDiagnosticsTimeout(
+    (async () => {
+      await db
+        .delete(cacheMaintenanceEventsTable)
+        .where(
+          and(
+            eq(cacheMaintenanceEventsTable.scope, scope),
+            eq(cacheMaintenanceEventsTable.operation, CACHE_MAINTENANCE_OPERATION),
+            lt(cacheMaintenanceEventsTable.occurredAt, cutoff),
+          ),
+        );
+      return db
+        .select({ occurredAt: cacheMaintenanceEventsTable.occurredAt })
+        .from(cacheMaintenanceEventsTable)
+        .where(sharedCacheMaintenanceWhere(scope, cutoff))
+        .orderBy(desc(cacheMaintenanceEventsTable.occurredAt), desc(cacheMaintenanceEventsTable.id))
+        .limit(CACHE_MAINTENANCE_SHARED_MAX_ROWS);
+    })(),
+  );
+  const lastError = rows[0]?.occurredAt;
+  return {
+    status: rows.length >= CACHE_MAINTENANCE_FAILURE_THRESHOLD ? "warning" : "ok",
+    recentErrorCount: rows.length,
+    threshold: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+    windowMs: CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+    ...(lastError === undefined ? {} : { lastErrorAt: lastError.toISOString() }),
+  };
+}
+
+async function recordSharedCacheMaintenanceFailure(
+  scope: CacheMaintenanceScope,
+  now: number,
+): Promise<SharedCacheMaintenanceResult> {
+  return withSharedDiagnosticsTimeout(
+    db.transaction(async (tx) => {
+      const lockKey = `cache-maintenance:${scope}:${CACHE_MAINTENANCE_OPERATION}`;
+      await tx.execute(
+        // Serialize the read/insert/trim sequence so exactly one API instance
+        // observes the threshold crossing and emits the episode warning.
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
+      );
+
+      const cutoff = new Date(now - CACHE_MAINTENANCE_FAILURE_WINDOW_MS);
+      await tx
+        .delete(cacheMaintenanceEventsTable)
+        .where(
+          and(
+            eq(cacheMaintenanceEventsTable.scope, scope),
+            eq(cacheMaintenanceEventsTable.operation, CACHE_MAINTENANCE_OPERATION),
+            lt(cacheMaintenanceEventsTable.occurredAt, cutoff),
+          ),
+        );
+      const where = sharedCacheMaintenanceWhere(scope, cutoff);
+      const before = await tx
+        .select({ id: cacheMaintenanceEventsTable.id })
+        .from(cacheMaintenanceEventsTable)
+        .where(where)
+        .limit(CACHE_MAINTENANCE_FAILURE_THRESHOLD);
+
+      await tx.insert(cacheMaintenanceEventsTable).values({
+        scope,
+        operation: CACHE_MAINTENANCE_OPERATION,
+        occurredAt: new Date(now),
+      });
+
+      const retained = await tx
+        .select({
+          id: cacheMaintenanceEventsTable.id,
+          occurredAt: cacheMaintenanceEventsTable.occurredAt,
+        })
+        .from(cacheMaintenanceEventsTable)
+        .where(where)
+        .orderBy(desc(cacheMaintenanceEventsTable.occurredAt), desc(cacheMaintenanceEventsTable.id))
+        .limit(CACHE_MAINTENANCE_SHARED_MAX_ROWS + 1);
+      const keep = retained.slice(0, CACHE_MAINTENANCE_SHARED_MAX_ROWS);
+      if (retained.length > keep.length) {
+        await tx
+          .delete(cacheMaintenanceEventsTable)
+          .where(
+            and(
+              eq(cacheMaintenanceEventsTable.scope, scope),
+              eq(cacheMaintenanceEventsTable.operation, CACHE_MAINTENANCE_OPERATION),
+              notInArray(
+                cacheMaintenanceEventsTable.id,
+                keep.map((row) => row.id),
+              ),
+            ),
+          );
+      }
+
+      const lastError = keep[0]?.occurredAt;
+      return {
+        recentErrorCount: keep.length,
+        shouldAlert:
+          before.length < CACHE_MAINTENANCE_FAILURE_THRESHOLD &&
+          keep.length >= CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+      };
+    }),
+  );
+}
+
 function safeCacheMaintenanceWaitMs(waitDurationMs: unknown): number {
   if (typeof waitDurationMs !== "number" || !Number.isFinite(waitDurationMs)) return 0;
   return Math.min(MAX_CACHE_MAINTENANCE_WAIT_MS, Math.max(0, Math.round(waitDurationMs)));
@@ -129,8 +281,9 @@ export function recordCacheMaintenance(
     outcome: CacheMaintenanceOutcome;
   },
   log: CacheMaintenanceLogger = logger,
-): void {
-  const recurrence = trackCacheMaintenanceFailure(fields.scope, fields.outcome, Date.now());
+): Promise<void> {
+  const now = Date.now();
+  const recurrence = trackCacheMaintenanceFailure(fields.scope, fields.outcome, now);
   try {
     log.info?.(
       {
@@ -147,29 +300,58 @@ export function recordCacheMaintenance(
     // an otherwise successful cache/provider operation into a failure.
   }
 
-  if (recurrence.shouldAlert) {
-    try {
-      log.warn?.(
-        {
-          event: "cache_maintenance_recurrence",
-          scope: fields.scope,
-          operation: fields.operation,
-          recentErrorCount: recurrence.recentErrorCount,
-          threshold: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
-          windowMs: CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
-        },
-        "cache maintenance failures recurring",
-      );
-    } catch {
-      // A warning logger failure must not change cache behavior.
-    }
-  }
+  if (fields.outcome !== "error") return Promise.resolve();
+
+  return recordSharedCacheMaintenanceFailure(fields.scope, now)
+    .then((sharedRecurrence) => {
+      if (!sharedRecurrence.shouldAlert) return;
+      try {
+        log.warn?.(
+          {
+            event: "cache_maintenance_recurrence",
+            scope: fields.scope,
+            operation: fields.operation,
+            recentErrorCount: sharedRecurrence.recentErrorCount,
+            threshold: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+            windowMs: CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+          },
+          "cache maintenance failures recurring",
+        );
+      } catch {
+        // A warning logger failure must not change cache behavior.
+      }
+    })
+    .catch(() => {
+      // If shared diagnostics are unavailable, retain the original
+      // process-local recurrence warning as a safe fallback.
+      if (!recurrence.shouldAlert) return;
+      try {
+        log.warn?.(
+          {
+            event: "cache_maintenance_recurrence",
+            scope: fields.scope,
+            operation: fields.operation,
+            recentErrorCount: recurrence.recentErrorCount,
+            threshold: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+            windowMs: CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+          },
+          "cache maintenance failures recurring",
+        );
+      } catch {
+        // A warning logger failure must not change cache behavior.
+      }
+    });
 }
 
-/** Reset process-local cache diagnostics between isolated test runs. */
-export function clearCacheMaintenanceDiagnosticsForTests(): void {
+/** Reset cache diagnostics between isolated test runs. */
+export async function clearCacheMaintenanceDiagnosticsForTests(): Promise<void> {
   cacheMaintenanceFailureTimes.clear();
   cacheMaintenanceAlerts.clear();
+  try {
+    await db.delete(cacheMaintenanceEventsTable);
+  } catch {
+    // Unit tests may not provide the shared diagnostics table or database.
+  }
 }
 
 function numericHeader(res: Response, name: string): number | undefined {

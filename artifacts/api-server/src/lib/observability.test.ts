@@ -11,8 +11,8 @@ import {
   safeQueueAgeMs,
 } from "./observability";
 
-afterEach(() => {
-  clearCacheMaintenanceDiagnosticsForTests();
+afterEach(async () => {
+  await clearCacheMaintenanceDiagnosticsForTests();
   vi.useRealTimers();
 });
 
@@ -36,9 +36,9 @@ describe("observability", () => {
     expect(safeQueueAgeMs(0, 8 * 24 * 60 * 60 * 1000)).toBeUndefined();
   });
 
-  it("records only bounded, scope-aware cache maintenance fields", () => {
+  it("records only bounded, scope-aware cache maintenance fields", async () => {
     const info = vi.fn();
-    recordCacheMaintenance(
+    await recordCacheMaintenance(
       {
         scope: "sandbox",
         operation: "prune",
@@ -60,16 +60,16 @@ describe("observability", () => {
     );
   });
 
-  it("does not let cache maintenance logging failures escape", () => {
-    expect(() =>
+  it("does not let cache maintenance logging failures escape", async () => {
+    await expect(
       recordCacheMaintenance(
         { scope: "live", operation: "prune", waitDurationMs: 12.4, outcome: "success" },
         { info: () => { throw new Error("logger unavailable"); } },
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it("surfaces recurring cache maintenance failures once per rolling-window episode", () => {
+  it("surfaces recurring cache maintenance failures once per rolling-window episode", async () => {
     const now = new Date("2026-09-02T12:00:00.000Z");
     vi.useFakeTimers({ now });
     const info = vi.fn();
@@ -78,7 +78,7 @@ describe("observability", () => {
     const fields = { scope: "live" as const, operation: "prune" as const, waitDurationMs: 12, outcome: "error" as const };
 
     for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_THRESHOLD; i += 1) {
-      recordCacheMaintenance(fields, log);
+      await recordCacheMaintenance(fields, log);
     }
 
     expect(warn).toHaveBeenCalledOnce();
@@ -93,7 +93,7 @@ describe("observability", () => {
       },
       "cache maintenance failures recurring",
     );
-    expect(getCacheMaintenanceDiagnostics()).toMatchObject({
+    await expect(getCacheMaintenanceDiagnostics()).resolves.toMatchObject({
       live: {
         status: "warning",
         recentErrorCount: CACHE_MAINTENANCE_FAILURE_THRESHOLD,
@@ -101,23 +101,23 @@ describe("observability", () => {
       sandbox: { status: "ok", recentErrorCount: 0 },
     });
 
-    recordCacheMaintenance(fields, log);
+    await recordCacheMaintenance(fields, log);
     expect(warn).toHaveBeenCalledOnce();
     expect(JSON.stringify(warn.mock.calls[0])).not.toMatch(/prompt|result|cache.?key/i);
 
     for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_MAX_EVENTS * 2; i += 1) {
-      recordCacheMaintenance(fields, log);
+      await recordCacheMaintenance(fields, log);
     }
-    expect(getCacheMaintenanceDiagnostics().live.recentErrorCount).toBe(
+    expect((await getCacheMaintenanceDiagnostics()).live.recentErrorCount).toBe(
       CACHE_MAINTENANCE_FAILURE_MAX_EVENTS,
     );
 
     vi.advanceTimersByTime(CACHE_MAINTENANCE_FAILURE_WINDOW_MS + 1);
-    expect(getCacheMaintenanceDiagnostics().live).toMatchObject({ status: "ok", recentErrorCount: 0 });
+    expect((await getCacheMaintenanceDiagnostics()).live).toMatchObject({ status: "ok", recentErrorCount: 0 });
 
-    recordCacheMaintenance(fields, log);
-    recordCacheMaintenance(fields, log);
-    recordCacheMaintenance(fields, log);
+    await recordCacheMaintenance(fields, log);
+    await recordCacheMaintenance(fields, log);
+    await recordCacheMaintenance(fields, log);
     expect(warn).toHaveBeenCalledTimes(2);
   });
 });

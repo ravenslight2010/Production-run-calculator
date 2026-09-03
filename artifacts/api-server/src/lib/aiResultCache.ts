@@ -171,7 +171,7 @@ function createDatabaseCacheStore(queryDb: CacheQueryDb): AiResultCacheStore {
         waitDurationMs = performance.now() - waitStartedAt;
         throw error;
       } finally {
-        recordCacheMaintenance({ scope, operation: "prune", waitDurationMs, outcome }, log);
+        void recordCacheMaintenance({ scope, operation: "prune", waitDurationMs, outcome }, log);
       }
     },
   };

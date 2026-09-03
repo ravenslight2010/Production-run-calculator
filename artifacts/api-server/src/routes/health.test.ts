@@ -44,8 +44,8 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  clearCacheMaintenanceDiagnosticsForTests();
+beforeEach(async () => {
+  await clearCacheMaintenanceDiagnosticsForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
   previousOpenAiKey = process.env.OPENAI_API_KEY;
@@ -56,7 +56,7 @@ describe("GET /healthz cache maintenance diagnostics", () => {
   it("surfaces recurring failures without changing healthy probe behavior", async () => {
     const maintenanceLog = { info: vi.fn(), warn: vi.fn() };
     for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_THRESHOLD; i += 1) {
-      recordCacheMaintenance(
+      await recordCacheMaintenance(
         { scope: "live", operation: "prune", waitDurationMs: 10, outcome: "error" },
         maintenanceLog,
       );
