@@ -21,7 +21,10 @@ import {
   AiAnomaliesResponse,
   AiMatchImportResponse,
   AiMatchPremixResponse,
+  AiMixReconcileResponse,
+  AiProactiveAlertResponse,
   AiScheduleOptimizeResponse,
+  AiSpecReconcileResponse,
   AiSuggestMergesResponse,
   AiSummaryResponse,
 } from "@workspace/api-zod";
@@ -43,6 +46,7 @@ const mock = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   firstMessages: undefined as any,
   calls: 0,
+  savedSpecRows: [] as unknown[],
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => {
@@ -66,6 +70,34 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
     // too, or the call throws "pickModel is not a function" and every route 502s.
     AI_MODELS,
     pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
+  };
+});
+
+// Keep these route contract tests independent of Postgres. Spec reconciliation
+// gets one in-memory saved sheet; proactive-alert inventory and incident reads
+// get empty rows. All real table exports remain available to the router.
+vi.mock("@workspace/db", async () => {
+  const actual = await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
+
+  return {
+    ...actual,
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          const rows = table === actual.savedSpecSheetsTable ? mock.savedSpecRows : [];
+          const query = {
+            where: () => query,
+            orderBy: () => query,
+            limit: async () => rows,
+            then: (
+              resolve: (value: unknown[]) => unknown,
+              reject?: (reason: unknown) => unknown,
+            ) => Promise.resolve(rows).then(resolve, reject),
+          };
+          return query;
+        },
+      }),
+    },
   };
 });
 
@@ -176,6 +208,7 @@ beforeEach(() => {
   mock.lastMessages = undefined;
   mock.firstMessages = undefined;
   mock.calls = 0;
+  mock.savedSpecRows = [];
 });
 
 function makeRun(id: string) {
@@ -296,6 +329,355 @@ function postSummary(body: unknown): Promise<Response> {
     body: JSON.stringify(body),
   });
 }
+
+function setSavedSpecSheet(recipes: unknown[], label = "Imported spec") {
+  mock.savedSpecRows = [
+    {
+      id: 1,
+      scope: "live",
+      label,
+      data: { recipes },
+    },
+  ];
+}
+
+function makeSpecReconcileBody(overrides: Record<string, unknown> = {}) {
+  return {
+    specSheetId: 1,
+    currentRecipes: [
+      {
+        kind: "dough",
+        name: "Standard",
+        rows: [{ ingredient: "Flour", lbs: 50 }],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function postSpecReconcile(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/spec-reconcile`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const mixDiscrepancy = {
+  source: "premix",
+  type: "amount-mismatch",
+  brand: "Acme",
+  flavor: "Pepperoni",
+  mixName: "Acme Pepperoni Mix",
+  ingredient: "Mozzarella",
+  sheetPerPizza: 0.5,
+  mixPerPizza: 0.4,
+  message: "Mozzarella amount differs",
+};
+
+function postMixReconcile(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/mix-reconcile`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function makeProactiveBody(overrides: Record<string, unknown> = {}) {
+  return {
+    date: "2026-06-18",
+    nowMs: 1_750_000_000_000,
+    runs: [
+      {
+        id: "run-1",
+        label: "Run 1",
+        brand: "Acme",
+        flavor: "Cheese",
+        dieType: "12in",
+        status: "running",
+        casesNeeded: 100,
+        casesMade: 10,
+        casesLeft: 90,
+        plannedPpm: 60,
+        actualPpm: 45,
+        minutesRemaining: 30,
+        netElapsedSec: 600,
+        downtimeSec: 0,
+        stoppages: [],
+      },
+    ],
+    scheduledRuns: [],
+    historyRuns: [],
+    ...overrides,
+  };
+}
+
+function postProactiveAlert(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/proactive-alert`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("AI reconciliation and proactive response contracts", () => {
+  it("returns a schema-valid deterministic spec reconciliation without calling the model", async () => {
+    setSavedSpecSheet([
+      {
+        kind: "dough",
+        name: "Standard",
+        rows: [{ ingredient: "Flour", lbs: 50 }],
+      },
+    ]);
+
+    const res = await postSpecReconcile(makeSpecReconcileBody());
+    expect(res.status).toBe(200);
+    const body = AiSpecReconcileResponse.parse(await res.json());
+
+    expect(body.discrepancies).toEqual([]);
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("returns a schema-valid enriched spec reconciliation", async () => {
+    setSavedSpecSheet([
+      {
+        kind: "dough",
+        name: "Standard",
+        rows: [{ ingredient: "Flour", lbs: 55 }],
+      },
+    ]);
+    mock.nextContent = JSON.stringify({ summary: "Flour is five pounds under the imported spec." });
+
+    const res = await postSpecReconcile(makeSpecReconcileBody());
+    expect(res.status).toBe(200);
+    const body = AiSpecReconcileResponse.parse(await res.json());
+
+    expect(body.discrepancies).toEqual([
+      expect.objectContaining({
+        kind: "dough",
+        recipeName: "Standard",
+        type: "amount-mismatch",
+        ingredient: "Flour",
+        specLbs: 55,
+        currentLbs: 50,
+      }),
+    ]);
+    expect(body.summary).toBe("Flour is five pounds under the imported spec.");
+    expect(body.aiGenerated).toBe(true);
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves the deterministic spec diff and labels provider failure unavailable", async () => {
+    setSavedSpecSheet([
+      {
+        kind: "dough",
+        name: "Standard",
+        rows: [{ ingredient: "Flour", lbs: 55 }],
+      },
+    ]);
+    mock.shouldThrow = true;
+
+    const res = await postSpecReconcile(makeSpecReconcileBody());
+    expect(res.status).toBe(200);
+    const body = AiSpecReconcileResponse.parse(await res.json());
+
+    expect(body.discrepancies).toHaveLength(1);
+    expect(body.summary).toBeUndefined();
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves a non-JSON spec summary fallback as enriched narration", async () => {
+    setSavedSpecSheet([
+      {
+        kind: "dough",
+        name: "Standard",
+        rows: [{ ingredient: "Flour", lbs: 55 }],
+      },
+    ]);
+    mock.nextContent = "The provider returned plain text.";
+
+    const res = await postSpecReconcile(makeSpecReconcileBody());
+    expect(res.status).toBe(200);
+    const body = AiSpecReconcileResponse.parse(await res.json());
+
+    expect(body.discrepancies).toHaveLength(1);
+    expect(body.summary).toBe("The provider returned plain text.");
+    expect(body.aiGenerated).toBe(true);
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("accepts a cached spec result through the generated schema without calling the model", async () => {
+    setSavedSpecSheet([
+      {
+        kind: "dough",
+        name: "Standard",
+        rows: [{ ingredient: "Flour", lbs: 55 }],
+      },
+    ]);
+    mock.cachedValue = {
+      specSheetId: 1,
+      discrepancies: [
+        {
+          kind: "dough",
+          recipeName: "Standard",
+          type: "amount-mismatch",
+          ingredient: "Flour",
+          specLbs: 55,
+          currentLbs: 50,
+          message: "Flour differs",
+        },
+      ],
+      summary: "Cached reconciliation summary.",
+    };
+
+    const res = await postSpecReconcile(makeSpecReconcileBody());
+    expect(res.status).toBe(200);
+    const body = AiSpecReconcileResponse.parse(await res.json());
+
+    expect(body.summary).toBe("Cached reconciliation summary.");
+    expect(body.aiGenerated).toBe(true);
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("returns a schema-valid deterministic mix reconciliation without calling the model", async () => {
+    const res = await postMixReconcile({ discrepancies: [] });
+    expect(res.status).toBe(200);
+    const body = AiMixReconcileResponse.parse(await res.json());
+
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(body.summary).toBeUndefined();
+    expect(mock.calls).toBe(0);
+  });
+
+  it("returns a schema-valid enriched mix reconciliation", async () => {
+    mock.nextContent = JSON.stringify({ summary: "Mozzarella is below the premix amount." });
+
+    const res = await postMixReconcile({ label: "Pepperoni sheet", discrepancies: [mixDiscrepancy] });
+    expect(res.status).toBe(200);
+    const body = AiMixReconcileResponse.parse(await res.json());
+
+    expect(body.summary).toBe("Mozzarella is below the premix amount.");
+    expect(body.aiGenerated).toBe(true);
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("labels a mix provider failure unavailable while returning a valid response", async () => {
+    mock.shouldThrow = true;
+
+    const res = await postMixReconcile({ discrepancies: [mixDiscrepancy] });
+    expect(res.status).toBe(200);
+    const body = AiMixReconcileResponse.parse(await res.json());
+
+    expect(body.summary).toBeUndefined();
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("preserves a non-JSON mix summary fallback as enriched narration", async () => {
+    mock.nextContent = "The provider returned plain text.";
+
+    const res = await postMixReconcile({ discrepancies: [mixDiscrepancy] });
+    expect(res.status).toBe(200);
+    const body = AiMixReconcileResponse.parse(await res.json());
+
+    expect(body.summary).toBe("The provider returned plain text.");
+    expect(body.aiGenerated).toBe(true);
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("accepts a cached mix result through the generated schema without calling the model", async () => {
+    mock.cachedValue = { summary: "Cached mix summary." };
+
+    const res = await postMixReconcile({ discrepancies: [mixDiscrepancy] });
+    expect(res.status).toBe(200);
+    const body = AiMixReconcileResponse.parse(await res.json());
+
+    expect(body.summary).toBe("Cached mix summary.");
+    expect(body.aiGenerated).toBe(true);
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("returns a schema-valid deterministic proactive response without calling the model", async () => {
+    const res = await postProactiveAlert(
+      makeProactiveBody({
+        runs: [{ ...makeProactiveBody().runs[0], status: "upcoming" }],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = AiProactiveAlertResponse.parse(await res.json());
+
+    expect(body.alert).toBeNull();
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
+  });
+
+  it("returns a schema-valid enriched proactive alert", async () => {
+    mock.nextContent = JSON.stringify({
+      alert: {
+        key: "behind-plan",
+        category: "run",
+        impact: "high",
+        title: "Falling behind plan",
+        detail: "Run 1 is behind its target pace.",
+      },
+    });
+
+    const res = await postProactiveAlert(makeProactiveBody());
+    expect(res.status).toBe(200);
+    const body = AiProactiveAlertResponse.parse(await res.json());
+
+    expect(body.alert).toMatchObject({ key: "behind-plan", category: "run", impact: "high" });
+    expect(body.aiStatus).toBe("enriched");
+    expect(mock.calls).toBe(1);
+  });
+
+  it("labels provider and malformed proactive responses unavailable", async () => {
+    mock.shouldThrow = true;
+    const unavailable = await postProactiveAlert(makeProactiveBody());
+    expect(unavailable.status).toBe(200);
+    const unavailableBody = AiProactiveAlertResponse.parse(await unavailable.json());
+    expect(unavailableBody.alert).toBeNull();
+    expect(unavailableBody.aiStatus).toBe("unavailable");
+
+    mock.shouldThrow = false;
+    mock.nextContent = "not JSON";
+    const malformed = await postProactiveAlert(makeProactiveBody());
+    expect(malformed.status).toBe(200);
+    const malformedBody = AiProactiveAlertResponse.parse(await malformed.json());
+    expect(malformedBody.alert).toBeNull();
+    expect(malformedBody.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(2);
+  });
+
+  it("accepts a cached proactive result through the generated schema without calling the model", async () => {
+    mock.cachedValue = {
+      alert: null,
+      note: "Cached no-alert result.",
+      aiStatus: "unavailable",
+    };
+
+    const res = await postProactiveAlert(makeProactiveBody());
+    expect(res.status).toBe(200);
+    const body = AiProactiveAlertResponse.parse(await res.json());
+
+    expect(body.alert).toBeNull();
+    expect(body.note).toBe("Cached no-alert result.");
+    expect(body.aiStatus).toBe("unavailable");
+    expect(mock.calls).toBe(0);
+  });
+});
 
 function postScheduleOptimize(body: unknown): Promise<Response> {
   return fetch(`${baseUrl}/ai/schedule-optimize`, {
