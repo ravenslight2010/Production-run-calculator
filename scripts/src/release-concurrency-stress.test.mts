@@ -9,7 +9,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -24,7 +24,10 @@ import {
   type StressRunStep,
 } from "./release-concurrency-stress.mts";
 import {
+  apiIntegrationTestShardInventoryErrors,
+  API_RELEASE_INTEGRATION_SCRIPT_NAMES,
   API_SHARD_TIMEOUT_MS,
+  assertApiIntegrationTestShardInventory,
   RELEASE_CHECK_API_SHARD_STEPS,
   releaseGateLabelsForMode,
 } from "./release-check.mts";
@@ -239,6 +242,72 @@ async function testCalibrationHistoryWorkflow(): Promise<void> {
 }
 
 async function run(): Promise<void> {
+  await assertApiIntegrationTestShardInventory(rootDir);
+  const apiPackageJson = JSON.parse(
+    await readFile(
+      resolve(rootDir, "artifacts/api-server/package.json"),
+      "utf8",
+    ),
+  ) as { scripts?: Record<string, string> };
+  const apiIntegrationTestPaths = (
+    await execFile("find", [
+      resolve(rootDir, "artifacts/api-server/src"),
+      "-name",
+      "*.integration.test.ts",
+      "-print",
+    ])
+  ).stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((path) =>
+      relative(resolve(rootDir, "artifacts/api-server"), path).replaceAll(
+        sep,
+        "/",
+      ),
+    )
+    .sort();
+  assert.deepEqual(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      apiPackageJson.scripts ?? {},
+    ),
+    [],
+    "every API integration test file must belong to exactly one logical release shard",
+  );
+
+  const duplicateFixtureScripts = {
+    ...apiPackageJson.scripts,
+    [API_RELEASE_INTEGRATION_SCRIPT_NAMES.general[0]]: apiPackageJson.scripts?.[
+      API_RELEASE_INTEGRATION_SCRIPT_NAMES.general[0]
+    ]?.replace(
+      " ! -path 'src/routes/roles.integration.test.ts'",
+      "",
+    ),
+  };
+  assert.match(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      duplicateFixtureScripts,
+    ).join("\n"),
+    /src\/routes\/roles\.integration\.test\.ts/,
+    "duplicate assignments must report the affected integration test path",
+  );
+
+  const missingFixtureScripts = {
+    ...apiPackageJson.scripts,
+    [API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated.roles[0]]:
+      "vitest run src/routes/not-an-integration-test.ts",
+  };
+  assert.match(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      missingFixtureScripts,
+    ).join("\n"),
+    /src\/routes\/roles\.integration\.test\.ts/,
+    "missing assignments must report the affected integration test path",
+  );
+
   assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 7);
   const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
   const fullReleaseGateInventory = releaseGateLabelsForMode("full");

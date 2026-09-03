@@ -183,6 +183,127 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
 ] as const;
 export const RELEASE_CHECKPOINT_REPORT = "release-check-checkpoint.md";
 
+export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
+  general: [
+    "test:release:integration:1",
+    "test:release:integration:2",
+    "test:release:integration:3",
+  ],
+  dedicated: {
+    roles: ["test:release:roles"],
+    sync: ["test:release:sync", "test:release:sync-sse"],
+  },
+} as const;
+
+type ApiReleaseScripts = Record<string, string | undefined>;
+
+const API_INTEGRATION_TEST_PATH_RE =
+  /src\/[A-Za-z0-9_./-]+\.integration\.test\.ts/g;
+
+function referencedApiIntegrationTestPaths(command: string | undefined): Set<string> {
+  return new Set(command?.match(API_INTEGRATION_TEST_PATH_RE) ?? []);
+}
+
+export function apiIntegrationTestShardInventoryErrors(
+  integrationTestPaths: readonly string[],
+  scripts: ApiReleaseScripts,
+): string[] {
+  const sortedPaths = [...integrationTestPaths].sort();
+  const generalAssignments = API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.map(
+    (scriptName) => {
+      const command = scripts[scriptName];
+      if (!command) {
+        throw new Error(`Missing API release script: ${scriptName}`);
+      }
+      const exclusions = referencedApiIntegrationTestPaths(command);
+      return new Set(sortedPaths.filter((path) => !exclusions.has(path)));
+    },
+  );
+  const generalMembershipMismatch = sortedPaths.filter((path) => {
+    const memberships = generalAssignments.map((assignment) =>
+      assignment.has(path),
+    );
+    return memberships.some((membership) => membership !== memberships[0]);
+  });
+
+  const logicalAssignments = new Map<string, string[]>(
+    sortedPaths.map((path) => [path, []]),
+  );
+  for (const path of generalAssignments[0]) {
+    logicalAssignments.get(path)?.push("general");
+  }
+  for (const [shardName, scriptNames] of Object.entries(
+    API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated,
+  )) {
+    const dedicatedPaths = new Set<string>();
+    for (const scriptName of scriptNames) {
+      const command = scripts[scriptName];
+      if (!command) {
+        throw new Error(`Missing API release script: ${scriptName}`);
+      }
+      for (const path of referencedApiIntegrationTestPaths(command)) {
+        dedicatedPaths.add(path);
+      }
+    }
+    for (const path of dedicatedPaths) {
+      logicalAssignments.get(path)?.push(shardName);
+    }
+  }
+
+  const missing = sortedPaths.filter(
+    (path) => logicalAssignments.get(path)?.length === 0,
+  );
+  const duplicates = sortedPaths.filter(
+    (path) => (logicalAssignments.get(path)?.length ?? 0) > 1,
+  );
+  const errors: string[] = [];
+  if (generalMembershipMismatch.length > 0) {
+    errors.push(
+      `General API integration shard membership differs for:\n${generalMembershipMismatch.join("\n")}`,
+    );
+  }
+  if (missing.length > 0) {
+    errors.push(
+      `API integration tests missing from release shards:\n${missing.join("\n")}`,
+    );
+  }
+  if (duplicates.length > 0) {
+    errors.push(
+      `API integration tests assigned to multiple release shards:\n${duplicates
+        .map(
+          (path) =>
+            `${path} (${logicalAssignments.get(path)?.join(", ") ?? ""})`,
+        )
+        .join("\n")}`,
+    );
+  }
+  return errors;
+}
+
+export async function assertApiIntegrationTestShardInventory(
+  projectRoot = rootDir,
+): Promise<void> {
+  const apiRoot = resolve(projectRoot, "artifacts/api-server");
+  const apiPackageJson = JSON.parse(
+    await readFile(resolve(apiRoot, "package.json"), "utf8"),
+  ) as { scripts?: ApiReleaseScripts };
+  const integrationTestPaths = (
+    await readdir(resolve(apiRoot, "src"), { recursive: true })
+  )
+    .filter((path) => path.endsWith(".integration.test.ts"))
+    .map((path) => `src/${path.replaceAll("\\", "/")}`)
+    .sort();
+  const errors = apiIntegrationTestShardInventoryErrors(
+    integrationTestPaths,
+    apiPackageJson.scripts ?? {},
+  );
+  if (errors.length > 0) {
+    throw new Error(
+      `API release shard inventory is invalid:\n${errors.join("\n")}`,
+    );
+  }
+}
+
 export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
     label: "API unit tests (release shard 1/7)",
@@ -1492,6 +1613,7 @@ async function main(): Promise<void> {
     }
   }
 
+  await assertApiIntegrationTestShardInventory();
   console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
   let revision: string;
   try {
