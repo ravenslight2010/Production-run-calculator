@@ -113,8 +113,10 @@ interface AutoTrackParams {
   endedAt?: number | null;
   /** Line-stage signal for packaging-only drain after a pause. */
   packagingDrainActive?: boolean;
-  /** Wall-clock seconds since the pause, used only for packaging drain output. */
+  /** Seconds of actual packaging output during the pause. */
   packagingDrainElapsedSec?: number;
+  /** False while a resumed line is refilling toward Wrapper/Packaging. */
+  packagingAutoTrackActive?: boolean;
 
   nowTime: Date;
 
@@ -321,6 +323,7 @@ export function useAutoTrack({
   endedAt = null,
   packagingDrainActive = false,
   packagingDrainElapsedSec = 0,
+  packagingAutoTrackActive = true,
   nowTime,
   elapsedBatchSec,
   calc,
@@ -411,12 +414,8 @@ export function useAutoTrack({
   // tick, so deltaCases is then ≈ 1 case.
   const formResetSkippedRef = useRef<boolean>(false);
   const caseClaimRetryRef = useRef<boolean>(false);
-  // A paused packaging drain measures output from its own pause-relative
-  // clock. Retain that clock's most recent reading so Resume can reconcile
-  // the final partial interval before switching back to the normal run clock.
-  const packagingDrainElapsedSecRef = useRef<number>(0);
-  const packagingDrainWallMsRef = useRef<number>(0);
   const previousPackagingDrainActiveRef = useRef(false);
+  const previousPackagingAutoTrackActiveRef = useRef(packagingAutoTrackActive);
   const previousRunStatusRef = useRef<RunStatus | null>(null);
   const resumeRearmPendingRef = useRef(false);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
@@ -554,9 +553,8 @@ export function useAutoTrack({
     batchSeededRef.current = false;
     drainFreezerRef.current = -1;
     formResetSkippedRef.current = false;
-    packagingDrainElapsedSecRef.current = 0;
-    packagingDrainWallMsRef.current = 0;
     previousPackagingDrainActiveRef.current = false;
+    previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
@@ -736,45 +734,6 @@ export function useAutoTrack({
     rearmDoughTimers(Date.now());
   }, [rearmDoughTimers]);
 
-  const applyPackagingCaseIncrement = useCallback((increment: number) => {
-    const wholeIncrement = Math.floor(Math.max(0, increment));
-    const cps = v.casesPerSkid;
-    if (wholeIncrement <= 0 || cps <= 0) return;
-
-    const curTotal =
-      (Number(form.getValues("skidsCompleted")) || 0) * cps +
-      (Number(form.getValues("casesOnCurrentSkid")) || 0);
-    const target = curTotal + wholeIncrement;
-    // Never pull a value down below what the operator already has on the floor.
-    const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-    if (newTotal === curTotal) return;
-
-    const nextSkids = Math.floor(newTotal / cps);
-    const nextCases = Math.round(newTotal % cps);
-    const dueAt = Date.now();
-    const periodMs = getAutoTrackTiming(
-      calc.ppm,
-      v.pizzasPerCase,
-      calc.perTray,
-      calc.perBatch,
-      machine,
-    ).caseMs || 1000;
-    commitAutomatic("case", dueAt, dueAt + periodMs, [
-      { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-      { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-    ]);
-  }, [
-    calc.perBatch,
-    calc.perTray,
-    calc.ppm,
-    commitAutomatic,
-    form,
-    machine,
-    v.casesNeeded,
-    v.casesPerSkid,
-    v.pizzasPerCase,
-  ]);
-
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
   // changes) the refs are reset FIRST and the write effect then fires exactly once
@@ -839,64 +798,51 @@ export function useAutoTrack({
     }
   }, [autoTrackProgress, nowTime, rearmCaseTimer, rearmDoughTimers, resetBookkeeping]);
 
-  // The normal run clock deliberately excludes paused time. A continued-tunnel
-  // pause instead uses a pause-relative packaging clock, so the two baselines
-  // cannot be compared directly after Resume. Reconcile the unfinished drain
-  // interval once, then switch the shared case baseline to the normal clock.
+  // Pause output and ordinary production use different clocks. Baseline each
+  // clock at the physical transition and always start from a full case period:
+  // entering a drain must not compare its zero-based clock with the run clock,
+  // and Resume must not replay paused output as an immediate catch-up.
   useEffect(() => {
     const wasPackagingDrainActive = previousPackagingDrainActiveRef.current;
-    const resumedFromPackagingDrain =
-      wasPackagingDrainActive && runStatus === "running" && !packagingDrainActive;
-
-    if (packagingDrainActive) {
-      packagingDrainElapsedSecRef.current = Math.max(0, packagingDrainElapsedSec);
-      packagingDrainWallMsRef.current = nowTime.getTime();
-    }
-
-    if (resumedFromPackagingDrain) {
-      const finalDrainExpected =
-        packagingDrainWallMsRef.current > 0 && v.pizzasPerCase > 0
-          ? Math.floor(
-            ((packagingDrainElapsedSecRef.current
-              + Math.max(0, Date.now() - packagingDrainWallMsRef.current) / 1000)
-              * calc.ppm)
-              / (v.pizzasPerCase * 60),
-          )
-          : -1;
-      const previousDrainExpected = lastExpectedCasesRef.current;
-      const suppressed = Date.now() < autoSuppressUntilRef.current;
-      if (
-        finalDrainExpected >= 0
-        && previousDrainExpected >= 0
-        && !suppressed
-        && !autoTrackBlockedRef?.current
-        && !autoTrackBlocked
-        && !disabled
-        && autoTrackProgress
-      ) {
-        applyPackagingCaseIncrement(finalDrainExpected - previousDrainExpected);
-      }
-
-      // Re-base even when an automatic write is suppressed or rejected. That
-      // keeps the pause interval from replaying once normal tracking resumes.
+    if (packagingDrainActive && !wasPackagingDrainActive) {
       lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
-      packagingDrainElapsedSecRef.current = 0;
-      packagingDrainWallMsRef.current = 0;
+      rearmCaseTimer(nowTime.getTime());
+    } else if (wasPackagingDrainActive && !packagingDrainActive) {
+      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+      rearmCaseTimer(nowTime.getTime());
     }
 
     previousPackagingDrainActiveRef.current = packagingDrainActive;
   }, [
-    applyPackagingCaseIncrement,
-    autoTrackBlocked,
-    autoTrackProgress,
     autoTrackSuggestion?.expectedCasesRaw,
-    calc.ppm,
-    disabled,
     nowTime,
     packagingDrainActive,
-    packagingDrainElapsedSec,
+    rearmCaseTimer,
+  ]);
+
+  // While a resumed line is filling toward Packaging, keep the ordinary clock
+  // baseline current without writing. When Packaging becomes physically ready,
+  // start one complete case interval from that transition.
+  useEffect(() => {
+    const wasActive = previousPackagingAutoTrackActiveRef.current;
+    if (runStatus === "running" && !packagingAutoTrackActive) {
+      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+      rearmCaseTimer(nowTime.getTime());
+    } else if (
+      runStatus === "running"
+      && packagingAutoTrackActive
+      && !wasActive
+    ) {
+      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+      rearmCaseTimer(nowTime.getTime());
+    }
+    previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
+  }, [
+    autoTrackSuggestion?.expectedCasesRaw,
+    nowTime,
+    packagingAutoTrackActive,
+    rearmCaseTimer,
     runStatus,
-    v.pizzasPerCase,
   ]);
 
   // Clear the independent dough-timer pause whenever the run becomes globally
@@ -980,7 +926,11 @@ export function useAutoTrack({
       || autoTrackBlocked
       || disabled
       || !autoTrackProgress
-      || !(runStatus === "running" || drainActive || packagingDrainActive)
+      || !(
+        (runStatus === "running" && packagingAutoTrackActive)
+        || drainActive
+        || packagingDrainActive
+      )
       || !autoTrackSuggestion
     ) return;
 

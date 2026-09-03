@@ -224,10 +224,11 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
       };
     }
 
-    // A resume wave exists only for a pause that was configured to stop the
-    // tunnel and lasted long enough for frontline to drain into it. This uses
-    // the persisted policy as well as timing, so two devices never infer
-    // different restart states from the same wall-clock duration.
+    // Resume follows the same physical fill sequence as a new run. When the
+    // tunnel was left running, the line is treated as drained and all three
+    // stages refill. When the safe stop policy actually reached the tunnel,
+    // that section restarts full: Stage 1 refills, then Stage 3 refills without
+    // waiting through another tunnel-fill window.
     const lastPauseDurationMs =
       lastResumeWallMs > 0 && lastPauseStartWallMs > 0
         ? Math.max(0, lastResumeWallMs - lastPauseStartWallMs)
@@ -235,22 +236,49 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
 
     const tunnelWasStopped =
       lastPauseStopsTunnel && lastPauseDurationMs >= preTunnelMin * 60000;
-    const s2WasStopped = tunnelWasStopped;
-    const s3WasStopped = tunnelWasStopped;
+    const refillDrainedLine = !lastPauseStopsTunnel && lastResumeWallMs > 0;
+    const resumedElapsedMin =
+      lastResumeWallMs > 0 ? Math.max(0, nowMs - lastResumeWallMs) / 60000 : 0;
 
-    const s2ResumeDeadlineMs =
-      s2WasStopped && lastResumeWallMs > 0
-        ? lastResumeWallMs + preTunnelMin * 60000
-        : 0;
-    const s3ResumeDeadlineMs =
-      s3WasStopped && lastResumeWallMs > 0
-        ? lastResumeWallMs + (preTunnelMin + tunnelMin) * 60000
-        : 0;
+    if (refillDrainedLine && resumedElapsedMin < freezerTime) {
+      if (resumedElapsedMin < preTunnelMin) {
+        return {
+          stage1: mk(S1, "resuming", (preTunnelMin - resumedElapsedMin) * 60000),
+          stage2: mk(S2, "empty"),
+          stage3: mk(S3, "empty"),
+        };
+      }
+      if (resumedElapsedMin < preTunnelMin + tunnelMin) {
+        return {
+          stage1: mk(S1, "active"),
+          stage2: mk(S2, "resuming", (preTunnelMin + tunnelMin - resumedElapsedMin) * 60000),
+          stage3: mk(S3, "empty"),
+        };
+      }
+      return {
+        stage1: mk(S1, "active"),
+        stage2: mk(S2, "active"),
+        stage3: mk(S3, "resuming", (freezerTime - resumedElapsedMin) * 60000),
+      };
+    }
 
-    const s2ResumingRemMs =
-      s2ResumeDeadlineMs > 0 ? Math.max(0, s2ResumeDeadlineMs - nowMs) : 0;
-    const s3ResumingRemMs =
-      s3ResumeDeadlineMs > 0 ? Math.max(0, s3ResumeDeadlineMs - nowMs) : 0;
+    if (tunnelWasStopped && lastResumeWallMs > 0) {
+      const packagingResumeMin = preTunnelMin + postTunnelMin;
+      if (resumedElapsedMin < preTunnelMin) {
+        return {
+          stage1: mk(S1, "resuming", (preTunnelMin - resumedElapsedMin) * 60000),
+          stage2: mk(S2, "paused"),
+          stage3: mk(S3, "empty"),
+        };
+      }
+      if (resumedElapsedMin < packagingResumeMin) {
+        return {
+          stage1: mk(S1, "active"),
+          stage2: mk(S2, "active"),
+          stage3: mk(S3, "resuming", (packagingResumeMin - resumedElapsedMin) * 60000),
+        };
+      }
+    }
 
     // Stage 1: fills over the first preTunnelMin of virtual (pause-excluded) time.
     let s1: PhaseInfo;
@@ -261,16 +289,9 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     }
 
     // Stage 2: fills over the next tunnelMin of virtual time.
-    // Resume-propagation takes precedence over the filling countdown: if Stage 2
-    // was actually stopped during the pause (pause lasted >= preTunnelMin) and the
-    // restart-wave has not yet arrived, show "resuming" regardless of whether the
-    // stage was still in its initial fill or had reached steady state.
     let s2: PhaseInfo;
     if (elapsedMin < preTunnelMin) {
       s2 = mk(S2, "empty");
-    } else if (s2ResumingRemMs > 0) {
-      // Resume propagation: new product arrives after preTunnelMin wall-clock.
-      s2 = mk(S2, "resuming", s2ResumingRemMs);
     } else if (elapsedMin < preTunnelMin + tunnelMin) {
       s2 = mk(S2, "filling", (preTunnelMin + tunnelMin - elapsedMin) * 60000);
     } else {
@@ -278,14 +299,9 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     }
 
     // Stage 3: fills over the final postTunnelMin of virtual time.
-    // Same precedence: resuming > filling > active.
     let s3: PhaseInfo;
     if (elapsedMin < preTunnelMin + tunnelMin) {
       s3 = mk(S3, "empty");
-    } else if (s3ResumingRemMs > 0) {
-      // Resume propagation: new product arrives after (preTunnelMin + tunnelMin)
-      // wall-clock time from resume.
-      s3 = mk(S3, "resuming", s3ResumingRemMs);
     } else if (elapsedMin < freezerTime) {
       s3 = mk(S3, "filling", (freezerTime - elapsedMin) * 60000);
     } else {

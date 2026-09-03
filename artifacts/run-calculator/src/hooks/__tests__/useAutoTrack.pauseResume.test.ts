@@ -1240,6 +1240,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
       elapsedBatchSec: number;
       packagingDrainActive: boolean;
       packagingDrainElapsedSec: number;
+      packagingAutoTrackActive?: boolean;
     }): Props => ({
       runId: "continued-tunnel-pause-handoff",
       runStatus: args.status,
@@ -1247,6 +1248,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
       elapsedBatchSec: args.elapsedBatchSec,
       packagingDrainActive: args.packagingDrainActive,
       packagingDrainElapsedSec: args.packagingDrainElapsedSec,
+      packagingAutoTrackActive: args.packagingAutoTrackActive,
       calc: calcPackagingOnly,
       v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
       form,
@@ -1269,10 +1271,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
 
     expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(31);
 
-    // Resume exactly one packing interval later. The normal run clock still
-    // says 16 expected cases (it deliberately excludes the pause), while the
-    // paused packaging clock reached 11. The handoff must add that one paused
-    // case once, then re-base normal tracking at 16.
+    // Resume does not reconcile a partial paused interval. Packaging waits for
+    // the physical refill sequence and must not jump immediately.
     const resumeAt = T0 + CASE_PERIOD_MS;
     act(() => {
       vi.setSystemTime(resumeAt);
@@ -1282,27 +1282,29 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
         elapsedBatchSec: ELAPSED_SEC,
         packagingDrainActive: false,
         packagingDrainElapsedSec: 0,
+        packagingAutoTrackActive: false,
       }));
     });
-    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(32);
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(31);
     expect(result.current.tickDueRefs.case.current).toBe(resumeAt + CASE_PERIOD_MS);
 
-    // A same-state rerender cannot replay the paused case.
+    // The completed physical refill transition establishes a fresh baseline.
+    const packagingReadyAt = resumeAt + 20 * 60_000;
     act(() => {
+      vi.setSystemTime(packagingReadyAt);
       rerender(props({
         status: "running",
-        nowMs: resumeAt,
+        nowMs: packagingReadyAt,
         elapsedBatchSec: ELAPSED_SEC,
         packagingDrainActive: false,
         packagingDrainElapsedSec: 0,
+        packagingAutoTrackActive: true,
       }));
     });
-    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(32);
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(31);
 
-    // The next ordinary interval advances immediately from the normal
-    // baseline, rather than waiting for normal elapsed time to catch up to the
-    // 60-second pause clock.
-    const nextCaseAt = resumeAt + CASE_PERIOD_MS + 1;
+    // The next full ordinary interval advances from the new baseline.
+    const nextCaseAt = packagingReadyAt + CASE_PERIOD_MS + 1;
     act(() => {
       vi.setSystemTime(nextCaseAt);
       rerender(props({
@@ -1311,9 +1313,10 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
         elapsedBatchSec: ELAPSED_SEC + CASE_PERIOD_MS / 1000 + 0.001,
         packagingDrainActive: false,
         packagingDrainElapsedSec: 0,
+        packagingAutoTrackActive: true,
       }));
     });
-    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(33);
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(32);
     expect(store.traysOnLine).toBe(5);
     expect(store.batchesReady).toBe(2);
   });
@@ -1334,6 +1337,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
       elapsedBatchSec: number;
       packagingDrainActive: boolean;
       packagingDrainElapsedSec: number;
+      packagingAutoTrackActive?: boolean;
     }): Props => ({
       runId: "manual-packaging-pause-handoff",
       runStatus: args.status,
@@ -1341,6 +1345,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
       elapsedBatchSec: args.elapsedBatchSec,
       packagingDrainActive: args.packagingDrainActive,
       packagingDrainElapsedSec: args.packagingDrainElapsedSec,
+      packagingAutoTrackActive: args.packagingAutoTrackActive,
       calc: calcPackagingOnly,
       v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
       form,
@@ -1369,15 +1374,29 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
         elapsedBatchSec: ELAPSED_SEC,
         packagingDrainActive: false,
         packagingDrainElapsedSec: 0,
+        packagingAutoTrackActive: false,
       }));
     });
-    expect(persistAutomaticProgress).toHaveBeenCalledWith(5, 0);
+    expect(persistAutomaticProgress).not.toHaveBeenCalled();
     expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(49);
 
-    // Simulate the manual-override window expiring. The rejected catch-up must
-    // not replay; only the next one-case normal interval may be accepted.
+    const packagingReadyAt = resumeAt + 20 * 60_000;
+    act(() => {
+      vi.setSystemTime(packagingReadyAt);
+      rerender(props({
+        status: "running",
+        nowMs: packagingReadyAt,
+        elapsedBatchSec: ELAPSED_SEC,
+        packagingDrainActive: false,
+        packagingDrainElapsedSec: 0,
+        packagingAutoTrackActive: true,
+      }));
+    });
+    expect(persistAutomaticProgress).not.toHaveBeenCalled();
+
+    // Only the next full normal interval may be accepted.
     persistAutomaticProgress.mockReturnValue(true);
-    const nextCaseAt = resumeAt + CASE_PERIOD_MS + 1;
+    const nextCaseAt = packagingReadyAt + CASE_PERIOD_MS + 1;
     act(() => {
       vi.setSystemTime(nextCaseAt);
       rerender(props({
@@ -1386,6 +1405,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
         elapsedBatchSec: ELAPSED_SEC + CASE_PERIOD_MS / 1000 + 0.001,
         packagingDrainActive: false,
         packagingDrainElapsedSec: 0,
+        packagingAutoTrackActive: true,
       }));
     });
     expect(persistAutomaticProgress).toHaveBeenLastCalledWith(5, 0);
