@@ -157,3 +157,4 @@
 - [Skill catalog CI roots](skill-catalog-ci-roots.md) — GitHub checkouts may omit platform-injected `.local` roots, so missing roots warn while discovered editable skills still block.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
+- [Shell lint inventory](shell-lint-inventory.md) — scripts/src shell files stay explicitly listed in check:shell; only documented fixture/generated files are excluded.
