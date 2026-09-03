@@ -168,7 +168,7 @@ overrides:
   "js-yaml@3": "^3.15.0"
   "js-yaml@4": "^4.2.0"
   # qs.stringify can crash with a TypeError on malformed comma-format arrays (DoS)
-  qs: "^6.15.2"
+  qs: "^6.16.0"
   # postcss has an XSS via unescaped </style> in stringified output
   postcss: "8.5.23"
   # @babel/core allows arbitrary file read via sourceMappingURL comments

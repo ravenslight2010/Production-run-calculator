@@ -65,6 +65,9 @@ import type {
   DieLineDefaultsList,
   DieTypeList,
   FacilityKnowledgeList,
+  FieldCheckIngestResult,
+  FieldCheckObservationBatch,
+  FieldChecksReport,
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
@@ -12393,6 +12396,163 @@ export const useSavePhotoAliases = <TError = ErrorType<void>,
       > => {
       return useMutation(getSavePhotoAliasesMutationOptions(options));
     }
+
+export const getSubmitFieldCheckObservationsUrl = () => {
+
+
+
+
+  return `/api/field-checks/observations`
+}
+
+/**
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data.
+ * @summary Submit passive browser field-check observations
+ */
+export const submitFieldCheckObservations = async (fieldCheckObservationBatch: FieldCheckObservationBatch, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FieldCheckIngestResult>(getSubmitFieldCheckObservationsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(fieldCheckObservationBatch)
+  }
+);}
+
+
+
+
+
+export const getSubmitFieldCheckObservationsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitFieldCheckObservations>>, TError,SubmitFieldCheckObservationsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitFieldCheckObservations>>, TError,SubmitFieldCheckObservationsMutationVariables, TContext> => {
+
+const mutationKey = ['submitFieldCheckObservations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitFieldCheckObservations>>, SubmitFieldCheckObservationsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  submitFieldCheckObservations(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitFieldCheckObservationsMutationResult = NonNullable<Awaited<ReturnType<typeof submitFieldCheckObservations>>>
+    export type SubmitFieldCheckObservationsMutationBody = BodyType<FieldCheckObservationBatch>
+    export type SubmitFieldCheckObservationsMutationError = ErrorType<void>
+    export type SubmitFieldCheckObservationsMutationVariables = {data: BodyType<FieldCheckObservationBatch>}
+
+    /**
+ * @summary Submit passive browser field-check observations
+ */
+export const useSubmitFieldCheckObservations = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitFieldCheckObservations>>, TError,SubmitFieldCheckObservationsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitFieldCheckObservations>>,
+        TError,
+        SubmitFieldCheckObservationsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSubmitFieldCheckObservationsMutationOptions(options));
+    }
+
+export const getGetFieldChecksUrl = () => {
+
+
+
+
+  return `/api/field-checks`
+}
+
+/**
+ * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
+ * @summary Get manager field-check health
+ */
+export const getFieldChecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<FieldChecksReport> => {
+
+  return customFetch<FieldChecksReport>(getGetFieldChecksUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFieldChecksQueryKey = () => {
+    return [
+    `/api/field-checks`
+    ] as const;
+    }
+
+
+export const getGetFieldChecksQueryOptions = <TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFieldChecksQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFieldChecks>>> = ({ signal }) => getFieldChecks({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFieldChecksQueryResult = NonNullable<Awaited<ReturnType<typeof getFieldChecks>>>
+export type GetFieldChecksQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get manager field-check health
+ */
+
+export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFieldChecksQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getReportIncidentUrl = () => {
 

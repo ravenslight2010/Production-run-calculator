@@ -501,6 +501,20 @@ test.describe("accessibility smoke", () => {
       screen: "cheese import dialog",
       file: invalidWorkbook,
     });
+    await dismissUnexpectedDialog(page);
+
+    // Field checks are a manager-only, browser-observed summary. This journey
+    // runs at desktop, tablet, and phone widths in the a11y project so the
+    // panel's responsive layout and explicit hardware boundary remain covered.
+    await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Reported issues", exact: true }).click();
+    const fieldChecks = page.getByTestId("field-checks-panel");
+    await expect(fieldChecks).toBeVisible();
+    await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
+    await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
+    await assertKeyboardTraversal(page, "reported issues field checks", 8);
   });
 
 });

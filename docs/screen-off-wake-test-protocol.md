@@ -223,3 +223,15 @@ verify the arithmetic in an isolated JSDOM environment:
 - **Test 8** (`paused run: counter stays frozen on wake`) — Same clock advance while paused → counter stays at 16.
 
 This protocol confirms those same invariants hold in a real browser's tab-lifecycle events.
+
+## Field verification boundary
+
+The Production Run Calculator passively records browser-observed evidence for
+startup, foreground recovery, sync acknowledgements, peer convergence, reload
+boot, online recovery, PWA update readiness, and bounded performance timing.
+That evidence appears in the manager **Reported issues → Field checks** panel
+and is scoped to the current facility. It is intentionally not a replacement
+for this protocol: touch accuracy, keyboard clearance, screen-off behavior, and
+OS process-kill recovery remain **Unsupported** until a person confirms them
+with guided physical-device steps. The observer never taps controls, changes
+run data, or creates synthetic production state.

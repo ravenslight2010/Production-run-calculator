@@ -25,6 +25,8 @@ import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { recordPerformance } from "./performanceDiagnostics";
+import { emitFieldCheckSignal, FieldVerificationObserver } from "./fieldChecks";
+import { WEB_BUILD_ID } from "./buildIdentity";
 
 const queryClient = new QueryClient();
 
@@ -117,6 +119,7 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
         onStateChange = () => {
           if (worker.state === "installed" && isUpdate) {
             setActivatedUpdateReady(true);
+            emitFieldCheckSignal("pwa-update-handoff", "success");
           }
         };
         worker.addEventListener("statechange", onStateChange);
@@ -140,12 +143,14 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const toastedRef = useRef(false);
   const handleUpdateAndReload = useCallback(
-    () =>
-      updateAndReload(
+    () => {
+      emitFieldCheckSignal("pwa-update-handoff", "success");
+      return updateAndReload(
         registrationRef.current,
         updateServiceWorker,
         () => window.location.reload(),
-      ),
+      );
+    },
     [updateServiceWorker],
   );
 
@@ -206,6 +211,7 @@ function App() {
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
+            <FieldVerificationObserver appBuild={WEB_BUILD_ID} />
             <AppRoutes />
           </AuthProvider>
           </ErrorBoundaryWithRecovery>

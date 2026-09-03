@@ -3710,6 +3710,51 @@ paths:
         "400":
           description: Invalid input
 
+  /field-checks/observations:
+    post:
+      operationId: submitFieldCheckObservations
+      tags: [incidents]
+      summary: Submit passive browser field-check observations
+      description: >-
+        Stores bounded, authenticated, facility-scoped observations from normal
+        staff use. Observations are deduplicated by observationId and never call
+        an AI provider or modify production data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldCheckObservationBatch"
+      responses:
+        "202":
+          description: Observations accepted or already recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldCheckIngestResult"
+        "400":
+          description: Invalid or oversized observations
+        "429":
+          description: Too many requests
+
+  /field-checks:
+    get:
+      operationId: getFieldChecks
+      tags: [incidents]
+      summary: Get manager field-check health
+      description: >-
+        Returns deterministic health rollups for passive browser evidence and
+        explicit unsupported states for hardware-only checks.
+      responses:
+        "200":
+          description: Field-check health for the current facility
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldChecksReport"
+        "403":
+          description: Incident review capability required
+
   /incidents:
     post:
       operationId: reportIncident
@@ -10459,6 +10504,160 @@ components:
         note:
           type: string
           description: Optional message when no matches could be made
+
+    FieldCheckObservationBatch:
+      type: object
+      additionalProperties: false
+      required: [observations]
+      properties:
+        observations:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/FieldCheckObservationInput"
+
+    FieldCheckObservationInput:
+      type: object
+      additionalProperties: false
+      required:
+        - observationId
+        - checkName
+        - checkVersion
+        - outcome
+        - observedAt
+        - appBuild
+        - deviceCategory
+        - metrics
+      properties:
+        observationId:
+          type: string
+          minLength: 8
+          maxLength: 160
+        checkName:
+          type: string
+          enum:
+            - startup
+            - foreground-recovery
+            - sync-acknowledgment
+            - cross-device-convergence
+            - reload-persistence
+            - offline-recovery
+            - pwa-update-handoff
+            - performance
+        checkVersion:
+          type: string
+          maxLength: 20
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        appBuild:
+          type: string
+          minLength: 1
+          maxLength: 100
+        deviceCategory:
+          type: string
+          enum:
+            - desktop-chrome
+            - desktop-safari
+            - desktop-firefox
+            - mobile-chrome
+            - mobile-safari
+            - tablet-browser
+            - other-browser
+        metrics:
+          type: object
+          maxProperties: 8
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 10000000
+
+    FieldCheckIngestResult:
+      type: object
+      required: [accepted, duplicate]
+      properties:
+        accepted: { type: integer, minimum: 0 }
+        duplicate: { type: integer, minimum: 0 }
+
+    FieldCheckFailure:
+      type: object
+      required: [outcome, observedAt, appBuild, deviceCategory, metrics]
+      properties:
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        appBuild: { type: string }
+        deviceCategory: { type: string }
+        metrics:
+          type: object
+          additionalProperties: { type: number }
+
+    FieldCheckSummary:
+      type: object
+      required:
+        - name
+        - label
+        - status
+        - observedBy
+        - evidence
+        - expiresHours
+        - lastSuccessfulAt
+        - lastObservedAt
+        - recentFailures
+        - failureCount
+        - incompleteCount
+        - actionable
+        - issueStatus
+      properties:
+        name: { type: string }
+        label: { type: string }
+        status:
+          type: string
+          enum: [healthy, collecting, needs-review, unsupported]
+        observedBy:
+          type: string
+          enum: [browser, hardware]
+        evidence: { type: string }
+        expiresHours: { type: [number, "null"] }
+        lastSuccessfulAt:
+          type: [string, "null"]
+          format: date-time
+        lastObservedAt:
+          type: [string, "null"]
+          format: date-time
+        recentFailures:
+          type: array
+          items: { $ref: "#/components/schemas/FieldCheckFailure" }
+        failureCount: { type: integer }
+        incompleteCount: { type: integer }
+        actionable: { type: boolean }
+        issueStatus:
+          type: [string, "null"]
+          enum: [open, recovered, null]
+
+    FieldChecksReport:
+      type: object
+      required: [version, scope, generatedAt, checks, overallStatus, actionableCount]
+      properties:
+        version: { type: string }
+        scope: { type: string, enum: [current facility] }
+        generatedAt:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/FieldCheckSummary" }
+        overallStatus:
+          type: string
+          enum: [healthy, collecting, needs-review, unsupported]
+        actionableCount: { type: integer }
 
     IncidentContext:
       type: object

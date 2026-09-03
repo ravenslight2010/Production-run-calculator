@@ -1334,8 +1334,73 @@ export const reportIncident = (body: ReportIncidentBody) =>
     }),
   });
 
+export type FieldCheckObservationInput = {
+  observationId: string;
+  checkName: string;
+  checkVersion: string;
+  outcome: "success" | "failure" | "incomplete";
+  observedAt: string;
+  appBuild: string;
+  deviceCategory:
+    | "desktop-chrome"
+    | "desktop-safari"
+    | "desktop-firefox"
+    | "mobile-chrome"
+    | "mobile-safari"
+    | "tablet-browser"
+    | "other-browser";
+  metrics?: Record<string, number>;
+};
+
+export const submitFieldCheckObservations = async (
+  observations: FieldCheckObservationInput[],
+): Promise<{ accepted: number; duplicate: number }> => {
+  // This intentionally does not use api(): field-check collection is
+  // best-effort telemetry and a stale session must not trigger the app's
+  // sign-out flow or interrupt production work.
+  const res = await fetchWithDiagnostics("/api/field-checks/observations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-client-id": clientId },
+    body: JSON.stringify({ observations }),
+  });
+  if (!res.ok) throw new Error(`Field-check submission failed (${res.status})`);
+  return (await res.json()) as { accepted: number; duplicate: number };
+};
+
+export type FieldCheckFailure = {
+  outcome: "success" | "failure" | "incomplete";
+  observedAt: string;
+  appBuild: string;
+  deviceCategory: string;
+  metrics: Record<string, number>;
+};
+export type FieldCheckSummary = {
+  name: string;
+  label: string;
+  status: "healthy" | "collecting" | "needs-review" | "unsupported";
+  observedBy: "browser" | "hardware";
+  evidence: string;
+  expiresHours: number | null;
+  lastSuccessfulAt: string | null;
+  lastObservedAt: string | null;
+  recentFailures: FieldCheckFailure[];
+  failureCount: number;
+  incompleteCount: number;
+  actionable: boolean;
+  issueStatus: "open" | "recovered" | null;
+};
+export type FieldChecksReport = {
+  version: string;
+  scope: "current facility";
+  generatedAt: string;
+  checks: FieldCheckSummary[];
+  overallStatus: "healthy" | "collecting" | "needs-review" | "unsupported";
+  actionableCount: number;
+};
+
 // Manager-only review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
+export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
 export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
 export const fetchActionableIncidentCount = () => api<{ count: number }>("/incidents/actionable-count");

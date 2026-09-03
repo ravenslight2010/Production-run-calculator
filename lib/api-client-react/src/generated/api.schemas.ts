@@ -3887,6 +3887,173 @@ export interface MatchPremixResult {
   note?: string;
 }
 
+export type FieldCheckObservationInputCheckName = typeof FieldCheckObservationInputCheckName[keyof typeof FieldCheckObservationInputCheckName];
+
+
+export const FieldCheckObservationInputCheckName = {
+  startup: 'startup',
+  'foreground-recovery': 'foreground-recovery',
+  'sync-acknowledgment': 'sync-acknowledgment',
+  'cross-device-convergence': 'cross-device-convergence',
+  'reload-persistence': 'reload-persistence',
+  'offline-recovery': 'offline-recovery',
+  'pwa-update-handoff': 'pwa-update-handoff',
+  performance: 'performance',
+} as const;
+
+export type FieldCheckObservationInputOutcome = typeof FieldCheckObservationInputOutcome[keyof typeof FieldCheckObservationInputOutcome];
+
+
+export const FieldCheckObservationInputOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export type FieldCheckObservationInputDeviceCategory = typeof FieldCheckObservationInputDeviceCategory[keyof typeof FieldCheckObservationInputDeviceCategory];
+
+
+export const FieldCheckObservationInputDeviceCategory = {
+  'desktop-chrome': 'desktop-chrome',
+  'desktop-safari': 'desktop-safari',
+  'desktop-firefox': 'desktop-firefox',
+  'mobile-chrome': 'mobile-chrome',
+  'mobile-safari': 'mobile-safari',
+  'tablet-browser': 'tablet-browser',
+  'other-browser': 'other-browser',
+} as const;
+
+export type FieldCheckObservationInputMetrics = {[key: string]: number};
+
+export interface FieldCheckObservationInput {
+  /**
+     * @minLength 8
+     * @maxLength 160
+     */
+  observationId: string;
+  checkName: FieldCheckObservationInputCheckName;
+  /** @maxLength 20 */
+  checkVersion: string;
+  outcome: FieldCheckObservationInputOutcome;
+  observedAt: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  appBuild: string;
+  deviceCategory: FieldCheckObservationInputDeviceCategory;
+  metrics: FieldCheckObservationInputMetrics;
+}
+
+export interface FieldCheckObservationBatch {
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  observations: FieldCheckObservationInput[];
+}
+
+export interface FieldCheckIngestResult {
+  /** @minimum 0 */
+  accepted: number;
+  /** @minimum 0 */
+  duplicate: number;
+}
+
+export type FieldCheckFailureOutcome = typeof FieldCheckFailureOutcome[keyof typeof FieldCheckFailureOutcome];
+
+
+export const FieldCheckFailureOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export type FieldCheckFailureMetrics = {[key: string]: number};
+
+export interface FieldCheckFailure {
+  outcome: FieldCheckFailureOutcome;
+  observedAt: string;
+  appBuild: string;
+  deviceCategory: string;
+  metrics: FieldCheckFailureMetrics;
+}
+
+export type FieldCheckSummaryStatus = typeof FieldCheckSummaryStatus[keyof typeof FieldCheckSummaryStatus];
+
+
+export const FieldCheckSummaryStatus = {
+  healthy: 'healthy',
+  collecting: 'collecting',
+  'needs-review': 'needs-review',
+  unsupported: 'unsupported',
+} as const;
+
+export type FieldCheckSummaryObservedBy = typeof FieldCheckSummaryObservedBy[keyof typeof FieldCheckSummaryObservedBy];
+
+
+export const FieldCheckSummaryObservedBy = {
+  browser: 'browser',
+  hardware: 'hardware',
+} as const;
+
+/**
+ * @nullable
+ */
+export type FieldCheckSummaryIssueStatus = typeof FieldCheckSummaryIssueStatus[keyof typeof FieldCheckSummaryIssueStatus] | null;
+
+
+export const FieldCheckSummaryIssueStatus = {
+  open: 'open',
+  recovered: 'recovered',
+} as const;
+
+export interface FieldCheckSummary {
+  name: string;
+  label: string;
+  status: FieldCheckSummaryStatus;
+  observedBy: FieldCheckSummaryObservedBy;
+  evidence: string;
+  /** @nullable */
+  expiresHours: number | null;
+  /** @nullable */
+  lastSuccessfulAt: string | null;
+  /** @nullable */
+  lastObservedAt: string | null;
+  recentFailures: FieldCheckFailure[];
+  failureCount: number;
+  incompleteCount: number;
+  actionable: boolean;
+  /** @nullable */
+  issueStatus: FieldCheckSummaryIssueStatus;
+}
+
+export type FieldChecksReportScope = typeof FieldChecksReportScope[keyof typeof FieldChecksReportScope];
+
+
+export const FieldChecksReportScope = {
+  current_facility: 'current facility',
+} as const;
+
+export type FieldChecksReportOverallStatus = typeof FieldChecksReportOverallStatus[keyof typeof FieldChecksReportOverallStatus];
+
+
+export const FieldChecksReportOverallStatus = {
+  healthy: 'healthy',
+  collecting: 'collecting',
+  'needs-review': 'needs-review',
+  unsupported: 'unsupported',
+} as const;
+
+export interface FieldChecksReport {
+  version: string;
+  scope: FieldChecksReportScope;
+  generatedAt: string;
+  checks: FieldCheckSummary[];
+  overallStatus: FieldChecksReportOverallStatus;
+  actionableCount: number;
+}
+
 /**
  * Captured details about a reported issue or a crash
  */

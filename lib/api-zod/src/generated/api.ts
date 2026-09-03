@@ -4663,6 +4663,83 @@ export const SavePhotoAliasesResponse = zod.object({
 
 
 /**
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data.
+ * @summary Submit passive browser field-check observations
+ */
+export const submitFieldCheckObservationsBodyObservationsItemObservationIdMin = 8;
+export const submitFieldCheckObservationsBodyObservationsItemObservationIdMax = 160;
+
+export const submitFieldCheckObservationsBodyObservationsItemCheckVersionMax = 20;
+
+export const submitFieldCheckObservationsBodyObservationsItemAppBuildMax = 100;
+
+export const submitFieldCheckObservationsBodyObservationsItemMetricsMinOne = 0;
+export const submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne = 10000000;
+
+export const submitFieldCheckObservationsBodyObservationsMax = 20;
+
+
+
+export const SubmitFieldCheckObservationsBody = zod.object({
+  "observations": zod.array(zod.object({
+  "observationId": zod.string().min(submitFieldCheckObservationsBodyObservationsItemObservationIdMin).max(submitFieldCheckObservationsBodyObservationsItemObservationIdMax),
+  "checkName": zod.enum(['startup', 'foreground-recovery', 'sync-acknowledgment', 'cross-device-convergence', 'reload-persistence', 'offline-recovery', 'pwa-update-handoff', 'performance']),
+  "checkVersion": zod.string().max(submitFieldCheckObservationsBodyObservationsItemCheckVersionMax),
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "appBuild": zod.string().min(1).max(submitFieldCheckObservationsBodyObservationsItemAppBuildMax),
+  "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'other-browser']),
+  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne))
+})).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
+})
+
+export const submitFieldCheckObservationsResponseAcceptedMin = 0;
+
+export const submitFieldCheckObservationsResponseDuplicateMin = 0;
+
+
+
+export const SubmitFieldCheckObservationsResponse = zod.object({
+  "accepted": zod.number().int().min(submitFieldCheckObservationsResponseAcceptedMin),
+  "duplicate": zod.number().int().min(submitFieldCheckObservationsResponseDuplicateMin)
+})
+
+
+/**
+ * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
+ * @summary Get manager field-check health
+ */
+export const GetFieldChecksResponse = zod.object({
+  "version": zod.string(),
+  "scope": zod.enum(['current facility']),
+  "generatedAt": zod.coerce.date(),
+  "checks": zod.array(zod.object({
+  "name": zod.string(),
+  "label": zod.string(),
+  "status": zod.enum(['healthy', 'collecting', 'needs-review', 'unsupported']),
+  "observedBy": zod.enum(['browser', 'hardware']),
+  "evidence": zod.string(),
+  "expiresHours": zod.number().nullable(),
+  "lastSuccessfulAt": zod.coerce.date().nullable(),
+  "lastObservedAt": zod.coerce.date().nullable(),
+  "recentFailures": zod.array(zod.object({
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "appBuild": zod.string(),
+  "deviceCategory": zod.string(),
+  "metrics": zod.record(zod.string(), zod.number())
+})),
+  "failureCount": zod.number().int(),
+  "incompleteCount": zod.number().int(),
+  "actionable": zod.boolean(),
+  "issueStatus": zod.union([zod.literal('open'),zod.literal('recovered'),zod.literal(null)]).nullable()
+})),
+  "overallStatus": zod.enum(['healthy', 'collecting', 'needs-review', 'unsupported']),
+  "actionableCount": zod.number().int()
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */
