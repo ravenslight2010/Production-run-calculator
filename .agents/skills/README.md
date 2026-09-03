@@ -46,7 +46,14 @@ changes to secondary or platform-managed content.
 - `import-bug-investigation` and `spec-import-guard` diagnose import pipeline
   failures. `data-heal-playbook` is added only after incorrect values are
   confirmed to be persisted.
+- `external-skill-import` reviews untrusted archives and GitHub skill sources
+  before installation. Accepted content goes only to editable roots and must
+  pass an explicit review recommendation and approval gate before files are
+  copied.
 
 When maintaining skills, preserve these boundaries and existing safety
 requirements. Do not rewrite descriptions based on unavailable model
 benchmarks, provider failures, or lexical trigger signals.
+
+External manifests are inventory hints, not implementations. Do not create or
+install a skill unless the reviewed source contains its actual `SKILL.md`.

@@ -19,6 +19,9 @@ For maintenance-mode guidance, read `references/maintenance.md` when improving
 an existing skill. It covers identity preservation, bounded evaluation, safety,
 and completion checks without expanding the core workflow.
 
+Use `external-skill-import` before incorporating archive or GitHub material;
+finish its inventory, license, ownership, and compatibility review first.
+
 At a high level, the process of creating a skill goes like this:
 
 - Decide what you want the skill to do and roughly how it should do it
