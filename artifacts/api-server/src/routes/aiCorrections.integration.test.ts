@@ -663,6 +663,117 @@ describe("profile data health check", () => {
     expect(await repeatedUndo.json()).toMatchObject({ alreadyUndone: true });
   });
 
+  it("undoes legacy nested future-run snapshots with the same guards as historical batches", async () => {
+    const manager = await freshManager();
+    const profileKey = "legacy-brand__legacy-flavor";
+    const date = "2099-02-01";
+    const oldValues = { frontlineRecipeName: "Legacy Sauce" };
+    const repairedValues = { frontlineRecipeName: "Corrected Sauce" };
+
+    await db.insert(brandProfilesTable).values({
+      key: profileKey,
+      scope: "live",
+      brand: "Legacy Brand",
+      flavor: "legacy flavor",
+      values: repairedValues,
+      updatedAtMs: 200,
+    });
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date,
+      data: {
+        dayState: {
+          runs: [
+            { id: "legacy-future", brand: "Legacy Brand", flavor: "legacy flavor" },
+            { id: "legacy-started", brand: "Legacy Brand", flavor: "legacy flavor", startedAt: 1 },
+            { id: "legacy-changed", brand: "Legacy Brand", flavor: "legacy flavor" },
+          ],
+        },
+        runValues: {
+          "legacy-future": repairedValues,
+          "legacy-started": repairedValues,
+          "legacy-changed": { frontlineRecipeName: "Changed after apply" },
+        },
+        runValuesUpdatedAt: {
+          "legacy-future": 201,
+          "legacy-started": 201,
+          "legacy-changed": 999,
+        },
+      },
+    });
+    await db.insert(dataHealthRepairBatchesTable).values({
+      id: "legacy-profile-repair",
+      scope: "live",
+      actor: manager,
+      status: "applied",
+      records: [{
+        profileKey,
+        recipeKind: "sauce",
+        fields: ["frontlineRecipeName"],
+        previousValues: oldValues,
+        nextValues: repairedValues,
+        afterStamp: 200,
+        runs: [
+          {
+            date,
+            runId: "legacy-future",
+            fields: ["frontlineRecipeName"],
+            beforeValues: oldValues,
+            afterValues: repairedValues,
+            beforeStamp: 20,
+            afterStamp: 201,
+          },
+          {
+            date,
+            runId: "legacy-started",
+            fields: ["frontlineRecipeName"],
+            beforeValues: oldValues,
+            afterValues: repairedValues,
+            beforeStamp: 20,
+            afterStamp: 201,
+          },
+          {
+            date,
+            runId: "legacy-changed",
+            fields: ["frontlineRecipeName"],
+            beforeValues: oldValues,
+            afterValues: repairedValues,
+            beforeStamp: 20,
+            afterStamp: 201,
+          },
+        ],
+      }],
+      summary: { applied: 1, skipped: 0, failed: 0, repairedRuns: 3 },
+    });
+
+    const undo = await fetch(
+      `${baseUrl}/api/profile-data/health-check/batches/legacy-profile-repair/undo`,
+      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+    );
+    expect(undo.status).toBe(200);
+    expect(await undo.json()).toMatchObject({
+      batchId: "legacy-profile-repair",
+      summary: { applied: 1, skipped: 2, failed: 0, repairedRuns: 1 },
+    });
+
+    const [restoredProfile] = await db.select().from(brandProfilesTable);
+    expect(restoredProfile.values).toMatchObject(oldValues);
+    expect(restoredProfile.updatedAtMs).toBeGreaterThan(200);
+
+    const [day] = await db.select().from(dailySyncTable);
+    const data = day.data as Record<string, any>;
+    expect(data.runValues["legacy-future"]).toMatchObject(oldValues);
+    expect(data.runValuesUpdatedAt["legacy-future"]).toBeGreaterThan(201);
+    expect(data.runValues["legacy-started"]).toMatchObject(repairedValues);
+    expect(data.runValuesUpdatedAt["legacy-started"]).toBe(201);
+    expect(data.runValues["legacy-changed"]).toMatchObject({ frontlineRecipeName: "Changed after apply" });
+    expect(data.runValuesUpdatedAt["legacy-changed"]).toBe(999);
+
+    const [batch] = await db.select().from(dataHealthRepairBatchesTable);
+    expect(batch.status).toBe("undone");
+    expect(batch.summary).toMatchObject({ applied: 1, skipped: 2, failed: 0, repairedRuns: 1 });
+  });
+
   it("normalizes an alias finding and applies only the selected repair with guarded undo", async () => {
     const manager = await freshManager();
     await db.insert(importAliasesTable).values([
