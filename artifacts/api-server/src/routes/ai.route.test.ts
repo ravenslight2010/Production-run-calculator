@@ -17,7 +17,11 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import type { ScheduleOptimizeResponse, SummaryResult } from "@workspace/api-zod";
+import {
+  AiAnomaliesResponse,
+  AiScheduleOptimizeResponse,
+  AiSummaryResponse,
+} from "@workspace/api-zod";
 import { MAX_RUNS } from "./aiOptimize";
 
 // A controllable mock of the OpenAI chat client. `nextContent` is whatever the
@@ -489,7 +493,7 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
       runs: [],
     });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as SummaryResult;
+    const json = AiSummaryResponse.parse(await res.json());
 
     expect(json.stats).toMatchObject({ hasData: false, runsPlanned: 0 });
     expect(json.summary).toContain("No production runs");
@@ -502,7 +506,7 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     mock.shouldThrow = true;
     const res = await postSummary(makeSummaryBody());
     expect(res.status).toBe(200);
-    const json = (await res.json()) as SummaryResult;
+    const json = AiSummaryResponse.parse(await res.json());
 
     expect(json.stats).toEqual({
       scope: "day",
@@ -530,7 +534,7 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     mock.nextContent = JSON.stringify({ summary: "   " });
     const res = await postSummary(makeSummaryBody({ date: "2026-06-19" }));
     expect(res.status).toBe(200);
-    const json = (await res.json()) as SummaryResult;
+    const json = AiSummaryResponse.parse(await res.json());
 
     expect(json.stats).toMatchObject({
       date: "2026-06-19",
@@ -549,7 +553,7 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     });
     const res = await postSummary(makeSummaryBody());
     expect(res.status).toBe(200);
-    const json = (await res.json()) as SummaryResult;
+    const json = AiSummaryResponse.parse(await res.json());
 
     expect(json.stats).toEqual({
       scope: "day",
@@ -580,13 +584,7 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
       makeAnomalyBody({ history: [makeAnomalyRun(), makeAnomalyRun()] }),
     );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as {
-      anomalies: unknown[];
-      summary: string;
-      aiGenerated: boolean;
-      aiStatus: string;
-      note: string;
-    };
+    const json = AiAnomaliesResponse.parse(await res.json());
 
     expect(json.anomalies).toEqual([]);
     expect(json.summary).toBe("");
@@ -599,12 +597,7 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
   it("returns an explicitly deterministic response without calling the model when no anomalies are found", async () => {
     const res = await postAnomalies(makeAnomalyBody());
     expect(res.status).toBe(200);
-    const json = (await res.json()) as {
-      anomalies: unknown[];
-      summary: string;
-      aiGenerated: boolean;
-      aiStatus: string;
-    };
+    const json = AiAnomaliesResponse.parse(await res.json());
 
     expect(json.anomalies).toEqual([]);
     expect(json.summary).toBe("");
@@ -627,12 +620,7 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as {
-      anomalies: Array<{ metric: string; observed: number }>;
-      summary: string;
-      aiGenerated: boolean;
-      aiStatus: string;
-    };
+    const json = AiAnomaliesResponse.parse(await res.json());
 
     expect(json.anomalies).toEqual([
       expect.objectContaining({ metric: "downtime", observed: 20 }),
@@ -659,12 +647,7 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as {
-      anomalies: Array<{ metric: string; observed: number }>;
-      summary: string;
-      aiGenerated: boolean;
-      aiStatus: string;
-    };
+    const json = AiAnomaliesResponse.parse(await res.json());
 
     expect(json.anomalies).toEqual([
       expect.objectContaining({ metric: "downtime", observed: 20 }),
@@ -693,12 +676,7 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as {
-      anomalies: Array<{ metric: string; observed: number }>;
-      summary: string;
-      aiGenerated: boolean;
-      aiStatus: string;
-    };
+    const json = AiAnomaliesResponse.parse(await res.json());
 
     expect(json.anomalies).toEqual([
       expect.objectContaining({ metric: "downtime", observed: 20 }),
@@ -743,7 +721,7 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
       ],
     });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as ScheduleOptimizeResponse;
+    const json = AiScheduleOptimizeResponse.parse(await res.json());
 
     expect(json.order).toEqual(["run-cheese", "run-veggie", "run-egg"]);
     expect(json.aiGenerated).toBe(false);
@@ -755,7 +733,7 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
     mock.shouldThrow = true;
     const res = await postScheduleOptimize(makeScheduleBody());
     expect(res.status).toBe(200);
-    const json = (await res.json()) as ScheduleOptimizeResponse;
+    const json = AiScheduleOptimizeResponse.parse(await res.json());
 
     expect(json.order).toEqual(["run-cheese", "run-veggie", "run-egg"]);
     expect(json.before).toEqual({
@@ -803,7 +781,7 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
       },
     ] }));
     expect(res.status).toBe(200);
-    const json = (await res.json()) as ScheduleOptimizeResponse;
+    const json = AiScheduleOptimizeResponse.parse(await res.json());
 
     expect(json.order).toEqual(["run-cheese-2", "run-veggie-2", "run-egg-2"]);
     expect(json.before).toEqual({
@@ -827,7 +805,7 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
     });
     const res = await postScheduleOptimize(makeScheduleBody());
     expect(res.status).toBe(200);
-    const json = (await res.json()) as ScheduleOptimizeResponse;
+    const json = AiScheduleOptimizeResponse.parse(await res.json());
 
     expect(json.order).toEqual(["run-cheese", "run-veggie", "run-egg"]);
     expect(json.before).toEqual({

@@ -148,5 +148,19 @@ describe("generated Zod schema runtime contracts", () => {
         aiStatus: "unknown",
       }),
     ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiScheduleOptimizeResponse.parse({
+        order: ["run-1"],
+        changed: false,
+        improved: false,
+        before: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        after: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
   });
 });
