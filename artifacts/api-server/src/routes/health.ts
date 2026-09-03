@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { getCacheMaintenanceDiagnostics } from "../lib/observability";
 
 const router: IRouter = Router();
 
@@ -24,16 +25,21 @@ router.get("/healthz", async (_req: Request, res: Response) => {
   if (!aiConfigured) checks.dependencies = { status: "error", detail: "ai_provider_not_configured" };
   const allHealthy = Object.values(checks).every((c) => c.status === "ok");
   const flatChecks = Object.fromEntries(Object.entries(checks).map(([key, value]) => [key, value.status]));
-  logger.info({ event: "health_check", outcome: allHealthy ? "success" : "degraded", checks: flatChecks }, "health check completed");
+  const diagnostics = { cacheMaintenance: getCacheMaintenanceDiagnostics() };
+  logger.info(
+    { event: "health_check", outcome: allHealthy ? "success" : "degraded", checks: flatChecks, diagnostics },
+    "health check completed",
+  );
 
   if (allHealthy) {
     // Keep the existing contract for any caller that checks the shape
     const data = HealthCheckResponse.parse({ status: "ok" });
-    res.json({ ...data, checks: flatChecks, timestamp: new Date().toISOString() });
+    res.json({ ...data, checks: flatChecks, diagnostics, timestamp: new Date().toISOString() });
   } else {
     res.status(503).json({
       status: "degraded",
       checks: flatChecks,
+      diagnostics,
       timestamp: new Date().toISOString(),
     });
   }
