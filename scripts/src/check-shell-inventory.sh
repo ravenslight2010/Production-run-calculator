@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
 # Keep the explicit check:shell inventory aligned with maintained shell files.
-# Fixture-only and generated shell files are intentionally excluded when they
-# live under scripts/src/fixtures/ or end in .fixture.sh or .generated.sh.
+# The maintained boundary includes scripts/src/**/*.sh and top-level
+# scripts/*.sh. Fixture-only and generated shell files are intentionally
+# excluded when they live under scripts/src/ or end in .fixture.sh or
+# .generated.sh.
 
 set -euo pipefail
 
@@ -37,7 +39,7 @@ NODE
 if [[ "$check_shell_command" != shellcheck\ * ]]; then
   cat >&2 <<'EOF'
 Shell lint inventory check expected scripts/package.json#check:shell to
-start with `shellcheck` followed by explicit scripts/src/*.sh paths.
+start with `shellcheck` followed by explicit ./src/*.sh or ./*.sh paths.
 EOF
   exit 1
 fi
@@ -49,12 +51,16 @@ for path in "${inventory_args[@]}"; do
     ./src/*.sh)
       inventory+=("scripts/src/${path#./src/}")
       ;;
+    ./*.sh)
+      inventory+=("scripts/${path#./}")
+      ;;
     *)
       printf \
         'Shell lint inventory check found unsupported check:shell path: %s\n' \
         "$path" >&2
       cat >&2 <<'EOF'
-Use explicit `./src/<name>.sh` paths in scripts/package.json#check:shell.
+Use explicit `./src/<name>.sh` or `./<name>.sh` paths in
+scripts/package.json#check:shell.
 EOF
       exit 1
       ;;
@@ -64,8 +70,8 @@ done
 is_excluded_shell_file() {
   local path="$1"
   [[ "$path" == scripts/src/fixtures/* ||
-    "$path" == scripts/src/*.fixture.sh ||
-    "$path" == scripts/src/*.generated.sh ]]
+    "$path" == *.fixture.sh ||
+    "$path" == *.generated.sh ]]
 }
 
 declare -a maintained_files=()
@@ -75,7 +81,8 @@ while IFS= read -r path; do
   fi
 done < <(
   git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- \
-    ':(glob)scripts/src/**/*.sh'
+    ':(glob)scripts/src/**/*.sh' \
+    ':(glob)scripts/*.sh'
 )
 
 sorted_expected=$(printf '%s\n' "${maintained_files[@]}" | sort -u)
@@ -92,8 +99,8 @@ if [[ -n "$missing" || -n "$unexpected" ]]; then
   cat >&2 <<'EOF'
 Shell lint inventory is out of date.
 
-Every maintained shell file under scripts/src must appear in the
-scripts/package.json check:shell command.
+Every maintained shell file under scripts/src or at the top level of scripts
+must appear in the scripts/package.json check:shell command.
 EOF
   if [[ -n "$missing" ]]; then
     printf '\nMissing from check:shell:\n%s\n' "$missing" >&2
@@ -104,8 +111,9 @@ EOF
   fi
   cat >&2 <<'EOF'
 
-Add or remove the explicit `./src/<name>.sh` entry in scripts/package.json,
-then run `pnpm --filter @workspace/scripts run check:shell`.
+Add or remove the explicit `./src/<name>.sh` or `./<name>.sh` entry in
+scripts/package.json, then run
+`pnpm --filter @workspace/scripts run check:shell`.
 Fixture-only or generated files may be excluded only under
 scripts/src/fixtures/ or with a .fixture.sh or .generated.sh suffix.
 EOF

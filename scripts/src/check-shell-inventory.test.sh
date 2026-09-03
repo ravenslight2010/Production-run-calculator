@@ -66,6 +66,25 @@ EOF
   echo "PASS: accepts a matching shell inventory"
 }
 
+test_accepts_matching_top_level_inventory() {
+  local workspace
+  workspace=$(make_workspace matching_top_level \
+    'shellcheck ./src/check-shell-inventory.sh ./run-large-spec-harness.sh')
+  cat > "${workspace}/scripts/run-large-spec-harness.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+  run_guard "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected matching top-level inventory to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "covers 2 maintained scripts"
+  echo "PASS: accepts a matching top-level shell inventory"
+}
+
 test_detects_missing_maintained_script() {
   local workspace
   workspace=$(make_workspace missing \
@@ -86,6 +105,25 @@ EOF
   echo "PASS: detects a maintained script missing from the inventory"
 }
 
+test_detects_missing_top_level_script() {
+  local workspace
+  workspace=$(make_workspace missing_top_level \
+    'shellcheck ./src/check-shell-inventory.sh')
+  cat > "${workspace}/scripts/run-large-spec-harness.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+  run_guard "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a missing top-level script to fail.\n' >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "Missing from check:shell:"
+  assert_contains "$CHECK_OUTPUT" "scripts/run-large-spec-harness.sh"
+  echo "PASS: detects a top-level script missing from the inventory"
+}
+
 test_detects_stale_inventory_entry() {
   local workspace
   workspace=$(make_workspace stale \
@@ -102,6 +140,22 @@ test_detects_stale_inventory_entry() {
   echo "PASS: detects a stale inventory entry"
 }
 
+test_detects_stale_top_level_inventory_entry() {
+  local workspace
+  workspace=$(make_workspace stale_top_level \
+    'shellcheck ./src/check-shell-inventory.sh ./removed.sh')
+
+  run_guard "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a stale top-level inventory entry to fail.\n' >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "Listed in check:shell but not a maintained shell file:"
+  assert_contains "$CHECK_OUTPUT" "scripts/removed.sh"
+  echo "PASS: detects a stale top-level inventory entry"
+}
+
 test_allows_only_documented_exclusions() {
   local workspace
   workspace=$(make_workspace exclusions \
@@ -111,6 +165,9 @@ test_allows_only_documented_exclusions() {
     "${workspace}/scripts/src/fixtures/fixture.sh" \
     "${workspace}/scripts/src/example.fixture.sh" \
     "${workspace}/scripts/src/example.generated.sh"
+  touch \
+    "${workspace}/scripts/example.fixture.sh" \
+    "${workspace}/scripts/example.generated.sh"
 
   run_guard "$workspace"
   [[ "$CHECK_STATUS" -eq 0 ]] || {
@@ -123,6 +180,9 @@ test_allows_only_documented_exclusions() {
 }
 
 test_accepts_matching_inventory
+test_accepts_matching_top_level_inventory
 test_detects_missing_maintained_script
+test_detects_missing_top_level_script
 test_detects_stale_inventory_entry
+test_detects_stale_top_level_inventory_entry
 test_allows_only_documented_exclusions
