@@ -4,6 +4,13 @@ import { Logger } from "pino";
 /**
  * Database connection pool configuration and health monitoring.
  * Prevents connection exhaustion under high concurrency (especially mobile SSE).
+ *
+ * This legacy factory currently has no production callers. The API's active
+ * database access goes through @workspace/db's shared pool, whose checkout
+ * deadline is covered by the pool-saturation integration tests. Keep this
+ * factory's defaults stable for compatibility, but do not add a production
+ * caller without equivalent checkout, waiter-cleanup, recovery, and
+ * long-running-query coverage.
  */
 
 export interface PoolOptions {

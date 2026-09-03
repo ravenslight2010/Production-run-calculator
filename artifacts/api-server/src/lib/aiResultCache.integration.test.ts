@@ -94,6 +94,10 @@ beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set");
 
+  // Intentional exception: this out-of-band admin pool only creates and drops
+  // the throwaway database used by this suite. It is not an API request pool,
+  // so its longer setup deadline must not be used as the checkout-safety
+  // contract for @workspace/db's active shared pool.
   adminPool = new pg.Pool({
     connectionString: originalDatabaseUrl,
     connectionTimeoutMillis: 15_000,
