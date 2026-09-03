@@ -13,6 +13,9 @@ jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    # Covers workspace typechecks plus catalog and routine scripts checks;
+    # observed runs fit within the bounded release typecheck budget.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -34,6 +37,9 @@ jobs:
   test:
     name: Unit tests (web + libs)
     runs-on: ubuntu-latest
+    # The broad web and shared-library sweep is slower than release's
+    # explicitly sharded package gates, but normally completes well below this.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -53,6 +59,8 @@ jobs:
   test-release-concurrency:
     name: Release concurrency fixture tests
     runs-on: ubuntu-latest
+    # Fixture-only validation should stay short while allowing cold installs.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -70,6 +78,8 @@ jobs:
   test-db:
     name: API tests (Postgres)
     runs-on: ubuntu-latest
+    # Match the standard release-check job ceiling for the full API suite.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16-alpine
@@ -109,6 +119,9 @@ jobs:
   security-audit:
     name: Security audit (prod deps)
     runs-on: ubuntu-latest
+    # Includes dependency installation and a network-bound audit with a
+    # bounded cap so registry stalls cannot hold a runner indefinitely.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -128,6 +141,9 @@ jobs:
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    # Allows both cached multi-stage image builds while bounding registry or
+    # build-service stalls.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -186,6 +202,8 @@ jobs:
   build:
     name: Build (web + API)
     runs-on: ubuntu-latest
+    # Includes dependency installation and both production bundles.
+    timeout-minutes: 20
     env:
       # vite.config.ts requires both PORT and BASE_PATH at config-load time;
       # PORT is unused for the static build output but must be present.
