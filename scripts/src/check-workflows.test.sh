@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CHECK_SCRIPT="${SCRIPT_DIR}/check-workflows.sh"
+CI_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/ci.yml"
 RELEASE_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-check.yml"
 STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
 TEST_ROOT=$(mktemp -d)
@@ -104,6 +105,46 @@ stable_branch_protection_step_block() {
       print
     }
   ' "$STABLE_BRANCH_PROTECTION_WORKFLOW"
+}
+
+ci_typecheck_job_block() {
+  awk '
+    $0 == "  typecheck:" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^  [[:alnum:]_-]+:/ {
+      exit
+    }
+    found {
+      print
+    }
+  ' "$CI_WORKFLOW"
+}
+
+test_ci_runs_routine_scripts_tests() {
+  local typecheck_block
+  local routine_step_line
+  local catalog_step_line
+
+  typecheck_block=$(ci_typecheck_job_block)
+  assert_contains "$typecheck_block" "      - name: Run routine scripts tests"
+  assert_contains "$typecheck_block" \
+    "        run: pnpm --filter @workspace/scripts run test"
+
+  routine_step_line=$(grep -nF -- \
+    "      - name: Run routine scripts tests" "$CI_WORKFLOW" | cut -d: -f1)
+  catalog_step_line=$(grep -nF -- \
+    "      - name: Test skill catalog contract" "$CI_WORKFLOW" | cut -d: -f1)
+  if [[ -z "$routine_step_line" || -z "$catalog_step_line" ||
+    "$routine_step_line" -le "$catalog_step_line" ]]; then
+    printf \
+      'Routine scripts tests must run after the skill catalog contract in %s.\n' \
+      "$CI_WORKFLOW" >&2
+    return 1
+  fi
+  echo "PASS: CI runs routine scripts tests after catalog contracts"
 }
 
 test_stable_branch_protection_workflow_contract() {
@@ -573,6 +614,7 @@ test_rejects_malformed_ci_actionlint_declaration
 test_rejects_invalid_local_actionlint_release
 test_rejects_invalid_ci_actionlint_release
 test_rejects_both_invalid_actionlint_releases
+test_ci_runs_routine_scripts_tests
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
 test_stable_branch_protection_alert_fixture

@@ -28,6 +28,8 @@ jobs:
         run: pnpm run check:skill-catalog
       - name: Test skill catalog contract
         run: pnpm --filter @workspace/scripts run test:skill-catalog
+      - name: Run routine scripts tests
+        run: pnpm --filter @workspace/scripts run test
 
   test:
     name: Unit tests (web + libs)
