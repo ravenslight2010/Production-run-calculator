@@ -136,6 +136,22 @@ ci_typecheck_job_block() {
   ' "$CI_WORKFLOW"
 }
 
+ci_schema_safe_rollback_job_block() {
+  awk '
+    $0 == "  schema-safe-rollback:" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^  [[:alnum:]_-]+:/ {
+      exit
+    }
+    found {
+      print
+    }
+  ' "$CI_WORKFLOW"
+}
+
 test_ci_runs_routine_scripts_tests() {
   local typecheck_block
   local routine_step_line
@@ -158,6 +174,30 @@ test_ci_runs_routine_scripts_tests() {
     return 1
   fi
   echo "PASS: CI runs routine scripts tests after catalog contracts"
+}
+
+test_schema_safe_rollback_ci_contract() {
+  local job_block
+  local scripts_package
+  local root_package
+
+  job_block=$(ci_schema_safe_rollback_job_block)
+  scripts_package=$(<"${SCRIPT_DIR}/../package.json")
+  root_package=$(<"${SCRIPT_DIR}/../../package.json")
+  assert_contains "$job_block" "    timeout-minutes: 20"
+  assert_contains "$job_block" "          fetch-depth: 2"
+  assert_contains "$job_block" "        run: pnpm run check:schema-safe-rollback"
+  assert_contains "$job_block" "        if: always()"
+  assert_contains "$job_block" "            cat rollback-rehearsal-report.md >> \"\$GITHUB_STEP_SUMMARY\""
+  assert_contains "$job_block" "        uses: actions/upload-artifact@v4"
+  assert_contains "$job_block" "          name: schema-safe-rollback-rehearsal"
+  assert_contains "$job_block" "          path: rollback-rehearsal-report.md"
+  assert_contains "$job_block" "          retention-days: 14"
+  assert_contains "$scripts_package" \
+    "\"check:schema-safe-rollback\": \"tsx ./src/rehearse-schema-safe-rollback.mts\""
+  assert_contains "$root_package" \
+    "\"check:schema-safe-rollback\": \"pnpm --filter @workspace/scripts run check:schema-safe-rollback\""
+  echo "PASS: CI retains bounded schema-safe rollback rehearsal evidence"
 }
 
 test_stable_branch_protection_workflow_contract() {
@@ -690,6 +730,7 @@ test_ci_jobs_have_positive_timeouts
 test_rejects_ci_job_without_timeout
 test_rejects_non_positive_ci_job_timeout
 test_ci_runs_routine_scripts_tests
+test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
 test_stable_branch_protection_alert_fixture

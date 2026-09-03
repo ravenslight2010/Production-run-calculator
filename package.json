@@ -11,6 +11,7 @@
     "audit:recovery": "pnpm --filter @workspace/scripts run audit:recovery",
     "check:clean-start": "pnpm --filter @workspace/scripts run check:clean-start",
     "check:render-image": "pnpm --filter @workspace/scripts run check:render-image",
+    "check:schema-safe-rollback": "pnpm --filter @workspace/scripts run check:schema-safe-rollback",
     "check:github-signed-commit-policy": "pnpm --filter @workspace/scripts run check:github-signed-commit-policy",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
     "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",

@@ -56,11 +56,35 @@ the `api-migrate` target (or the matching `runcalc-api-migrate:<sha>` image)
 against the deployment database before starting the runtime image. Do not
 point the long-lived API service at the migration image.
 
-To roll back application code, deploy the earlier `runcalc-api:<sha>` image
-again. Database pushes are forward-only: if the newer release changed the
-schema, run the matching migration image for the chosen release first and
-verify `/api/healthz`; do not expect an application-image rollback to undo
-database changes.
+Use immutable GHCR tags, never `latest`, for a deployment or rollback. For
+example, first apply the migration image that exactly matches the release being
+introduced, then start its matching runtime:
+
+```bash
+docker run --rm --env DATABASE_URL="$DATABASE_URL" \
+  ghcr.io/ravenslight2010/runcalc-api-migrate:<new-sha>
+docker run ... ghcr.io/ravenslight2010/runcalc-api:<new-sha>
+```
+
+Verify both deployed checks: `/` must return the compiled calculator and
+`/api/healthz` must report healthy. To roll application code back, replace only
+the runtime with the earlier immutable tag:
+
+```bash
+docker run ... ghcr.io/ravenslight2010/runcalc-api:<previous-sha>
+```
+
+Do **not** run the previous migration image or attempt a down migration.
+Database application is forward-only, so the earlier runtime must operate
+against the schema already applied by
+`runcalc-api-migrate:<new-sha>`. If either `/` or `/api/healthz` is
+incompatible, stop the rollback and roll forward with a compatibility fix
+instead. The CI rehearsal command is `pnpm run check:schema-safe-rollback`; it
+proves this adjacent-revision code-only replacement using disposable Docker
+resources. The retained [September 2026 rehearsal
+evidence](docs/schema-safe-rollback-rehearsal-evidence.md) records a matching
+migration exit, both deployment checks before and after replacement, immutable
+image identities, and an unchanged normalized schema fingerprint.
 
 ## Local development
 

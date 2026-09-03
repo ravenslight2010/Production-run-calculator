@@ -115,6 +115,37 @@ jobs:
       - name: Run API server tests
         run: pnpm --filter @workspace/api-server test
 
+  schema-safe-rollback:
+    name: Schema-safe application rollback rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Rehearse application rollback on forward schema
+        run: pnpm run check:schema-safe-rollback
+      - name: Summarize rollback rehearsal evidence
+        if: always()
+        run: |
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f rollback-rehearsal-report.md ]]; then
+            cat rollback-rehearsal-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain rollback rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-safe-rollback-rehearsal
+          path: rollback-rehearsal-report.md
+          if-no-files-found: error
+          retention-days: 14
+
 
   security-audit:
     name: Security audit (prod deps)
