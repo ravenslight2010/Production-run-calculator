@@ -1348,6 +1348,9 @@ export type FieldCheckObservationInput = {
     | "mobile-chrome"
     | "mobile-safari"
     | "tablet-browser"
+    | "android-phone"
+    | "android-tablet"
+    | "ipad"
     | "other-browser";
   metrics?: Record<string, number>;
 };
@@ -1401,6 +1404,16 @@ export type FieldChecksReport = {
 // Manager-only review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
 export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
+export const confirmHardwareFieldCheck = (body: {
+  checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+  checkVersion: "2026-09";
+  outcome: "success" | "failure" | "incomplete";
+  observedAt: string;
+  deviceCategory: "android-phone" | "android-tablet" | "ipad";
+}) => api<{ accepted: number; duplicate: number }>("/field-checks/hardware-confirmations", {
+  method: "POST",
+  body: JSON.stringify(body),
+});
 export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
 export const fetchActionableIncidentCount = () => api<{ count: number }>("/incidents/actionable-count");

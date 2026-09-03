@@ -7,9 +7,11 @@ import {
   type FieldCheckObservation,
 } from "@workspace/db";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { currentScope } from "./requestScope";
 
 export const FIELD_CHECK_VERSION = "1";
+export const HARDWARE_CHECK_VERSION = "2026-09";
 export const FIELD_CHECK_RETENTION_DAYS = 30;
 export const FIELD_CHECK_MAX_BATCH = 20;
 export const FIELD_CHECK_MAX_METRICS = 8;
@@ -121,6 +123,9 @@ const observationSchema = z.object({
     "mobile-chrome",
     "mobile-safari",
     "tablet-browser",
+    "android-phone",
+    "android-tablet",
+    "ipad",
     "other-browser",
   ]),
   metrics: z.record(z.string(), z.number().finite().min(0).max(10_000_000)).default({}),
@@ -137,6 +142,47 @@ const observationSchema = z.object({
     }
   }
 });
+
+const hardwareConfirmationSchema = z.object({
+  checkName: z.enum(["touch-accuracy", "keyboard-clearance", "process-kill-recovery"]),
+  checkVersion: z.literal(HARDWARE_CHECK_VERSION),
+  outcome: z.enum(["success", "failure", "incomplete"]),
+  observedAt: z.string().datetime({ offset: true }),
+  deviceCategory: z.enum(["android-phone", "android-tablet", "ipad"]),
+}).strict();
+
+export type HardwareConfirmationInput = z.infer<typeof hardwareConfirmationSchema>;
+
+export function validateHardwareConfirmation(body: unknown): {
+  ok: true;
+  data: HardwareConfirmationInput;
+} | {
+  ok: false;
+  error: string;
+} {
+  const parsed = hardwareConfirmationSchema.safeParse(body);
+  if (!parsed.success) return { ok: false, error: "Invalid hardware-check confirmation" };
+  const observedAt = Date.parse(parsed.data.observedAt);
+  if (Math.abs(Date.now() - observedAt) > FIELD_CHECK_MAX_CLOCK_SKEW_MS) {
+    return { ok: false, error: "Observation timestamp is outside the accepted clock window" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+export function hardwareConfirmationObservation(
+  input: HardwareConfirmationInput,
+): FieldCheckObservationInput {
+  return {
+    observationId: `hardware:${randomUUID()}`,
+    checkName: input.checkName,
+    checkVersion: input.checkVersion,
+    outcome: input.outcome,
+    observedAt: input.observedAt,
+    appBuild: "hardware-protocol",
+    deviceCategory: input.deviceCategory,
+    metrics: {},
+  };
+}
 
 export type FieldCheckObservationInput = z.infer<typeof observationSchema>;
 
@@ -156,6 +202,11 @@ export function validateFieldCheckBatch(body: unknown): {
   }
   const parsed = z.array(observationSchema).safeParse(observations);
   if (!parsed.success) return { ok: false, error: "Invalid field-check observation" };
+  if (parsed.data.some((observation) =>
+    catalogByName.get(observation.checkName as FieldCheckName)?.observedBy !== "browser"
+  )) {
+    return { ok: false, error: "Hardware checks require guided manager confirmation" };
+  }
   const now = Date.now();
   if (parsed.data.some((observation) => {
     const observedAt = Date.parse(observation.observedAt);
@@ -210,7 +261,10 @@ export function deriveFieldCheckStatus(input: {
   actionable: boolean;
   now?: number;
 }): FieldCheckStatus {
-  if (input.observedBy === "hardware") return "unsupported";
+  if (input.observedBy === "hardware") {
+    if (input.actionable) return "needs-review";
+    return input.lastSuccessfulAt ? "healthy" : "unsupported";
+  }
   if (input.actionable) return "needs-review";
   return input.lastSuccessfulAt && isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())
     ? "healthy"
@@ -360,7 +414,7 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
     const recentFailures = rows.filter((row) => row.outcome !== "success").slice(0, 5).map(failureDto);
     const incompleteCount = issue?.incompleteCount ?? rows.filter((row) => row.outcome === "incomplete").length;
     const failureCount = issue?.failureCount ?? rows.filter((row) => row.outcome === "failure").length;
-    const actionable = check.observedBy === "browser" && (
+    const actionable = (
       failureCount > 0 || incompleteCount >= FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD
     ) && issue?.status !== "recovered";
     const status = deriveFieldCheckStatus({

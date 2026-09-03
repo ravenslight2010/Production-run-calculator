@@ -83,6 +83,7 @@ import type {
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
   GetSyncTodayParams,
+  HardwareFieldCheckConfirmation,
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
@@ -12553,6 +12554,85 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
 
 
 
+
+export const getConfirmHardwareFieldCheckUrl = () => {
+
+
+
+
+  return `/api/field-checks/hardware-confirmations`
+}
+
+/**
+ * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name.
+ * @summary Record a guided physical-device check
+ */
+export const confirmHardwareFieldCheck = async (hardwareFieldCheckConfirmation: HardwareFieldCheckConfirmation, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FieldCheckIngestResult>(getConfirmHardwareFieldCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(hardwareFieldCheckConfirmation)
+  }
+);}
+
+
+
+
+
+export const getConfirmHardwareFieldCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmHardwareFieldCheck>>, TError,ConfirmHardwareFieldCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmHardwareFieldCheck>>, TError,ConfirmHardwareFieldCheckMutationVariables, TContext> => {
+
+const mutationKey = ['confirmHardwareFieldCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmHardwareFieldCheck>>, ConfirmHardwareFieldCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmHardwareFieldCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmHardwareFieldCheckMutationResult = NonNullable<Awaited<ReturnType<typeof confirmHardwareFieldCheck>>>
+    export type ConfirmHardwareFieldCheckMutationBody = BodyType<HardwareFieldCheckConfirmation>
+    export type ConfirmHardwareFieldCheckMutationError = ErrorType<void>
+    export type ConfirmHardwareFieldCheckMutationVariables = {data: BodyType<HardwareFieldCheckConfirmation>}
+
+    /**
+ * @summary Record a guided physical-device check
+ */
+export const useConfirmHardwareFieldCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmHardwareFieldCheck>>, TError,ConfirmHardwareFieldCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmHardwareFieldCheck>>,
+        TError,
+        ConfirmHardwareFieldCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmHardwareFieldCheckMutationOptions(options));
+    }
 
 export const getReportIncidentUrl = () => {
 

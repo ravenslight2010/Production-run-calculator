@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
-import { requireCapability } from "../middlewares/requireCapability";
+import { requireCapability, requireManagerRole } from "../middlewares/requireCapability";
 import {
   FIELD_CHECK_MAX_BATCH,
   buildFieldChecksReport,
+  hardwareConfirmationObservation,
   recordFieldCheckBatch,
   validateFieldCheckBatch,
+  validateHardwareConfirmation,
 } from "../lib/fieldChecks";
 
 const router = Router();
@@ -52,6 +54,23 @@ router.get(
   requireCapability("review-incidents"),
   async (_req, res): Promise<void> => {
     res.json(await buildFieldChecksReport());
+  },
+);
+
+router.post(
+  "/field-checks/hardware-confirmations",
+  requireCapability("review-incidents"),
+  requireManagerRole,
+  async (req, res): Promise<void> => {
+    const validation = validateHardwareConfirmation(req.body);
+    if (!validation.ok) {
+      res.status(400).json({ error: validation.error });
+      return;
+    }
+    const result = await recordFieldCheckBatch([
+      hardwareConfirmationObservation(validation.data),
+    ]);
+    res.status(201).json(result);
   },
 );
 

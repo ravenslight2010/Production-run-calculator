@@ -3960,6 +3960,48 @@ export interface FieldCheckIngestResult {
   duplicate: number;
 }
 
+export type HardwareFieldCheckConfirmationCheckName = typeof HardwareFieldCheckConfirmationCheckName[keyof typeof HardwareFieldCheckConfirmationCheckName];
+
+
+export const HardwareFieldCheckConfirmationCheckName = {
+  'touch-accuracy': 'touch-accuracy',
+  'keyboard-clearance': 'keyboard-clearance',
+  'process-kill-recovery': 'process-kill-recovery',
+} as const;
+
+export type HardwareFieldCheckConfirmationCheckVersion = typeof HardwareFieldCheckConfirmationCheckVersion[keyof typeof HardwareFieldCheckConfirmationCheckVersion];
+
+
+export const HardwareFieldCheckConfirmationCheckVersion = {
+  '2026-09': '2026-09',
+} as const;
+
+export type HardwareFieldCheckConfirmationOutcome = typeof HardwareFieldCheckConfirmationOutcome[keyof typeof HardwareFieldCheckConfirmationOutcome];
+
+
+export const HardwareFieldCheckConfirmationOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export type HardwareFieldCheckConfirmationDeviceCategory = typeof HardwareFieldCheckConfirmationDeviceCategory[keyof typeof HardwareFieldCheckConfirmationDeviceCategory];
+
+
+export const HardwareFieldCheckConfirmationDeviceCategory = {
+  'android-phone': 'android-phone',
+  'android-tablet': 'android-tablet',
+  ipad: 'ipad',
+} as const;
+
+export interface HardwareFieldCheckConfirmation {
+  checkName: HardwareFieldCheckConfirmationCheckName;
+  checkVersion: HardwareFieldCheckConfirmationCheckVersion;
+  outcome: HardwareFieldCheckConfirmationOutcome;
+  observedAt: string;
+  deviceCategory: HardwareFieldCheckConfirmationDeviceCategory;
+}
+
 export type FieldCheckFailureOutcome = typeof FieldCheckFailureOutcome[keyof typeof FieldCheckFailureOutcome];
 
 

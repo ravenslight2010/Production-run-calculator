@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import {
   fetchIncidents,
   fetchFieldChecks,
+  confirmHardwareFieldCheck,
   markIncidentReviewed,
   markIncidentResolved,
   requestIncidentClusters,
@@ -367,6 +368,20 @@ function FieldChecksPanel({
   isLoading: boolean;
   error: unknown;
 }) {
+  const queryClient = useQueryClient();
+  const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad">("android-phone");
+  const confirmation = useMutation({
+    mutationFn: (input: {
+      checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+      outcome: "success" | "failure" | "incomplete";
+    }) => confirmHardwareFieldCheck({
+      ...input,
+      checkVersion: "2026-09",
+      observedAt: new Date().toISOString(),
+      deviceCategory,
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["fieldChecks"] }),
+  });
   const browserChecks = report?.checks.filter((check) => check.observedBy === "browser") ?? [];
   const hardwareChecks = report?.checks.filter((check) => check.observedBy === "hardware") ?? [];
   const actionable = report?.checks.filter((check) => check.actionable) ?? [];
@@ -410,15 +425,61 @@ function FieldChecksPanel({
               Hardware-only checks
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              These remain unsupported by browser evidence and require guided human confirmation on the device.
+              Browser evidence cannot confirm these. Follow the physical-device protocol without entering production data, then record only the device category, protocol version, outcome, and time.
             </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <label className="mt-2 block text-xs text-muted-foreground">
+              Device category
+              <select
+                className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+                value={deviceCategory}
+                onChange={(event) => setDeviceCategory(event.target.value as typeof deviceCategory)}
+              >
+                <option value="android-phone">Android phone</option>
+                <option value="android-tablet">Android tablet</option>
+                <option value="ipad">iPad</option>
+              </select>
+            </label>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+              <li>Use a clean training or idle screen; do not start or edit a production run.</li>
+              <li>Check touch targets, keyboard clearance, or fully close and reopen the app as described in the protocol.</li>
+              <li>Record Pass, Fail, or Incomplete below immediately after the physical check.</li>
+            </ol>
+            <div className="mt-3 space-y-2">
               {hardwareChecks.map((check) => (
-                <span key={check.name} className={`rounded-full px-2 py-1 text-[10px] font-semibold ${FIELD_STATUS_CLASS[check.status]}`}>
-                  {check.label}: {FIELD_STATUS_LABEL[check.status]}
-                </span>
+                <div key={check.name} className="rounded-md border border-border bg-background/50 p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-foreground">
+                      {check.label}: {check.status === "healthy" ? "Confirmed" : FIELD_STATUS_LABEL[check.status]}
+                    </span>
+                    <div className="flex gap-1">
+                      {(["success", "failure", "incomplete"] as const).map((outcome) => (
+                        <Button
+                          key={outcome}
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          disabled={confirmation.isPending}
+                          onClick={() => confirmation.mutate({
+                            checkName: check.name as "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery",
+                            outcome,
+                          })}
+                        >
+                          {outcome === "success" ? "Pass" : outcome === "failure" ? "Fail" : "Incomplete"}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  {check.lastObservedAt && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Last recorded {timeAgo(check.lastObservedAt)}
+                    </p>
+                  )}
+                </div>
               ))}
             </div>
+            {confirmation.isError && (
+              <p className="mt-2 text-xs text-red-400">Couldn’t save the hardware confirmation.</p>
+            )}
           </div>
           {actionable.length > 0 && (
             <div className="space-y-2" aria-label="Actionable field-check failures">

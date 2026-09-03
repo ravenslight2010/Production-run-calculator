@@ -3755,6 +3755,33 @@ paths:
         "403":
           description: Incident review capability required
 
+  /field-checks/hardware-confirmations:
+    post:
+      operationId: confirmHardwareFieldCheck
+      tags: [incidents]
+      summary: Record a guided physical-device check
+      description: >-
+        Records a manager-confirmed hardware observation separately from passive
+        browser evidence. The request accepts only the bounded device category,
+        protocol version, outcome, timestamp, and hardware check name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HardwareFieldCheckConfirmation"
+      responses:
+        "201":
+          description: Hardware confirmation recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldCheckIngestResult"
+        "400":
+          description: Invalid hardware confirmation
+        "403":
+          description: Incident review capability required
+
   /incidents:
     post:
       operationId: reportIncident
@@ -10582,6 +10609,27 @@ components:
       properties:
         accepted: { type: integer, minimum: 0 }
         duplicate: { type: integer, minimum: 0 }
+
+    HardwareFieldCheckConfirmation:
+      type: object
+      additionalProperties: false
+      required: [checkName, checkVersion, outcome, observedAt, deviceCategory]
+      properties:
+        checkName:
+          type: string
+          enum: [touch-accuracy, keyboard-clearance, process-kill-recovery]
+        checkVersion:
+          type: string
+          enum: ["2026-09"]
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        deviceCategory:
+          type: string
+          enum: [android-phone, android-tablet, ipad]
 
     FieldCheckFailure:
       type: object

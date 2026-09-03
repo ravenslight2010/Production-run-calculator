@@ -4740,6 +4740,30 @@ export const GetFieldChecksResponse = zod.object({
 
 
 /**
+ * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name.
+ * @summary Record a guided physical-device check
+ */
+export const ConfirmHardwareFieldCheckBody = zod.object({
+  "checkName": zod.enum(['touch-accuracy', 'keyboard-clearance', 'process-kill-recovery']),
+  "checkVersion": zod.enum(['2026-09']),
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "deviceCategory": zod.enum(['android-phone', 'android-tablet', 'ipad'])
+})
+
+export const confirmHardwareFieldCheckResponseAcceptedMin = 0;
+
+export const confirmHardwareFieldCheckResponseDuplicateMin = 0;
+
+
+
+export const ConfirmHardwareFieldCheckResponse = zod.object({
+  "accepted": zod.number().int().min(confirmHardwareFieldCheckResponseAcceptedMin),
+  "duplicate": zod.number().int().min(confirmHardwareFieldCheckResponseDuplicateMin)
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */

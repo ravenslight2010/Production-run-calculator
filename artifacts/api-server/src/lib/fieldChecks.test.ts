@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD,
   deriveFieldCheckStatus,
+  HARDWARE_CHECK_VERSION,
+  hardwareConfirmationObservation,
   validateFieldCheckBatch,
+  validateHardwareConfirmation,
 } from "./fieldChecks";
 
 const validObservation = {
@@ -86,5 +89,44 @@ describe("field-check contract", () => {
       now,
     })).toBe("unsupported");
     expect(FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD).toBe(3);
+  });
+
+  it("accepts only bounded, current hardware confirmations", () => {
+    const confirmation = {
+      checkName: "touch-accuracy",
+      checkVersion: HARDWARE_CHECK_VERSION,
+      outcome: "success",
+      observedAt: new Date().toISOString(),
+      deviceCategory: "android-tablet",
+    };
+    const valid = validateHardwareConfirmation(confirmation);
+    expect(valid.ok).toBe(true);
+    expect(validateHardwareConfirmation({ ...confirmation, notes: "free form" }).ok).toBe(false);
+    expect(validateHardwareConfirmation({ ...confirmation, deviceCategory: "desktop-chrome" }).ok).toBe(false);
+    if (valid.ok) {
+      expect(hardwareConfirmationObservation(valid.data)).toMatchObject({
+        ...confirmation,
+        appBuild: "hardware-protocol",
+        metrics: {},
+      });
+    }
+  });
+
+  it("distinguishes confirmed and failed hardware evidence from unsupported", () => {
+    const now = Date.now();
+    expect(deriveFieldCheckStatus({
+      observedBy: "hardware",
+      expiresHours: null,
+      lastSuccessfulAt: new Date(now),
+      actionable: false,
+      now,
+    })).toBe("healthy");
+    expect(deriveFieldCheckStatus({
+      observedBy: "hardware",
+      expiresHours: null,
+      lastSuccessfulAt: null,
+      actionable: true,
+      now,
+    })).toBe("needs-review");
   });
 });
