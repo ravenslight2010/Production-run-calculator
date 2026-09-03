@@ -1,13 +1,14 @@
-# Guarded direct-to-main GitHub push
+# Legacy guarded direct-to-main GitHub push
 
-`pnpm run push:main -- --message "Describe the change"` is the repository's
-test-gated command for committing explicitly staged changes and pushing them
-directly to `origin/main`.
+This document describes a legacy helper only. The repository's current policy
+requires pull requests for every change to `main`; use the `Replit` branch and
+open a pull request instead. The live branch rule will reject the direct push
+performed by this helper.
 
-This command intentionally bypasses pull-request review by design. Use it only
-when direct-to-main delivery is appropriate for the change and repository
-policy. It does not create a branch, stage files, rewrite `origin`, or manage
-credentials.
+`pnpm run push:main -- --message "Describe the change"` remains in the
+repository for historical compatibility. It is a test-gated command for
+committing explicitly staged changes and attempting to push them directly to
+`origin/main`; it is not an approved delivery path.
 
 ## Prerequisites
 
@@ -95,8 +96,8 @@ GitHub's native **required signed commits** rule is enabled for this repository'
 `main` branch. This server-side rule is independent of
 `push.main.requireSigned`: it rejects an unsigned commit whether it arrives from
 the guarded helper, a normal Git client, an API call, or GitHub Actions. The
-branch remains compatible with direct-to-main delivery; the policy does not
-require pull requests or status checks.
+branch also requires pull requests, the repository's required checks, and
+resolved conversations before merging.
 
 Use the read-only verifier below to confirm that the live repository rule is
 still active:

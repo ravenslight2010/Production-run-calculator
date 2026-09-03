@@ -1,19 +1,34 @@
-# Repository policy contract
+# Stable `main` branch policy
 
-GitHub's live branch protection for `main` must have **required signed commits**
-enabled. This is the enforcement boundary for every delivery path; the local
-guarded-push helper is an additional early check, not the source of truth.
+GitHub's live branch protection for `main` is the enforcement boundary for
+every delivery path. Changes to `main` require a pull request with at least one
+approval, passing required checks, resolved conversations, and an up-to-date
+branch. Stale approvals are dismissed, administrators are included, force
+pushes and branch deletion are disabled, and required signed commits remain
+enabled.
 
-The protection intentionally leaves pull-request reviews, status checks, admin
-enforcement, and push restrictions disabled so approved direct-to-main delivery
-continues to work.
+The required GitHub Actions checks are:
 
-The local `push:main` helper may reject an unsigned commit earlier when its
-repository-local opt-in is enabled, but this contract does not depend on that
-helper. GitHub's live rule is the mandatory boundary for Git clients, API
-writes, Actions, and every other path to `main`.
+- `Typecheck`
+- `Unit tests (web + libs)`
+- `API tests (Postgres)`
+- `Security audit (prod deps)`
+- `Docker image`
+- `Build (web + API)`
+- `Desktop and phone department journey`
+- `Release gates and retained standard evidence`
 
-Validate the live setting with:
+Development uses the `Replit` branch, which tracks `origin/Replit`. Local
+`main` continues to track `origin/main` as the comparison base; its local push
+target is diverted to the backup remote so an ordinary `git push` from the
+comparison branch cannot update GitHub's stable branch. Deliver changes to
+`main` through a pull request from `Replit`.
+
+The legacy `push:main` helper is not a routine delivery path under this policy;
+GitHub will reject direct updates to `main`. It remains only as a historical
+guard for repositories that explicitly permit direct delivery.
+
+Validate the signed-commit portion with:
 
 ```sh
 pnpm run check:github-signed-commit-policy -- \
