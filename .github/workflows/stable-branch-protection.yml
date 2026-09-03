@@ -1,0 +1,55 @@
+name: Stable branch protection check
+
+on:
+  schedule:
+    # Run weekly away from the top of the hour so settings drift is noticed
+    # without competing with the repository's heavier scheduled workflows.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify main branch protection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check live main branch protection
+        id: protection-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          check_log="$RUNNER_TEMP/stable-branch-protection-check.txt"
+
+          set +e
+          bash scripts/src/check-github-signed-commit-policy.sh 2>&1 |
+            tee "$check_log"
+          check_status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "## Stable branch protection check"
+            echo
+            echo '```text'
+            cat "$check_log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$check_status"
+
+      - name: Retain protection check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-branch-protection-check
+          path: ${{ runner.temp }}/stable-branch-protection-check.txt
+          if-no-files-found: error
+          retention-days: 14
