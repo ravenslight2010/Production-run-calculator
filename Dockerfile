@@ -8,9 +8,60 @@ RUN apt-get update \
 RUN npm install -g pnpm@11.5.2  # keep in sync with packageManager in package.json
 WORKDIR /app
 
-# Copy the whole workspace and install every package (this is a pnpm monorepo).
-COPY . .
+# Copy the complete workspace dependency graph before application source. Keep
+# this list aligned with pnpm-workspace.yaml so source-only changes can reuse the
+# frozen-lockfile install layer without omitting any workspace package.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
+COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
+COPY artifacts/run-calculator/package.json ./artifacts/run-calculator/package.json
+COPY lib/ai-memory/package.json ./lib/ai-memory/package.json
+COPY lib/ai-review/package.json ./lib/ai-review/package.json
+COPY lib/allergen/package.json ./lib/allergen/package.json
+COPY lib/anomaly/package.json ./lib/anomaly/package.json
+COPY lib/api-client-react/package.json ./lib/api-client-react/package.json
+COPY lib/api-spec/package.json ./lib/api-spec/package.json
+COPY lib/api-zod/package.json ./lib/api-zod/package.json
+COPY lib/cheese-import/package.json ./lib/cheese-import/package.json
+COPY lib/cheese-recipes/package.json ./lib/cheese-recipes/package.json
+COPY lib/cheese-reconcile/package.json ./lib/cheese-reconcile/package.json
+COPY lib/corpus-harness/package.json ./lib/corpus-harness/package.json
+COPY lib/cycle-count/package.json ./lib/cycle-count/package.json
+COPY lib/day-summary/package.json ./lib/day-summary/package.json
+COPY lib/db/package.json ./lib/db/package.json
+COPY lib/downtime-trends/package.json ./lib/downtime-trends/package.json
+COPY lib/fill-missing/package.json ./lib/fill-missing/package.json
+COPY lib/formula-guard/package.json ./lib/formula-guard/package.json
+COPY lib/freezer-pull/package.json ./lib/freezer-pull/package.json
+COPY lib/incident-cluster/package.json ./lib/incident-cluster/package.json
+COPY lib/ingredient-catalog/package.json ./lib/ingredient-catalog/package.json
+COPY lib/integrations-openai-ai-server/package.json ./lib/integrations-openai-ai-server/package.json
+COPY lib/inventory-math/package.json ./lib/inventory-math/package.json
+COPY lib/merge-suggest/package.json ./lib/merge-suggest/package.json
+COPY lib/mixes/package.json ./lib/mixes/package.json
+COPY lib/mix-reconcile/package.json ./lib/mix-reconcile/package.json
+COPY lib/named-recipes/package.json ./lib/named-recipes/package.json
+COPY lib/name-match/package.json ./lib/name-match/package.json
+COPY lib/onboarding/package.json ./lib/onboarding/package.json
+COPY lib/premix-import/package.json ./lib/premix-import/package.json
+COPY lib/production-rules/package.json ./lib/production-rules/package.json
+COPY lib/profile-cleanup/package.json ./lib/profile-cleanup/package.json
+COPY lib/recipe-apply/package.json ./lib/recipe-apply/package.json
+COPY lib/recipe-guide-import/package.json ./lib/recipe-guide-import/package.json
+COPY lib/scheduled-recipe-check/package.json ./lib/scheduled-recipe-check/package.json
+COPY lib/schedule-move/package.json ./lib/schedule-move/package.json
+COPY lib/schedule-optimize/package.json ./lib/schedule-optimize/package.json
+COPY lib/setup-math-check/package.json ./lib/setup-math-check/package.json
+COPY lib/shipping-import/package.json ./lib/shipping-import/package.json
+COPY lib/spec-export/package.json ./lib/spec-export/package.json
+COPY lib/spec-import/package.json ./lib/spec-import/package.json
+COPY lib/spec-reconcile/package.json ./lib/spec-reconcile/package.json
+COPY lib/voice-commands/package.json ./lib/voice-commands/package.json
+COPY scripts/package.json ./scripts/package.json
 RUN pnpm install --frozen-lockfile
+
+# Application source is intentionally copied only after dependencies install.
+COPY . .
 
 # Build the web app (served at the domain root) and the API server bundle.
 # Deployment systems can provide VITE_APP_VERSION (or a Replit deployment id).
