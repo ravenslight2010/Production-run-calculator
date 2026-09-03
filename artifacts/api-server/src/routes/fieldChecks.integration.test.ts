@@ -32,6 +32,7 @@ let baseUrl: string;
 const PHONE_USER = "field-phone-user";
 const TABLET_USER = "field-tablet-user";
 const MANAGER = "field-manager";
+const SUPERVISOR = "field-supervisor";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
@@ -117,11 +118,13 @@ beforeEach(async () => {
     { id: PHONE_USER, username: PHONE_USER, passwordHash: "x" },
     { id: TABLET_USER, username: TABLET_USER, passwordHash: "x" },
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
+    { id: SUPERVISOR, username: SUPERVISOR, passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: PHONE_USER, role: "operator" },
     { userId: TABLET_USER, role: "operator" },
     { userId: MANAGER, role: "manager" },
+    { userId: SUPERVISOR, role: "supervisor" },
   ]);
 });
 
@@ -225,57 +228,29 @@ describe("field-check evidence from two authenticated clients", () => {
     });
 
     const runRows = await db.select().from(dailySyncTable);
-
-    const observedAt = new Date().toISOString();
-    expect(observations).toHaveLength(1);
-    expect(observations[0]).toMatchObject({
-      checkName: "touch-accuracy",
-      checkVersion: "2026-09",
-      outcome: "success",
-      appBuild: "hardware-protocol",
-      deviceCategory: "android-phone",
-      metrics: {},
-    });
+    expect(runRows).toEqual([]);
   });
 });
 
+describe("manager-only hardware confirmations", () => {
+  it("rejects the seeded supervisor without recording an observation", async () => {
+    const response = await request(
+      SUPERVISOR,
+      "POST",
+      "/api/field-checks/hardware-confirmations",
+      {
+        checkName: "touch-accuracy",
+        checkVersion: "2026-09",
+        outcome: "success",
+        observedAt: new Date().toISOString(),
+        deviceCategory: "android-phone",
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Manager role required" });
+
     const observations = await db.select().from(fieldCheckObservationsTable);
-
-    const staffResponse = await request(
-      PHONE_USER,
-      "POST",
-      "/api/field-checks/hardware-confirmations",
-      {
-        ...managerConfirmation,
-        checkName: "keyboard-clearance",
-      },
-    );
-
-    const managerResponse = await request(
-      MANAGER,
-      "POST",
-      "/api/field-checks/hardware-confirmations",
-      managerConfirmation,
-    );
-
-    const managerConfirmation = {
-      checkName: "touch-accuracy",
-      checkVersion: "2026-09",
-      outcome: "success",
-      observedAt,
-      deviceCategory: "android-phone",
-    } as const;
-
-    const passiveResponse = await request(
-      PHONE_USER,
-      "POST",
-      "/api/field-checks/observations",
-      {
-        observations: [{
-          observationId: "passive-hardware-claim",
-          ...managerConfirmation,
-          appBuild: "passive-browser-test",
-          metrics: {},
-        }],
-      },
-    );
+    expect(observations).toEqual([]);
+  });
+});
