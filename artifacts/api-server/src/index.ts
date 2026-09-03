@@ -6,6 +6,7 @@ import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { spawnSync } from "node:child_process";
+import path from "node:path";
 
 const rawPort = process.env["PORT"];
 
@@ -18,12 +19,23 @@ if (!rawPort) {
 const port = Number(rawPort);
 
 function applyDatabaseSchema(): void {
-  if (process.env.NODE_ENV !== "production") return;
+  if (
+    process.env.NODE_ENV !== "production" ||
+    process.env.RUN_DB_MIGRATION !== "true"
+  ) {
+    return;
+  }
 
   logger.info("Applying database schema (drizzle push-force)…");
   const result = spawnSync(
-    "pnpm",
-    ["--filter", "@workspace/db", "run", "push-force"],
+    process.execPath,
+    [
+      path.join(process.cwd(), "migration", "node_modules", "drizzle-kit", "bin.cjs"),
+      "push",
+      "--force",
+      "--config",
+      path.join(process.cwd(), "migration", "drizzle.config.ts"),
+    ],
     { stdio: "inherit", env: process.env, cwd: process.cwd() },
   );
   if (result.error) {
@@ -138,6 +150,9 @@ async function startServer(): Promise<void> {
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
+// This opt-in path is useful for deployments that cannot configure a
+// pre-deploy command. Compose and Render use their explicit migration paths
+// instead, so the long-lived API process does not repeat the schema push.
 applyDatabaseSchema();
 startServer().catch((err) => {
   logger.error({ err }, "Failed to start server");

@@ -20,7 +20,7 @@ services:
   migrate:
     build:
       context: .
-      target: api
+      target: api-migrate
     env_file: .env
     command: ["pnpm", "--filter", "@workspace/db", "run", "push-force"]
     restart: "no"
@@ -32,6 +32,9 @@ services:
     build:
       context: .
       target: api
+    environment:
+      # The one-shot migrate service owns schema changes in Compose.
+      RUN_DB_MIGRATION: "false"
     restart: unless-stopped
     env_file: .env
     depends_on:

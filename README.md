@@ -38,6 +38,29 @@ docker compose up --build
 
 - Web is served by Caddy on `:80`/`:443` (auto-HTTPS via `SITE_ADDRESS`).
 - API runs on port `5000`; schema is applied by the one-shot `migrate` service (`db push-force`).
+- The API image is built from the slim `api` target. The Compose `migrate`
+  service uses the full `api-migrate` target and must complete before `api`
+  starts.
+
+### Container deployment and rollback
+
+CI publishes two API images:
+
+- `runcalc-api:<sha>` — slim production runtime serving `/` and `/api/*`.
+- `runcalc-api-migrate:<sha>` — full workspace image for one-shot
+  `@workspace/db` `push-force` operations.
+
+Render deploys `runcalc-api` and runs the bundled Drizzle Kit command as its
+pre-deploy migration. For a manual migration or a self-hosted deployment, run
+the `api-migrate` target (or the matching `runcalc-api-migrate:<sha>` image)
+against the deployment database before starting the runtime image. Do not
+point the long-lived API service at the migration image.
+
+To roll back application code, deploy the earlier `runcalc-api:<sha>` image
+again. Database pushes are forward-only: if the newer release changed the
+schema, run the matching migration image for the chosen release first and
+verify `/api/healthz`; do not expect an application-image rollback to undo
+database changes.
 
 ## Local development
 

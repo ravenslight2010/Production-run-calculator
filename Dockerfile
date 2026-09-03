@@ -74,12 +74,34 @@ RUN PORT=3000 BASE_PATH=/ \
     pnpm --filter @workspace/run-calculator run build \
   && pnpm --filter @workspace/api-server run build
 
-########## api: runs the bundled server ##########
-# Reuses the builder image so the one-shot "migrate" service (see
-# docker-compose.yml) can also run the schema push from the same image, which
-# needs the source + dev dependencies. The server itself runs from the bundle.
-FROM builder AS api
+########## api-migrate-runtime: only the DB package + migration dependencies ##########
+# Render runs the migration as a pre-deploy command in the API image. Deploying
+# just this workspace package keeps that compatibility without copying the full
+# builder dependency graph into the long-lived server image.
+FROM builder AS api-migrate-runtime
+RUN rm -rf /app/migration \
+  && CI=true pnpm --filter @workspace/db deploy --legacy /app/migration
+
+########## api-migrate: full workspace image for local/CI one-shot schema pushes ##########
+# Keep this target compatible with `pnpm --filter @workspace/db run push-force`.
+# It intentionally retains the source and development dependencies that the
+# workspace command needs; it is not the image deployed for API traffic.
+FROM builder AS api-migrate
+CMD ["pnpm", "--filter", "@workspace/db", "run", "push-force"]
+
+########## api-runtime-deps: production dependencies externalized by esbuild ##########
+FROM builder AS api-runtime-deps
+RUN rm -rf /app/api-runtime \
+  && CI=true pnpm --filter @workspace/api-server deploy --legacy --prod /app/api-runtime
+
+########## api: slim image for the bundled server ##########
+FROM node:24-slim AS api
 ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+COPY --from=builder /app/artifacts/run-calculator/dist/public ./artifacts/run-calculator/dist/public
+COPY --from=api-runtime-deps /app/api-runtime/node_modules ./node_modules
+COPY --from=api-migrate-runtime /app/migration ./migration
 CMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 ########## web: static files served by Caddy (also gives HTTPS) ##########

@@ -144,7 +144,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + push api image (schema + runtime)
+      - name: Build + push api runtime image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -154,6 +154,19 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/runcalc-api:latest
             ghcr.io/${{ github.repository_owner }}/runcalc-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build + push api migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api-migrate
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:latest
+            ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

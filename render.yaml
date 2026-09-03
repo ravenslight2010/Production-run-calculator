@@ -5,9 +5,10 @@
 #   4. Render provisions the database + service from the Docker image
 #   5. Add the secrets in the service's "Environment" tab
 #
-# The API applies the DB schema itself at boot (drizzle push-force), so no
-# separate migrate service is needed — Render's fresh Postgres gets its tables
-# on the first deploy automatically.
+# The API image is the slim `api` Docker target. Render runs the migration
+# payload copied into that image before each deploy, then starts the bundled
+# server. The full `api-migrate` target is published separately for manual
+# recovery and Docker Compose.
 
 databases:
   - name: runcalc-db
@@ -20,6 +21,9 @@ services:
     runtime: image
     image:
       url: ghcr.io/ravenslight2010/runcalc-api:latest
+    preDeployCommand: >-
+      node migration/node_modules/drizzle-kit/bin.cjs push --force
+      --config migration/drizzle.config.ts
     plan: free
     healthCheckPath: /api/healthz
     envVars:
