@@ -18,6 +18,10 @@ The required GitHub Actions checks are:
 - `Desktop and phone department journey`
 - `Release gates and retained standard evidence`
 
+Each required check must be reported by the GitHub Actions app
+(app ID `15368`). The read-only verifier checks this identity as well as the
+exact check names above.
+
 Development uses the `Replit` branch, which tracks `origin/Replit`. Local
 `main` continues to track `origin/main` as the comparison base; its local push
 target is diverted to the backup remote so an ordinary `git push` from the
