@@ -1366,7 +1366,16 @@ export const submitFieldCheckObservations = async (
     headers: { "Content-Type": "application/json", "x-client-id": clientId },
     body: JSON.stringify({ observations }),
   });
-  if (!res.ok) throw new Error(`Field-check submission failed (${res.status})`);
+  if (!res.ok) {
+    const retryAfterSeconds = Number(res.headers.get("Retry-After"));
+    const error = new Error(`Field-check submission failed (${res.status})`) as Error & {
+      retryAfterMs?: number;
+    };
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      error.retryAfterMs = Math.min(120_000, Math.max(1_000, retryAfterSeconds * 1_000));
+    }
+    throw error;
+  }
   return (await res.json()) as { accepted: number; duplicate: number };
 };
 

@@ -11,7 +11,7 @@ vi.mock("./inventoryShared", () => ({ submitFieldCheckObservations: submit }));
 describe("field-check observer", () => {
   beforeEach(() => {
     localStorage.clear();
-    submit.mockClear();
+    submit.mockReset().mockResolvedValue({ accepted: 1, duplicate: 0 });
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
@@ -46,5 +46,23 @@ describe("field-check observer", () => {
     emitFieldCheckSignal("foreground-recovery", "success");
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
+  });
+
+  it("backs off a failed delivery instead of retrying in a hot loop", async () => {
+    vi.useFakeTimers();
+    submit.mockRejectedValue(Object.assign(new Error("rate limited"), {
+      retryAfterMs: 5_000,
+    }));
+    const stop = createFieldCheckObserver("test-build");
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(submit).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(submit).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(submit).toHaveBeenCalledTimes(2);
+
+    stop();
+    vi.useRealTimers();
   });
 });

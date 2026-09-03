@@ -227,7 +227,14 @@ export async function fetchWithDiagnostics(
     }
     return response;
   } catch (err) {
-    if (startedAt !== null && typeof performance !== "undefined") {
+    // Field-check delivery is itself telemetry. Recording its transport
+    // failure would emit another field-check signal, creating a self-sustaining
+    // retry loop when the endpoint is unavailable or rate-limited.
+    if (
+      path !== "/api/field-checks/observations" &&
+      startedAt !== null &&
+      typeof performance !== "undefined"
+    ) {
       const name = (err as { name?: unknown } | null)?.name;
       recordPerformance(
         `api-failure:${path}:${name === "TimeoutError" || name === "AbortError" ? "timeout" : "network"}`,

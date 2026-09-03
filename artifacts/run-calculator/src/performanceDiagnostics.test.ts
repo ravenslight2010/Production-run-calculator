@@ -112,6 +112,17 @@ describe("calculator performance diagnostics", () => {
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
 
+  it("does not recursively observe field-check delivery failures", async () => {
+    const failure = new TypeError("network failure");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
+
+    await expect(
+      fetchWithDiagnostics("/api/field-checks/observations"),
+    ).rejects.toBe(failure);
+
+    expect(getPerformanceDiagnostics()).toEqual([]);
+  });
+
   it("records bounded heap samples only when the browser exposes heap metrics", () => {
     Object.defineProperty(performance, "memory", {
       configurable: true,

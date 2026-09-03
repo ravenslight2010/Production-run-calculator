@@ -32,6 +32,7 @@ const clientKey = "run-calc-field-check-client";
 const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
+const defaultRetryMs = 30_000;
 
 function randomId(): string {
   try {
@@ -141,9 +142,10 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   let wasHidden = document.visibilityState === "hidden";
   let wasOffline = navigator.onLine === false;
   let flushInFlight: Promise<void> | null = null;
+  let retryTimer: number | null = null;
 
   const flush = async () => {
-    if (stopped || flushInFlight || !navigator.onLine) return;
+    if (stopped || flushInFlight || retryTimer !== null || !navigator.onLine) return;
     const queued = loadQueue();
     if (queued.length === 0) return;
     const batch = queued.slice(0, 20);
@@ -152,10 +154,21 @@ export function createFieldCheckObserver(appBuild: string): () => void {
         const sent = new Set(batch.map((item) => item.observationId));
         saveQueue(loadQueue().filter((item) => !sent.has(item.observationId)));
       })
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        const requestedDelay = (error as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+        const delay = typeof requestedDelay === "number" && Number.isFinite(requestedDelay)
+          ? Math.min(120_000, Math.max(1_000, requestedDelay))
+          : defaultRetryMs;
+        if (!stopped && retryTimer === null) {
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            void flush();
+          }, delay);
+        }
+      })
       .finally(() => {
         flushInFlight = null;
-        if (!stopped) void flush();
+        if (!stopped && retryTimer === null) void flush();
       });
     await flushInFlight;
   };
@@ -201,6 +214,7 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   return () => {
     stopped = true;
     window.clearInterval(interval);
+    if (retryTimer !== null) window.clearTimeout(retryTimer);
     window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, onSignal);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("online", onOnline);
