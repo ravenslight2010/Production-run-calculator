@@ -11,6 +11,8 @@
 // dynamic imports below.
 
 import { spawnSync } from "node:child_process";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
@@ -22,6 +24,7 @@ import {
   beforeEach,
   vi,
 } from "vitest";
+import express from "express";
 import pg from "pg";
 import { runWithScope, type Scope } from "./requestScope";
 import type { AiCacheResult } from "./aiResultCache";
@@ -40,6 +43,8 @@ let aiResultCacheTable: DbModule["aiResultCacheTable"];
 let cacheMaintenanceEventsTable: DbModule["cacheMaintenanceEventsTable"];
 let cache: CacheModule;
 let observability: ObservabilityModule;
+let healthServer: Server;
+let healthBaseUrl: string;
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
@@ -131,10 +136,20 @@ beforeAll(async () => {
   cacheMaintenanceEventsTable = dbMod.cacheMaintenanceEventsTable;
   cache = await import("./aiResultCache");
   observability = await import("./observability");
+  const healthRouter = (await import("../routes/health")).default;
+  const healthApp = express();
+  healthApp.use(healthRouter);
+  await new Promise<void>((resolve) => {
+    healthServer = healthApp.listen(0, () => resolve());
+  });
+  healthBaseUrl = `http://127.0.0.1:${(healthServer.address() as AddressInfo).port}`;
   pool.on("error", () => {});
 }, 60_000);
 
 afterAll(async () => {
+  if (healthServer) {
+    await new Promise<void>((resolve) => healthServer.close(() => resolve()));
+  }
   if (pool) await pool.end();
   if (adminPool) {
     if (testDbName) {
@@ -970,6 +985,48 @@ describe("AI result cache persistence and scope isolation", () => {
     // Every shared write was blocked long enough to hit its database deadline,
     // so no late transaction should insert an event after the lock is released.
     expect(storedRows).toHaveLength(0);
+  });
+
+  it("keeps /healthz responsive when every pool client is checked out", async () => {
+    const heldClients: pg.PoolClient[] = [];
+    try {
+      for (let index = 0; index < pool.options.max; index += 1) {
+        heldClients.push(await pool.connect());
+      }
+      const startedAt = Date.now();
+
+      expect(pool.idleCount).toBe(0);
+      expect(pool.totalCount).toBeGreaterThanOrEqual(pool.options.max);
+
+      const response = await fetch(`${healthBaseUrl}/healthz`);
+      const body = await response.json() as {
+        checks: { database: string };
+        diagnostics: {
+          cacheMaintenance: {
+            live: { status: string; recentErrorCount: number };
+            sandbox: { status: string; recentErrorCount: number };
+          };
+        };
+      };
+
+      // The pool's acquisition timeout must win before the route can wait
+      // indefinitely behind the held clients. The database probe and the two
+      // diagnostics scopes may each time out, so allow both bounded rounds.
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
+      expect(pool.waitingCount).toBe(0);
+      expect(response.status).toBe(503);
+      expect(body.checks.database).toBe("error");
+      expect(body.diagnostics.cacheMaintenance.live).toMatchObject({
+        status: "ok",
+        recentErrorCount: 0,
+      });
+      expect(body.diagnostics.cacheMaintenance.sandbox).toMatchObject({
+        status: "ok",
+        recentErrorCount: 0,
+      });
+    } finally {
+      for (const client of heldClients) client.release();
+    }
   });
 
   it("aggregates maintenance failures across isolated API owners and scopes", async () => {
