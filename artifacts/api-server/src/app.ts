@@ -1,3 +1,5 @@
+import path from "node:path";
+import { existsSync } from "node:fs";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -102,6 +104,25 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use("/api", router);
+
+// In production (Docker/Render/etc.), serve the pre-built web app from the same
+// process so the SPA and API share an origin — no CORS issues, and relative
+// /api/... fetches work without configuring a separate API base URL. The web
+// build output lives at artifacts/run-calculator/dist/public relative to the
+// repo root (or CWD). In dev, the Vite dev server handles the web app directly.
+// Guarded to production only so integration tests (which import app.ts) are
+// never affected by the catch-all route.
+if (process.env.NODE_ENV === "production") {
+  const WEB_DIST = path.resolve(process.cwd(), "artifacts/run-calculator/dist/public");
+  if (existsSync(WEB_DIST)) {
+    app.use(express.static(WEB_DIST, { index: "index.html" }));
+    // SPA catch-all: any non-API, non-asset request serves index.html so client-side
+    // routing works. Must come AFTER the /api router so API routes are never shadowed.
+    app.get("/{*splat}", (req: Request, res: Response) => {
+      res.sendFile(path.join(WEB_DIST, "index.html"));
+    });
+  }
+}
 
 // Central JSON error handler — enhanced with actionable staff-facing messages.
 // Covers body-parser failures (413, JSON SyntaxError), Zod validation errors,
