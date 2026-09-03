@@ -20,6 +20,7 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { AiForecastResponse } from "@workspace/api-zod";
 import { clearAiResultCacheForTests } from "../lib/aiResultCache";
 
 // ── Single shared mock-state object (one vi.hoisted call matches the pattern ──
@@ -148,6 +149,11 @@ function post(body: unknown): Promise<Response> {
   });
 }
 
+async function parseForecastResponse(res: Response) {
+  expect(res.status).toBe(200);
+  return AiForecastResponse.parse(await res.json());
+}
+
 /** Minimal 2-day history that clears the FORECAST_MIN_RUNS floor. */
 function historyWithRuns(n: number) {
   return Array.from({ length: n }, (_, i) => ({
@@ -220,12 +226,7 @@ describe("POST /ai/forecast — response shape", () => {
       history: historyWithRuns(2),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      forecast: { targetDate: string; confidence: string; summary: string; runs: unknown[] } | null;
-      forecasts: unknown[];
-      generatedAt: number;
-    };
+    const body = await parseForecastResponse(res);
 
     // Top-level shape
     expect(body).toHaveProperty("forecast");
@@ -256,9 +257,7 @@ describe("POST /ai/forecast — response shape", () => {
       history: historyWithRuns(2),
     });
 
-    const body = (await res.json()) as {
-      forecast: { runs: Array<{ brand: string; flavor: string; dieType: string; casesNeeded: number; rationale: string }> } | null;
-    };
+    const body = await parseForecastResponse(res);
 
     const run = body.forecast!.runs[0];
     expect(typeof run.brand).toBe("string");
@@ -279,11 +278,10 @@ describe("POST /ai/forecast — response shape", () => {
       history: historyWithRuns(1), // only 1 run total
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { forecast: unknown; note: string };
+    const body = await parseForecastResponse(res);
     expect(body.forecast).toBeNull();
     expect(typeof body.note).toBe("string");
-    expect(body.note.length).toBeGreaterThan(0);
+    expect(body.note!.length).toBeGreaterThan(0);
     // No AI call should have been made.
     expect(mock.calls).toHaveLength(0);
   });
@@ -295,14 +293,7 @@ describe("POST /ai/forecast — response shape", () => {
       history: [],
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      forecast: null;
-      forecasts: unknown[];
-      aiGenerated: boolean;
-      aiStatus: string;
-      note: string;
-    };
+    const body = await parseForecastResponse(res);
     expect(body.forecast).toBeNull();
     expect(body.forecasts).toEqual([]);
     expect(body.aiGenerated).toBe(false);
@@ -322,12 +313,12 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
     const targetDate = "2026-06-23";
     mock.reply = goodSingleDayReply(targetDate);
 
-    await post({
+    await parseForecastResponse(await post({
       nowMs: Date.now(),
       targetDate,
       horizonDays: 1,
       history: historyWithRuns(2),
-    });
+    }));
 
     // At least one main AI call must have been made.
     const mainCall = mock.calls[0];
@@ -340,12 +331,12 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
     const targetDate = "2026-06-23";
     mock.reply = goodMultiDayReply(["2026-06-23", "2026-06-24", "2026-06-25"]);
 
-    await post({
+    await parseForecastResponse(await post({
       nowMs: Date.now(),
       targetDate,
       horizonDays: 3,
       history: historyWithRuns(2),
-    });
+    }));
 
     const mainCall = mock.calls[0];
     expect(mainCall).toBeDefined();
@@ -359,12 +350,12 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
     // has a lower ceiling than a multi-day one (no silent regression where both
     // get the same, potentially too-small, value).
     mock.reply = goodSingleDayReply("2026-06-23");
-    await post({ nowMs: Date.now(), targetDate: "2026-06-23", horizonDays: 1, history: historyWithRuns(2) });
+    await parseForecastResponse(await post({ nowMs: Date.now(), targetDate: "2026-06-23", horizonDays: 1, history: historyWithRuns(2) }));
     const singleTokens = mock.calls[0]?.max_completion_tokens ?? 0;
 
     mock.calls = [];
     mock.reply = goodMultiDayReply(["2026-06-23", "2026-06-24"]);
-    await post({ nowMs: Date.now(), targetDate: "2026-06-23", horizonDays: 2, history: historyWithRuns(2) });
+    await parseForecastResponse(await post({ nowMs: Date.now(), targetDate: "2026-06-23", horizonDays: 2, history: historyWithRuns(2) }));
     const multiTokens = mock.calls[0]?.max_completion_tokens ?? 0;
 
     expect(multiTokens).toBeGreaterThan(singleTokens);
@@ -383,19 +374,14 @@ describe("POST /ai/forecast — multi-day response shape", () => {
       history: historyWithRuns(2),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      forecast: { targetDate: string } | null;
-      forecasts: Array<{ targetDate: string; runs: unknown[] }>;
-      generatedAt: number;
-    };
+    const body = await parseForecastResponse(res);
 
     expect(body.forecasts).toHaveLength(3);
-    expect(body.forecasts.map((f) => f.targetDate)).toEqual(dates);
+    expect(body.forecasts!.map((f) => f.targetDate)).toEqual(dates);
     // Back-compat: forecast (singular) is the first day.
     expect(body.forecast?.targetDate).toBe(dates[0]);
     // Every day's plan has at least one run.
-    for (const plan of body.forecasts) {
+    for (const plan of body.forecasts!) {
       expect(Array.isArray(plan.runs)).toBe(true);
       expect(plan.runs.length).toBeGreaterThan(0);
     }
@@ -418,12 +404,7 @@ describe("POST /ai/forecast — unverified history path", () => {
       history: historyWithRuns(2),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      forecast: { targetDate: string; confidence: string; runs: unknown[] } | null;
-      forecasts: unknown[];
-      generatedAt: number;
-    };
+    const body = await parseForecastResponse(res);
 
     // Forecast must still be present and well-formed.
     expect(body.forecast).not.toBeNull();
@@ -466,14 +447,7 @@ describe("POST /ai/forecast — AI fallback and cache contract", () => {
     mock.shouldThrow = true;
     const res = await post(request);
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      forecast: null;
-      forecasts: unknown[];
-      aiGenerated: boolean;
-      aiStatus: string;
-      note: string;
-    };
+    const body = await parseForecastResponse(res);
     expect(body.forecast).toBeNull();
     expect(body.forecasts).toEqual([]);
     expect(body.aiGenerated).toBe(false);
@@ -486,11 +460,7 @@ describe("POST /ai/forecast — AI fallback and cache contract", () => {
     mock.shouldThrow = false;
     mock.reply = goodSingleDayReply(request.targetDate);
     const retry = await post(request);
-    expect(retry.status).toBe(200);
-    const retryBody = (await retry.json()) as {
-      forecast: { targetDate: string } | null;
-      forecasts: unknown[];
-    };
+    const retryBody = await parseForecastResponse(retry);
     expect(retryBody.forecast?.targetDate).toBe(request.targetDate);
     expect(retryBody.forecasts).toHaveLength(1);
     expect(mock.calls).toHaveLength(2);
@@ -500,14 +470,7 @@ describe("POST /ai/forecast — AI fallback and cache contract", () => {
     mock.reply = "not JSON";
     const res = await post(request);
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      forecast: null;
-      forecasts: unknown[];
-      aiGenerated: boolean;
-      aiStatus: string;
-      note: string;
-    };
+    const body = await parseForecastResponse(res);
     expect(body.forecast).toBeNull();
     expect(body.forecasts).toEqual([]);
     expect(body.aiGenerated).toBe(false);
@@ -519,14 +482,13 @@ describe("POST /ai/forecast — AI fallback and cache contract", () => {
   it("serves an unchanged request from cache without calling the provider again", async () => {
     mock.reply = goodSingleDayReply(request.targetDate);
     const first = await post(request);
-    expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as Record<string, unknown>;
+    const firstBody = await parseForecastResponse(first);
     expect(mock.calls).toHaveLength(1);
 
     mock.reply = JSON.stringify({ forecasts: [] });
     const second = await post(request);
-    expect(second.status).toBe(200);
-    expect(await second.json()).toMatchObject({
+    const secondBody = await parseForecastResponse(second);
+    expect(secondBody).toMatchObject({
       ...firstBody,
       generatedAt: expect.any(Number),
     });

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   AiAnomaliesResponse,
+  AiForecastResponse,
   AiScheduleOptimizeResponse,
   AiSummaryResponse,
   CheckUsernameAvailableQueryParams,
@@ -61,7 +62,7 @@ describe("generated Zod schema runtime contracts", () => {
     ).toThrow(z.ZodError);
   });
 
-  it("validates the shared AI status values on recap and schedule responses", () => {
+  it("validates the shared AI status values on AI responses", () => {
     const statuses = ["deterministic", "enriched", "unavailable"] as const;
 
     for (const aiStatus of statuses) {
@@ -111,6 +112,15 @@ describe("generated Zod schema runtime contracts", () => {
         aiStatus,
       });
       expect(anomalies.aiStatus).toBe(aiStatus);
+
+      const forecast = AiForecastResponse.parse({
+        forecast: null,
+        forecasts: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(forecast.aiStatus).toBe(aiStatus);
     }
 
     expect(() =>
@@ -157,6 +167,16 @@ describe("generated Zod schema runtime contracts", () => {
         before: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
         after: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
         summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiForecastResponse.parse({
+        forecast: null,
+        forecasts: [],
         generatedAt: 1_750_000_000_000,
         aiGenerated: false,
         aiStatus: "unknown",

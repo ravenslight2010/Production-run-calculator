@@ -1571,6 +1571,8 @@ export const AiForecastResponse = zod.object({
 }).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
 })).optional().describe('One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon.'),
   "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI produced a forecast; false when no forecast was produced'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Explanation when no forecast could responsibly be produced')
 })
 

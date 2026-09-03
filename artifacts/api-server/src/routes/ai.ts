@@ -1694,24 +1694,28 @@ router.post(
     const userPrompt = appendCorrectionsBlock(appendFacilityMemoryBlock(user, knowledge), corrections);
 
     const model = pickModel("full");
-    type ForecastCacheBody = {
+    type ForecastResponseBody = {
       forecast: ForecastPlanOut | null;
       forecasts: ForecastPlanOut[];
+      aiGenerated: boolean;
+      aiStatus: "deterministic" | "enriched" | "unavailable";
       note?: string;
     };
-    let cachedForecastBody: ForecastCacheBody;
+    let cachedForecastBody: ForecastResponseBody;
     try {
-      const cached = await cachedAiResponse(req, res, {
+      const cached = await cachedAiResponse<ForecastResponseBody>(req, res, {
         operation: "forecast",
         model,
         system,
         user: userPrompt,
-        validate: (value): value is ForecastCacheBody =>
+        validate: (value): value is ForecastResponseBody =>
           isObject(value) &&
           Array.isArray(value.forecasts) &&
           value.forecasts.every(isObject) &&
           "forecast" in value &&
-          (value.forecast === null || isObject(value.forecast)),
+          (value.forecast === null || isObject(value.forecast)) &&
+          value.aiGenerated === true &&
+          value.aiStatus === "enriched",
         load: async () => {
           // A malformed reply is user-visible data loss, so retain the existing
           // bounded retry and only cache a successfully sanitized plan.
@@ -1749,9 +1753,11 @@ router.post(
           }
 
           const { forecasts, note } = sanitizeForecasts(result.raw, targetDates);
-          const value: ForecastCacheBody = {
+          const value: ForecastResponseBody = {
             forecast: forecasts[0] ?? null,
             forecasts,
+            aiGenerated: true,
+            aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
 

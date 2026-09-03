@@ -6958,6 +6958,8 @@ components:
       required:
         - forecast
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         forecast:
           oneOf:
@@ -6976,6 +6978,11 @@ components:
             $ref: "#/components/schemas/ForecastPlan"
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI produced a forecast; false when no forecast was produced
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Explanation when no forecast could responsibly be produced
