@@ -110,6 +110,7 @@ test_stable_branch_protection_workflow_contract() {
   local workflow_content
   local check_block
   local upload_block
+  local notification_block
 
   workflow_content=$(<"$STABLE_BRANCH_PROTECTION_WORKFLOW")
   assert_contains "$workflow_content" "  schedule:"
@@ -117,6 +118,7 @@ test_stable_branch_protection_workflow_contract() {
   assert_contains "$workflow_content" "  workflow_dispatch:"
   assert_contains "$workflow_content" "permissions:"
   assert_contains "$workflow_content" "  contents: read"
+  assert_contains "$workflow_content" "  issues: write"
   assert_contains "$workflow_content" "    timeout-minutes: 5"
 
   check_block=$(stable_branch_protection_step_block "Check live main branch protection")
@@ -138,6 +140,26 @@ test_stable_branch_protection_workflow_contract() {
     "path: \${{ runner.temp }}/stable-branch-protection-check.txt"
   assert_contains "$upload_block" "if-no-files-found: error"
   assert_contains "$upload_block" "retention-days: 14"
+
+  notification_block=$(stable_branch_protection_step_block \
+    "Notify maintainers of scheduled protection drift")
+  assert_contains "$notification_block" \
+    "if: failure() && github.event_name == 'schedule'"
+  assert_contains "$notification_block" "uses: actions/github-script@v7"
+  assert_contains "$notification_block" \
+    "const title = '[Alert] Stable branch protection drift detected';"
+  assert_contains "$notification_block" "github.paginate("
+  assert_contains "$notification_block" "github.rest.issues.listForRepo"
+  assert_contains "$notification_block" "state: 'open'"
+  assert_contains "$notification_block" "!issue.pull_request && issue.title === title"
+  assert_contains "$notification_block" "github.rest.issues.createComment"
+  assert_contains "$notification_block" "issue_number: existing.number"
+  assert_contains "$notification_block" "github.rest.issues.create"
+  assert_contains "$notification_block" "Review the workflow run"
+  if [[ "$notification_block" == *'cat "$check_log"'* ]]; then
+    printf 'Notification must link to retained output, not copy repository details.\n' >&2
+    return 1
+  fi
   echo "PASS: preserves stable branch protection drift-monitoring contract"
 }
 
