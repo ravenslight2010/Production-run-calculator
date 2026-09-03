@@ -9,6 +9,10 @@ actionlint_workflow="$workflow_dir/workflow-lint.yml"
 ci_workflow="$workflow_dir/ci.yml"
 release_workflow="$workflow_dir/release-check.yml"
 nightly_large_spec_workflow="$workflow_dir/nightly-large-spec.yml"
+department_navigation_workflow="$workflow_dir/department-navigation.yml"
+release_concurrency_calibration_workflow="$workflow_dir/release-concurrency-calibration.yml"
+stable_branch_protection_workflow="$workflow_dir/stable-branch-protection.yml"
+workflow_lint_workflow="$workflow_dir/workflow-lint.yml"
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -197,6 +201,11 @@ EOF
 check_workflow_timeouts "CI" "$ci_workflow"
 check_workflow_timeouts "Release check" "$release_workflow"
 check_workflow_timeouts "Nightly large-spec" "$nightly_large_spec_workflow"
+check_workflow_timeouts "Department navigation" "$department_navigation_workflow"
+check_workflow_timeouts \
+  "Release concurrency calibration" "$release_concurrency_calibration_workflow"
+check_workflow_timeouts "Stable branch protection" "$stable_branch_protection_workflow"
+check_workflow_timeouts "Workflow lint" "$workflow_lint_workflow"
 
 if [[ -n "${ACTIONLINT_BIN:-}" ]]; then
   actionlint_bin="$ACTIONLINT_BIN"

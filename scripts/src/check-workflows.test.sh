@@ -9,7 +9,10 @@ CHECK_SCRIPT="${SCRIPT_DIR}/check-workflows.sh"
 CI_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/ci.yml"
 RELEASE_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-check.yml"
 NIGHTLY_LARGE_SPEC_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/nightly-large-spec.yml"
+DEPARTMENT_NAVIGATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/department-navigation.yml"
+RELEASE_CONCURRENCY_CALIBRATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-concurrency-calibration.yml"
 STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
+WORKFLOW_LINT_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/workflow-lint.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
 FAKE_ACTIONLINT_MARKER="${TEST_ROOT}/actionlint-called"
@@ -82,6 +85,58 @@ jobs:
     steps:
       - run: echo ok
 EOF
+  cat > "${workspace}/.github/workflows/department-navigation.yml" <<'EOF'
+name: Department navigation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fixture-department-navigation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
+  cat > "${workspace}/.github/workflows/release-concurrency-calibration.yml" <<'EOF'
+name: Release concurrency calibration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fixture-release-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
+  cat > "${workspace}/.github/workflows/stable-branch-protection.yml" <<'EOF'
+name: Stable branch protection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fixture-stable-branch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
+  cat > "${workspace}/.github/workflows/workflow-lint.yml" <<EOF
+name: Workflow lint
+
+env:
+  ${ci_declaration}
+
+jobs:
+  fixture-workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
   printf '%s\n' "$workspace"
 }
 
@@ -102,6 +157,14 @@ make_timeout_workflow_workspace() {
   cp "$RELEASE_WORKFLOW" "$workspace/.github/workflows/release-check.yml"
   cp "$NIGHTLY_LARGE_SPEC_WORKFLOW" \
     "$workspace/.github/workflows/nightly-large-spec.yml"
+  cp "$DEPARTMENT_NAVIGATION_WORKFLOW" \
+    "$workspace/.github/workflows/department-navigation.yml"
+  cp "$RELEASE_CONCURRENCY_CALIBRATION_WORKFLOW" \
+    "$workspace/.github/workflows/release-concurrency-calibration.yml"
+  cp "$STABLE_BRANCH_PROTECTION_WORKFLOW" \
+    "$workspace/.github/workflows/stable-branch-protection.yml"
+  cp "$WORKFLOW_LINT_WORKFLOW" \
+    "$workspace/.github/workflows/workflow-lint.yml"
   printf '%s\n' "$workspace"
 }
 
@@ -862,6 +925,102 @@ test_rejects_non_positive_nightly_job_timeout() {
   echo "PASS: rejects a non-positive nightly timeout"
 }
 
+test_remaining_workflow_jobs_have_positive_timeouts() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace remaining-workflow-timeouts)
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf \
+      'Expected remaining workflow timeouts to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "Department navigation workflow jobs have positive timeout-minutes values."
+  assert_contains "$CHECK_OUTPUT" \
+    "Release concurrency calibration workflow jobs have positive timeout-minutes values."
+  assert_contains "$CHECK_OUTPUT" \
+    "Stable branch protection workflow jobs have positive timeout-minutes values."
+  assert_contains "$CHECK_OUTPUT" \
+    "Workflow lint workflow jobs have positive timeout-minutes values."
+  echo "PASS: checks positive timeouts for remaining workflows"
+}
+
+test_rejects_missing_remaining_workflow_job_timeout() {
+  local workflow_file workflow_name workspace
+  for workflow_file in \
+    department-navigation.yml \
+    release-concurrency-calibration.yml \
+    stable-branch-protection.yml \
+    workflow-lint.yml; do
+    workflow_name=${workflow_file%.yml}
+    workspace=$(make_timeout_workflow_workspace \
+      "remaining-missing-timeout-${workflow_name}")
+    printf '\n' >> "$workspace/.github/workflows/$workflow_file"
+    cat >> "$workspace/.github/workflows/$workflow_file" <<EOF
+  future-${workflow_name}:
+    name: Future ${workflow_name}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+    run_check "$workspace"
+    [[ "$CHECK_STATUS" -eq 1 ]] || {
+      printf \
+        'Expected %s job without a timeout to fail. Output:\n%s\n' \
+        "$workflow_file" "$CHECK_OUTPUT" >&2
+      return 1
+    }
+    assert_contains "$CHECK_OUTPUT" \
+      "future-${workflow_name}: missing timeout-minutes"
+    [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+      printf \
+        'Expected missing %s timeout to fail before linting.\n' \
+        "$workflow_file" >&2
+      return 1
+    }
+  done
+  echo "PASS: rejects missing timeouts in remaining workflows"
+}
+
+test_rejects_non_positive_remaining_workflow_job_timeout() {
+  local workflow_file workflow_name workspace
+  for workflow_file in \
+    department-navigation.yml \
+    release-concurrency-calibration.yml \
+    stable-branch-protection.yml \
+    workflow-lint.yml; do
+    workflow_name=${workflow_file%.yml}
+    workspace=$(make_timeout_workflow_workspace \
+      "remaining-zero-timeout-${workflow_name}")
+    printf '\n' >> "$workspace/.github/workflows/$workflow_file"
+    cat >> "$workspace/.github/workflows/$workflow_file" <<EOF
+  future-${workflow_name}:
+    name: Future ${workflow_name}
+    runs-on: ubuntu-latest
+    timeout-minutes: 0
+    steps:
+      - run: echo ok
+EOF
+    run_check "$workspace"
+    [[ "$CHECK_STATUS" -eq 1 ]] || {
+      printf \
+        'Expected non-positive %s timeout to fail. Output:\n%s\n' \
+        "$workflow_file" "$CHECK_OUTPUT" >&2
+      return 1
+    }
+    assert_contains "$CHECK_OUTPUT" \
+      "future-${workflow_name}: timeout-minutes must be a positive integer (found: 0)"
+    [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+      printf \
+        'Expected non-positive %s timeout to fail before linting.\n' \
+        "$workflow_file" >&2
+      return 1
+    }
+  done
+  echo "PASS: rejects non-positive timeouts in remaining workflows"
+}
+
 test_accepts_matching_versions
 test_accepts_quoted_ci_version_with_inline_comment
 test_accepts_quoted_ci_version_without_comment
@@ -882,6 +1041,9 @@ test_rejects_release_job_without_timeout
 test_rejects_non_positive_release_job_timeout
 test_rejects_nightly_job_without_timeout
 test_rejects_non_positive_nightly_job_timeout
+test_remaining_workflow_jobs_have_positive_timeouts
+test_rejects_missing_remaining_workflow_job_timeout
+test_rejects_non_positive_remaining_workflow_job_timeout
 test_ci_runs_routine_scripts_tests
 test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract
