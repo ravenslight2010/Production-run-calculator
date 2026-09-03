@@ -687,17 +687,20 @@ describe("profile data health check", () => {
             { id: "legacy-future", brand: "Legacy Brand", flavor: "legacy flavor" },
             { id: "legacy-started", brand: "Legacy Brand", flavor: "legacy flavor", startedAt: 1 },
             { id: "legacy-changed", brand: "Legacy Brand", flavor: "legacy flavor" },
+            { id: "legacy-incomplete", brand: "Legacy Brand", flavor: "legacy flavor" },
           ],
         },
         runValues: {
           "legacy-future": repairedValues,
           "legacy-started": repairedValues,
           "legacy-changed": { frontlineRecipeName: "Changed after apply" },
+          "legacy-incomplete": repairedValues,
         },
         runValuesUpdatedAt: {
           "legacy-future": 201,
           "legacy-started": 201,
           "legacy-changed": 999,
+          "legacy-incomplete": 201,
         },
       },
     });
@@ -741,6 +744,32 @@ describe("profile data health check", () => {
             beforeStamp: 20,
             afterStamp: 201,
           },
+          {
+            date,
+            runId: "legacy-incomplete",
+            beforeValues: oldValues,
+            afterValues: repairedValues,
+            beforeStamp: 20,
+            afterStamp: 201,
+          },
+          {
+            date: "2099-02-02",
+            runId: "legacy-missing-day",
+            fields: ["frontlineRecipeName"],
+            beforeValues: oldValues,
+            afterValues: repairedValues,
+            beforeStamp: 20,
+            afterStamp: 201,
+          },
+          {
+            date,
+            runId: "",
+            fields: ["frontlineRecipeName"],
+            beforeValues: oldValues,
+            afterValues: repairedValues,
+            beforeStamp: 20,
+            afterStamp: 201,
+          },
         ],
       }],
       summary: { applied: 1, skipped: 0, failed: 0, repairedRuns: 3 },
@@ -753,7 +782,7 @@ describe("profile data health check", () => {
     expect(undo.status).toBe(200);
     expect(await undo.json()).toMatchObject({
       batchId: "legacy-profile-repair",
-      summary: { applied: 1, skipped: 2, failed: 0, repairedRuns: 1 },
+      summary: { applied: 1, skipped: 5, failed: 0, repairedRuns: 1 },
     });
 
     const [restoredProfile] = await db.select().from(brandProfilesTable);
@@ -768,10 +797,12 @@ describe("profile data health check", () => {
     expect(data.runValuesUpdatedAt["legacy-started"]).toBe(201);
     expect(data.runValues["legacy-changed"]).toMatchObject({ frontlineRecipeName: "Changed after apply" });
     expect(data.runValuesUpdatedAt["legacy-changed"]).toBe(999);
+    expect(data.runValues["legacy-incomplete"]).toMatchObject(repairedValues);
+    expect(data.runValuesUpdatedAt["legacy-incomplete"]).toBe(201);
 
     const [batch] = await db.select().from(dataHealthRepairBatchesTable);
     expect(batch.status).toBe("undone");
-    expect(batch.summary).toMatchObject({ applied: 1, skipped: 2, failed: 0, repairedRuns: 1 });
+    expect(batch.summary).toMatchObject({ applied: 1, skipped: 5, failed: 0, repairedRuns: 1 });
   });
 
   it("normalizes an alias finding and applies only the selected repair with guarded undo", async () => {

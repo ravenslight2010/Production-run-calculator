@@ -111,6 +111,24 @@ function record(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+function snapshotFields(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const fields = value.filter((field): field is string => typeof field === "string" && field.trim().length > 0);
+  if (fields.length !== value.length || new Set(fields).size !== fields.length) return null;
+  return fields;
+}
+
+function hasSnapshotValues(value: unknown, fields: string[]): boolean {
+  const values = record(value);
+  return fields.every((field) => Object.prototype.hasOwnProperty.call(values, field));
+}
+
+function finiteSnapshotStamp(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const stamp = Number(value);
+  return Number.isFinite(stamp) ? stamp : null;
+}
+
 function nameKey(value: unknown): string {
   return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
@@ -695,17 +713,21 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
         if (item.repairType === "run-values") {
           const date = String(item.date ?? "");
           const runId = String(item.runId ?? "");
+          const fields = snapshotFields(item.fields);
+          const beforeStamp = finiteSnapshotStamp(item.beforeStamp);
+          const afterStamp = finiteSnapshotStamp(item.afterStamp);
           const [day] = await tx.select().from(dailySyncTable)
             .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
-          if (!day || !runId) { skipped++; continue; }
+          if (!day || !runId || !fields || beforeStamp == null || afterStamp == null
+            || !hasSnapshotValues(item.beforeValues, fields)
+            || !hasSnapshotValues(item.afterValues, fields)) { skipped++; continue; }
           const data = record(day.data);
           const state = record(data.dayState);
           const found = (Array.isArray(state.runs) ? state.runs : []).map(record).find((value) => value.id === runId);
           const stamps = record(data.runValuesUpdatedAt);
           const values = record(record(data.runValues)[runId]);
-          const fields = Array.isArray(item.fields) ? item.fields.map(String) : [];
           if (!found || found.startedAt != null || found.endedAt != null
-            || Number(stamps[runId]) !== Number(item.afterStamp)
+            || Number(stamps[runId]) !== afterStamp
             || !fields.every((field) => JSON.stringify(values[field]) === JSON.stringify(record(item.afterValues)[field]))) {
             skipped++;
             continue;
@@ -744,17 +766,21 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
         for (const run of runs) {
           const date = String(run.date ?? "");
           const runId = String(run.runId ?? "");
+          const fields = snapshotFields(run.fields);
+          const beforeStamp = finiteSnapshotStamp(run.beforeStamp);
+          const afterStamp = finiteSnapshotStamp(run.afterStamp);
           const [day] = await tx.select().from(dailySyncTable)
             .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
-          if (!day || !runId) { skipped++; continue; }
+          if (!day || !runId || !fields || beforeStamp == null || afterStamp == null
+            || !hasSnapshotValues(run.beforeValues, fields)
+            || !hasSnapshotValues(run.afterValues, fields)) { skipped++; continue; }
           const data = record(day.data);
           const state = record(data.dayState);
           const found = (Array.isArray(state.runs) ? state.runs : []).map(record).find((value) => value.id === runId);
           const stamps = record(data.runValuesUpdatedAt);
           const values = record(record(data.runValues)[runId]);
-          const fields = Array.isArray(run.fields) ? run.fields.map(String) : [];
           if (!found || found.startedAt != null || found.endedAt != null
-            || Number(stamps[runId]) !== Number(run.afterStamp)
+            || Number(stamps[runId]) !== afterStamp
             || !fields.every((field) => JSON.stringify(values[field]) === JSON.stringify(record(run.afterValues)[field]))) {
             skipped++;
             continue;
