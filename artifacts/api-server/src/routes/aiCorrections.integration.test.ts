@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
@@ -547,13 +547,15 @@ describe("profile data health check", () => {
       data: {
         dayState: { runs: [
           { id: "future", brand: "Corner Booth", flavor: "pepperoni" },
+          { id: "future-changed", brand: "Corner Booth", flavor: "pepperoni" },
           { id: "started", brand: "Corner Booth", flavor: "pepperoni", startedAt: 1 },
         ] },
         runValues: {
           future: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+          "future-changed": { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
           started: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
         },
-        runValuesUpdatedAt: { future: 10, started: 10 },
+        runValuesUpdatedAt: { future: 10, "future-changed": 10, started: 10 },
       },
     });
 
@@ -599,8 +601,21 @@ describe("profile data health check", () => {
     });
     expect(applied.status).toBe(200);
     const body = await applied.json() as { batchId: string; summary: { repairedProfiles: number; repairedRuns: number }; after: { safeRepairs: unknown[] } };
-    expect(body.summary).toEqual({ repairedProfiles: 1, repairedRuns: 1 });
+    expect(body.summary).toEqual({ repairedProfiles: 1, repairedRuns: 2 });
     expect(body.after.safeRepairs).toHaveLength(0);
+    const [batch] = await db.select().from(dataHealthRepairBatchesTable);
+    expect(batch.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        repairType: "run-values",
+        runId: "future",
+        beforeStamp: 10,
+        afterValues: expect.objectContaining({ frontlineRecipeName: "Red Hot Pizza Sauce" }),
+      }),
+      expect.objectContaining({
+        repairType: "run-values",
+        runId: "future-changed",
+      }),
+    ]));
 
     const [profile] = await db.select().from(brandProfilesTable);
     expect(profile.values).toMatchObject({
@@ -610,16 +625,36 @@ describe("profile data health check", () => {
     const [day] = await db.select().from(dailySyncTable);
     const data = day.data as Record<string, any>;
     expect(data.runValues.future).toMatchObject({ frontlineRecipeName: "Red Hot Pizza Sauce" });
+    expect(data.runValues["future-changed"]).toMatchObject({ frontlineRecipeName: "Red Hot Pizza Sauce" });
     expect(data.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+
+    await db.update(dailySyncTable).set({
+      data: {
+        ...data,
+        runValues: {
+          ...data.runValues,
+          "future-changed": { ...data.runValues["future-changed"], frontlineRecipeName: "Changed after apply" },
+        },
+        runValuesUpdatedAt: { ...data.runValuesUpdatedAt, "future-changed": 999 },
+      },
+    }).where(eq(dailySyncTable.date, "2099-01-01"));
 
     const undo = await fetch(
       `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(body.batchId)}/undo`,
       { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
     );
     expect(undo.status).toBe(200);
+    expect(await undo.json()).toMatchObject({
+      summary: { applied: 1, skipped: 1, failed: 0, repairedRuns: 1 },
+    });
     const [restoredProfile] = await db.select().from(brandProfilesTable);
     expect(restoredProfile.updatedAtMs).toBeGreaterThan(profile.updatedAtMs);
     expect(restoredProfile.values).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+     const [restoredDay] = await db.select().from(dailySyncTable);
+     const restoredData = restoredDay.data as Record<string, any>;
+     expect(restoredData.runValues.future).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+     expect(restoredData.runValues["future-changed"]).toMatchObject({ frontlineRecipeName: "Changed after apply" });
+     expect(restoredData.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
     const repeatedUndo = await fetch(
       `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(body.batchId)}/undo`,
       { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },

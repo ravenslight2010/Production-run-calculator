@@ -473,8 +473,9 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
           : []),
       ]);
       const repairedByProfile = new Map<string, { values: JsonRecord; fields: string[] }>();
-      const appliedByProfileKey = new Map<string, ProfileDataHealthRepair & { afterStamp: number; runs?: unknown[] }>();
+      const appliedByProfileKey = new Map<string, ProfileDataHealthRepair & { afterStamp: number }>();
       const applied: Array<Record<string, unknown>> = [];
+      const runRecords: Array<Record<string, unknown>> = [];
       let skipped = [...requested].filter((id) => !supportedIds.has(id)).length;
       const now = Date.now();
 
@@ -497,7 +498,7 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
         );
         repair.previousValues = previousValues;
         (repair as ProfileDataHealthRepair & { afterStamp: number }).afterStamp = stamp;
-        appliedByProfileKey.set(profileKey(profile.brand, profile.flavor), repair as ProfileDataHealthRepair & { afterStamp: number; runs?: unknown[] });
+        appliedByProfileKey.set(profileKey(profile.brand, profile.flavor), repair as ProfileDataHealthRepair & { afterStamp: number });
         applied.push({ ...repair, repairType: "profile-link" });
       }
 
@@ -531,8 +532,9 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
             nextStamps[id] = afterStamp;
             const appliedRepair = appliedByProfileKey.get(profileKey(run.brand, run.flavor));
             if (appliedRepair) {
-              appliedRepair.runs ??= [];
-              appliedRepair.runs.push({
+               runRecords.push({
+                 repairType: "run-values",
+                 profileKey: appliedRepair.profileKey,
                 runId: id, date: day.date, fields: changedProfile.fields,
                 beforeValues: Object.fromEntries(changedProfile.fields.map((field) => [field, runValues[field]])),
                 afterValues: Object.fromEntries(changedProfile.fields.map((field) => [field, nextRunValues[field]])),
@@ -582,7 +584,7 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
       if (applied.length > 0) {
         batchId = `profile-data-health:${now}:${Math.random().toString(36).slice(2, 10)}`;
         await tx.insert(dataHealthRepairBatchesTable).values({
-          id: batchId, scope, actor: req.userId ?? "unknown", records: applied,
+           id: batchId, scope, actor: req.userId ?? "unknown", records: [...applied, ...runRecords],
           summary: { applied: applied.length, skipped, failed: 0, repairedRuns },
         });
         await tx.insert(auditLogsTable).values({
@@ -690,6 +692,36 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
           applied++;
           continue;
         }
+        if (item.repairType === "run-values") {
+          const date = String(item.date ?? "");
+          const runId = String(item.runId ?? "");
+          const [day] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
+          if (!day || !runId) { skipped++; continue; }
+          const data = record(day.data);
+          const state = record(data.dayState);
+          const found = (Array.isArray(state.runs) ? state.runs : []).map(record).find((value) => value.id === runId);
+          const stamps = record(data.runValuesUpdatedAt);
+          const values = record(record(data.runValues)[runId]);
+          const fields = Array.isArray(item.fields) ? item.fields.map(String) : [];
+          if (!found || found.startedAt != null || found.endedAt != null
+            || Number(stamps[runId]) !== Number(item.afterStamp)
+            || !fields.every((field) => JSON.stringify(values[field]) === JSON.stringify(record(item.afterValues)[field]))) {
+            skipped++;
+            continue;
+          }
+          const restoredRuns = { ...record(data.runValues), [runId]: { ...values, ...record(item.beforeValues) } };
+          const restoredStamps = {
+            ...stamps,
+            [runId]: Math.max(Number(stamps[runId]) || 0, Date.now()) + 1,
+          };
+          await tx.update(dailySyncTable).set({
+            data: { ...data, runValues: restoredRuns, runValuesUpdatedAt: restoredStamps },
+            updatedAt: new Date(),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date)));
+          repairedRuns++;
+          continue;
+        }
         const key = String(item.profileKey ?? "");
         const [profile] = await tx.select().from(brandProfilesTable)
           .where(and(eq(brandProfilesTable.key, key), eq(brandProfilesTable.scope, scope))).for("update");
@@ -705,6 +737,9 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
         })
           .where(and(eq(brandProfilesTable.key, key), eq(brandProfilesTable.scope, scope)));
         applied++;
+        // Older batches nested run snapshots under the profile record. Keep
+        // honoring that legacy shape, while new batches use independent
+        // run-values records above so profile undo cannot gate run undo.
         const runs = Array.isArray(item.runs) ? item.runs.map(record) : [];
         for (const run of runs) {
           const date = String(run.date ?? "");

@@ -697,11 +697,11 @@ test("repairs scoped Data Health findings, preserves started runs, and guards un
     const data = day.rows[0].data as {
       runValues: Record<string, Record<string, unknown>>;
     };
-    // The future snapshots were updated by the applied repair and remain
-    // authoritative after undo; the undo response's guarded profile records
-    // restore only the unchanged profile row.
-    expect(data.runValues[fixture.futureRunIds[0]].frontlineRecipeName).toBe(fixture.recipeNames[0]);
-    expect(data.runValues[fixture.futureRunIds[1]].frontlineRecipeName).toBe(fixture.recipeNames[1]);
+    // Future snapshots have their own guarded records. Both are restored even
+    // though the second profile changed after apply; the started run remains
+    // protected and is never refreshed.
+    expect(data.runValues[fixture.futureRunIds[0]].frontlineRecipeName).toBe(fixture.wrongNames[0]);
+    expect(data.runValues[fixture.futureRunIds[1]].frontlineRecipeName).toBe(fixture.wrongNames[1]);
     expect(data.runValues[fixture.startedRunId].frontlineRecipeName).toBe(fixture.wrongNames[0]);
   } finally {
     await verifyDb.end().catch(() => {});
