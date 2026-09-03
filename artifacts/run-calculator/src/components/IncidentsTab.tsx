@@ -363,10 +363,12 @@ function FieldChecksPanel({
   report,
   isLoading,
   error,
+  canConfirmHardware,
 }: {
   report: Awaited<ReturnType<typeof fetchFieldChecks>> | undefined;
   isLoading: boolean;
   error: unknown;
+  canConfirmHardware: boolean;
 }) {
   const queryClient = useQueryClient();
   const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad">("android-phone");
@@ -427,18 +429,20 @@ function FieldChecksPanel({
             <p className="text-xs text-muted-foreground mt-1">
               Browser evidence cannot confirm these. Follow the physical-device protocol without entering production data, then record only the device category, protocol version, outcome, and time.
             </p>
-            <label className="mt-2 block text-xs text-muted-foreground">
-              Device category
-              <select
-                className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-                value={deviceCategory}
-                onChange={(event) => setDeviceCategory(event.target.value as typeof deviceCategory)}
-              >
-                <option value="android-phone">Android phone</option>
-                <option value="android-tablet">Android tablet</option>
-                <option value="ipad">iPad</option>
-              </select>
-            </label>
+            {canConfirmHardware && (
+              <label className="mt-2 block text-xs text-muted-foreground">
+                Device category
+                <select
+                  className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+                  value={deviceCategory}
+                  onChange={(event) => setDeviceCategory(event.target.value as typeof deviceCategory)}
+                >
+                  <option value="android-phone">Android phone</option>
+                  <option value="android-tablet">Android tablet</option>
+                  <option value="ipad">iPad</option>
+                </select>
+              </label>
+            )}
             <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
               <li>Use a clean training or idle screen; do not start or edit a production run.</li>
               <li>Check touch targets, keyboard clearance, or fully close and reopen the app as described in the protocol.</li>
@@ -451,23 +455,25 @@ function FieldChecksPanel({
                     <span className="text-xs font-semibold text-foreground">
                       {check.label}: {check.status === "healthy" ? "Confirmed" : FIELD_STATUS_LABEL[check.status]}
                     </span>
-                    <div className="flex gap-1">
-                      {(["success", "failure", "incomplete"] as const).map((outcome) => (
-                        <Button
-                          key={outcome}
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-[11px]"
-                          disabled={confirmation.isPending}
-                          onClick={() => confirmation.mutate({
-                            checkName: check.name as "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery",
-                            outcome,
-                          })}
-                        >
-                          {outcome === "success" ? "Pass" : outcome === "failure" ? "Fail" : "Incomplete"}
-                        </Button>
-                      ))}
-                    </div>
+                    {canConfirmHardware && (
+                      <div className="flex gap-1">
+                        {(["success", "failure", "incomplete"] as const).map((outcome) => (
+                          <Button
+                            key={outcome}
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[11px]"
+                            disabled={confirmation.isPending}
+                            onClick={() => confirmation.mutate({
+                              checkName: check.name as "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery",
+                              outcome,
+                            })}
+                          >
+                            {outcome === "success" ? "Pass" : outcome === "failure" ? "Fail" : "Incomplete"}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {check.lastObservedAt && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
@@ -537,11 +543,13 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
   );
 }
 
-// Manager-only review queue of reported issues and auto-captured crashes, each
-// with its stored AI diagnosis + workaround. Operators never see this tab.
+// Review queue of reported issues and auto-captured crashes, each with its
+// stored AI diagnosis + workaround. Access is capability-gated; operators
+// never see this tab.
 export default function IncidentsTab() {
-  const { hasCapability, isLoading: roleLoading } = useMe();
+  const { hasCapability, role, isLoading: roleLoading } = useMe();
   const canReview = hasCapability("review-incidents");
+  const canConfirmHardware = role === "manager";
   const isIdle = useIdle();
   const jitter = useMemo(() => Math.floor(Math.random() * 10_000), []);
   const [pollingReady, setPollingReady] = useState(false);
@@ -613,7 +621,12 @@ export default function IncidentsTab() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <FieldChecksPanel report={fieldChecks} isLoading={fieldChecksLoading} error={fieldChecksError} />
+        <FieldChecksPanel
+          report={fieldChecks}
+          isLoading={fieldChecksLoading}
+          error={fieldChecksError}
+          canConfirmHardware={canConfirmHardware}
+        />
         {hasIncidents && source !== "field_check" && <ClustersPanel disabled={isLoading} />}
         {hasAnyIssues && (
           <div className="space-y-2 pb-1">

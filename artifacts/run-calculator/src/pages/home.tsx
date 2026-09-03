@@ -16510,7 +16510,7 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowReportIssue(true)}>
                   <LifeBuoy className="w-4 h-4 mr-2" /> Report an issue
                 </DropdownMenuItem>
-                {isManager && (
+                {canReviewIncidents && (
                   <DropdownMenuItem onClick={() => setActiveTab("incidents")}>
                     <LifeBuoy className="w-4 h-4 mr-2" /> Reported issues
                   </DropdownMenuItem>

@@ -1440,7 +1440,7 @@ export type FieldChecksReport = {
   actionableCount: number;
 };
 
-// Manager-only review endpoints.
+// Incident and field-check review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
 export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
 export const confirmHardwareFieldCheck = (body: {

@@ -203,7 +203,7 @@ async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
   await assertKeyboardTraversal(page, `${screen} at 200% zoom`, 4);
 }
 
-async function signUp(page: Page): Promise<void> {
+async function signUp(page: Page, role: "manager" | "supervisor" = "manager"): Promise<void> {
   const username = uniqueTestId("a11y");
   testUsernames.add(username);
   await signUpAndHandleOnboarding(page, username, "AccessibilitySmoke123!", {
@@ -231,28 +231,34 @@ async function signUp(page: Page): Promise<void> {
         const userId = user.rows[0]?.id;
         expect(userId, "isolated sign-up did not create a database user").toBeTruthy();
         await db.query(
-          "INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager') " +
-            "ON CONFLICT (user_id) DO UPDATE SET role = 'manager'",
-          [userId],
+          "INSERT INTO user_roles (user_id, role) VALUES ($1, $2) " +
+            "ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role",
+          [userId, role],
         );
-        await db.query(
-          "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-          [JSON.stringify([
-            "manage-staff",
-            "manage-inventory",
-            "edit-production-rules",
-            "approve-password-resets",
-            "review-incidents",
-            "use-ai-tools",
-            "manage-factory-settings",
-            "manage-profiles",
-          ])],
-        );
+        if (role === "manager") {
+          await db.query(
+            "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+            [JSON.stringify([
+              "manage-staff",
+              "manage-inventory",
+              "edit-production-rules",
+              "approve-password-resets",
+              "review-incidents",
+              "use-ai-tools",
+              "manage-factory-settings",
+              "manage-profiles",
+            ])],
+          );
+        }
       } finally {
         await db.end().catch(() => {});
       }
       await currentPage.waitForTimeout(500);
       await currentPage.keyboard.press("Escape");
+      if (role !== "manager") {
+        await currentPage.reload({ waitUntil: "domcontentloaded" });
+        await currentPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      }
     },
   });
 }
@@ -503,18 +509,37 @@ test.describe("accessibility smoke", () => {
     });
     await dismissUnexpectedDialog(page);
 
-    // Field checks are a manager-only, browser-observed summary. This journey
-    // runs at desktop, tablet, and phone widths in the a11y project so the
-    // panel's responsive layout and explicit hardware boundary remain covered.
+    // Field checks are a browser-observed summary. This manager journey runs at
+    // desktop, tablet, and phone widths in the a11y project and verifies that
+    // managers retain the physical-device attestation controls.
     await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Reported issues", exact: true }).click();
+    const fieldChecks = page.getByTestId("field-checks-panel");
+    await expect(fieldChecks).toBeVisible();
+    await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
+    await expect(fieldChecks.getByText("Authenticated app startup and home bundle timing.", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toBeVisible();
+    await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(3);
+    await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
+    await assertKeyboardTraversal(page, "reported issues field checks", 8);
+  });
+
+  test("supervisors can review field checks without physical-device attestation controls", async ({ page }) => {
+    await signUp(page, "supervisor");
+
+    await page.getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "Reported issues", exact: true }).click();
     const fieldChecks = page.getByTestId("field-checks-panel");
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
     await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
     await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
-    await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
-    await assertKeyboardTraversal(page, "reported issues field checks", 8);
+    await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toHaveCount(0);
+    await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(0);
+    await expect(fieldChecks.getByRole("button", { name: "Fail", exact: true })).toHaveCount(0);
+    await expect(fieldChecks.getByRole("button", { name: "Incomplete", exact: true })).toHaveCount(0);
   });
 
 });
