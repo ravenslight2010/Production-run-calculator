@@ -1,12 +1,13 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
   formatCatalogReport,
   main,
+  MAX_EDITABLE_LINES,
   scanSkillCatalog,
   type DuplicateAllowlistEntry,
   type SkillRoot,
@@ -60,6 +61,28 @@ test("rejects malformed metadata, invalid names, and overlong editable bodies", 
   assert.ok(codes.includes("invalid_name"));
   assert.ok(codes.includes("line_limit_exceeded"));
   assert.ok(report.failures >= 3);
+});
+
+test("project skill-creator keeps advanced guidance behind a local reference", async () => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const report = await scanSkillCatalog({
+    projectRoot,
+    roots: [roots[0]],
+    duplicateAllowlist: [],
+  });
+  const skill = report.skills.find((item) => item.name === "skill-creator");
+
+  assert.ok(skill, "expected the project-authored skill-creator guide");
+  assert.ok(
+    skill.lineCount <= MAX_EDITABLE_LINES,
+    `skill-creator/SKILL.md has ${skill.lineCount} lines; expected at most ${MAX_EDITABLE_LINES}`,
+  );
+
+  const skillPath = join(projectRoot, skill.path);
+  const advancedReference = "references/advanced-workflows.md";
+  const content = await readFile(skillPath, "utf8");
+  assert.ok(content.includes(advancedReference), `expected ${advancedReference} to remain referenced`);
+  assert.ok((await readFile(join(dirname(skillPath), advancedReference), "utf8")).length > 0);
 });
 
 test("rejects a custom skill whose frontmatter name does not match its directory", async () => {
