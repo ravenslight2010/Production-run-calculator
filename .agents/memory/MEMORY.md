@@ -149,3 +149,4 @@
 - [Validation roots](skill-catalog-ci-roots.md) + [Shell lint](shell-lint-inventory.md) — missing platform roots warn; editable skills and shell utilities remain covered.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
+- [Deferred Gemini fallback](deferred-gemini-fallback.md) — keep the direct GOOGLE_API_KEY fallback separate until AI feature work.
