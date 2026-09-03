@@ -14,12 +14,13 @@
     "check:github-signed-commit-policy": "pnpm --filter @workspace/scripts run check:github-signed-commit-policy",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
     "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",
+    "check:shell-inventory": "bash ./scripts/src/check-shell-inventory.sh && bash ./lib/api-spec/check-generated.test.sh --shell-inventory-only",
     "push:main": "bash ./scripts/src/push-main.sh",
     "test:gemini": "python3 scripts/test_gemini_skill_trigger_benchmark.py && python3 scripts/test_gemini_failure_alert.py",
     "release:check": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts",
     "release:check:full": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run check:shell-inventory && pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "devDependencies": {

@@ -256,6 +256,11 @@ const steps: ReleaseStep[] = [
     stage: "prerequisites",
   },
   {
+    label: "shell lint inventory",
+    args: ["run", "check:shell-inventory"],
+    stage: "prerequisites",
+  },
+  {
     label: "generated API client freshness",
     args: ["run", "check:api-generated"],
     stage: "prerequisites",

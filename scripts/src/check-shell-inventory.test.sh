@@ -5,6 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 GUARD_SCRIPT="${SCRIPT_DIR}/check-shell-inventory.sh"
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT
@@ -179,6 +180,30 @@ test_allows_only_documented_exclusions() {
   echo "PASS: allows only documented fixture/generated exclusions"
 }
 
+test_release_validation_runs_package_inventory_guards() {
+  local root_command
+  root_command=$(
+    node - "${REPO_ROOT}/package.json" <<'NODE'
+const fs = require("node:fs");
+
+const packagePath = process.argv[2];
+const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+process.stdout.write(packageJson.scripts?.["check:shell-inventory"] ?? "");
+NODE
+  )
+
+  assert_contains "$root_command" "scripts/src/check-shell-inventory.sh"
+  assert_contains "$root_command" \
+    "lib/api-spec/check-generated.test.sh --shell-inventory-only"
+
+  local release_check
+  release_check=$(cat "${REPO_ROOT}/scripts/src/release-check.mts")
+  assert_contains "$release_check" 'label: "shell lint inventory"'
+  assert_contains "$release_check" 'args: ["run", "check:shell-inventory"]'
+  assert_contains "$release_check" 'stage: "prerequisites"'
+  echo "PASS: release validation runs both package inventory guards"
+}
+
 test_accepts_matching_inventory
 test_accepts_matching_top_level_inventory
 test_detects_missing_maintained_script
@@ -186,3 +211,4 @@ test_detects_missing_top_level_script
 test_detects_stale_inventory_entry
 test_detects_stale_top_level_inventory_entry
 test_allows_only_documented_exclusions
+test_release_validation_runs_package_inventory_guards

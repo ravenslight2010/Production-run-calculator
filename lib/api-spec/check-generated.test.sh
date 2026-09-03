@@ -103,6 +103,10 @@ NODE
 
 assert_shell_inventory_is_current
 
+if [[ "${1:-}" == "--shell-inventory-only" ]]; then
+  exit 0
+fi
+
 mkdir -p "$test_root/before/client" "$test_root/before/zod" "$test_root/logs"
 cp -R "$client_generated" "$test_root/before/client/"
 cp -R "$zod_generated" "$test_root/before/zod/"
