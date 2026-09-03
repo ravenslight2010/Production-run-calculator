@@ -2,11 +2,36 @@ const MAX_ENTRIES = 40;
 const SLOW_TRANSITION_MS = 250;
 const SLOW_LOAD_MS = 1500;
 const SLOW_CALCULATION_MS = 16;
-const DIAGNOSTIC_INGESTION_PATHS = new Set([
-  "/api/field-checks/observations",
-  "/api/field-checks/hardware-confirmations",
-  "/api/incidents",
-]);
+
+type ApiFailureInstrumentationPolicy = {
+  instrumentDeliveryFailures: boolean;
+};
+
+type DiagnosticIngestionTransport = ApiFailureInstrumentationPolicy & {
+  path: `/api/${string}`;
+};
+
+/**
+ * Client-owned diagnostic ingestion transports. Every new transport belongs
+ * here so its delivery-failure policy is explicit and reviewable without
+ * duplicating the server's route registry.
+ */
+export const DIAGNOSTIC_INGESTION_TRANSPORTS = {
+  fieldCheckObservations: {
+    path: "/api/field-checks/observations",
+    instrumentDeliveryFailures: false,
+  },
+  hardwareConfirmations: {
+    path: "/api/field-checks/hardware-confirmations",
+    instrumentDeliveryFailures: false,
+  },
+  incidents: {
+    path: "/api/incidents",
+    instrumentDeliveryFailures: false,
+  },
+} as const satisfies Record<string, DiagnosticIngestionTransport>;
+
+export type DiagnosticIngestionTransportName = keyof typeof DIAGNOSTIC_INGESTION_TRANSPORTS;
 export const IMPORT_PERFORMANCE_BUDGETS = {
   parseMs: 120_000,
   reviewOpenMs: 2_000,
@@ -219,9 +244,10 @@ export function getMemoryDiagnostics(): readonly MemoryDiagnostic[] {
  * The URL is reduced to its pathname and neither request nor response data is
  * logged or retained. This is the non-timeout counterpart to fetchWithTimeout.
  */
-export async function fetchWithDiagnostics(
+async function fetchWithFailurePolicy(
   url: string,
-  init?: RequestInit,
+  init: RequestInit | undefined,
+  failurePolicy: ApiFailureInstrumentationPolicy,
 ): Promise<Response> {
   const startedAt = typeof performance === "undefined" ? null : performance.now();
   const path = safePath(url);
@@ -236,7 +262,7 @@ export async function fetchWithDiagnostics(
     // so can feed an ingestion outage back into the same passive field-check
     // stream and amplify retries. Successful delivery remains measurable.
     if (
-      !DIAGNOSTIC_INGESTION_PATHS.has(path) &&
+      failurePolicy.instrumentDeliveryFailures &&
       startedAt !== null &&
       typeof performance !== "undefined"
     ) {
@@ -249,6 +275,21 @@ export async function fetchWithDiagnostics(
     }
     throw err;
   }
+}
+
+export function fetchWithDiagnostics(
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
+  return fetchWithFailurePolicy(url, init, { instrumentDeliveryFailures: true });
+}
+
+export function fetchDiagnosticIngestion(
+  transportName: DiagnosticIngestionTransportName,
+  init?: RequestInit,
+): Promise<Response> {
+  const transport = DIAGNOSTIC_INGESTION_TRANSPORTS[transportName];
+  return fetchWithFailurePolicy(transport.path, init, transport);
 }
 
 export const PERFORMANCE_BUDGETS = {

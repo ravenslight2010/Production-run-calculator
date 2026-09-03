@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearPerformanceDiagnostics,
+  DIAGNOSTIC_INGESTION_TRANSPORTS,
+  fetchDiagnosticIngestion,
   fetchWithDiagnostics,
   getMemoryDiagnostics,
   getPerformanceDiagnostics,
@@ -112,17 +114,44 @@ describe("calculator performance diagnostics", () => {
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
 
-  it.each([
-    "/api/field-checks/observations",
-    "/api/field-checks/hardware-confirmations",
-    "/api/incidents",
-  ])("does not recursively observe diagnostic delivery failures for %s", async (path) => {
-    const failure = new TypeError("network failure");
-    vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
+  it("declares a delivery-failure instrumentation policy for every known diagnostic transport", () => {
+    expect(Object.values(DIAGNOSTIC_INGESTION_TRANSPORTS)).toEqual([
+      {
+        path: "/api/field-checks/observations",
+        instrumentDeliveryFailures: false,
+      },
+      {
+        path: "/api/field-checks/hardware-confirmations",
+        instrumentDeliveryFailures: false,
+      },
+      {
+        path: "/api/incidents",
+        instrumentDeliveryFailures: false,
+      },
+    ]);
+  });
 
-    await expect(fetchWithDiagnostics(path)).rejects.toBe(failure);
+  it.each(Object.entries(DIAGNOSTIC_INGESTION_TRANSPORTS))(
+    "does not recursively observe diagnostic delivery failures for %s",
+    async (transportName) => {
+      const failure = new TypeError("network failure");
+      vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
 
-    expect(getPerformanceDiagnostics()).toEqual([]);
+      await expect(
+        fetchDiagnosticIngestion(transportName as keyof typeof DIAGNOSTIC_INGESTION_TRANSPORTS),
+      ).rejects.toBe(failure);
+
+      expect(getPerformanceDiagnostics()).toEqual([]);
+    },
+  );
+
+  it("rejects omitted or unregistered diagnostic transport policies at the type boundary", () => {
+    // @ts-expect-error Diagnostic ingestion always requires a registered transport name.
+    const missingPolicy = () => fetchDiagnosticIngestion();
+    // @ts-expect-error Unknown diagnostic transports must be added to the reviewed registry first.
+    const unknownPolicy = () => fetchDiagnosticIngestion("new-diagnostic-endpoint");
+
+    expect([missingPolicy, unknownPolicy]).toHaveLength(2);
   });
 
   it("records bounded heap samples only when the browser exposes heap metrics", () => {

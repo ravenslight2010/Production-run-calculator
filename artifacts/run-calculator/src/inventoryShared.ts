@@ -2,7 +2,11 @@ import type { FormValues } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
-import { fetchWithDiagnostics } from "./performanceDiagnostics";
+import {
+  fetchDiagnosticIngestion,
+  fetchWithDiagnostics,
+  type DiagnosticIngestionTransportName,
+} from "./performanceDiagnostics";
 import type { AiStatus } from "./aiStatus";
 import {
   computeRunLines as computeRunLinesShared,
@@ -529,7 +533,10 @@ function isSessionProbePath(path: string): boolean {
   return path === "/me" || path.startsWith("/auth/");
 }
 
-async function api<T>(path: string, opts?: RequestInit): Promise<T> {
+async function api<T>(
+  path: string,
+  opts?: RequestInit,
+): Promise<T> {
   const requestEpoch = authRequestEpoch;
   const res = await fetchWithDiagnostics(`/api${path}`, {
     ...opts,
@@ -539,6 +546,14 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
       ...(opts?.headers ?? {}),
     },
   });
+  return parseApiResponse<T>(path, res, requestEpoch);
+}
+
+async function parseApiResponse<T>(
+  path: string,
+  res: Response,
+  requestEpoch: number,
+): Promise<T> {
   if (!res.ok) {
     if (res.status === 401 && !isSessionProbePath(path)) {
       onUnauthorized?.(requestEpoch);
@@ -564,6 +579,21 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return null as T;
   return (await res.json()) as T;
+}
+
+function diagnosticIngestionApi<T>(
+  transportName: DiagnosticIngestionTransportName,
+  opts: RequestInit,
+): Promise<T> {
+  const requestEpoch = authRequestEpoch;
+  return fetchDiagnosticIngestion(transportName, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": clientId,
+      ...(opts.headers ?? {}),
+    },
+  }).then((res) => parseApiResponse<T>(`[diagnostic:${transportName}]`, res, requestEpoch));
 }
 
 export type CreateItemBody = {
@@ -1326,7 +1356,7 @@ export type Incident = {
 // Report a problem (or auto-submit a crash) and get back a plain-language
 // diagnosis + workaround. Allowed for any signed-in user.
 export const reportIncident = (body: ReportIncidentBody) =>
-  api<IncidentDiagnosis>("/incidents", {
+  diagnosticIngestionApi<IncidentDiagnosis>("incidents", {
     method: "POST",
     body: JSON.stringify({
       ...body,
@@ -1361,7 +1391,7 @@ export const submitFieldCheckObservations = async (
   // This intentionally does not use api(): field-check collection is
   // best-effort telemetry and a stale session must not trigger the app's
   // sign-out flow or interrupt production work.
-  const res = await fetchWithDiagnostics("/api/field-checks/observations", {
+  const res = await fetchDiagnosticIngestion("fieldCheckObservations", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-client-id": clientId },
     body: JSON.stringify({ observations }),
@@ -1419,10 +1449,13 @@ export const confirmHardwareFieldCheck = (body: {
   outcome: "success" | "failure" | "incomplete";
   observedAt: string;
   deviceCategory: "android-phone" | "android-tablet" | "ipad";
-}) => api<{ accepted: number; duplicate: number }>("/field-checks/hardware-confirmations", {
-  method: "POST",
-  body: JSON.stringify(body),
-});
+}) => diagnosticIngestionApi<{ accepted: number; duplicate: number }>(
+  "hardwareConfirmations",
+  {
+    method: "POST",
+    body: JSON.stringify(body),
+  },
+);
 export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
 export const fetchActionableIncidentCount = () => api<{ count: number }>("/incidents/actionable-count");
