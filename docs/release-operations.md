@@ -147,6 +147,25 @@ warning, each mode's resume/regenerate commands, and forked pull-request
 artifact access using a safe read-only-token fixture. The fixture never uses a
 real GitHub URL or token.
 
+### Live external-fork verification
+
+The repository-level GitHub settings checked on September 3, 2026 were:
+
+- Actions enabled, with all actions allowed;
+- default workflow permissions set to read-only; and
+- first-time fork contributors requiring approval before their workflows run.
+
+The live download check is **BLOCKED** until a disposable fork owned by a
+different GitHub account is available. The authorized account for this
+repository has no external fork or organization namespace, and GitHub did not
+create a distinct fork when a same-owner fork was requested. Consequently, no
+external-fork pull request, stopped-check run, or reviewer artifact download
+was claimed from this environment. Once an external fork is available, rerun
+the standard pull-request workflow with an intentionally stopped gate, approve
+the first-time contributor workflow if GitHub requests it, and verify that the
+summary's checkpoint link downloads successfully before deleting the fork and
+pull request.
+
 The workflow-lint job runs a separate workflow guard that checks both standard
 and full jobs keep their `always()` stopped-summary step after the matching
 evidence upload and pass the matching artifact URL and recovery commands. This

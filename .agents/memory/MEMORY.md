@@ -153,6 +153,7 @@
 - [Phone E2E form overrides](phone-e2e-form-overrides.md) — server-backed reloads can overwrite local numeric fixtures; reapply values through controlled inputs after reload.
 - [GitHub Git push authentication](github-git-push.md) — the GitHub API integration cannot upload local Git objects; shell pushes need a secure GIT_URL remote.
 - [GitHub cancelled-job summaries](github-actions-job-summary-visibility.md) — cancelled runs may hide GITHUB_STEP_SUMMARY Markdown from public pages and check-run REST output despite successful summary steps.
+- [GitHub external-fork verification](github-external-fork-verification.md) — live fork PR checks need a fork owned by another account; same-owner fork requests are not usable proof.
 - [Skill catalog CI roots](skill-catalog-ci-roots.md) — GitHub checkouts may omit platform-injected `.local` roots, so missing roots warn while discovered editable skills still block.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
