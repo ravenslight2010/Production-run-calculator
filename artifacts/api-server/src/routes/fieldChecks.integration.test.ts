@@ -225,6 +225,57 @@ describe("field-check evidence from two authenticated clients", () => {
     });
 
     const runRows = await db.select().from(dailySyncTable);
-    expect(runRows).toEqual([]);
+
+    const observedAt = new Date().toISOString();
+    expect(observations).toHaveLength(1);
+    expect(observations[0]).toMatchObject({
+      checkName: "touch-accuracy",
+      checkVersion: "2026-09",
+      outcome: "success",
+      appBuild: "hardware-protocol",
+      deviceCategory: "android-phone",
+      metrics: {},
+    });
   });
 });
+
+    const observations = await db.select().from(fieldCheckObservationsTable);
+
+    const staffResponse = await request(
+      PHONE_USER,
+      "POST",
+      "/api/field-checks/hardware-confirmations",
+      {
+        ...managerConfirmation,
+        checkName: "keyboard-clearance",
+      },
+    );
+
+    const managerResponse = await request(
+      MANAGER,
+      "POST",
+      "/api/field-checks/hardware-confirmations",
+      managerConfirmation,
+    );
+
+    const managerConfirmation = {
+      checkName: "touch-accuracy",
+      checkVersion: "2026-09",
+      outcome: "success",
+      observedAt,
+      deviceCategory: "android-phone",
+    } as const;
+
+    const passiveResponse = await request(
+      PHONE_USER,
+      "POST",
+      "/api/field-checks/observations",
+      {
+        observations: [{
+          observationId: "passive-hardware-claim",
+          ...managerConfirmation,
+          appBuild: "passive-browser-test",
+          metrics: {},
+        }],
+      },
+    );
