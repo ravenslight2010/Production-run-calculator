@@ -118,6 +118,38 @@ test("finds broken local markdown targets but ignores external links", async () 
   assert.deepEqual(skill?.findings.map((item) => item.code), ["broken_local_reference"]);
 });
 
+test("finds broken inline resource paths without treating commands or examples as files", async () => {
+  const root = await fixture();
+  const skillDirectory = join(root, ".agents/skills", "reference-skill");
+  await mkdir(join(skillDirectory, "references"), { recursive: true });
+  await writeFile(join(skillDirectory, "references", "existing.md"), "fixture reference\n");
+  await mkdir(join(root, "scripts"), { recursive: true });
+  await writeFile(join(root, "scripts", "existing.mts"), "fixture script\n");
+  await addSkill(
+    root,
+    ".agents/skills",
+    "reference-skill",
+    [
+      "Read `references/existing.md` and `scripts/existing.mts`.",
+      "The missing guide is `references/missing.md`.",
+      "Run `pnpm run scripts/missing.mts` or visit `https://example.com/missing`.",
+      "The directory label `references/` and this fenced example should not be checked.",
+      "```text",
+      "`references/fenced-missing.md`",
+      "```",
+      "",
+    ].join("\n"),
+  );
+  const report = await scanSkillCatalog({ projectRoot: root, roots });
+  const skill = report.skills.find((item) => item.name === "reference-skill");
+
+  assert.deepEqual(
+    skill?.findings.map((item) => item.code),
+    ["broken_local_reference"],
+  );
+  assert.equal(skill?.findings[0]?.line, 6);
+});
+
 test("allows an intentional duplicate only with an explicit routing record", async () => {
   const root = await fixture();
   await addSkill(root, ".agents/skills", "shared-skill");

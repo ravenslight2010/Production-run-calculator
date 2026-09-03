@@ -154,3 +154,4 @@
 - [Field verification boundary](field-verification.md) — passive field evidence must stay best-effort and advisory, never become a second source of truth for production state.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [Container image migration split](container-image-migration.md) — Render pre-deploy runs inside the pulled image; slim runtimes need a scoped migration payload while full migration stays a separate target.
+- [Inline skill path references](inline-skill-path-references.md) — validate only whitespace-free file-like inline paths; resolve skill resources locally and explicit project prefixes from the repository root.
