@@ -15,6 +15,7 @@
 - [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
+- [Autosave edit attribution](autosave-edit-attribution.md) + [profile clobber](profile-clobber-blank-form.md) — autosave must never stamp an all-default run (empty-over-populated clobbers peers) nor zero a profile before it loads (saveProfile guard + seed self-heal).
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
@@ -149,10 +150,9 @@
 - [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Phone E2E form overrides](phone-e2e-form-overrides.md) — server-backed reloads can overwrite local numeric fixtures; reapply values through controlled inputs after reload.
-- [GitHub delivery constraints](github-git-push.md) + [job summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — API auth, cancelled runs, and same-owner forks have proof limits.
+- [GitHub Git push authentication](github-git-push.md) — the GitHub API integration cannot upload local Git objects; shell pushes need a secure GIT_URL remote.
+- [GitHub cancelled-job summaries](github-actions-job-summary-visibility.md) — cancelled runs may hide GITHUB_STEP_SUMMARY Markdown from public pages and check-run REST output despite successful summary steps.
 - [Skill catalog CI roots](skill-catalog-ci-roots.md) — GitHub checkouts may omit platform-injected `.local` roots, so missing roots warn while discovered editable skills still block.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
-- [Shell lint inventory](shell-lint-inventory.md) — scripts/src shell files stay explicitly listed in check:shell; only documented fixture/generated files are excluded.
-- [Field verification boundary](field-verification.md) — passive field evidence must stay best-effort and advisory, never become a second source of truth for production state.
-- [Docker container readiness](docker-container-readiness.md) — Replit Docker exec, healthchecks, and bridge traffic may fail; prefer dynamic host-network probes.
+- [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
