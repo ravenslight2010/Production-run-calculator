@@ -302,6 +302,14 @@ const steps: ReleaseStep[] = [
     stage: "clean-start",
     concurrencyLimit: 1,
   },
+  {
+    label: "Render image smoke",
+    args: ["run", "check:render-image"],
+    timeoutMs: 15 * 60_000,
+    warningMs: 10 * 60_000,
+    stage: "container-smoke",
+    concurrencyLimit: 1,
+  },
   ...RELEASE_CHECK_API_SHARD_STEPS,
   {
     label: "run calculator tests",

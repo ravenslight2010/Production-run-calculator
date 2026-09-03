@@ -21,7 +21,7 @@ services:
     image:
       url: ghcr.io/ravenslight2010/runcalc-api:latest
     plan: free
-    healthCheckPath: /healthz
+    healthCheckPath: /api/healthz
     envVars:
       # ---- Database (auto-linked by Render) ----
       - key: DATABASE_URL
@@ -43,7 +43,9 @@ services:
       - key: AUTH_TOKEN_SECRET
         generateValue: true
       # ---- AI (set this in Render's dashboard) ----
-      - key: GOOGLE_API_KEY
+      - key: AI_INTEGRATIONS_GEMINI_API_KEY
+        sync: false
+      - key: AI_INTEGRATIONS_GEMINI_BASE_URL
         sync: false
       # ---- Web / CORS (optional; leave blank when web + API share the same domain) ----
       - key: REPLIT_DOMAINS

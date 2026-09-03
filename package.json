@@ -10,6 +10,7 @@
     "check:api-generated": "pnpm --filter @workspace/api-spec run check-generated && pnpm --filter @workspace/api-zod run test && tsc --build --force ./lib/api-client-react/tsconfig.json ./lib/api-zod/tsconfig.json",
     "audit:recovery": "pnpm --filter @workspace/scripts run audit:recovery",
     "check:clean-start": "pnpm --filter @workspace/scripts run check:clean-start",
+    "check:render-image": "pnpm --filter @workspace/scripts run check:render-image",
     "check:github-signed-commit-policy": "pnpm --filter @workspace/scripts run check:github-signed-commit-policy",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
     "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",

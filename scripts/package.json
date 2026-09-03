@@ -27,6 +27,7 @@
     "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
     "check:clean-start": "tsx ./src/verify-clean-start.mts",
+    "check:render-image": "tsx ./src/verify-render-image.mts",
     "push:main": "bash ./src/push-main.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

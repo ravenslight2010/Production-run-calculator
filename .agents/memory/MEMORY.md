@@ -149,11 +149,10 @@
 - [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Phone E2E form overrides](phone-e2e-form-overrides.md) — server-backed reloads can overwrite local numeric fixtures; reapply values through controlled inputs after reload.
-- [GitHub Git push authentication](github-git-push.md) — the GitHub API integration cannot upload local Git objects; shell pushes need a secure GIT_URL remote.
-- [GitHub cancelled-job summaries](github-actions-job-summary-visibility.md) — cancelled runs may hide GITHUB_STEP_SUMMARY Markdown from public pages and check-run REST output despite successful summary steps.
-- [GitHub external-fork verification](github-external-fork-verification.md) — live fork PR checks need a fork owned by another account; same-owner fork requests are not usable proof.
+- [GitHub delivery constraints](github-git-push.md) + [job summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — API auth, cancelled runs, and same-owner forks have proof limits.
 - [Skill catalog CI roots](skill-catalog-ci-roots.md) — GitHub checkouts may omit platform-injected `.local` roots, so missing roots warn while discovered editable skills still block.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
 - [Shell lint inventory](shell-lint-inventory.md) — scripts/src shell files stay explicitly listed in check:shell; only documented fixture/generated files are excluded.
 - [Field verification boundary](field-verification.md) — passive field evidence must stay best-effort and advisory, never become a second source of truth for production state.
+- [Docker container readiness](docker-container-readiness.md) — Replit Docker exec, healthchecks, and bridge traffic may fail; prefer dynamic host-network probes.
