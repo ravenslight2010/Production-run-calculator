@@ -111,6 +111,7 @@ test_stable_branch_protection_workflow_contract() {
   local check_block
   local upload_block
   local notification_block
+  local check_log_placeholder="\$check_log"
 
   workflow_content=$(<"$STABLE_BRANCH_PROTECTION_WORKFLOW")
   assert_contains "$workflow_content" "  schedule:"
@@ -156,11 +157,100 @@ test_stable_branch_protection_workflow_contract() {
   assert_contains "$notification_block" "issue_number: existing.number"
   assert_contains "$notification_block" "github.rest.issues.create"
   assert_contains "$notification_block" "Review the workflow run"
-  if [[ "$notification_block" == *'cat "$check_log"'* ]]; then
+  if grep -Fq "cat \"${check_log_placeholder}\"" <<<"$notification_block"; then
     printf 'Notification must link to retained output, not copy repository details.\n' >&2
     return 1
   fi
   echo "PASS: preserves stable branch protection drift-monitoring contract"
+}
+
+test_stable_branch_protection_alert_fixture() {
+  local fixture_repository="https://github.example/factory/stable-branch-protection-alert-fixture"
+  local issue_url=""
+  local comment_issue_url=""
+  local issue_count=0
+  local comment_count=0
+  local scheduled_run_count=0
+  local manual_run_count=0
+
+  fixture_alert() {
+    local event_name="$1"
+    local conclusion="$2"
+    local run_url="$3"
+
+    if [[ "$event_name" == "schedule" ]]; then
+      scheduled_run_count=$((scheduled_run_count + 1))
+    elif [[ "$event_name" == "workflow_dispatch" ]]; then
+      manual_run_count=$((manual_run_count + 1))
+    fi
+
+    if [[ "$conclusion" != "failure" || "$event_name" != "schedule" ]]; then
+      return 0
+    fi
+
+    if (( issue_count == 0 )); then
+      issue_count=1
+      issue_url="${fixture_repository}/issues/1"
+    else
+      comment_count=$((comment_count + 1))
+      comment_issue_url="$issue_url"
+    fi
+
+    [[ "$run_url" == "${fixture_repository}/actions/runs/"* ]]
+  }
+
+  fixture_alert \
+    schedule \
+    failure \
+    "${fixture_repository}/actions/runs/1001"
+  fixture_alert \
+    schedule \
+    failure \
+    "${fixture_repository}/actions/runs/1002"
+
+  [[ "$issue_count" -eq 1 ]] || {
+    printf 'Expected the first scheduled failure to create one durable issue.\n' >&2
+    return 1
+  }
+  [[ "$comment_count" -eq 1 ]] || {
+    printf 'Expected the later scheduled failure to comment on that issue.\n' >&2
+    return 1
+  }
+  [[ "$comment_issue_url" == "$issue_url" ]] || {
+    printf 'Expected the repeat failure comment to use the durable issue URL.\n' >&2
+    return 1
+  }
+  [[ "$issue_url" == "${fixture_repository}/issues/1" ]] || {
+    printf 'Expected the fixture to retain its issue URL.\n' >&2
+    return 1
+  }
+
+  local issue_count_before_manual="$issue_count"
+  local comment_count_before_manual="$comment_count"
+  fixture_alert \
+    workflow_dispatch \
+    failure \
+    "${fixture_repository}/actions/runs/1003"
+
+  [[ "$issue_count" -eq "$issue_count_before_manual" ]] || {
+    printf 'Manual dispatch failure must not create an issue.\n' >&2
+    return 1
+  }
+  [[ "$comment_count" -eq "$comment_count_before_manual" ]] || {
+    printf 'Manual dispatch failure must not add a comment.\n' >&2
+    return 1
+  }
+  [[ "$scheduled_run_count" -eq 2 && "$manual_run_count" -eq 1 ]] || {
+    printf 'Expected two scheduled fixture runs and one manual fixture run.\n' >&2
+    return 1
+  }
+
+  printf \
+    'PASS: safe alert fixture issue=%s scheduled_runs=%s manual_runs=%s comments=%s protection_output=omitted\n' \
+    "$issue_url" \
+    "$scheduled_run_count" \
+    "$manual_run_count" \
+    "$comment_count"
 }
 
 assert_stopped_summary_workflow_contract() {
@@ -485,3 +575,4 @@ test_rejects_invalid_ci_actionlint_release
 test_rejects_both_invalid_actionlint_releases
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
+test_stable_branch_protection_alert_fixture
