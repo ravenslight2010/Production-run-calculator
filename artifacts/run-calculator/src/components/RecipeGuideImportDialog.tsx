@@ -208,7 +208,7 @@ export function SauceGuideImportDialog({
     });
   const requiresAcknowledgement = applyRows.some((row) => {
     const targets = row.flavors.length ? row.flavors : ["", ...(flavorsByBrand[row.brand] ?? [])];
-    return targets.some((flavor) => {
+    return targets.some((flavor: string) => {
       const profile = loadProfile(row.brand, flavor) as Record<string, unknown> | null;
       return profile?.frontlineRecipeName && profile.frontlineRecipeName !== row.recipeName;
     });
@@ -467,7 +467,7 @@ export function DoughGuideImportDialog({
     });
   const requiresAcknowledgement = applyRows.some((row) => {
     const targets = row.flavors.length ? row.flavors : ["", ...(flavorsByBrand[row.brand] ?? [])];
-    return targets.some((flavor) => {
+    return targets.some((flavor: string) => {
       const profile = loadProfile(row.brand, flavor) as Record<string, unknown> | null;
       return profile?.doughRecipeName && profile.doughRecipeName !== row.doughRecipeName;
     });
