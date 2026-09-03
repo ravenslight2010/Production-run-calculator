@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Regression tests for the retired database pool production-use guard.
+# Regression tests for the shared-pool production boundary guard.
 
 set -euo pipefail
 
@@ -17,11 +17,6 @@ make_workspace() {
     "${workspace}/scripts/src" \
     "${workspace}/artifacts/api-server/src/lib"
   cp "$GUARD_SCRIPT" "${workspace}/scripts/src/check-retired-db-pool.sh"
-  cat > "${workspace}/artifacts/api-server/src/lib/dbResilience.ts" <<'EOF'
-export function createResilientPool() {
-  return {};
-}
-EOF
   cat > \
     "${workspace}/artifacts/api-server/src/lib/aiResultCache.integration.test.ts" \
     <<'EOF'
@@ -52,7 +47,7 @@ assert_contains() {
   fi
 }
 
-test_accepts_no_production_caller() {
+test_accepts_removed_retired_pool() {
   local workspace
   workspace=$(make_workspace no-caller)
   run_check "$workspace"
@@ -62,8 +57,27 @@ test_accepts_no_production_caller() {
     return 1
   }
   assert_contains "$CHECK_OUTPUT" \
-    "retired database pool has no production callers"
-  echo "PASS: accepts retired pool with no production caller"
+    "retired database pool is removed"
+  echo "PASS: accepts removed retired pool"
+}
+
+test_rejects_retired_pool_file() {
+  local workspace
+  workspace=$(make_workspace retired-file)
+  cat > "${workspace}/artifacts/api-server/src/lib/dbResilience.ts" <<'EOF'
+export function createResilientPool() {
+  return {};
+}
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected the retired pool file to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "artifacts/api-server/src/lib/dbResilience.ts"
+  echo "PASS: rejects retired pool file"
 }
 
 test_rejects_production_import() {
@@ -146,7 +160,8 @@ test_requires_shared_pool_coverage() {
   echo "PASS: requires shared-pool checkout regression coverage"
 }
 
-test_accepts_no_production_caller
+test_accepts_removed_retired_pool
+test_rejects_retired_pool_file
 test_rejects_production_import
 test_rejects_production_invocation
 test_ignores_test_and_admin_pools

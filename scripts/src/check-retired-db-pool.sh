@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Keep the API's retired resilient pool from becoming a second production pool.
+# Keep API production traffic on the shared @workspace/db pool.
 
 set -euo pipefail
 
@@ -15,9 +15,15 @@ relative_path() {
   printf '%s\n' "${path#"${REPO_ROOT}"/}"
 }
 
-if [[ ! -f "$RETIRED_POOL" ]]; then
-  printf 'Retired database pool guard could not find %s.\n' \
+if [[ -e "$RETIRED_POOL" ]]; then
+  printf 'Retired database pool guard found removed file %s.\n' \
     "$(relative_path "$RETIRED_POOL")" >&2
+  cat >&2 <<EOF
+
+The legacy resilient pool must remain deleted. API production traffic uses the
+shared @workspace/db pool and its checkout contract is covered by
+$(relative_path "$CHECKOUT_TEST").
+EOF
   exit 1
 fi
 
@@ -49,7 +55,6 @@ mapfile -d '' production_sources < <(
     ! -name '*.test.tsx' \
     ! -name '*.integration.test.ts' \
     ! -name '*.integration.test.tsx' \
-    ! -path "$RETIRED_POOL" \
     -print0 | sort -z
 )
 
@@ -79,15 +84,14 @@ done
 
 if (( ${#violations[@]} > 0 )); then
   cat >&2 <<EOF
-Retired database pool guard found production use of
-$(relative_path "$RETIRED_POOL"):
+Retired database pool guard found a legacy pool reference in API production
+source:
 EOF
 printf '  %s\n' "${violations[@]}" >&2
 cat >&2 <<EOF
 
-Do not import or invoke this legacy factory for API production traffic. The
-shared pool checkout contract is covered by
-$(relative_path "$CHECKOUT_TEST"); extend that coverage before deliberately
+Keep API production traffic on the shared pool. Its checkout contract is
+covered by $(relative_path "$CHECKOUT_TEST"); extend that coverage before
 changing the production pool boundary. Test/admin database pools remain
 excluded from this check.
 EOF
@@ -95,4 +99,4 @@ EOF
 fi
 
 printf \
-  'PASS: retired database pool has no production callers; shared-pool checkout coverage is present.\n'
+  'PASS: retired database pool is removed; shared-pool checkout coverage is present.\n'
