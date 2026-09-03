@@ -6,6 +6,7 @@ workspace_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow_dir="$workspace_root/.github/workflows"
 actionlint_package="$workspace_root/scripts/package.json"
 actionlint_workflow="$workflow_dir/workflow-lint.yml"
+ci_workflow="$workflow_dir/ci.yml"
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -111,6 +112,79 @@ actionlint version, then run `pnpm install` to refresh pnpm-lock.yaml.
 EOF
   exit 1
 fi
+
+if [[ ! -f "$ci_workflow" ]]; then
+  echo "CI workflow timeout check failed: ${ci_workflow} is missing." >&2
+  exit 1
+fi
+
+ci_timeout_check_output="$(
+  awk '
+    function finish_job() {
+      if (current_job == "") {
+        return
+      }
+      checked_jobs++
+      if (!saw_timeout) {
+        print "  " current_job ": missing timeout-minutes"
+        failures++
+      } else if (timeout_value !~ /^[1-9][0-9]*$/) {
+        print "  " current_job ": timeout-minutes must be a positive integer (found: " timeout_value ")"
+        failures++
+      }
+    }
+
+    $0 == "jobs:" {
+      in_jobs = 1
+      next
+    }
+
+    in_jobs && $0 ~ /^[^[:space:]]/ {
+      finish_job()
+      in_jobs = 0
+      next
+    }
+
+    in_jobs && $0 ~ /^  [[:alnum:]_-]+:[[:space:]]*(#.*)?$/ {
+      finish_job()
+      current_job = $0
+      sub(/^  /, "", current_job)
+      sub(/:.*/, "", current_job)
+      saw_timeout = 0
+      timeout_value = ""
+      next
+    }
+
+    in_jobs && current_job != "" && $0 ~ /^    timeout-minutes:[[:space:]]*/ {
+      timeout_value = $0
+      sub(/^    timeout-minutes:[[:space:]]*/, "", timeout_value)
+      sub(/[[:space:]]+#.*/, "", timeout_value)
+      gsub(/[[:space:]]/, "", timeout_value)
+      saw_timeout = 1
+      next
+    }
+
+    END {
+      if (in_jobs) {
+        finish_job()
+      }
+      if (checked_jobs == 0) {
+        print "  no jobs found"
+        failures++
+      }
+      exit(failures ? 1 : 0)
+    }
+  ' "$ci_workflow"
+)" || {
+  cat >&2 <<EOF
+CI workflow timeout check failed. Every job in .github/workflows/ci.yml must
+declare a positive integer timeout-minutes value:
+$ci_timeout_check_output
+EOF
+  exit 1
+}
+
+echo "CI workflow jobs have positive timeout-minutes values."
 
 if [[ -n "${ACTIONLINT_BIN:-}" ]]; then
   actionlint_bin="$ACTIONLINT_BIN"

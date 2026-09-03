@@ -42,6 +42,19 @@ name: Workflow lint
 env:
   ${ci_declaration}
 EOF
+  cat > "${workspace}/.github/workflows/ci.yml" <<'EOF'
+name: CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
   printf '%s\n' "$workspace"
 }
 
@@ -602,6 +615,65 @@ test_rejects_both_invalid_actionlint_releases() {
   echo "PASS: reports both invalid releases before linting"
 }
 
+test_ci_jobs_have_positive_timeouts() {
+  local workspace
+  workspace=$(make_workspace ci-timeouts 1.7.12 1.7.12)
+  cp "$CI_WORKFLOW" "$workspace/.github/workflows/ci.yml"
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected every current CI job timeout to pass. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "CI workflow jobs have positive timeout-minutes values."
+  echo "PASS: checks positive timeouts for every CI job"
+}
+
+test_rejects_ci_job_without_timeout() {
+  local workspace
+  workspace=$(make_workspace ci-missing-timeout 1.7.12 1.7.12)
+  cp "$CI_WORKFLOW" "$workspace/.github/workflows/ci.yml"
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+  future-check:
+    name: Future check
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a CI job without a timeout to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "future-check: missing timeout-minutes"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the missing CI timeout to fail before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects a CI job without a timeout"
+}
+
+test_rejects_non_positive_ci_job_timeout() {
+  local workspace
+  workspace=$(make_workspace ci-zero-timeout 1.7.12 1.7.12)
+  cp "$CI_WORKFLOW" "$workspace/.github/workflows/ci.yml"
+  sed -i 's/^    timeout-minutes: 20$/    timeout-minutes: 0/' \
+    "$workspace/.github/workflows/ci.yml"
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a non-positive CI timeout to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "build: timeout-minutes must be a positive integer (found: 0)"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected the non-positive CI timeout to fail before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects a non-positive CI timeout"
+}
+
 test_accepts_matching_versions
 test_accepts_quoted_ci_version_with_inline_comment
 test_accepts_quoted_ci_version_without_comment
@@ -614,6 +686,9 @@ test_rejects_malformed_ci_actionlint_declaration
 test_rejects_invalid_local_actionlint_release
 test_rejects_invalid_ci_actionlint_release
 test_rejects_both_invalid_actionlint_releases
+test_ci_jobs_have_positive_timeouts
+test_rejects_ci_job_without_timeout
+test_rejects_non_positive_ci_job_timeout
 test_ci_runs_routine_scripts_tests
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
