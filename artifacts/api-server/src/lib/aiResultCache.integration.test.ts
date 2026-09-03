@@ -1029,6 +1029,79 @@ describe("AI result cache persistence and scope isolation", () => {
     }
   });
 
+  it("rejects a queued checkout after the pool deadline and recovers afterward", async () => {
+    const heldClients: pg.PoolClient[] = [];
+    let queuedCheckout: Promise<pg.PoolClient> | undefined;
+    try {
+      for (let index = 0; index < pool.options.max; index += 1) {
+        heldClients.push(await pool.connect());
+      }
+
+      expect(pool.idleCount).toBe(0);
+      expect(pool.waitingCount).toBe(0);
+
+      const startedAt = Date.now();
+      queuedCheckout = pool.connect();
+      await vi.waitFor(() => {
+        expect(pool.waitingCount).toBe(1);
+      });
+
+      await expect(queuedCheckout).rejects.toThrow(/timeout/i);
+      // connectionTimeoutMillis must remove the waiter, not merely stop the
+      // caller from awaiting it while node-postgres keeps it queued.
+      expect(pool.waitingCount).toBe(0);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(700);
+    } finally {
+      for (const client of heldClients) client.release();
+      if (queuedCheckout) await queuedCheckout.catch(() => undefined);
+    }
+
+    await expect(pool.query("SELECT 1")).resolves.toMatchObject({
+      rows: [{ "?column?": 1 }],
+    });
+  });
+
+  it("allows an acquired client to finish a legitimately slow API request", async () => {
+    const slowApp = express();
+    slowApp.get("/slow-db-request", async (_req, res, next) => {
+      try {
+        const result = await pool.query(
+          "SELECT pg_sleep(1.2), 42 AS value",
+        );
+        res.json({ value: result.rows[0]?.value });
+      } catch (error) {
+        next(error);
+      }
+    });
+    slowApp.use(
+      (
+        _error: unknown,
+        _req: express.Request,
+        res: express.Response,
+        _next: express.NextFunction,
+      ) => {
+        res.status(500).json({ error: "slow request failed" });
+      },
+    );
+
+    let slowServer: Server | undefined;
+    try {
+      slowServer = await new Promise<Server>((resolve) => {
+        const server = slowApp.listen(0, () => resolve(server));
+      });
+      const port = (slowServer.address() as AddressInfo).port;
+      const response = await fetch(`http://127.0.0.1:${port}/slow-db-request`);
+      const body = await response.json() as { value?: number; error?: string };
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual({ value: 42 });
+    } finally {
+      if (slowServer) {
+        await new Promise<void>((resolve) => slowServer!.close(() => resolve()));
+      }
+    }
+  });
+
   it("aggregates maintenance failures across isolated API owners and scopes", async () => {
     const [liveOwner, sandboxOwner] = await Promise.all([
       import("./observability" + "?aggregate-owner-live"),
