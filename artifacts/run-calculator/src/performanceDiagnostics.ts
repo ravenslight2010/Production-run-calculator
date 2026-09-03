@@ -2,6 +2,11 @@ const MAX_ENTRIES = 40;
 const SLOW_TRANSITION_MS = 250;
 const SLOW_LOAD_MS = 1500;
 const SLOW_CALCULATION_MS = 16;
+const DIAGNOSTIC_INGESTION_PATHS = new Set([
+  "/api/field-checks/observations",
+  "/api/field-checks/hardware-confirmations",
+  "/api/incidents",
+]);
 export const IMPORT_PERFORMANCE_BUDGETS = {
   parseMs: 120_000,
   reviewOpenMs: 2_000,
@@ -227,11 +232,11 @@ export async function fetchWithDiagnostics(
     }
     return response;
   } catch (err) {
-    // Field-check delivery is itself telemetry. Recording its transport
-    // failure would emit another field-check signal, creating a self-sustaining
-    // retry loop when the endpoint is unavailable or rate-limited.
+    // Diagnostic ingestion must not observe its own transport failures. Doing
+    // so can feed an ingestion outage back into the same passive field-check
+    // stream and amplify retries. Successful delivery remains measurable.
     if (
-      path !== "/api/field-checks/observations" &&
+      !DIAGNOSTIC_INGESTION_PATHS.has(path) &&
       startedAt !== null &&
       typeof performance !== "undefined"
     ) {

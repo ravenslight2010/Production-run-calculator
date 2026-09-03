@@ -112,13 +112,15 @@ describe("calculator performance diagnostics", () => {
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
 
-  it("does not recursively observe field-check delivery failures", async () => {
+  it.each([
+    "/api/field-checks/observations",
+    "/api/field-checks/hardware-confirmations",
+    "/api/incidents",
+  ])("does not recursively observe diagnostic delivery failures for %s", async (path) => {
     const failure = new TypeError("network failure");
     vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
 
-    await expect(
-      fetchWithDiagnostics("/api/field-checks/observations"),
-    ).rejects.toBe(failure);
+    await expect(fetchWithDiagnostics(path)).rejects.toBe(failure);
 
     expect(getPerformanceDiagnostics()).toEqual([]);
   });
