@@ -22,8 +22,11 @@ const CACHE_MAINTENANCE_OPERATION = "prune" as const;
 const CACHE_MAINTENANCE_SCOPES: CacheMaintenanceScope[] = ["live", "sandbox"];
 const CACHE_MAINTENANCE_SHARED_MAX_ROWS = CACHE_MAINTENANCE_FAILURE_MAX_EVENTS;
 const CACHE_MAINTENANCE_SHARED_TIMEOUT_MS = 1_000;
-const CACHE_MAINTENANCE_SHARED_DB_LOCK_TIMEOUT_MS =
-  CACHE_MAINTENANCE_SHARED_TIMEOUT_MS + 100;
+// Keep the PostgreSQL deadline shorter than the caller's fallback deadline.
+// Promise.race alone only stops waiting for a query; it does not stop the
+// transaction that owns the pool connection.
+const CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS =
+  CACHE_MAINTENANCE_SHARED_TIMEOUT_MS - 100;
 const cacheMaintenanceFailureTimes = new Map<string, number[]>();
 const cacheMaintenanceAlerts = new Set<string>();
 
@@ -159,14 +162,31 @@ async function withSharedDiagnosticsTimeout<T>(work: Promise<T>): Promise<T> {
   }
 }
 
+async function configureSharedDiagnosticsTimeout(tx: {
+  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
+}): Promise<void> {
+  await tx.execute(
+    sql`SELECT set_config(
+      'statement_timeout',
+      ${`${CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS}ms`},
+      true
+    ), set_config(
+      'lock_timeout',
+      ${`${CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS}ms`},
+      true
+    )`,
+  );
+}
+
 async function readSharedCacheMaintenanceDiagnostic(
   scope: CacheMaintenanceScope,
   now: number,
 ): Promise<CacheMaintenanceDiagnostic> {
   const cutoff = new Date(now - CACHE_MAINTENANCE_FAILURE_WINDOW_MS);
   const rows = await withSharedDiagnosticsTimeout(
-    (async () => {
-      await db
+    db.transaction(async (tx) => {
+      await configureSharedDiagnosticsTimeout(tx);
+      await tx
         .delete(cacheMaintenanceEventsTable)
         .where(
           and(
@@ -175,13 +195,13 @@ async function readSharedCacheMaintenanceDiagnostic(
             lt(cacheMaintenanceEventsTable.occurredAt, cutoff),
           ),
         );
-      return db
+      return tx
         .select({ occurredAt: cacheMaintenanceEventsTable.occurredAt })
         .from(cacheMaintenanceEventsTable)
         .where(sharedCacheMaintenanceWhere(scope, cutoff))
         .orderBy(desc(cacheMaintenanceEventsTable.occurredAt), desc(cacheMaintenanceEventsTable.id))
         .limit(CACHE_MAINTENANCE_SHARED_MAX_ROWS);
-    })(),
+    }),
   );
   const lastError = rows[0]?.occurredAt;
   return {
@@ -199,13 +219,7 @@ async function recordSharedCacheMaintenanceFailure(
 ): Promise<SharedCacheMaintenanceResult> {
   return withSharedDiagnosticsTimeout(
     db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT set_config(
-          'lock_timeout',
-          ${`${CACHE_MAINTENANCE_SHARED_DB_LOCK_TIMEOUT_MS}ms`},
-          true
-        )`,
-      );
+      await configureSharedDiagnosticsTimeout(tx);
       const lockKey = `cache-maintenance:${scope}:${CACHE_MAINTENANCE_OPERATION}`;
       await tx.execute(
         // Serialize the read/insert/trim sequence so exactly one API instance

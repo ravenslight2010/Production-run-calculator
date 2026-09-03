@@ -883,6 +883,7 @@ describe("AI result cache persistence and scope isolation", () => {
       ["cache-maintenance:live:prune"],
     );
 
+    let poolAvailabilityCheck: Promise<unknown> | undefined;
     try {
       const requests = requestPayloads.map((requestPayload, index) =>
         readOrCreate(
@@ -937,20 +938,38 @@ describe("AI result cache persistence and scope isolation", () => {
         expect(diagnosticsOutput).not.toContain(resultPayload.answer);
       }
       expect(diagnosticsOutput).not.toContain("expired stalled private result");
+
+      // The caller has already fallen back locally. Wait while the blocking
+      // lock remains held, then prove timed-out diagnostic transactions have
+      // released their pool connections rather than leaving later work queued.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      poolAvailabilityCheck = pool.query("SELECT 1");
+      await expect(
+        Promise.race([
+          poolAvailabilityCheck,
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error("stalled diagnostics kept a pool connection queued"),
+                ),
+              500,
+            ),
+          ),
+        ]),
+      ).resolves.toBeDefined();
     } finally {
       await diagnosticsLock.query("ROLLBACK");
       diagnosticsLock.release();
+      if (poolAvailabilityCheck) await poolAvailabilityCheck;
       await pool.query(`DROP TRIGGER IF EXISTS ${pruneTriggerName} ON ai_result_cache`);
       await pool.query(`DROP FUNCTION IF EXISTS ${pruneFunctionName}()`);
     }
 
-    // recordCacheMaintenance is intentionally detached from cache requests.
-    // Let its lock-bounded transactions settle before the next test resets the
-    // shared diagnostics table.
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
     const storedRows = await db.select().from(cacheMaintenanceEventsTable);
-    expect(storedRows.length).toBeGreaterThan(0);
-    expect(storedRows.length).toBeLessThanOrEqual(requestPayloads.length);
+    // Every shared write was blocked long enough to hit its database deadline,
+    // so no late transaction should insert an event after the lock is released.
+    expect(storedRows).toHaveLength(0);
   });
 
   it("aggregates maintenance failures across isolated API owners and scopes", async () => {
