@@ -842,6 +842,117 @@ describe("AI result cache persistence and scope isolation", () => {
     await expect(db.select().from(cacheMaintenanceEventsTable)).resolves.toHaveLength(0);
   });
 
+  it("keeps cache requests available and local recurrence visible when shared diagnostics stall", async () => {
+    const owner = await import("./aiResultCache" + "?diagnostics-stall");
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const expiredKey = "diagnostics-stall-expired";
+    const pruneTriggerName = "ai_result_cache_diagnostics_stall_prune_trigger";
+    const pruneFunctionName = "ai_result_cache_diagnostics_stall_prune";
+    const requestPayloads = Array.from(
+      { length: 12 },
+      (_, index) => `private stalled request payload ${index}`,
+    );
+    const resultPayloads = requestPayloads.map((_, index) => ({
+      answer: `private stalled result payload ${index}`,
+    }));
+    const diagnosticsLock = await pool.connect();
+
+    await db.insert(aiResultCacheTable).values({
+      scope: "live",
+      namespace: owner.AI_RESULT_CACHE_NAMESPACE,
+      operationKey: expiredKey,
+      result: { answer: "expired stalled private result" },
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await pool.query(`
+      CREATE FUNCTION ${pruneFunctionName}() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'controlled cache prune failure during diagnostics stall';
+      END;
+      $$;
+    `);
+    await pool.query(`
+      CREATE TRIGGER ${pruneTriggerName}
+      BEFORE DELETE ON ai_result_cache
+      FOR EACH ROW EXECUTE FUNCTION ${pruneFunctionName}();
+    `);
+    await diagnosticsLock.query("BEGIN");
+    await diagnosticsLock.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      ["cache-maintenance:live:prune"],
+    );
+
+    try {
+      const requests = requestPayloads.map((requestPayload, index) =>
+        readOrCreate(
+          "live",
+          async () => resultPayloads[index]!,
+          owner,
+          requestPayload,
+          log,
+        ),
+      );
+      await expect(
+        Promise.race([
+          Promise.all(requests),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("cache requests waited for stalled diagnostics")),
+              4_000,
+            ),
+          ),
+        ]),
+      ).resolves.toEqual(
+        resultPayloads.map((value) => ({ value, hit: false })),
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(log.warn).toHaveBeenCalledOnce();
+        },
+        { timeout: 2_500 },
+      );
+      expect(log.warn).toHaveBeenCalledWith(
+        {
+          event: "cache_maintenance_recurrence",
+          scope: "live",
+          operation: "prune",
+          recentErrorCount: observability.CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+          threshold: observability.CACHE_MAINTENANCE_FAILURE_THRESHOLD,
+          windowMs: observability.CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+        },
+        "cache maintenance failures recurring",
+      );
+
+      const diagnosticsOutput = JSON.stringify({
+        info: log.info.mock.calls,
+        warn: log.warn.mock.calls,
+      });
+      for (const requestPayload of requestPayloads) {
+        expect(diagnosticsOutput).not.toContain(requestPayload);
+        expect(diagnosticsOutput).not.toContain(cacheKey(owner, requestPayload));
+      }
+      for (const resultPayload of resultPayloads) {
+        expect(diagnosticsOutput).not.toContain(resultPayload.answer);
+      }
+      expect(diagnosticsOutput).not.toContain("expired stalled private result");
+    } finally {
+      await diagnosticsLock.query("ROLLBACK");
+      diagnosticsLock.release();
+      await pool.query(`DROP TRIGGER IF EXISTS ${pruneTriggerName} ON ai_result_cache`);
+      await pool.query(`DROP FUNCTION IF EXISTS ${pruneFunctionName}()`);
+    }
+
+    await vi.waitFor(
+      async () => {
+        const rows = await db.select().from(cacheMaintenanceEventsTable);
+        expect(rows).toHaveLength(requestPayloads.length);
+      },
+      { timeout: 5_000 },
+    );
+  });
+
   it("aggregates maintenance failures across isolated API owners and scopes", async () => {
     const [liveOwner, sandboxOwner] = await Promise.all([
       import("./observability" + "?aggregate-owner-live"),

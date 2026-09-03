@@ -22,6 +22,8 @@ const CACHE_MAINTENANCE_OPERATION = "prune" as const;
 const CACHE_MAINTENANCE_SCOPES: CacheMaintenanceScope[] = ["live", "sandbox"];
 const CACHE_MAINTENANCE_SHARED_MAX_ROWS = CACHE_MAINTENANCE_FAILURE_MAX_EVENTS;
 const CACHE_MAINTENANCE_SHARED_TIMEOUT_MS = 1_000;
+const CACHE_MAINTENANCE_SHARED_DB_LOCK_TIMEOUT_MS =
+  CACHE_MAINTENANCE_SHARED_TIMEOUT_MS + 100;
 const cacheMaintenanceFailureTimes = new Map<string, number[]>();
 const cacheMaintenanceAlerts = new Set<string>();
 
@@ -197,6 +199,13 @@ async function recordSharedCacheMaintenanceFailure(
 ): Promise<SharedCacheMaintenanceResult> {
   return withSharedDiagnosticsTimeout(
     db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT set_config(
+          'lock_timeout',
+          ${`${CACHE_MAINTENANCE_SHARED_DB_LOCK_TIMEOUT_MS}ms`},
+          true
+        )`,
+      );
       const lockKey = `cache-maintenance:${scope}:${CACHE_MAINTENANCE_OPERATION}`;
       await tx.execute(
         // Serialize the read/insert/trim sequence so exactly one API instance
