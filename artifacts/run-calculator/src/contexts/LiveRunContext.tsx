@@ -47,6 +47,7 @@ import {
   type PackagingSpeedNudge,
   type PackagingSpeedNudgeFeedbackStatus,
 } from "../packagingSpeedNudge";
+import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -201,7 +202,7 @@ export function LiveRunProvider({
   runStatus,
   currentRun,
   currentRunId,
-  v,
+  v: liveValues,
   ve,
   form,
   dayState,
@@ -219,6 +220,10 @@ export function LiveRunProvider({
   claimAutoTrackEvent,
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus);
+  // A selected pending run must never inherit Packaging completion from the
+  // previously viewed/active run while react-hook-form settles a run switch.
+  // Staged Dough values remain intact because they may be intentionally seeded.
+  const v = isolatePendingRunPackagingProgress(currentRun, liveValues);
 
   // Freezer-fill ramp: rises over elapsed run time, capped to freezerTime.
   // Pausing freezes the ramp at the paused-at moment.

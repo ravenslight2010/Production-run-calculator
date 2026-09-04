@@ -242,6 +242,7 @@ import {
   recordManualPackagingProgress,
   savePackagingProgress,
 } from "../packagingProgress";
+import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import { consumeSyncWriteResponse } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -11047,13 +11048,35 @@ export default function Home() {
     // turn that stale UI into a lifecycle write; the reconciled state will
     // render before the controls become actionable again.
     if (foregroundSyncBarrierRef.current) return;
-    initialFinishTimestampRef.current = Date.now() + (calcRef.current?.totalTimeSec ?? 0) * 1000;
     const base = dayStateRef.current;
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
     const activeRunId = activeRun.id;
     const now = Date.now();
+    // A pending run owns no Packaging completion. If a run-switch handoff ever
+    // leaked the prior run's counters into this form/storage, clear them before
+    // the lifecycle starts so the new run cannot begin already "complete".
+    const rawOpeningValues = form.getValues();
+    const isolatedOpeningValues = isolatePendingRunPackagingProgress(
+      activeRun,
+      rawOpeningValues,
+    );
+    if (isolatedOpeningValues !== rawOpeningValues) {
+      form.setValue("skidsCompleted", 0, { shouldDirty: true });
+      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+      recordManualPackagingProgress({
+        runId: activeRunId,
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+        manualOverrideUntil: now,
+        now,
+      });
+      saveRunValues(activeRunId, form.getValues());
+      markRunValuesUpdated(activeRunId, now);
+    }
+    initialFinishTimestampRef.current =
+      now + (calcRef.current?.totalTimeSec ?? 0) * 1000;
     // Starting a run stops any other run that is currently running. Finalize each
     // like an explicit endRun: deduct its own inventory (idempotent per runId,
     // from its stored values) before marking it ended.
