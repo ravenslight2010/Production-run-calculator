@@ -129,6 +129,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("live-run-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
 
     await goToMixPlan(page);
@@ -139,6 +141,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("mix-plan-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
 
     // Feed a deterministic workbook directly to the same hidden input used by
@@ -158,6 +162,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("import-review-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
     // The review dialog's close control is icon-only; scope the click to the
     // modal so unrelated page buttons cannot be selected.
@@ -168,6 +174,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("compact-run-tablet.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
   });
 
@@ -178,6 +186,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
   });
 });

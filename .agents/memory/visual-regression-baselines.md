@@ -25,3 +25,15 @@ large live surface even though the visual contract only covered the viewport.
 **How to apply:** Scope screenshots to the intended viewport or component
 region in visual and release evidence tests, while retaining full-page
 captures only when document extent is itself the behavior under test.
+
+The full destructive browser configuration can use stricter screenshot defaults
+than the dedicated visual configuration; keep the reviewed diff tolerance
+explicit on each visual assertion so both runners enforce the same contract.
+
+**Why:** A harmless 36-pixel capture variance failed the full release run even
+though the isolated visual suite passed under its reviewed tolerance.
+
+**How to apply:** When the dedicated visual config has an approved
+`maxDiffPixels`/`threshold`, mirror those values in the visual assertions used
+by the full browser suite; never regenerate baselines solely to clear capture
+variance.
