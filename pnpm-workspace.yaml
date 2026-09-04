@@ -75,12 +75,14 @@ onlyBuiltDependencies:
 overrides:
   # Security overrides formerly stored in package.json. Keep them here because
   # pnpm 11 reads workspace overrides and ignores package.json.pnpm.
+  adm-zip: "0.6.0"
+  browserslist: "4.28.7"
   image-size: ">=2.0.2"
   body-parser: "2.3.0"
   protobufjs: "7.6.5"
   "minimatch@5>brace-expansion": "2.1.4"
   "minimatch@10>brace-expansion": "5.0.9"
-  fast-uri: "3.1.5"
+  fast-uri: "3.1.6"
   js-yaml: "4.3.1"
   undici: "7.29.0"
   "@esbuild-kit/esm-loader": "npm:tsx@^4.23.12"

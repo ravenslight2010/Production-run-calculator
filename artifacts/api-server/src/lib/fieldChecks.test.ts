@@ -13,7 +13,7 @@ const validObservation = {
   checkName: "startup",
   checkVersion: "1",
   outcome: "success",
-  observedAt: "2026-09-03T12:00:00.000Z",
+  observedAt: new Date().toISOString(),
   appBuild: "build-123",
   deviceCategory: "mobile-chrome",
   metrics: { durationMs: 42 },
