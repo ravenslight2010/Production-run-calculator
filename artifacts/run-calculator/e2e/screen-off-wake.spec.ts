@@ -1269,6 +1269,178 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "E. one device keeps a paired Packaging correction through wake and reload",
+    async ({ page }) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(page, "48");
+      // At +12:48.5 min, 7:48.5 min of product has exited the five-minute
+      // tunnel: floor(7.8083 × 60 / 6) = 78 cases = 1 skid + 30 cases.
+      const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt);
+      await simulateWake(page);
+      await waitForCaseCounterChange(page, 0, 8_000);
+      expect(await readCaseTotal(page)).toBe(78);
+
+      await page.locator('[data-testid="tab-packaging"]').click();
+      const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
+      const cases = page.locator('[data-testid="text-casesOnCurrentSkid"]').first();
+      await expect(skids).toContainText("1");
+      await expect(cases).toHaveText("30");
+
+      // Reproduce the operator's paired correction while auto tracking is live:
+      // subtract one completed skid, then add fifteen cases to that same skid.
+      // 1/30 -> 0/30 -> 0/45. The 48-case maximum permits the full correction.
+      await mockDateNow(page, Date.now());
+      await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
+      for (let i = 0; i < 15; i++) {
+        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+      }
+      await expect(skids).toContainText("0");
+      await expect(cases).toHaveText("45");
+
+      const canonical = await page.waitForFunction(async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          packagingProgress?: Record<string, {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+            correctionGeneration?: number;
+          }>;
+        };
+        const runId = body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id;
+        const values = runId ? body.runValues?.[runId] : undefined;
+        const progress = runId ? body.packagingProgress?.[runId] : undefined;
+        return runId && values?.skidsCompleted === 0
+          && values.casesOnCurrentSkid === 45
+          && progress?.skidsCompleted === 0
+          && progress.casesOnCurrentSkid === 45
+          && (progress.correctionGeneration ?? 0) > 0
+          ? { runId, values, progress }
+          : false;
+      }, undefined, { timeout: 15_000 });
+      const canonicalState = await canonical.jsonValue() as {
+        runId: string;
+        values: { skidsCompleted: number; casesOnCurrentSkid: number };
+        progress: { skidsCompleted: number; casesOnCurrentSkid: number; correctionGeneration: number };
+      };
+
+      // Let the active line run briefly, then put this only device to sleep.
+      // The server hold is intentionally still active, so wake cannot replace
+      // the acknowledged pair with an automatic baseline.
+      await page.waitForTimeout(1_500);
+      await simulateScreenOff(page);
+      await mockDateNow(page, Date.now() + 5_000);
+      await simulateWake(page);
+      await expect(cases).toHaveText("45", { timeout: 15_000 });
+      await expect(skids).toContainText("0");
+
+      const afterWake = await page.evaluate((serverRunId) => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          currentIndex?: number;
+          runs?: Array<{ id?: string }>;
+        };
+        const runIds = (day.runs ?? []).map((run) => run.id).filter(
+          (id): id is string => Boolean(id),
+        );
+        const runId = runIds.includes(serverRunId)
+          ? serverRunId
+          : runIds[day.currentIndex ?? 0] ?? runIds[0];
+        const values = JSON.parse(
+          localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
+        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
+        const progressMap = JSON.parse(
+          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+        ) as Record<string, {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+          correctionGeneration?: number;
+        }>;
+        return {
+          values,
+          progress: progressMap[runId],
+          runId,
+          serverRunId,
+          runIds,
+          keys: Object.keys(localStorage).filter((key) => key.startsWith("run-calc-run-")),
+        };
+      }, canonicalState.runId);
+      expect(
+        afterWake.runId,
+        `local run id must match canonical ${canonicalState.runId}; local keys=${afterWake.keys.join(",")}`,
+      ).toBe(canonicalState.runId);
+      expect(afterWake.values).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
+      });
+      expect(afterWake.progress).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
+        correctionGeneration: canonicalState.progress.correctionGeneration,
+      });
+
+      const serverHold = await page.evaluate(async (runId) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          packagingProgress?: Record<string, { manualOverrideUntil?: number }>;
+        };
+        return body.packagingProgress?.[runId]?.manualOverrideUntil ?? 0;
+      }, canonicalState.runId);
+      const holdRemaining = Math.max(0, serverHold - Date.now() + 150);
+      expect(holdRemaining, "canonical manual correction hold").toBeLessThanOrEqual(60_500);
+      await page.waitForTimeout(holdRemaining);
+
+      // One case period after the automatic baseline (78 -> 79 expected) must
+      // advance the corrected total (45 -> 46), not restore the old 1/30 pair.
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt + 6_001);
+      await simulateWake(page);
+      await expect(cases).toHaveText("46", { timeout: 15_000 });
+      await expect(skids).toContainText("0");
+
+      // Reload is a separate persistence boundary: form, durable run values,
+      // Packaging register, and canonical server state must still agree.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-packaging"]')
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
+        .toHaveText("46", { timeout: 20_000 });
+      await expect(page.locator('[data-testid="text-skidsCompleted"]').first())
+        .toContainText("0");
+
+      const persisted = await page.evaluate(async (runId) => {
+        const values = JSON.parse(
+          localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
+        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
+        const progressMap = JSON.parse(
+          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+        ) as Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        };
+        return {
+          values,
+          progress: progressMap[runId],
+          serverValues: body.runValues?.[runId],
+          serverProgress: body.packagingProgress?.[runId],
+        };
+      }, canonicalState.runId);
+      expect(persisted.values).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+      expect(persisted.progress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+      expect(persisted.serverValues).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+      expect(persisted.serverProgress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+    },
+  );
+
+  test(
     "D. active peers and server keep a downward skid correction over a stale automatic write",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
       test.slow();
