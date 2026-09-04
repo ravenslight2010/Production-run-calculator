@@ -1,7 +1,13 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import {
+  hasAutomaticUpdateReloadBlockingSurface,
+  isAutomaticUpdateReloadSafe,
+  reportAutomaticUpdateReloadSafety,
+  useAutomaticUpdateReloadBlocker,
+} from "../updateReloadSafety";
 import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
@@ -1379,6 +1385,7 @@ export function CheesePickCard({
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
 }) {
+  const updateReloadBlockerId = useId();
   // A temporary substitution must be visible anywhere floor staff read the
   // blend. Apply it to this display copy rather than the form's saved rows, so
   // clearing tomorrow's overlay restores the original master recipe exactly.
@@ -1423,6 +1430,10 @@ export function CheesePickCard({
   );
 
   const showMissingWarning = recipeName.trim() !== "" && !!recipeMissing;
+  useAutomaticUpdateReloadBlocker(
+    `missing-cheese-recipe-${updateReloadBlockerId}`,
+    showMissingWarning,
+  );
   const body = (
     <>
       {effectiveRecipe.changed && (
@@ -14029,6 +14040,85 @@ export default function Home() {
     : currentRun?.startedAt ? "running"
     : "pending";
 
+  const hasActiveRun = dayState.runs.some((run) => run.startedAt && !run.endedAt);
+  const hasUnsavedForm =
+    Boolean(currentRunId) && !deepEqual(v, loadRunValues(currentRunId));
+  // Keep every Home-owned modal/full-screen interaction in one named inventory.
+  // Locally owned surfaces (for example Ingredient Detail inside Summary) use
+  // useAutomaticUpdateReloadBlocker and are aggregated by the external store.
+  const hasBlockingDialog = hasAutomaticUpdateReloadBlockingSurface({
+    supervisorPin: showPinDialog,
+    logStoppage: showStopDialog,
+    editStoppage: editingStop,
+    addPastStoppage: showManualStopDialog,
+    editStoppageReasons: showEditReasonsDialog,
+    manageLists: showManageDialog,
+    scheduledDays: showScheduleDialog,
+    scheduleImport: showImportDialog,
+    specImport: showSpecImport,
+    premixImport: showPremixImport,
+    shippingImport: showShippingImport,
+    sauceGuideImport: showSauceGuideImport,
+    doughGuideImport: showDoughGuideImport,
+    cheeseImport: showCheeseImport,
+    setupEditor: setupEditorOpen,
+    castScreens: showScreensDialog,
+    reorderRuns: showReorderDialog,
+    reportIssue: showReportIssue,
+    managerAttention: showManagerAttention,
+    alertSettings: showAlertSettings,
+    floorMode: showFloorMode,
+    glance: showGlance,
+    sauceWeights: sauceWeightsOpen,
+    pauseTunnelDecision: pauseDecisionRunId,
+    changePassword: showPasswordDialog,
+    guidedTour: showTour,
+    getStarted: showGetStarted,
+    importedCaseDecision: caseUpdatePrompt,
+    confirmDeleteBrand,
+    confirmDeleteFlavor,
+    confirmRemoveRun,
+    confirmRemoveBlankRuns: confirmRemoveBlanks,
+    confirmDeleteStoppage: confirmDeleteStopId,
+    confirmDeleteScheduledDay: scheduleDeleteConfirm,
+    moveScheduledRun: scheduleMove,
+    confirmMerge: mergeConfirming,
+  });
+  const hasBlockingOperation = Boolean(
+    specImportLoading
+    || specImportApplying
+    || premixImportLoading
+    || premixImportApplying
+    || shippingImportLoading
+    || shippingImportApplying
+    || sauceGuideImportLoading
+    || sauceGuideImportApplying
+    || doughGuideImportLoading
+    || doughGuideImportApplying
+    || cheeseImportLoading
+    || cheeseImportApplying
+    || scheduleSaving
+    || scheduleMoving
+    || mergeBusy
+    || mergeSuggestBusy
+    || mergeBatchBusy
+    || undoBusy
+    || exporting
+    || freezerSurplusBusy
+    || foregroundRecoveryNotice?.kind === "recovering"
+  );
+  const automaticUpdateReloadSafe = isAutomaticUpdateReloadSafe({
+    hasActiveRun,
+    hasUnsavedForm,
+    hasBlockingDialog,
+    hasBlockingOperation,
+  });
+
+  useEffect(() => {
+    reportAutomaticUpdateReloadSafety(automaticUpdateReloadSafe);
+    return () => reportAutomaticUpdateReloadSafety(false);
+  }, [automaticUpdateReloadSafe]);
+
   // Effective values for calculation/display: the Run-tab temporary overrides
   // (Freeze tunnel time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
   // Setup fields themselves are never touched.
@@ -20356,6 +20446,10 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     stallPrompt, setStallPrompt, stallCheck,
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
   } = useLiveRun();
+  useAutomaticUpdateReloadBlocker(
+    "live-run-operational-alert",
+    Boolean(stallPrompt || showPaceAlert || showBatchDue),
+  );
 
   // Confirm before starting a run that is not the next unstarted run in the
   // schedule, so an accidental tap on the wrong run can be caught before it
@@ -22885,6 +22979,10 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const [showSauceQuickCheck, setShowSauceQuickCheckRaw] = useState(
     () => getSauceBarrelEntry(currentRunId).showQuickCheck,
   );
+  useAutomaticUpdateReloadBlocker(
+    "sauce-production-due-alert",
+    showSauceBarrelDue || showSauceQuickCheck,
+  );
 
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
@@ -23579,6 +23677,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     prep, prepActive, elapsedSec: prepElapsedSec, doughSecLeft, doughBatchNum, startPrep, addPrepBatchDough,
   } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: doughPrepBatchSec, sauceBatchSec: 1800 });
   const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
+  useAutomaticUpdateReloadBlocker(
+    "dough-production-due-alert",
+    showBatchDue || showPrepBatchDue,
+  );
   const prevDoughBatchNumRef = useRef(0);
   useEffect(() => {
     if (prepActive && doughBatchNum > 0 && doughBatchNum > prevDoughBatchNumRef.current) setShowPrepBatchDue(true);
@@ -25425,6 +25527,10 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   const { isManager } = useMe();
   const { calc, liveFreezerMin } = useLiveRun();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
+  useAutomaticUpdateReloadBlocker(
+    "ingredient-detail-dialog",
+    Boolean(ingredientDetailRunId),
+  );
   return (
     <>
                 {/* Shift notes */}
