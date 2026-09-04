@@ -1441,9 +1441,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
-    "F. a failed Packaging correction stays pending until an explicit retry",
+    "F. a failed Packaging correction stays visible on phone until an explicit retry",
     async ({ page }, testInfo) => {
       test.slow();
+      await page.setViewportSize({ width: 390, height: 844 });
       const safeBaseMs = await setupAndStartRun(page, "48");
       const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
 
@@ -1529,6 +1530,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         }
         await expect(skids).toContainText("0");
         await expect(cases).toHaveText("45");
+        await expect(skids).toBeVisible();
+        await expect(cases).toBeVisible();
         await expect.poll(() => blockedWrites, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
 
         const localPair = await page.evaluate((id) => {
@@ -1559,6 +1562,18 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           exact: true,
         });
         await expect(retry).toBeVisible();
+        await expect(retry).toBeEnabled();
+        const pendingGeometry = await page.evaluate(() => ({
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        }));
+        expect(pendingGeometry.documentScrollWidth).toBeLessThanOrEqual(
+          pendingGeometry.viewportWidth + 1,
+        );
+        expect(pendingGeometry.bodyScrollWidth).toBeLessThanOrEqual(
+          pendingGeometry.viewportWidth + 1,
+        );
         await page.screenshot({
           path: testInfo.outputPath("packaging-correction-pending.png"),
           fullPage: true,
@@ -1589,6 +1604,17 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           .toContainText("0", { timeout: 20_000 });
         await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
           .toHaveText("45", { timeout: 20_000 });
+        const convergedGeometry = await page.evaluate(() => ({
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        }));
+        expect(convergedGeometry.documentScrollWidth).toBeLessThanOrEqual(
+          convergedGeometry.viewportWidth + 1,
+        );
+        expect(convergedGeometry.bodyScrollWidth).toBeLessThanOrEqual(
+          convergedGeometry.viewportWidth + 1,
+        );
         await page.screenshot({
           path: testInfo.outputPath("packaging-correction-converged.png"),
           fullPage: true,
