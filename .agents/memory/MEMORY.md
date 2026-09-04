@@ -141,6 +141,7 @@
 - [Release evidence](release-check-shard-budget.md) + [revision binding](revision-bound-release-evidence.md) + [full verifier](release-evidence-verifier-mode.md) + [browser contract](release-browser-coverage-contract.md) — reports must be current, complete, and verified in the selected mode.
 - [Source-audit reports](large-source-audit-captures.md) + [versions](source-audit-report-versions.md) — keep hashed source captures shard-safe and dispatch persisted comparisons by supported read version.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
+- [Pinned pnpm after baseline refresh](pinned-pnpm-after-refresh.md) — a newer packageManager pin can make the installed pnpm shim recurse; use the exact pinned launcher with CI mode to reconcile modules.
 - [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Browser test reliability](runtest-expo-web-quirks.md) + [phone overrides](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — use fallback when runTest flakes; reapply controlled values after reload.

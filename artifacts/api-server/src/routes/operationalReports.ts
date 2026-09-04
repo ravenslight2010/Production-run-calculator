@@ -32,7 +32,10 @@ const RunSchema = z.object({
 });
 const BodySchema = z.object({
   scope: z.enum(["day", "week"]),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+    const parsed = new Date(`${value}T12:00:00Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "Invalid calendar date"),
   runs: z.array(RunSchema).max(600),
 });
 
@@ -42,8 +45,22 @@ function addDays(iso: string, amount: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function dateRange(scope: "day" | "week", date: string): [string, string] {
+export function dateRange(scope: "day" | "week", date: string): [string, string] {
   return scope === "week" ? [addDays(date, -6), date] : [date, date];
+}
+
+export type OperationalReportValidationResult =
+  | { ok: true; data: z.infer<typeof BodySchema> }
+  | { ok: false; status: number; error: string };
+
+export function validateOperationalReportBody(
+  body: unknown,
+): OperationalReportValidationResult {
+  const parsed = BodySchema.safeParse(body);
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: "Invalid operational report input" };
+  }
+  return { ok: true, data: parsed.data };
 }
 
 type HandoffSeverity = "urgent" | "high" | "medium" | "low" | "info";
@@ -147,9 +164,9 @@ router.post(
   "/reports/operational",
   requireCapability("review-incidents"),
   async (req, res): Promise<void> => {
-    const parsed = BodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid operational report input" });
+    const parsed = validateOperationalReportBody(req.body);
+    if (!parsed.ok) {
+      res.status(parsed.status).json({ error: parsed.error });
       return;
     }
     const input = parsed.data;

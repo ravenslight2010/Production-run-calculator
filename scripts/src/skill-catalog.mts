@@ -516,7 +516,7 @@ function formatSkillFindings(skill: SkillRecord): string {
 export function formatCatalogReport(report: CatalogReport): string {
   const lines = [
     "Skill catalog inventory",
-    "=======================",
+    "-----------------------",
     ...report.roots.map(
       (root) =>
         `Root ${root.id}: ${root.classification} (${root.relativePath}) — ${

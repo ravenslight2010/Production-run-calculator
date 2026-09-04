@@ -1,6 +1,6 @@
-# ============================================================================
+# ----------------------------------------------------------------------------
 # SECURITY: Minimum release age for npm packages (supply-chain attack defense)
-# ============================================================================
+# ----------------------------------------------------------------------------
 #
 # This setting requires that any npm package version must have been published
 # for at least 1 day (1440 minutes) before pnpm will allow installing it.
@@ -24,7 +24,7 @@
 #     - react
 #     - typescript
 #
-# ============================================================================
+# ----------------------------------------------------------------------------
 minimumReleaseAge: 1440
 
 minimumReleaseAgeExclude:
