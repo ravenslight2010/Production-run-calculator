@@ -416,6 +416,8 @@ export function useAutoTrack({
   const caseClaimRetryRef = useRef<boolean>(false);
   const previousPackagingDrainActiveRef = useRef(false);
   const previousPackagingAutoTrackActiveRef = useRef(packagingAutoTrackActive);
+  const previousPackagingClockMsRef = useRef(nowTime.getTime());
+  const packagingClockRollbackUntilMsRef = useRef<number | null>(null);
   const previousRunStatusRef = useRef<RunStatus | null>(null);
   const resumeRearmPendingRef = useRef(false);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
@@ -825,18 +827,48 @@ export function useAutoTrack({
   // start one complete case interval from that transition.
   useEffect(() => {
     const wasActive = previousPackagingAutoTrackActiveRef.current;
-    if (runStatus === "running" && !packagingAutoTrackActive) {
-      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
-      rearmCaseTimer(nowTime.getTime());
+    const nowMs = nowTime.getTime();
+    // A phase transition caused by a normal one-second clock tick represents
+    // the line physically becoming ready for packaging, so its first case
+    // should start on a fresh cadence. A large jump is a screen-off/wake
+    // reconciliation: the line may have crossed the phase boundary while the
+    // display was asleep, and re-arming here would discard the legitimate
+    // hidden-time catch-up.
+    const clockJumpedWhileHidden =
+      nowMs > previousPackagingClockMsRef.current + 2_000;
+    const clockMovedBackward =
+      nowMs + 2_000 < previousPackagingClockMsRef.current;
+    if (clockMovedBackward) {
+      // A wall-clock correction must not turn the later correction back into
+      // production time. Keep the existing production baseline and postpone
+      // the next case until the clock has caught up to the old instant.
+      packagingClockRollbackUntilMsRef.current = previousPackagingClockMsRef.current;
+      rearmCaseTimer(nowMs);
     } else if (
-      runStatus === "running"
-      && packagingAutoTrackActive
-      && !wasActive
+      packagingClockRollbackUntilMsRef.current !== null
+      && nowMs < packagingClockRollbackUntilMsRef.current
     ) {
-      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
-      rearmCaseTimer(nowTime.getTime());
+      rearmCaseTimer(nowMs);
+    } else {
+      packagingClockRollbackUntilMsRef.current = null;
+      if (runStatus === "running" && !packagingAutoTrackActive) {
+        if (!clockJumpedWhileHidden) {
+          lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+          rearmCaseTimer(nowMs);
+        }
+      } else if (
+        runStatus === "running"
+        && packagingAutoTrackActive
+        && !wasActive
+      ) {
+        if (!clockJumpedWhileHidden) {
+          lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+          rearmCaseTimer(nowMs);
+        }
+      }
     }
     previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
+    previousPackagingClockMsRef.current = nowMs;
   }, [
     autoTrackSuggestion?.expectedCasesRaw,
     nowTime,
@@ -921,16 +953,17 @@ export function useAutoTrack({
 
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
+    const caseTrackingActive =
+      (runStatus === "running" && packagingAutoTrackActive)
+      || drainActive
+      || packagingDrainActive;
+    const doughTrackingActive = runStatus === "running";
     if (
       autoTrackBlockedRef?.current
       || autoTrackBlocked
       || disabled
       || !autoTrackProgress
-      || !(
-        (runStatus === "running" && packagingAutoTrackActive)
-        || drainActive
-        || packagingDrainActive
-      )
+      || (!caseTrackingActive && !doughTrackingActive)
       || !autoTrackSuggestion
     ) return;
 
@@ -942,7 +975,12 @@ export function useAutoTrack({
     const suppressed = Date.now() < autoSuppressUntilRef.current;
 
     // ── Cases (and skids, derived from the same total): tick once per case. ──
-    if (calc.ppm > 0 && v.pizzasPerCase > 0 && nowMs >= caseNextDueMsRef.current) {
+    if (
+      caseTrackingActive
+      && calc.ppm > 0
+      && v.pizzasPerCase > 0
+      && nowMs >= caseNextDueMsRef.current
+    ) {
       const casePeriodMs = clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000);
       const prevExpected = lastExpectedCasesRef.current;
       // Baseline the incremental delta off the UNCLAMPED total so the count keeps

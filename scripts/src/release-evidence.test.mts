@@ -533,32 +533,32 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 115",
-      "Enumerated cases: 115",
+      "Expected cases: 117",
+      "Enumerated cases: 117",
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 115",
+      "Not-run cases: 117",
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 115 | 0 | 0 | 0 | 0 | 115 | 0ms |",
+      "| `e2e/example.spec.ts` | 117 | 0 | 0 | 0 | 0 | 117 | 0ms |",
       "",
     ].join("\n");
     const invalidPassingBrowserReport = validBrowserReport
       .replace("Result: FAIL", "Result: PASS")
-      .replace("Completed cases: 0", "Completed cases: 115")
+      .replace("Completed cases: 0", "Completed cases: 117")
       .replace("Passed cases: 0", "Passed cases: 111")
       .replace("Failed cases: 0", "Failed cases: 1")
-      .replace("Not-run cases: 115", "Not-run cases: 0")
+      .replace("Not-run cases: 117", "Not-run cases: 0")
       .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
       .replace(
-        "| `e2e/example.spec.ts` | 115 | 0 | 0 | 0 | 0 | 115 | 0ms |",
-        "| `e2e/example.spec.ts` | 115 | 115 | 112 | 0 | 1 | 0 | 0ms |",
+        "| `e2e/example.spec.ts` | 117 | 0 | 0 | 0 | 0 | 117 | 0ms |",
+        "| `e2e/example.spec.ts` | 117 | 117 | 114 | 0 | 1 | 0 | 0ms |",
       );
     assert.throws(
       () => validateFullBrowserReport(invalidPassingBrowserReport, {

@@ -9,5 +9,11 @@
 .env
 .env.*
 **/*.log
+**/test-results
+**/playwright-report
+release-evidence
+release-evidence-full
+screenshots
+.cache
 Dockerfile
 docker-compose.yml

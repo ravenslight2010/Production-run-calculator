@@ -88,6 +88,34 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.traysOnLine).toBe(49);
   });
 
+  it("keeps dough timers running before packaging is ready without writing cases", () => {
+    const { form, values } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 50,
+      batchesReady: 10,
+    });
+    const t0 = 1_700_000_000_000;
+
+    renderHook(() =>
+      useAutoTrack({
+        runId: "run-before-packaging",
+        runStatus: "running",
+        packagingAutoTrackActive: false,
+        nowTime: new Date(t0),
+        elapsedBatchSec: 10 * 60,
+        calc: baseCalc,
+        v: makeV(),
+        form,
+      }),
+    );
+
+    expect(values.traysOnLine).toBe(49);
+    expect(values.batchesReady).toBe(9.75);
+    expect(values.skidsCompleted).toBe(0);
+    expect(values.casesOnCurrentSkid).toBe(0);
+  });
+
   it("only counts down once staged dough covers the rest of the run AND no batches remain", () => {
     // Deficit closed (traysNeeded=0) AND no ready batches: production must stop
     // entirely, so the counter only drains down.

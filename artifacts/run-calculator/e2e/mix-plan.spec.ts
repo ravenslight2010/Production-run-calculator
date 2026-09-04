@@ -2780,6 +2780,12 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   test("mix plan collapses to empty when all runs in a shift are ended", async ({
     page,
   }) => {
+    // This journey intentionally starts and finishes two live runs. On the
+    // proxied release preview, the sync/authentication round-trips can put
+    // the final navigation just over the suite's 60-second default; keep the
+    // assertion bounded without weakening any individual wait.
+    test.setTimeout(90_000);
+
     const suffix = uid();
     const username = `user_${suffix}`;
     const mixId1 = `all-ended-mix-a-${suffix}`;

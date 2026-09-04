@@ -21,8 +21,8 @@ API/package-test stage runs at most four children by default, with no more than
 two API/database shards at once. Each API shard remains serialized internally
 and has an eight-minute hard limit with a six-minute warning. Browser stages
 remain strictly serial for disposable live-day safety. The full browser suite
-has a 30-minute hard limit with a 25-minute warning. This is a bounded
-execution budget, not a retry or an evidence-validation bypass: all 115
+has a 45-minute hard limit with a 40-minute warning. This is a bounded
+execution budget, not a retry or an evidence-validation bypass: all 117
 enumerated cases still need to complete and the retained report must pass the
 same revision-bound evidence verifier.
 
@@ -35,7 +35,7 @@ pnpm run release:check:full
 The full browser config retains `browser-full/FINAL-REPORT.md` automatically.
 It records the run revision, total/complete/pass/skip/fail/not-run counts,
 wall-clock duration, and a sorted per-file duration table. The report is generated from
-Playwright's completed test results; a `GO` report requires all 115 cases to be
+Playwright's completed test results; a `GO` report requires all 117 cases to be
 enumerated and completed. The main config remains serial with `workers: 1`,
 with no retries or reduced test-match coverage. The release report also records
 total wall-clock time and per-stage wall-clock durations so the scheduler's
@@ -46,7 +46,7 @@ prior complete, passing retained full-suite report before replacing it. An
 interrupted, timed-out, or incomplete run leaves the last valid baseline
 untouched. The report flags a file when it is at least 30 seconds and 25%
 slower than its prior duration. This filters normal cold-environment noise
-while surfacing a slowdown that can consume the 30-minute budget. New files,
+while surfacing a slowdown that can consume the 45-minute budget. New files,
 removed files, faster files, and a missing or legacy baseline are not treated
 as regressions.
 
@@ -65,7 +65,7 @@ as regressions.
   failure, never a pass.
 - A browser duration alert is an operational review signal, not a coverage or
   serial-execution bypass. It is copied into the release summary for
-  investigation; the full suite still must complete all 115 cases and pass the
+  investigation; the full suite still must complete all 117 cases and pass the
   revision-bound evidence verifier.
 
 Without an explicit `RELEASE_EVIDENCE_DIR`, standard and full checks retain
