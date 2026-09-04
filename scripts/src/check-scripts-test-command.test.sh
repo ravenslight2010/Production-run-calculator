@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PACKAGE_JSON="${SCRIPT_DIR}/../package.json"
 EXPECTED_VALIDATOR='python3 -S ../.agents/skills/skill-creator/scripts/test_quick_validate.py'
+EXPECTED_SKILL_CATALOG_CHECK='pnpm run check:skill-catalog'
 
 if [[ ! -f "$PACKAGE_JSON" ]]; then
   printf 'Could not find scripts package manifest: %s\n' "$PACKAGE_JSON" >&2
@@ -44,4 +45,15 @@ EOF
   exit 1
 fi
 
-printf 'PASS: scripts test command retains the python3 -S quick validator suite.\n'
+if [[ "$TEST_COMMAND" != *"$EXPECTED_SKILL_CATALOG_CHECK"* ]]; then
+  cat >&2 <<EOF
+scripts/package.json#test must run the live skill catalog check:
+  ${EXPECTED_SKILL_CATALOG_CHECK}
+
+The standard scripts test command must validate repository skill roots, not
+only isolated contract fixtures.
+EOF
+  exit 1
+fi
+
+printf 'PASS: scripts test command retains live skill catalog and quick validator checks.\n'
