@@ -1441,6 +1441,166 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "F. a failed Packaging correction stays pending until an explicit retry",
+    async ({ page }, testInfo) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(page, "48");
+      const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt);
+      await simulateWake(page);
+      await waitForCaseCounterChange(page, 0, 8_000);
+      expect(await readCaseTotal(page)).toBe(78);
+
+      await page.locator('[data-testid="tab-packaging"]').click();
+      const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
+      const cases = page.locator('[data-testid="text-casesOnCurrentSkid"]').first();
+      await expect(skids).toContainText("1");
+      await expect(cases).toHaveText("30");
+
+      const runId = await page.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          currentRunId?: string;
+          currentIndex?: number;
+          runs?: Array<{ id?: string }>;
+        };
+        return day.currentRunId ?? day.runs?.[day.currentIndex ?? 0]?.id ?? day.runs?.[0]?.id ?? null;
+      });
+      expect(runId, "active run id").toBeTruthy();
+
+      const initial = await page.waitForFunction(async (id) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          packagingProgress?: Record<string, {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+            correctionGeneration?: number;
+          }>;
+        };
+        const values = body.runValues?.[id];
+        const progress = body.packagingProgress?.[id];
+        return values?.skidsCompleted === 1
+          && values.casesOnCurrentSkid === 30
+          && progress?.skidsCompleted === 1
+          && progress.casesOnCurrentSkid === 30
+          ? { correctionGeneration: progress.correctionGeneration ?? 0 }
+          : false;
+      }, runId, { timeout: 15_000 });
+      const initialState = await initial.jsonValue() as { correctionGeneration: number };
+
+      let blocked = true;
+      let blockedWrites = 0;
+      await page.route("**/api/sync/today**", async (route) => {
+        const request = route.request();
+        if (request.method() === "PUT") {
+          const requestBody = JSON.parse(request.postData() ?? "{}") as {
+            payload?: {
+              packagingProgress?: Record<string, { correctionGeneration?: number }>;
+            };
+          };
+          const progress = requestBody.payload?.packagingProgress?.[runId!];
+          if (
+            blocked
+            && progress
+            && (progress.correctionGeneration ?? 0) > initialState.correctionGeneration
+          ) {
+            blockedWrites += 1;
+            await route.fulfill({
+              status: 503,
+              contentType: "application/json",
+              body: JSON.stringify({ error: "controlled Packaging sync outage" }),
+            });
+            return;
+          }
+        }
+        await route.continue();
+      });
+
+      try {
+        // 1/30 -> 0/30 -> 0/45. The corrected pair must remain local while
+        // every PUT carrying the correction is rejected.
+        await mockDateNow(page, Date.now());
+        await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
+        for (let i = 0; i < 15; i++) {
+          await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+        }
+        await expect(skids).toContainText("0");
+        await expect(cases).toHaveText("45");
+        await expect.poll(() => blockedWrites, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+
+        const localPair = await page.evaluate((id) => {
+          const values = JSON.parse(
+            localStorage.getItem(`run-calc-run-${id}`) ?? "{}",
+          ) as { skidsCompleted?: number; casesOnCurrentSkid?: number };
+          const progress = JSON.parse(
+            localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+          ) as Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          return { values, progress: progress[id] };
+        }, runId);
+        expect(localPair.values).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 45 });
+        expect(localPair.progress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 45 });
+
+        const notAcknowledged =
+          "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.";
+        await expect(page.getByText(notAcknowledged, { exact: true })).toBeVisible({ timeout: 20_000 });
+
+        await page.locator('button[title="Sync connected"]').click();
+        await expect(page.getByText(
+          "Your local change is retained on this device. It is not shared until the server acknowledges it.",
+          { exact: true },
+        )).toBeVisible();
+        await expect(page.getByText(notAcknowledged, { exact: true })).toBeVisible();
+        await expect(page.getByText("Pending writes")).toBeVisible();
+        const retry = page.getByRole("button", {
+          name: "Retry latest retained change",
+          exact: true,
+        });
+        await expect(retry).toBeVisible();
+        await page.screenshot({
+          path: testInfo.outputPath("packaging-correction-pending.png"),
+          fullPage: true,
+        });
+
+        blocked = false;
+        await retry.click();
+        await expect.poll(async () => page.evaluate(async (id) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+          const body = await response.json() as {
+            runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+            packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          };
+          const values = body.runValues?.[id];
+          const progress = body.packagingProgress?.[id];
+          return values?.skidsCompleted === 0
+            && values.casesOnCurrentSkid === 45
+            && progress?.skidsCompleted === 0
+            && progress.casesOnCurrentSkid === 45;
+        }, runId), { timeout: 15_000 }).toBe(true);
+        await expect(page.getByText(notAcknowledged, { exact: true })).toBeHidden();
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.locator('[data-testid="tab-packaging"]')
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await expect(page.locator('[data-testid="text-skidsCompleted"]').first())
+          .toContainText("0", { timeout: 20_000 });
+        await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
+          .toHaveText("45", { timeout: 20_000 });
+        await page.screenshot({
+          path: testInfo.outputPath("packaging-correction-converged.png"),
+          fullPage: true,
+        });
+      } finally {
+        blocked = false;
+        await page.unroute("**/api/sync/today**").catch(() => {});
+      }
+    },
+  );
+
+  test(
     "D. active peers and server keep a downward skid correction over a stale automatic write",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
       test.slow();
