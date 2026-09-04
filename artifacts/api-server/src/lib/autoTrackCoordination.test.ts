@@ -19,6 +19,18 @@ function claim(overrides: Partial<AutoTrackClaim> = {}): AutoTrackClaim {
   };
 }
 
+function sauceMutations(made: number, anchor: number, correctionGeneration: number) {
+  return [
+    { field: "sauceBarrelsMade" as const, from: made, to: made + 1 },
+    { field: "sauceBarrelAnchorNetSec" as const, from: anchor, to: anchor + 60 },
+    {
+      field: "sauceBarrelCorrectionGeneration" as const,
+      from: correctionGeneration,
+      to: correctionGeneration,
+    },
+  ];
+}
+
 describe("auto-track coordination", () => {
   it("validates allow-listed channels, fields, times, and bounded values", () => {
     expect(parseAutoTrackClaim(claim(), NOW)).toEqual(claim());
@@ -31,6 +43,42 @@ describe("auto-track coordination", () => {
     }), NOW)).toBeNull();
     expect(parseAutoTrackClaim(claim({
       mutations: [{ field: "batchesReady", from: 1, to: 0 }],
+    }), NOW)).toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "sauce-barrel",
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations: sauceMutations(0, 0, 0),
+    }), NOW)).not.toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "sauce-barrel",
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations: [
+        { field: "sauceBarrelsMade", from: 0, to: 2 },
+        { field: "sauceBarrelAnchorNetSec", from: 0, to: 60 },
+        { field: "sauceBarrelCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW)).toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "sauce-barrel",
+      correctionGeneration: 1,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations: sauceMutations(0, 0, 0),
+    }), NOW)).toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "sauce-barrel",
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations: [
+        { field: "sauceBarrelsMade", from: 0, to: 1 },
+        { field: "sauceBarrelAnchorNetSec", from: 60, to: 59 },
+        { field: "sauceBarrelCorrectionGeneration", from: 0, to: 0 },
+      ],
     }), NOW)).toBeNull();
   });
 
@@ -166,5 +214,98 @@ describe("auto-track coordination", () => {
     const result = applyAutoTrackClaim(stored, claim(), NOW);
     expect(result.outcome).toBe("conflict");
     expect(result.values.traysOnLine).toBe(10);
+  });
+
+  it("accepts a configured sauce barrel once and exposes canonical inventory work", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: {
+        "run-1": {
+          sauceBarrelsMade: 0,
+          sauceBarrelAnchorNetSec: 0,
+          sauceBarrelCorrectionGeneration: 0,
+          sauceBarrelLbs: 200,
+          frontlineRecipeName: "Tomato Sauce",
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "sauce-barrel",
+      eventId: "client-a:sauce-barrel:1",
+      correctionGeneration: 0,
+      mutations: sauceMutations(0, 0, 0),
+    }), NOW);
+    expect(result.outcome).toBe("accepted");
+    expect(result.values.sauceBarrelsMade).toBe(1);
+    expect(result.values.sauceBarrelAnchorNetSec).toBe(60);
+    expect(result.values.sauceBarrelCorrectionGeneration).toBe(0);
+    expect(result.inventoryConsumption).toEqual({
+      kind: "sauce-barrel",
+      runId: "run-1",
+      barrelIndex: 1,
+      eventId: "client-a:sauce-barrel:1",
+      itemKey: "ingredient:Tomato Sauce:lbs",
+      qty: 200,
+    });
+  });
+
+  it("rejects sauce progress after a manual snapshot correction", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: {
+        "run-1": {
+          sauceBarrelsMade: 0,
+          sauceBarrelAnchorNetSec: 0,
+          sauceBarrelCorrectionGeneration: 1,
+          sauceBarrelLbs: 200,
+          frontlineRecipeName: "Tomato Sauce",
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 11 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "run-1": {
+            "sauce-barrel": {
+              generation: "manual:11",
+              sequence: 0,
+              nextDueAt: NOW,
+              updatedAt: NOW,
+            },
+          },
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "sauce-barrel",
+      baseUpdatedAt: 11,
+      correctionGeneration: 0,
+      mutations: sauceMutations(0, 0, 0),
+    }), NOW);
+    expect(result.outcome).toBe("conflict");
+    expect(result.inventoryConsumption).toBeUndefined();
+  });
+
+  it("does not issue inventory work for unconfigured sauce tracking", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: {
+        "run-1": {
+          sauceBarrelsMade: 0,
+          sauceBarrelAnchorNetSec: 0,
+          sauceBarrelCorrectionGeneration: 0,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "sauce-barrel",
+      correctionGeneration: 0,
+      mutations: sauceMutations(0, 0, 0),
+    }), NOW);
+    expect(result.outcome).toBe("conflict");
+    expect(result.values.sauceBarrelsMade).toBe(0);
+    expect(result.inventoryConsumption).toBeUndefined();
   });
 });

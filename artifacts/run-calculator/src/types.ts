@@ -52,6 +52,11 @@ export const formSchema = z.object({
   carryOverDone: z.boolean().default(false),
   sauceOzPerPizza: z.coerce.number().min(0).default(0),
   sauceBarrelLbs: z.coerce.number().min(0).default(0),
+  // Canonical, synchronized sauce production register. UI-only alert latches
+  // remain in sauceBarrelStore; these values participate in auto-track claims.
+  sauceBarrelsMade: z.coerce.number().min(0).default(0),
+  sauceBarrelAnchorNetSec: z.coerce.number().min(0).default(0),
+  sauceBarrelCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app1OzPerPizza: z.coerce.number().min(0).default(0),
   app1BatchLbs: z.coerce.number().min(0).default(0),
   app2OzPerPizza: z.coerce.number().min(0).default(0),
@@ -182,6 +187,9 @@ export const DEFAULT_VALUES: FormValues = {
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
+  sauceBarrelsMade: 0,
+  sauceBarrelAnchorNetSec: 0,
+  sauceBarrelCorrectionGeneration: 0,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
   app2OzPerPizza: 0,

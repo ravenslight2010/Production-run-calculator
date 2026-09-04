@@ -25,6 +25,9 @@ export const AutoTrackMutationField = {
   casesOnCurrentSkid: 'casesOnCurrentSkid',
   traysOnLine: 'traysOnLine',
   batchesReady: 'batchesReady',
+  sauceBarrelsMade: 'sauceBarrelsMade',
+  sauceBarrelAnchorNetSec: 'sauceBarrelAnchorNetSec',
+  sauceBarrelCorrectionGeneration: 'sauceBarrelCorrectionGeneration',
 } as const;
 
 export interface AutoTrackMutation {
@@ -58,6 +61,7 @@ export const AutoTrackClaimChannel = {
   'batch-consume': 'batch-consume',
   'batch-produce': 'batch-produce',
   hopper: 'hopper',
+  'sauce-barrel': 'sauce-barrel',
 } as const;
 
 export interface AutoTrackClaim {
@@ -89,7 +93,7 @@ export interface AutoTrackClaim {
   baseUpdatedAt: number;
   /** @minimum 0 */
   correctionGeneration?: number;
-  /** @maxItems 2 */
+  /** @maxItems 3 */
   mutations: AutoTrackMutation[];
 }
 

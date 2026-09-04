@@ -27,6 +27,8 @@ interface AutoTrackCalc {
    * double-counting and the count can never exceed what was pressed.
    */
   casesInFreezer: number;
+  /** Seconds per sauce barrel; 0/invalid disables the sauce channel. */
+  sauceDepletionSec?: number;
 }
 
 /**
@@ -61,6 +63,9 @@ interface AutoTrackValues {
   freezerTime: number;
   traysOnLine: number;
   batchesReady: number;
+  sauceBarrelsMade: number;
+  sauceBarrelAnchorNetSec: number;
+  sauceBarrelCorrectionGeneration: number;
 }
 
 export type AutoTrackChannel =
@@ -69,10 +74,12 @@ export type AutoTrackChannel =
   | "tray-produce"
   | "batch-consume"
   | "batch-produce"
-  | "hopper";
+  | "hopper"
+  | "sauce-barrel";
 
 export type AutoTrackMutation = {
-  field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady";
+  field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady"
+    | "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -189,6 +196,8 @@ interface AutoTrackParams {
 
   autoTrackRebaseAfterBlock?: boolean;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  /** Stop sauce completion once dough hands off to the next unstarted run. */
+  nextRunPrepActive?: boolean;
 }
 
 interface AutoTrackResult {
@@ -347,6 +356,7 @@ export function useAutoTrack({
   // original boolean barrier. Home opts out explicitly for unchanged pulls.
   autoTrackRebaseAfterBlock = true,
   claimAutoTrackEvent,
+  nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
@@ -439,6 +449,8 @@ export function useAutoTrack({
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   const [coordinationPendingCount, setCoordinationPendingCount] = useState(0);
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
+  // Net-elapsed seconds (not a wall-clock display due time) for sauce claims.
+  const sauceNextDueNetSecRef = useRef(0);
 
   useEffect(() => {
     const adopt = (event: Event) => {
@@ -468,7 +480,9 @@ export function useAutoTrack({
                   ? batchNextDueMsRef
                   : channel === "batch-produce"
                     ? batchProdNextDueMsRef
-                    : hopperProdNextDueMsRef;
+                    : channel === "sauce-barrel"
+                      ? sauceNextDueNetSecRef
+                      : hopperProdNextDueMsRef;
           dueRef.current = state.nextDueAt;
           continue;
         }
@@ -486,7 +500,9 @@ export function useAutoTrack({
                 ? batchNextDueMsRef
                 : channel === "batch-produce"
                   ? batchProdNextDueMsRef
-                  : hopperProdNextDueMsRef;
+                  : channel === "sauce-barrel"
+                    ? sauceNextDueNetSecRef
+                    : hopperProdNextDueMsRef;
         dueRef.current = state.nextDueAt;
       }
     };
@@ -574,6 +590,7 @@ export function useAutoTrack({
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
+    sauceNextDueNetSecRef.current = 0;
     setCoordinationPendingCount(0);
     setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
@@ -650,6 +667,15 @@ export function useAutoTrack({
       if (typeof values.batchesReady === "number") {
         form.setValue("batchesReady", values.batchesReady, { shouldDirty: true });
       }
+      if (typeof values.sauceBarrelsMade === "number") {
+        form.setValue("sauceBarrelsMade", values.sauceBarrelsMade, { shouldDirty: true });
+      }
+      if (typeof values.sauceBarrelAnchorNetSec === "number") {
+        form.setValue("sauceBarrelAnchorNetSec", values.sauceBarrelAnchorNetSec, { shouldDirty: true });
+      }
+      if (typeof values.sauceBarrelCorrectionGeneration === "number") {
+        form.setValue("sauceBarrelCorrectionGeneration", values.sauceBarrelCorrectionGeneration, { shouldDirty: true });
+      }
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
     if (!claimAutoTrackEvent) {
@@ -662,6 +688,9 @@ export function useAutoTrack({
     const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
     const eventId = coordinationRetryEventRef.current[channel]
       ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
+    const correctionGeneration = channel === "sauce-barrel"
+      ? mutations.find((mutation) => mutation.field === "sauceBarrelCorrectionGeneration")?.from
+      : undefined;
     coordinationRetryEventRef.current[channel] = eventId;
     coordinationPendingRef.current.add(channel);
     setCoordinationPendingCount(coordinationPendingRef.current.size);
@@ -677,6 +706,7 @@ export function useAutoTrack({
       nextDueAt,
       // Home replaces this placeholder with its last adopted canonical stamp.
       baseUpdatedAt: 0,
+      correctionGeneration,
       mutations,
     }).then((result) => {
       // A concurrent channel or peer may have advanced the shared run-value
@@ -701,7 +731,9 @@ export function useAutoTrack({
               ? batchNextDueMsRef
               : channel === "batch-produce"
                 ? batchProdNextDueMsRef
-                : hopperProdNextDueMsRef;
+                : channel === "sauce-barrel"
+                  ? sauceNextDueNetSecRef
+                  : hopperProdNextDueMsRef;
       dueRef.current = result.state.nextDueAt;
       coordinationRetryEventRef.current[channel] = undefined;
       applyValues(result.values);
@@ -716,6 +748,8 @@ export function useAutoTrack({
               ? batchNextDueMsRef
               : channel === "batch-produce"
                 ? batchProdNextDueMsRef
+              : channel === "sauce-barrel"
+                ? sauceNextDueNetSecRef
                 : hopperProdNextDueMsRef;
       dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
       // A failed coordinated case claim did not actually apply the mutation.
@@ -972,6 +1006,74 @@ export function useAutoTrack({
     autoTrackRebaseAfterBlock,
     rebaseAfterForegroundSync,
     resetBookkeeping,
+  ]);
+
+  const previousSauceCorrectionGenerationRef = useRef(v.sauceBarrelCorrectionGeneration);
+  useEffect(() => {
+    const cadence = Number(calc.sauceDepletionSec) || 0;
+    const anchor = Math.max(0, Number(v.sauceBarrelAnchorNetSec) || 0);
+    sauceNextDueNetSecRef.current =
+      Number.isFinite(cadence) && cadence > 0 ? anchor + cadence : 0;
+    if (previousSauceCorrectionGenerationRef.current !== v.sauceBarrelCorrectionGeneration) {
+      // Manual corrections invalidate the server channel generation. Restart
+      // its sequence and discard any failed pre-correction event identity.
+      coordinationSequenceRef.current["sauce-barrel"] = 0;
+      coordinationRetryEventRef.current["sauce-barrel"] = undefined;
+      previousSauceCorrectionGenerationRef.current = v.sauceBarrelCorrectionGeneration;
+    }
+  }, [
+    calc.sauceDepletionSec,
+    v.sauceBarrelAnchorNetSec,
+    v.sauceBarrelCorrectionGeneration,
+  ]);
+
+  // Sauce uses the same sequenced claim protocol as every other automatic
+  // counter. Its due values are net-run seconds, so pauses consume no sauce.
+  // A claim is exactly one barrel; successful form adoption triggers the next
+  // overdue identity rather than folding a screen-off gap into one mutation.
+  useEffect(() => {
+    if (
+      !claimAutoTrackEvent ||
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      runStatus !== "running" ||
+      calc.pressDone ||
+      nextRunPrepActive
+    ) return;
+    const cadence = Number(calc.sauceDepletionSec) || 0;
+    if (!Number.isFinite(cadence) || cadence <= 0 || !Number.isFinite(elapsedBatchSec)) return;
+    const anchor = Math.max(0, Number(v.sauceBarrelAnchorNetSec) || 0);
+    const dueAtNetSec = sauceNextDueNetSecRef.current > 0
+      ? sauceNextDueNetSecRef.current
+      : anchor + cadence;
+    if (elapsedBatchSec < dueAtNetSec) return;
+    const currentCount = Math.max(0, Number(v.sauceBarrelsMade) || 0);
+    const correctionGeneration = Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0);
+    sauceNextDueNetSecRef.current = dueAtNetSec;
+    commitAutomatic("sauce-barrel", dueAtNetSec, dueAtNetSec + cadence, [
+      { field: "sauceBarrelsMade", from: currentCount, to: currentCount + 1 },
+      { field: "sauceBarrelAnchorNetSec", from: anchor, to: dueAtNetSec },
+      { field: "sauceBarrelCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
+    ]);
+  }, [
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    calc.pressDone,
+    calc.sauceDepletionSec,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    endedAt,
+    nextRunPrepActive,
+    runGeneration,
+    runId,
+    runStatus,
+    v.sauceBarrelAnchorNetSec,
+    v.sauceBarrelCorrectionGeneration,
+    v.sauceBarrelsMade,
   ]);
 
   // Apply expected values whenever a counter's own production-paced tick is due.

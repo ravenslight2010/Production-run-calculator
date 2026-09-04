@@ -38,6 +38,6 @@ export interface AutoTrackClaim {
   baseUpdatedAt: number;
   /** @minimum 0 */
   correctionGeneration?: number;
-  /** @maxItems 2 */
+  /** @maxItems 3 */
   mutations: AutoTrackMutation[];
 }

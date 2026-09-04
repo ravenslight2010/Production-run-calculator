@@ -24,6 +24,10 @@ let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
+let inventoryItemsTable: DbModule["inventoryItemsTable"];
+let inventoryLotsTable: DbModule["inventoryLotsTable"];
+let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
+let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 
@@ -70,6 +74,10 @@ beforeAll(async () => {
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
+  inventoryItemsTable = dbMod.inventoryItemsTable;
+  inventoryLotsTable = dbMod.inventoryLotsTable;
+  inventoryLedgerTable = dbMod.inventoryLedgerTable;
+  inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
 
@@ -114,7 +122,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -221,6 +229,160 @@ describe("POST /sync/auto-track/claim", () => {
     // pending automatic event is rejected as stale before value comparison.
     expect(staleBase.outcome).toBe("stale");
     expect(staleBase.values.traysOnLine).toBe(14);
+  });
+
+  it("atomically advances one Sauce barrel and deducts its inventory once across competing stations", async () => {
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 100,
+      qtyRemaining: 100,
+    });
+    const sauceSeedResponse = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "sauce-seed",
+        payload: {
+          dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 }] },
+          runValues: {
+            [RUN]: {
+              traysOnLine: 10,
+              sauceBarrelsMade: 0,
+              sauceBarrelAnchorNetSec: 0,
+              sauceBarrelCorrectionGeneration: 0,
+              frontlineRecipeName: "BBQ Sauce",
+              frontlineRecipe: [],
+              sauceBarrelLbs: 10,
+            },
+          },
+          runValuesUpdatedAt: { [RUN]: 3 },
+        },
+      }),
+    }).then((response) => response.json()) as {
+      data: { runValuesUpdatedAt: Record<string, number> };
+    };
+    const sauceBaseUpdatedAt = sauceSeedResponse.data.runValuesUpdatedAt[RUN];
+    const sauceEvent = (senderId: string, eventId: string) => ({
+      senderId,
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "sauce-barrel",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId,
+        dueAt: 60,
+        nextDueAt: 120,
+        baseUpdatedAt: sauceBaseUpdatedAt,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "sauceBarrelsMade", from: 0, to: 1 },
+          { field: "sauceBarrelAnchorNetSec", from: 0, to: 60 },
+          { field: "sauceBarrelCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    });
+
+    const [a, b] = await Promise.all([
+      post(sauceEvent("sauce-a", "sauce-a:barrel:1")),
+      post(sauceEvent("sauce-b", "sauce-b:barrel:1")),
+    ]);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      outcome: string;
+      values: { sauceBarrelsMade: number; sauceBarrelAnchorNetSec: number };
+    }>;
+    expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
+    expect(bodies.every(({ values }) =>
+      values.sauceBarrelsMade === 1 && values.sauceBarrelAnchorNetSec === 60
+    )).toBe(true);
+    const [lot] = await db.select().from(inventoryLotsTable);
+    expect(lot.qtyRemaining).toBe(90);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+
+    const winner = bodies[0].outcome === "accepted"
+      ? sauceEvent("sauce-a", "sauce-a:barrel:1")
+      : sauceEvent("sauce-b", "sauce-b:barrel:1");
+    const duplicate = await (await post(winner)).json() as { outcome: string };
+    expect(duplicate.outcome).toBe("duplicate");
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(90);
+  });
+
+  it("rolls back Sauce progress when inventory is unavailable and accepts the same event after recovery", async () => {
+    const sauceClaim = {
+      senderId: "sauce-retry",
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "sauce-barrel",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId: "sauce-retry:barrel:1",
+        dueAt: 60,
+        nextDueAt: 120,
+        baseUpdatedAt: 0,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "sauceBarrelsMade", from: 0, to: 1 },
+          { field: "sauceBarrelAnchorNetSec", from: 0, to: 60 },
+          { field: "sauceBarrelCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    };
+    const retrySeedResponse = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "sauce-seed",
+        payload: {
+          dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 }] },
+          runValues: {
+            [RUN]: {
+              sauceBarrelsMade: 0,
+              sauceBarrelAnchorNetSec: 0,
+              sauceBarrelCorrectionGeneration: 0,
+              frontlineRecipeName: "BBQ Sauce",
+              frontlineRecipe: [],
+              sauceBarrelLbs: 10,
+            },
+          },
+          runValuesUpdatedAt: { [RUN]: 3 },
+        },
+      }),
+    }).then((response) => response.json()) as {
+      data: { runValuesUpdatedAt: Record<string, number> };
+    };
+    sauceClaim.claim.baseUpdatedAt = retrySeedResponse.data.runValuesUpdatedAt[RUN];
+    expect((await post(sauceClaim)).status).toBe(500);
+    const afterFailure = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      headers: authHeaders(),
+    }).then((response) => response.json()) as {
+      runValues: Record<string, { sauceBarrelsMade: number }>;
+    };
+    expect(afterFailure.runValues[RUN].sauceBarrelsMade).toBe(0);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 100,
+      qtyRemaining: 100,
+    });
+    const recovered = await post(sauceClaim);
+    expect(recovered.status).toBe(200);
+    expect((await recovered.json() as { outcome: string }).outcome).toBe("accepted");
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(90);
   });
 });
 

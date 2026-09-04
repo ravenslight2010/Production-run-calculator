@@ -1211,10 +1211,11 @@ export const consumeSauceBarrel = (
   barrelIndex: number,
   itemKey: string,
   qty: number,
+  eventId?: string,
 ) =>
   api<{ applied: boolean; consumed: number }>("/inventory/consume-sauce-barrel", {
     method: "POST",
-    body: JSON.stringify({ runId, barrelIndex, itemKey, qty }),
+    body: JSON.stringify({ runId, barrelIndex, itemKey, qty, eventId }),
   });
 
 // ── Locations (named storage) + transfers ────────────────────────────────────

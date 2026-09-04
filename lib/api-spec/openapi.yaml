@@ -4419,7 +4419,14 @@ components:
       properties:
         field:
           type: string
-          enum: [skidsCompleted, casesOnCurrentSkid, traysOnLine, batchesReady]
+          enum:
+            - skidsCompleted
+            - casesOnCurrentSkid
+            - traysOnLine
+            - batchesReady
+            - sauceBarrelsMade
+            - sauceBarrelAnchorNetSec
+            - sauceBarrelCorrectionGeneration
         from: { type: number, minimum: 0, maximum: 1000000 }
         to: { type: number, minimum: 0, maximum: 1000000 }
     AutoTrackClaim:
@@ -4430,7 +4437,7 @@ components:
         runId: { type: string, minLength: 1, maxLength: 160 }
         channel:
           type: string
-          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper]
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel]
         generation: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1, maximum: 10000000 }
         eventId: { type: string, minLength: 1, maxLength: 160 }
@@ -4440,7 +4447,7 @@ components:
         correctionGeneration: { type: integer, minimum: 0 }
         mutations:
           type: array
-          maxItems: 2
+          maxItems: 3
           items: { $ref: "#/components/schemas/AutoTrackMutation" }
     AutoTrackClaimRequest:
       type: object

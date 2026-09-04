@@ -635,6 +635,7 @@ export function LiveRunProvider({
       autoTrackBlockedRef,
       autoTrackRebaseAfterBlock,
       claimAutoTrackEvent,
+      nextRunPrepActive,
     });
 
   // Packaging speed feedback is shared by the Packaging tab and the quick

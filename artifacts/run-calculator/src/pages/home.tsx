@@ -507,7 +507,7 @@ import {
 } from "../departments";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
-import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
+import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../sauceBarrelStore";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
 import { useProductionRules } from "../hooks/useProductionRules";
@@ -7552,8 +7552,16 @@ export default function Home() {
     }
     return { outcome: body.outcome, state: body.state, values: body.values };
       });
-    autoTrackClaimQueueRef.current = request.then(() => {}, () => {});
-    return request;
+    const surfaced = request.catch((error) => {
+      if (claim.channel === "sauce-barrel") {
+        setWriteError(
+          "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.",
+        );
+      }
+      throw error;
+    });
+    autoTrackClaimQueueRef.current = surfaced.then(() => {}, () => {});
+    return surfaced;
   }
 
   // Mirror today's substitution overlay into the shared-calc module so every
@@ -22971,7 +22979,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   // back restores the barrel count, anchor, and alert latches rather than
   // resetting them to zero.  All setters write back to the store immediately.
   const [sauceMade, setSauceMadeRaw] = useState(
-    () => getSauceBarrelEntry(currentRunId).barrelsMade,
+    () => Math.max(0, Number(v.sauceBarrelsMade) || getSauceBarrelEntry(currentRunId).barrelsMade),
   );
   const [showSauceBarrelDue, setShowSauceBarrelDueRaw] = useState(
     () => getSauceBarrelEntry(currentRunId).showBarrelDue,
@@ -22987,7 +22995,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
   const lastBarrelNetSecRef = useRef<number>(
-    getSauceBarrelEntry(currentRunId).lastBarrelNetSec,
+    Math.max(0, Number(v.sauceBarrelAnchorNetSec) || getSauceBarrelEntry(currentRunId).lastBarrelNetSec),
   );
   const sauceBarrelDueKeyRef = useRef<string>(
     getSauceBarrelEntry(currentRunId).barrelDueKey,
@@ -22996,18 +23004,25 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     getSauceBarrelEntry(currentRunId).quickCheckKey,
   );
 
-  // Write-through wrappers — keep the persistent store in sync so remounts
-  // restore the correct values.
-  const setSauceMade = useCallback(
-    (fn: ((n: number) => number) | number) => {
-      setSauceMadeRaw((prev) => {
-        const next = typeof fn === "function" ? fn(prev) : fn;
-        getSauceBarrelEntry(currentRunId).barrelsMade = next;
-        return next;
-      });
-    },
-    [currentRunId],
-  );
+  const applyManualSauceProgress = useCallback((
+    nextMade: number,
+    nextAnchor: number,
+    targetCorrectionGeneration?: number,
+  ) => {
+    const made = Math.max(0, Math.floor(nextMade));
+    const anchor = Math.max(0, Math.floor(nextAnchor));
+    const correctionGeneration = targetCorrectionGeneration
+      ?? Math.max(0, Number(form.getValues("sauceBarrelCorrectionGeneration")) || 0) + 1;
+    form.setValue("sauceBarrelsMade", made, { shouldDirty: true });
+    form.setValue("sauceBarrelAnchorNetSec", anchor, { shouldDirty: true });
+    form.setValue("sauceBarrelCorrectionGeneration", correctionGeneration, { shouldDirty: true });
+    mirrorSauceBarrelProgress(currentRunId, { barrelsMade: made, lastBarrelNetSec: anchor });
+    setSauceMadeRaw(made);
+    lastBarrelNetSecRef.current = anchor;
+    const now = Date.now();
+    markRunValuesUpdated(currentRunId, now);
+    lastLocalEditRef.current = now;
+  }, [currentRunId, form, lastLocalEditRef]);
   const setShowSauceBarrelDue = useCallback(
     (val: boolean) => {
       getSauceBarrelEntry(currentRunId).showBarrelDue = val;
@@ -23022,57 +23037,36 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     },
     [currentRunId],
   );
-  // Helper: update the barrel anchor ref AND the store in one call.
-  const writeLastBarrelAnchor = useCallback(
-    (sec: number) => {
-      lastBarrelNetSecRef.current = sec;
-      getSauceBarrelEntry(currentRunId).lastBarrelNetSec = sec;
-    },
-    [currentRunId],
-  );
-
   // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
   const {
     prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
   } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: 580, sauceBatchSec: 1800 });
 
-  // Track the PREVIOUS run ID so the reset effect can distinguish a genuine
-  // new-run transition from a remount with the same run ID (e.g. Radix
-  // TabsContent unmounting and re-mounting when the operator switches tabs).
-  // On a remount the prev ref initialises to currentRunId — equal → skip reset.
-  const prevRunIdRef = useRef<string>(currentRunId);
-
+  // Canonical progress comes from synchronized run values. Mirror it into the
+  // tab-surviving UI store so automatic advances remain visible across
+  // navigation, reload, run switching, and peer reconciliation.
   useEffect(() => {
-    // Reset only when the run ID genuinely changes — not on tab-return remounts.
-    // A remount sets prevRunIdRef to currentRunId on creation, so this guard
-    // returns immediately, leaving the module-level store (and its persisted
-    // barrel count, anchor, and latches) untouched.
-    if (prevRunIdRef.current === currentRunId) return;
-    prevRunIdRef.current = currentRunId;
-    // Wipe the store entry for the new run so state starts from zero.
-    // Raw setters avoid a write-through echo back to the just-reset entry.
-    resetSauceBarrelEntry(currentRunId);
-    setSauceMadeRaw(0);
-    lastBarrelNetSecRef.current = 0;
-    setShowSauceBarrelDueRaw(false);
-    sauceBarrelDueKeyRef.current = "";
-    sauceQuickCheckKeyRef.current = "";
-    setShowSauceQuickCheckRaw(false);
-  }, [currentRunId]);
-  useEffect(() => {
-    if (runStatus === "ended") {
-      resetSauceBarrelEntry(currentRunId);
-      setSauceMadeRaw(0);
-      setShowSauceBarrelDueRaw(false);
-      setShowSauceQuickCheckRaw(false);
-    }
-  }, [runStatus, currentRunId]);
+    const made = Math.max(0, Math.floor(Number(v.sauceBarrelsMade) || 0));
+    const anchor = Math.max(0, Math.floor(Number(v.sauceBarrelAnchorNetSec) || 0));
+    mirrorSauceBarrelProgress(currentRunId, { barrelsMade: made, lastBarrelNetSec: anchor });
+    setSauceMadeRaw(made);
+    lastBarrelNetSecRef.current = anchor;
+  }, [currentRunId, v.sauceBarrelAnchorNetSec, v.sauceBarrelsMade]);
   // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
   useEffect(() => {
     if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
-      setSauceMade(n => n === 0 ? prep.prepBatchesSauce : n);
+      if ((Number(v.sauceBarrelsMade) || 0) === 0) {
+        applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
+      }
     }
-  }, [runStatus, prep.prepCarriedOver, prep.prepBatchesSauce]);
+  }, [
+    applyManualSauceProgress,
+    elapsedBatchSec,
+    prep.prepBatchesSauce,
+    prep.prepCarriedOver,
+    runStatus,
+    v.sauceBarrelsMade,
+  ]);
 
   // ── Sauce barrel nearly-exhausted alert ───────────────────────────────────
   // Fire when < 15% of barrel time remains (same threshold as 15-min run alert).
@@ -23195,9 +23189,14 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               totalBatches={calc.sauceBatches}
               made={sauceMade}
               onIncrement={() => {
-                // writeLastBarrelAnchor syncs both the ref and the store so the
-                // anchor survives subsequent tab navigation (remounts).
-                const barrelIndex = getSauceBarrelEntry(currentRunId).barrelsMade + 1;
+                const barrelIndex = Math.max(0, Number(v.sauceBarrelsMade) || 0) + 1;
+                const targetCorrectionGeneration =
+                  Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0) + 1;
+                // Deterministic until this action commits: retries, reloads, or
+                // duplicate taps share one marker, while a decrement advances
+                // the generation so a genuinely remade barrel gets a new one.
+                const manualEventId =
+                  `manual:${targetCorrectionGeneration}:${barrelIndex}`.slice(0, 160);
                 const sauceName = (v.frontlineRecipeName ?? "").trim();
                 const hasSauceRecipe = (v.frontlineRecipe ?? []).some((r: RecipeRow) => Number(r.lbs ?? 0) > 0);
                 const itemKey = hasSauceRecipe
@@ -23207,15 +23206,42 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                     : "";
                 const barrelQty = hasSauceRecipe ? 1 : calc.sauceEffBarrel;
                 if (itemKey && barrelQty > 0) {
-                  void consumeSauceBarrel(currentRunId, barrelIndex, itemKey, barrelQty).catch(() => {
-                    setWriteError("Couldn't record sauce barrel usage — inventory may be out of sync. Check your connection.");
-                  });
+                  const retryDelays = [0, 1_500, 5_000];
+                  const attempt = (index: number): void => {
+                    window.setTimeout(() => {
+                      void consumeSauceBarrel(
+                        currentRunId,
+                        barrelIndex,
+                        itemKey,
+                        barrelQty,
+                        manualEventId,
+                      )
+                        .then(() => {
+                          applyManualSauceProgress(
+                            barrelIndex,
+                            elapsedBatchSec,
+                            targetCorrectionGeneration,
+                          );
+                          setShowSauceBarrelDue(false);
+                        })
+                        .catch(() => {
+                          setWriteError(
+                            "Couldn't record Sauce barrel usage. Inventory was not advanced; this same barrel is retrying.",
+                          );
+                          if (index + 1 < retryDelays.length) attempt(index + 1);
+                        });
+                    }, retryDelays[index]);
+                  };
+                  attempt(0);
+                } else {
+                  applyManualSauceProgress(barrelIndex, elapsedBatchSec);
+                  setShowSauceBarrelDue(false);
                 }
-                writeLastBarrelAnchor(elapsedBatchSec);
-                setSauceMade(n => n + 1);
+              }}
+              onDecrement={() => {
+                applyManualSauceProgress(Math.max(0, sauceMade - 1), elapsedBatchSec);
                 setShowSauceBarrelDue(false);
               }}
-              onDecrement={() => setSauceMade(n => Math.max(0, n - 1))}
               isLive={isLive}
               testId="output-sauce-batches"
               sauceEffBarrel={calc.sauceEffBarrel}

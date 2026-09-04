@@ -1281,3 +1281,53 @@ describe("packagingProgress merge (Task 974)", () => {
     });
   });
 });
+
+describe("auto-track coordination snapshot invalidation", () => {
+  it("invalidates a stored sauce-barrel channel after a manual progress snapshot", () => {
+    const existing = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 },
+      runValues: {
+        r1: {
+          sauceBarrelsMade: 1,
+          sauceBarrelAnchorNetSec: 60,
+          sauceBarrelCorrectionGeneration: 0,
+        },
+      },
+      runValuesUpdatedAt: { r1: 10 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          r1: {
+            "sauce-barrel": {
+              generation: "r1:2",
+              sequence: 1,
+              nextDueAt: 10_000,
+              acceptedEventId: "event-1",
+              updatedAt: 10,
+            },
+          },
+        },
+      },
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 },
+      runValues: {
+        r1: {
+          sauceBarrelsMade: 2,
+          sauceBarrelAnchorNetSec: 120,
+          sauceBarrelCorrectionGeneration: 1,
+        },
+      },
+      runValuesUpdatedAt: { r1: 11 },
+    };
+
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const state = (
+      (out.autoTrackCoordination as Record<string, Record<string, Record<string, Record<string, unknown>>>>)
+        .runs.r1["sauce-barrel"]
+    );
+    expect(state.generation).toBe("manual:11");
+    expect(state.sequence).toBe(0);
+    expect(state.acceptedEventId).toBeUndefined();
+  });
+});

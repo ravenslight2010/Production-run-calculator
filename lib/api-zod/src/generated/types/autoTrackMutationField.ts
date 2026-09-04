@@ -14,4 +14,7 @@ export const AutoTrackMutationField = {
   casesOnCurrentSkid: 'casesOnCurrentSkid',
   traysOnLine: 'traysOnLine',
   batchesReady: 'batchesReady',
+  sauceBarrelsMade: 'sauceBarrelsMade',
+  sauceBarrelAnchorNetSec: 'sauceBarrelAnchorNetSec',
+  sauceBarrelCorrectionGeneration: 'sauceBarrelCorrectionGeneration',
 } as const;
