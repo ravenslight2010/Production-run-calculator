@@ -125,6 +125,7 @@ export interface LiveRunContextValue {
   setAutoTrackProgress: React.Dispatch<React.SetStateAction<boolean>>;
   autoTrackSuggestion: ReturnType<typeof useAutoTrack>["autoTrackSuggestion"];
   autoSuppressUntilRef: React.MutableRefObject<number>;
+  doughAutoSuppressUntilRef: React.MutableRefObject<number>;
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
   coordinationStatus: ReturnType<typeof useAutoTrack>["coordinationStatus"];
@@ -134,7 +135,7 @@ export interface LiveRunContextValue {
   acceptPackagingSpeedNudge: (nowMs?: number) => void;
   dismissPackagingSpeedNudge: () => void;
   isDoughTimerPaused: boolean;
-  pauseDoughTimers: () => void;
+  pauseDoughTimers: (durationMs?: number) => void;
   resumeDoughTimers: () => void;
   stallPrompt: boolean;
   setStallPrompt: React.Dispatch<React.SetStateAction<boolean>>;
@@ -174,6 +175,7 @@ export interface LiveRunProviderProps {
   screenMode: string | null;
   machine: { spinSec: number; hopperSec: number };
   externalAutoSuppressRef?: React.MutableRefObject<number>;
+  externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
   onPackagingProgressAutoAdvance?: (
     skidsCompleted: number,
     casesOnCurrentSkid: number,
@@ -209,6 +211,7 @@ export function LiveRunProvider({
   screenMode,
   machine,
   externalAutoSuppressRef,
+  externalDoughAutoSuppressRef,
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
@@ -607,7 +610,7 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
     useAutoTrack({
       runId: currentRunId,
       runGeneration: String(currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0),
@@ -626,6 +629,7 @@ export function LiveRunProvider({
       // Pass Home's ref so the hook's own suppression check reads from it —
       // manual-edit latches written by UI consumers are honoured by the write loop.
       externalAutoSuppressRef,
+      externalDoughAutoSuppressRef,
       onPackagingProgressAutoAdvance,
       autoTrackBlocked,
       autoTrackBlockedRef,
@@ -764,7 +768,7 @@ export function LiveRunProvider({
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptPackagingSpeedNudge: acceptSharedPackagingSpeedNudge,
@@ -781,7 +785,7 @@ export function LiveRunProvider({
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptSharedPackagingSpeedNudge, dismissSharedPackagingSpeedNudge,

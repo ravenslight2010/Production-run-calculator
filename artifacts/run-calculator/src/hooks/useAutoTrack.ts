@@ -156,6 +156,12 @@ interface AutoTrackParams {
 
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   /**
+   * Manual-edit suppression for the dough pipeline. This is intentionally
+   * separate from the packaging ref so a dough correction never pauses
+   * case/skid tracking.
+   */
+  externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
+  /**
    * Persists the independently synced packaging register before a case/skid
    * auto-write lands in the form. Returning false fences a tick that raced a
    * newly adopted manual-override deadline.
@@ -197,6 +203,7 @@ interface AutoTrackResult {
     batches: number | null;
   } | null;
   autoSuppressUntilRef: React.MutableRefObject<number>;
+  doughAutoSuppressUntilRef: React.MutableRefObject<number>;
   /**
    * Restart the requested auto-track countdown(s) from their full cadence.
    * A scoped resume must not re-arm unrelated production timers or write a
@@ -220,7 +227,7 @@ interface AutoTrackResult {
   /** True while the dough-timer independent pause is active. */
   isDoughTimerPaused: boolean;
   /** Freeze mixer/hopper countdown displays and suppress dough tick writes. */
-  pauseDoughTimers: () => void;
+  pauseDoughTimers: (durationMs?: number) => void;
   /** Restart dough countdowns from full duration and clear the paused state. */
   resumeDoughTimers: () => void;
   /** Server event acknowledgement state for accessible status messaging. */
@@ -332,6 +339,7 @@ export function useAutoTrack({
   machine,
   disabled = false,
   externalAutoSuppressRef,
+  externalDoughAutoSuppressRef,
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
@@ -345,11 +353,17 @@ export function useAutoTrack({
   // When set, tray/batch production and consumption ticks are suppressed
   // without affecting cases/skids or the global auto-track toggle.
   const doughTimerPausedRef = useRef<number>(0);
+  // Non-zero only for a timed correction pause. A manual pause leaves this at
+  // zero and waits for the operator's explicit Resume timers action.
+  const doughTimerResumeAtRef = useRef<number>(0);
   const [isDoughTimerPaused, setIsDoughTimerPaused] = useState(false);
   const internalAutoSuppressRef = useRef<number>(0);
+  const internalDoughAutoSuppressRef = useRef<number>(0);
   // Prefer caller's ref so that suppression latches written by UI consumers
   // (e.g. Home's autoSuppressUntilRef) are seen by this hook's write loop.
   const autoSuppressUntilRef = externalAutoSuppressRef ?? internalAutoSuppressRef;
+  const doughAutoSuppressUntilRef =
+    externalDoughAutoSuppressRef ?? internalDoughAutoSuppressRef;
   // Per-counter "next tick due at" wall-clock timestamps (ms). 0 = fire on the
   // next tick (fresh baseline / forced resume).
   const caseNextDueMsRef = useRef<number>(0);
@@ -564,8 +578,10 @@ export function useAutoTrack({
     setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
     doughTimerPausedRef.current = 0;
+    doughTimerResumeAtRef.current = 0;
+    doughAutoSuppressUntilRef.current = 0;
     setIsDoughTimerPaused(false);
-  }, []);
+  }, [doughAutoSuppressUntilRef]);
 
   const rearmCaseTimer = useCallback((nowMs: number) => {
     const timing = getAutoTrackTiming(
@@ -589,6 +605,8 @@ export function useAutoTrack({
     // Rebase every dough channel at the same instant. Consumption anchors are
     // cleared so the first completed interval cannot replay paused elapsed time.
     doughTimerPausedRef.current = 0;
+    doughTimerResumeAtRef.current = 0;
+    doughAutoSuppressUntilRef.current = 0;
     setIsDoughTimerPaused(false);
     trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
     batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
@@ -725,8 +743,13 @@ export function useAutoTrack({
 
   // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
   // Does not affect the cases/skids counter or the global auto-track toggle.
-  const pauseDoughTimers = useCallback(() => {
-    doughTimerPausedRef.current = Date.now();
+  const pauseDoughTimers = useCallback((durationMs?: number) => {
+    const nowMs = Date.now();
+    doughTimerPausedRef.current = nowMs;
+    doughTimerResumeAtRef.current =
+      typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0
+        ? nowMs + durationMs
+        : 0;
     setIsDoughTimerPaused(true);
   }, []);
 
@@ -972,7 +995,12 @@ export function useAutoTrack({
     // but do not write — the operator is taking over. Bookkeeping still
     // advances so the window expiring never causes a catch-up jump that wipes
     // the operator's manual edit.
-    const suppressed = Date.now() < autoSuppressUntilRef.current;
+    const caseSuppressed = Date.now() < autoSuppressUntilRef.current;
+    // Keep legacy packaging/manual suppression behavior for Dough while
+    // allowing a Dough-only correction to leave case tracking untouched.
+    const doughSuppressed =
+      Date.now() < doughAutoSuppressUntilRef.current
+      || Date.now() < autoSuppressUntilRef.current;
 
     // ── Cases (and skids, derived from the same total): tick once per case. ──
     if (
@@ -999,7 +1027,7 @@ export function useAutoTrack({
       const prevFreezer = drainFreezerRef.current;
       drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
 
-      if (!suppressed) {
+      if (!caseSuppressed) {
         const cps = v.casesPerSkid;
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
@@ -1111,6 +1139,17 @@ export function useAutoTrack({
       }
     }
 
+    // A timed manual correction pause ends by re-arming every dough channel.
+    // Return without writing in this render so the next clock tick starts from
+    // a clean, full cadence and cannot replay the paused interval.
+    if (
+      doughTimerPausedRef.current > 0
+      && doughTimerResumeAtRef.current > 0
+      && nowMs >= doughTimerResumeAtRef.current
+    ) {
+      rearmDoughTimers(nowMs);
+      return;
+    }
     if (doughTimerPausedRef.current > 0) return;
 
     // ── Trays: count up while dough is still being pressed, down as the line
@@ -1144,7 +1183,7 @@ export function useAutoTrack({
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
       } else if (nowMs >= trayProdNextDueMsRef.current) {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
-        if (!suppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
+        if (!doughSuppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
           delta += 1;
         }
       }
@@ -1160,7 +1199,7 @@ export function useAutoTrack({
           : trayPeriodMs / 60000;
         trayNextDueMsRef.current = nowMs + trayPeriodMs;
         trayLastMsRef.current = nowMs;
-        if (!suppressed && !doughFeedComplete) {
+        if (!doughSuppressed && !doughFeedComplete) {
           // First tray tick of a run where the operator never entered staged
           // dough (counter still 0): seed the suggested staging (the same number
           // the "Suggest" button applies) so the counter has real stock to track
@@ -1222,7 +1261,7 @@ export function useAutoTrack({
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
       } else if (nowMs >= batchProdNextDueMsRef.current) {
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
-        if (!suppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
+        if (!doughSuppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
           delta += 1;
         }
       }
@@ -1235,7 +1274,7 @@ export function useAutoTrack({
           : batchPeriodMs / 60000;
         batchNextDueMsRef.current = nowMs + batchPeriodMs;
         batchLastMsRef.current = nowMs;
-        if (!suppressed && !doughFeedComplete) {
+        if (!doughSuppressed && !doughFeedComplete) {
           // Same one-shot seed as trays: an untouched 0 counter gets the
           // suggested staging on its first tick so it has stock to track.
           if (!batchSeededRef.current) {
@@ -1291,6 +1330,7 @@ export function useAutoTrack({
     setAutoTrackProgress,
     autoTrackSuggestion,
     autoSuppressUntilRef,
+    doughAutoSuppressUntilRef,
     fireAutoTrackNow,
     tickDueRefs: tickDueRefsRef.current,
     isDoughTimerPaused,

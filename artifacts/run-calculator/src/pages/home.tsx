@@ -2360,16 +2360,16 @@ function StepperField({
           const cur = Number(fieldRef.current?.value) || 0;
           navigator.vibrate?.(8);
           const next = Math.max(min, cur - step);
-          onManualChange?.(next);
           fieldRef.current?.onChange(next);
+          onManualChange?.(next);
         };
         const increment = () => {
           const cur = Number(fieldRef.current?.value) || 0;
           if (max !== undefined && cur >= max) return;
           navigator.vibrate?.(8);
           const next = max !== undefined ? Math.min(max, cur + step) : cur + step;
-          onManualChange?.(next);
           fieldRef.current?.onChange(next);
+          onManualChange?.(next);
         };
         return (
           <FormItem>
@@ -2407,8 +2407,8 @@ function StepperField({
                   onChange={(e) => {
                     const val = e.target.value === "" ? "" : Number(e.target.value);
                     const next = max !== undefined && typeof val === "number" ? Math.min(max, val) : val;
-                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
                     field.onChange(next);
+                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
                   }}
                   onFocus={e => e.target.select()}
                   className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
@@ -2927,6 +2927,7 @@ export default function Home() {
   // Shared auto-track suppress ref — owned in Home, passed to LiveRunProvider
   // so both Home callbacks and useAutoTrack suppress the same latch.
   const autoSuppressUntilRef = useRef<number>(0);
+  const doughAutoSuppressUntilRef = useRef<number>(0);
   // Automatic sandbox refresh: when the server reports the sandbox copy is stale
   // (older than its cutoff, or never copied), re-copy live → sandbox and reload —
   // the same flow as the manual "Reset sandbox" button, minus the confirm. This
@@ -19199,6 +19200,7 @@ export default function Home() {
         prefs={me?.notificationPrefs}
         screenMode={screenMode}
         externalAutoSuppressRef={autoSuppressUntilRef}
+        externalDoughAutoSuppressRef={doughAutoSuppressUntilRef}
         onPackagingProgressAutoAdvance={persistAutomaticPackagingProgress}
         machine={{
           spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
@@ -23582,7 +23584,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     calc, nowTime, elapsedBatchSec,
     showBatchDue, setShowBatchDue,
     autoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
+    fireAutoTrackNow, tickDueRefs, doughAutoSuppressUntilRef,
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
     nextRunPrepActive, packagingDrainActive, detectPackagingSpeedDrift,
   } = useLiveRun();
@@ -23697,15 +23699,15 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   const hopperLeft = running && timing.hopperMs > 0 && hopperProdDue > 0
                     ? Math.min(timing.hopperMs / 1000, Math.max(0, (hopperProdDue - nowMs) / 1000))
                     : null;
-                  const suppressedNow = Date.now() < autoSuppressUntilRef.current;
-                  const suppressedMinsLeftNow = suppressedNow ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
+                   const suppressedNow = Date.now() < doughAutoSuppressUntilRef.current;
+                   const suppressedMinsLeftNow = suppressedNow ? Math.ceil((doughAutoSuppressUntilRef.current - Date.now()) / 60000) : 0;
                   return (
                     <>
                       <ManualOverrideBanner
-                        show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef.current)}
+                         show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, doughAutoSuppressUntilRef.current)}
                         station="Dough"
                         minsLeft={suppressedMinsLeftNow}
-                        onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow("dough"); }}
+                         onResume={() => { doughAutoSuppressUntilRef.current = 0; fireAutoTrackNow("dough"); }}
                       />
                       <div className="rounded-lg border border-border/50 bg-card/60 px-4 py-3 mb-3">
                           <div className="flex items-center justify-between mb-2">
@@ -23715,7 +23717,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             {running && !isDoughTimerPaused && (
                               <button
                                 type="button"
-                                onClick={pauseDoughTimers}
+                                 onClick={() => pauseDoughTimers()}
                                 className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-amber-400 transition-colors"
                                 title="Pause dough timers"
                                 data-testid="btn-pause-dough-timers"
@@ -23908,21 +23910,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 <div className="mb-4">
                   {(() => {
                     const s = autoTrackSuggestion;
-                    const suppressed = Date.now() < autoSuppressUntilRef.current;
-                    const onManual = () => {
-                      autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
-                      markRunValuesUpdated(currentRunId, Date.now());
-                    };
                     const { trays: suggestedTrays, batches: suggestedBatches } =
                       suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
-                    // Stop auto-track TickBars once the press is done — no more
-                    // batches are needed for this run at that point.
-                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
-                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
-                    // ── Live countdowns to each auto counter's next tick ──
-                    const nowMs = nowTime.getTime();
-                    const secLeftOf = (dueMs: number, periodSec: number) =>
-                      dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
                     const timing = getAutoTrackTiming(
                       calc.ppm,
                       v.pizzasPerCase,
@@ -23933,6 +23922,29 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         hopperSec: Math.max(0, Number(v.hopperSec) || 0),
                       },
                     );
+                    const onManual = () => {
+                      const now = Date.now();
+                      if (timing.trayMs > 0) {
+                        doughAutoSuppressUntilRef.current = now + timing.trayMs;
+                        pauseDoughTimers(timing.trayMs);
+                      } else {
+                        // No valid tray cadence means the dough hook cannot
+                        // tick either, so clear any stale timed pause rather
+                        // than inventing a fixed fallback interval.
+                        doughAutoSuppressUntilRef.current = 0;
+                        resumeDoughTimers();
+                      }
+                      markRunValuesUpdated(currentRunId, now);
+                    };
+                    // Stop auto-track TickBars once the press is done — no more
+                    // batches are needed for this run at that point.
+                    const suppressed = Date.now() < doughAutoSuppressUntilRef.current;
+                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
+                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
+                    // ── Live countdowns to each auto counter's next tick ──
+                    const nowMs = nowTime.getTime();
+                    const secLeftOf = (dueMs: number, periodSec: number) =>
+                      dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
                     const trayPeriodSec = timing.trayMs / 1000;
                     const trayProductionSec = timing.trayProductionMs / 1000;
                     const drainQuarterSec = timing.batchConsumptionMs / 1000;
