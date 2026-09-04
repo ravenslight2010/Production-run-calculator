@@ -29,6 +29,10 @@ interface AutoTrackCalc {
   casesInFreezer: number;
   /** Seconds per sauce barrel; 0/invalid disables the sauce channel. */
   sauceDepletionSec?: number;
+  app1Batches?: number;
+  app2Batches?: number;
+  app3Batches?: number;
+  app4Batches?: number;
 }
 
 /**
@@ -66,6 +70,14 @@ interface AutoTrackValues {
   sauceBarrelsMade: number;
   sauceBarrelAnchorNetSec: number;
   sauceBarrelCorrectionGeneration: number;
+  app1Type: string; app1OzPerPizza: number; app1BatchLbs: number; app1CheeseRecipe: Array<{ lbs: number }>;
+  app1BatchesMade: number; app1BatchAnchorNetSec: number; app1BatchCorrectionGeneration: number;
+  app2Type: string; app2OzPerPizza: number; app2BatchLbs: number; app2CheeseRecipe: Array<{ lbs: number }>;
+  app2BatchesMade: number; app2BatchAnchorNetSec: number; app2BatchCorrectionGeneration: number;
+  app3Type: string; app3OzPerPizza: number; app3BatchLbs: number; app3CheeseRecipe: Array<{ lbs: number }>;
+  app3BatchesMade: number; app3BatchAnchorNetSec: number; app3BatchCorrectionGeneration: number;
+  app4Type: string; app4OzPerPizza: number; app4BatchLbs: number; app4CheeseRecipe: Array<{ lbs: number }>;
+  app4BatchesMade: number; app4BatchAnchorNetSec: number; app4BatchCorrectionGeneration: number;
 }
 
 export type AutoTrackChannel =
@@ -75,11 +87,19 @@ export type AutoTrackChannel =
   | "batch-consume"
   | "batch-produce"
   | "hopper"
-  | "sauce-barrel";
+  | "sauce-barrel"
+  | "app1-batch"
+  | "app2-batch"
+  | "app3-batch"
+  | "app4-batch";
 
 export type AutoTrackMutation = {
   field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady"
-    | "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration";
+    | "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration"
+    | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
+    | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
+    | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
+    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -451,6 +471,25 @@ export function useAutoTrack({
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
   // Net-elapsed seconds (not a wall-clock display due time) for sauce claims.
   const sauceNextDueNetSecRef = useRef(0);
+  const appNextDueNetSecRefs = {
+    app1: useRef(0),
+    app2: useRef(0),
+    app3: useRef(0),
+    app4: useRef(0),
+  };
+  const dueRefForChannel = (channel: AutoTrackChannel) => {
+    if (channel === "case") return caseNextDueMsRef;
+    if (channel === "tray-consume") return trayNextDueMsRef;
+    if (channel === "tray-produce") return trayProdNextDueMsRef;
+    if (channel === "batch-consume") return batchNextDueMsRef;
+    if (channel === "batch-produce") return batchProdNextDueMsRef;
+    if (channel === "sauce-barrel") return sauceNextDueNetSecRef;
+    if (channel === "app1-batch") return appNextDueNetSecRefs.app1;
+    if (channel === "app2-batch") return appNextDueNetSecRefs.app2;
+    if (channel === "app3-batch") return appNextDueNetSecRefs.app3;
+    if (channel === "app4-batch") return appNextDueNetSecRefs.app4;
+    return hopperProdNextDueMsRef;
+  };
 
   useEffect(() => {
     const adopt = (event: Event) => {
@@ -470,19 +509,7 @@ export function useAutoTrack({
         const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
         if (state.generation !== generation) {
           coordinationSequenceRef.current[channel] = 0;
-          const dueRef = channel === "case"
-            ? caseNextDueMsRef
-            : channel === "tray-consume"
-              ? trayNextDueMsRef
-              : channel === "tray-produce"
-                ? trayProdNextDueMsRef
-                : channel === "batch-consume"
-                  ? batchNextDueMsRef
-                  : channel === "batch-produce"
-                    ? batchProdNextDueMsRef
-                    : channel === "sauce-barrel"
-                      ? sauceNextDueNetSecRef
-                      : hopperProdNextDueMsRef;
+          const dueRef = dueRefForChannel(channel);
           dueRef.current = state.nextDueAt;
           continue;
         }
@@ -490,19 +517,7 @@ export function useAutoTrack({
           coordinationSequenceRef.current[channel] ?? 0,
           state.sequence,
         );
-        const dueRef = channel === "case"
-          ? caseNextDueMsRef
-          : channel === "tray-consume"
-            ? trayNextDueMsRef
-            : channel === "tray-produce"
-              ? trayProdNextDueMsRef
-              : channel === "batch-consume"
-                ? batchNextDueMsRef
-                : channel === "batch-produce"
-                  ? batchProdNextDueMsRef
-                  : channel === "sauce-barrel"
-                    ? sauceNextDueNetSecRef
-                    : hopperProdNextDueMsRef;
+        const dueRef = dueRefForChannel(channel);
         dueRef.current = state.nextDueAt;
       }
     };
@@ -591,6 +606,10 @@ export function useAutoTrack({
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
     sauceNextDueNetSecRef.current = 0;
+    appNextDueNetSecRefs.app1.current = 0;
+    appNextDueNetSecRefs.app2.current = 0;
+    appNextDueNetSecRefs.app3.current = 0;
+    appNextDueNetSecRefs.app4.current = 0;
     setCoordinationPendingCount(0);
     setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
@@ -676,6 +695,14 @@ export function useAutoTrack({
       if (typeof values.sauceBarrelCorrectionGeneration === "number") {
         form.setValue("sauceBarrelCorrectionGeneration", values.sauceBarrelCorrectionGeneration, { shouldDirty: true });
       }
+      (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
+        const made = values[`${slot}BatchesMade` as keyof FormValues];
+        const anchor = values[`${slot}BatchAnchorNetSec` as keyof FormValues];
+        const generation = values[`${slot}BatchCorrectionGeneration` as keyof FormValues];
+        if (typeof made === "number") form.setValue(`${slot}BatchesMade` as keyof FormValues, made as never, { shouldDirty: true });
+        if (typeof anchor === "number") form.setValue(`${slot}BatchAnchorNetSec` as keyof FormValues, anchor as never, { shouldDirty: true });
+        if (typeof generation === "number") form.setValue(`${slot}BatchCorrectionGeneration` as keyof FormValues, generation as never, { shouldDirty: true });
+      });
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
     if (!claimAutoTrackEvent) {
@@ -688,9 +715,10 @@ export function useAutoTrack({
     const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
     const eventId = coordinationRetryEventRef.current[channel]
       ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
-    const correctionGeneration = channel === "sauce-barrel"
-      ? mutations.find((mutation) => mutation.field === "sauceBarrelCorrectionGeneration")?.from
-      : undefined;
+    const correctionMutation = mutations.find((mutation) =>
+      mutation.field === "sauceBarrelCorrectionGeneration" || mutation.field.endsWith("BatchCorrectionGeneration"),
+    );
+    const correctionGeneration = correctionMutation?.from;
     coordinationRetryEventRef.current[channel] = eventId;
     coordinationPendingRef.current.add(channel);
     setCoordinationPendingCount(coordinationPendingRef.current.size);
@@ -709,6 +737,17 @@ export function useAutoTrack({
       correctionGeneration,
       mutations,
     }).then((result) => {
+      // A manual correction can happen while this request is in flight. Its
+      // incremented generation is the local authority until that snapshot
+      // reaches the server, so never let the older acknowledgement restore the
+      // pre-correction made count or net-time anchor.
+      if (
+        correctionMutation
+        && Number(form.getValues(correctionMutation.field as keyof FormValues)) !== correctionMutation.from
+      ) {
+        coordinationRetryEventRef.current[channel] = undefined;
+        return;
+      }
       // A concurrent channel or peer may have advanced the shared run-value
       // stamp after this claim was queued. Treat that canonical conflict like
       // a failed claim so the catch path retries from the newly adopted values
@@ -721,36 +760,12 @@ export function useAutoTrack({
         coordinationSequenceRef.current[channel] ?? 0,
         result.state.sequence,
       );
-      const dueRef = channel === "case"
-        ? caseNextDueMsRef
-        : channel === "tray-consume"
-          ? trayNextDueMsRef
-          : channel === "tray-produce"
-            ? trayProdNextDueMsRef
-            : channel === "batch-consume"
-              ? batchNextDueMsRef
-              : channel === "batch-produce"
-                ? batchProdNextDueMsRef
-                : channel === "sauce-barrel"
-                  ? sauceNextDueNetSecRef
-                  : hopperProdNextDueMsRef;
+      const dueRef = dueRefForChannel(channel);
       dueRef.current = result.state.nextDueAt;
       coordinationRetryEventRef.current[channel] = undefined;
       applyValues(result.values);
     }).catch(() => {
-      const dueRef = channel === "case"
-        ? caseNextDueMsRef
-        : channel === "tray-consume"
-          ? trayNextDueMsRef
-          : channel === "tray-produce"
-            ? trayProdNextDueMsRef
-            : channel === "batch-consume"
-              ? batchNextDueMsRef
-              : channel === "batch-produce"
-                ? batchProdNextDueMsRef
-              : channel === "sauce-barrel"
-                ? sauceNextDueNetSecRef
-                : hopperProdNextDueMsRef;
+      const dueRef = dueRefForChannel(channel);
       dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
       // A failed coordinated case claim did not actually apply the mutation.
       // Re-baseline so the next tick retries the same absolute catch-up rather
@@ -1074,6 +1089,98 @@ export function useAutoTrack({
     v.sauceBarrelAnchorNetSec,
     v.sauceBarrelCorrectionGeneration,
     v.sauceBarrelsMade,
+  ]);
+
+  // Persisted anchors are the authoritative rebase points. In particular, a
+  // manual +/- may happen while a prior automatic event is due: resetting this
+  // slot's due time to the new anchor prevents that stale event from writing
+  // the old anchor back after the suppression fence expires.
+  useEffect(() => {
+    (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
+      const values = v as FormValues;
+      const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
+      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
+      const batchLbs = recipeLbs > 0
+        ? recipeLbs
+        : Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0;
+      const ounces = Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0;
+      const cadence = batchLbs > 0 && ounces > 0 && calc.ppm > 0
+        ? (batchLbs * 16 / ounces / calc.ppm) * 60
+        : 0;
+      const channel = `${slot}-batch` as AutoTrackChannel;
+      dueRefForChannel(channel).current = cadence > 0
+        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + cadence
+        : 0;
+    });
+  }, [calc.ppm, v]);
+
+  // Applicator batches use the same provider-owned, net-production clock as
+  // Sauce. Each slot has its own effective batch and therefore its own cadence;
+  // this deliberately does not use the dough batch cadence or add controls to
+  // mix/lb-only rows.
+  useEffect(() => {
+    if (
+      !claimAutoTrackEvent ||
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      runStatus !== "running" ||
+      calc.pressDone ||
+      Date.now() < autoSuppressUntilRef.current ||
+      !Number.isFinite(elapsedBatchSec)
+    ) return;
+    const formValues = v as FormValues;
+    const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
+      const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
+      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
+      const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : Number(formValues[`${slot}BatchLbs` as keyof FormValues]);
+      const ouncesPerPizza = Number(formValues[`${slot}OzPerPizza` as keyof FormValues]);
+      const required = Number(calc[`${slot}Batches`]);
+      return {
+        slot,
+        channel: `${slot}-batch` as AutoTrackChannel,
+        madeField: `${slot}BatchesMade` as keyof FormValues,
+        anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
+        correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
+        valid: !!String(formValues[`${slot}Type` as keyof FormValues]).trim() &&
+          !String(formValues[`${slot}Type` as keyof FormValues]).trim().toLowerCase().includes("mix") &&
+          effectiveBatchLbs > 0 && ouncesPerPizza > 0 && required > 0 && calc.ppm > 0,
+        cadence: effectiveBatchLbs > 0 && ouncesPerPizza > 0 && calc.ppm > 0
+          ? (effectiveBatchLbs * 16 / ouncesPerPizza / calc.ppm) * 60
+          : 0,
+        required,
+      };
+    });
+    for (const slot of slots) {
+      if (!slot.valid || !Number.isFinite(slot.cadence) || slot.cadence <= 0) continue;
+      const made = Math.max(0, Number(formValues[slot.madeField]) || 0);
+      const anchor = Math.max(0, Number(formValues[slot.anchorField]) || 0);
+      const correctionGeneration = Math.max(0, Number(formValues[slot.correctionField]) || 0);
+      const dueAt = dueRefForChannel(slot.channel).current || anchor + slot.cadence;
+      // At most one sequenced event is claimed at a time. The canonical
+      // acknowledgement advances the persisted anchor, then this effect claims
+      // the next overdue fractional cadence without losing accumulated time.
+      if (elapsedBatchSec < dueAt || made >= Math.ceil(slot.required)) continue;
+      dueRefForChannel(slot.channel).current = dueAt;
+      commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
+        { field: slot.madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(slot.required), made + 1) },
+        { field: slot.anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
+        { field: slot.correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+      ]);
+    }
+  }, [
+    autoSuppressUntilRef,
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    calc,
+    claimAutoTrackEvent,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    runStatus,
+    v,
   ]);
 
   // Apply expected values whenever a counter's own production-paced tick is due.

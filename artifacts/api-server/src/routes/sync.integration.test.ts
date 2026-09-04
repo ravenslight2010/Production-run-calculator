@@ -231,6 +231,48 @@ describe("POST /sync/auto-track/claim", () => {
     expect(staleBase.values.traysOnLine).toBe(14);
   });
 
+  it("atomically coordinates applicator batches without consuming inventory", async () => {
+    const applicatorEvent = (senderId: string, eventId: string) => ({
+      senderId,
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "app1-batch",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId,
+        dueAt: 60,
+        nextDueAt: 120,
+        baseUpdatedAt: 1,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "app1BatchesMade", from: 0, to: 1 },
+          { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
+          { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    });
+    const [a, b] = await Promise.all([
+      post(applicatorEvent("app-a", "app-a:app1:1")),
+      post(applicatorEvent("app-b", "app-b:app1:1")),
+    ]);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      outcome: string;
+      values: { app1BatchesMade: number; app1BatchAnchorNetSec: number };
+    }>;
+    expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
+    expect(bodies.every(({ values }) =>
+      values.app1BatchesMade === 1 && values.app1BatchAnchorNetSec === 60
+    )).toBe(true);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+
+    const winner = bodies[0].outcome === "accepted"
+      ? applicatorEvent("app-a", "app-a:app1:1")
+      : applicatorEvent("app-b", "app-b:app1:1");
+    expect((await (await post(winner)).json() as { outcome: string }).outcome).toBe("duplicate");
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+
   it("atomically advances one Sauce barrel and deducts its inventory once across competing stations", async () => {
     const [item] = await db.insert(inventoryItemsTable).values({
       key: "ingredient:BBQ Sauce:lbs",

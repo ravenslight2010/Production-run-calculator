@@ -28,6 +28,18 @@ export const AutoTrackMutationField = {
   sauceBarrelsMade: 'sauceBarrelsMade',
   sauceBarrelAnchorNetSec: 'sauceBarrelAnchorNetSec',
   sauceBarrelCorrectionGeneration: 'sauceBarrelCorrectionGeneration',
+  app1BatchesMade: 'app1BatchesMade',
+  app1BatchAnchorNetSec: 'app1BatchAnchorNetSec',
+  app1BatchCorrectionGeneration: 'app1BatchCorrectionGeneration',
+  app2BatchesMade: 'app2BatchesMade',
+  app2BatchAnchorNetSec: 'app2BatchAnchorNetSec',
+  app2BatchCorrectionGeneration: 'app2BatchCorrectionGeneration',
+  app3BatchesMade: 'app3BatchesMade',
+  app3BatchAnchorNetSec: 'app3BatchAnchorNetSec',
+  app3BatchCorrectionGeneration: 'app3BatchCorrectionGeneration',
+  app4BatchesMade: 'app4BatchesMade',
+  app4BatchAnchorNetSec: 'app4BatchAnchorNetSec',
+  app4BatchCorrectionGeneration: 'app4BatchCorrectionGeneration',
 } as const;
 
 export interface AutoTrackMutation {
@@ -62,6 +74,10 @@ export const AutoTrackClaimChannel = {
   'batch-produce': 'batch-produce',
   hopper: 'hopper',
   'sauce-barrel': 'sauce-barrel',
+  'app1-batch': 'app1-batch',
+  'app2-batch': 'app2-batch',
+  'app3-batch': 'app3-batch',
+  'app4-batch': 'app4-batch',
 } as const;
 
 export interface AutoTrackClaim {

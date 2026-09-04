@@ -8,6 +8,10 @@ export const AUTO_TRACK_CHANNELS = [
   "batch-produce",
   "hopper",
   "sauce-barrel",
+  "app1-batch",
+  "app2-batch",
+  "app3-batch",
+  "app4-batch",
 ] as const;
 
 export type AutoTrackChannel = typeof AUTO_TRACK_CHANNELS[number];
@@ -34,7 +38,19 @@ export type AutoTrackMutation = {
     | "batchesReady"
     | "sauceBarrelsMade"
     | "sauceBarrelAnchorNetSec"
-    | "sauceBarrelCorrectionGeneration";
+    | "sauceBarrelCorrectionGeneration"
+    | "app1BatchesMade"
+    | "app1BatchAnchorNetSec"
+    | "app1BatchCorrectionGeneration"
+    | "app2BatchesMade"
+    | "app2BatchAnchorNetSec"
+    | "app2BatchCorrectionGeneration"
+    | "app3BatchesMade"
+    | "app3BatchAnchorNetSec"
+    | "app3BatchCorrectionGeneration"
+    | "app4BatchesMade"
+    | "app4BatchAnchorNetSec"
+    | "app4BatchCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -76,6 +92,18 @@ const MUTATING_FIELDS = new Set<AutoTrackMutation["field"]>([
   "sauceBarrelsMade",
   "sauceBarrelAnchorNetSec",
   "sauceBarrelCorrectionGeneration",
+  "app1BatchesMade",
+  "app1BatchAnchorNetSec",
+  "app1BatchCorrectionGeneration",
+  "app2BatchesMade",
+  "app2BatchAnchorNetSec",
+  "app2BatchCorrectionGeneration",
+  "app3BatchesMade",
+  "app3BatchAnchorNetSec",
+  "app3BatchCorrectionGeneration",
+  "app4BatchesMade",
+  "app4BatchAnchorNetSec",
+  "app4BatchCorrectionGeneration",
 ]);
 const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["field"]>> = {
   case: new Set(["skidsCompleted", "casesOnCurrentSkid"]),
@@ -88,6 +116,26 @@ const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["fi
     "sauceBarrelsMade",
     "sauceBarrelAnchorNetSec",
     "sauceBarrelCorrectionGeneration",
+  ]),
+  "app1-batch": new Set([
+    "app1BatchesMade",
+    "app1BatchAnchorNetSec",
+    "app1BatchCorrectionGeneration",
+  ]),
+  "app2-batch": new Set([
+    "app2BatchesMade",
+    "app2BatchAnchorNetSec",
+    "app2BatchCorrectionGeneration",
+  ]),
+  "app3-batch": new Set([
+    "app3BatchesMade",
+    "app3BatchAnchorNetSec",
+    "app3BatchCorrectionGeneration",
+  ]),
+  "app4-batch": new Set([
+    "app4BatchesMade",
+    "app4BatchAnchorNetSec",
+    "app4BatchCorrectionGeneration",
   ]),
 };
 function finiteNumber(value: unknown): value is number {
@@ -121,9 +169,9 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     || !Array.isArray(body.mutations)
     || body.mutations.length > 3
   ) return null;
-  const sauceNetTime = body.channel === "sauce-barrel";
+  const netTimeChannel = body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel);
   if (
-    sauceNetTime
+    netTimeChannel
       ? body.dueAt < 0 || body.nextDueAt > 1_000_000
       : body.dueAt < now - 24 * 60 * 60_000
         // The client may be operating with a clock that is ahead of the API
@@ -133,7 +181,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
         || body.nextDueAt > now + 24 * 60 * 60_000
   ) return null;
   if (
-    (body.channel === "case" || body.channel === "sauce-barrel")
+    (body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel))
     && (!Number.isSafeInteger(body.correctionGeneration) || (body.correctionGeneration as number) < 0)
   ) return null;
 
@@ -165,11 +213,17 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
   if (body.channel === "hopper" ? mutations.length !== 0 : mutations.length === 0) return null;
   // A barrel event is one completed physical barrel, never a client-side
   // reconciliation of the canonical counter.
-  if (body.channel === "sauce-barrel") {
+  if (body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel)) {
+    const prefix = body.channel === "sauce-barrel"
+      ? "sauceBarrel"
+      : `app${body.channel[3]}Batch`;
+    const madeField = body.channel === "sauce-barrel" ? "sauceBarrelsMade" : `${prefix}esMade`;
+    const anchorField = `${prefix}AnchorNetSec`;
+    const correctionField = `${prefix}CorrectionGeneration`;
     const byField = new Map(mutations.map((mutation) => [mutation.field, mutation]));
-    const made = byField.get("sauceBarrelsMade");
-    const anchor = byField.get("sauceBarrelAnchorNetSec");
-    const correction = byField.get("sauceBarrelCorrectionGeneration");
+    const made = byField.get(madeField as AutoTrackMutation["field"]);
+    const anchor = byField.get(anchorField as AutoTrackMutation["field"]);
+    const correction = byField.get(correctionField as AutoTrackMutation["field"]);
     if (
       mutations.length !== 3
       || !made
@@ -178,8 +232,8 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
       || !Number.isSafeInteger(made.from)
       || !Number.isSafeInteger(made.to)
       || made.to !== made.from + 1
-      || !Number.isSafeInteger(anchor.from)
-      || !Number.isSafeInteger(anchor.to)
+      || (body.channel === "sauce-barrel" && !Number.isSafeInteger(anchor.from))
+      || (body.channel === "sauce-barrel" && !Number.isSafeInteger(anchor.to))
       || anchor.to < anchor.from
       || !Number.isSafeInteger(correction.from)
       || !Number.isSafeInteger(correction.to)
@@ -198,7 +252,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     dueAt: body.dueAt,
     nextDueAt: body.nextDueAt,
     baseUpdatedAt: body.baseUpdatedAt,
-    ...(body.channel === "case" || body.channel === "sauce-barrel"
+    ...(body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel)
       ? { correctionGeneration: body.correctionGeneration as number }
       : {}),
     mutations,
@@ -278,8 +332,17 @@ export function applyAutoTrackClaim(
     ) outcome = "conflict";
   }
 
-  if (outcome === "accepted" && claim.channel === "sauce-barrel") {
-    const correctionGeneration = values.sauceBarrelCorrectionGeneration;
+  if (outcome === "accepted" && (claim.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(claim.channel))) {
+    const correctionField = claim.channel === "sauce-barrel"
+      ? "sauceBarrelCorrectionGeneration"
+      : `app${claim.channel[3]}BatchCorrectionGeneration`;
+    // Applicator coordination was added after durable run values existed in
+    // the field. A missing progress register is its documented zero default;
+    // accept its first claim so a live legacy run can adopt the new register.
+    // Sauce intentionally remains strict because it can produce inventory work.
+    const correctionGeneration = claim.channel === "sauce-barrel"
+      ? values[correctionField]
+      : values[correctionField] ?? 0;
     if (
       !Number.isSafeInteger(correctionGeneration)
       || correctionGeneration !== claim.correctionGeneration

@@ -31,6 +31,15 @@ function sauceMutations(made: number, anchor: number, correctionGeneration: numb
   ];
 }
 
+function applicatorMutations(slot: 1 | 2 | 3 | 4, made: number, anchor: number, correctionGeneration: number) {
+  const prefix = `app${slot}Batch` as const;
+  return [
+    { field: `${prefix}esMade` as const, from: made, to: made + 1 },
+    { field: `${prefix}AnchorNetSec` as const, from: anchor, to: anchor + 60 },
+    { field: `${prefix}CorrectionGeneration` as const, from: correctionGeneration, to: correctionGeneration },
+  ];
+}
+
 describe("auto-track coordination", () => {
   it("validates allow-listed channels, fields, times, and bounded values", () => {
     expect(parseAutoTrackClaim(claim(), NOW)).toEqual(claim());
@@ -40,6 +49,28 @@ describe("auto-track coordination", () => {
     }), NOW)).not.toBeNull();
     expect(parseAutoTrackClaim(claim({
       channel: "hopper",
+    }), NOW)).toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "app1-batch",
+      correctionGeneration: 0,
+      dueAt: 60.25,
+      nextDueAt: 120.5,
+      mutations: [
+        { field: "app1BatchesMade", from: 0, to: 1 },
+        { field: "app1BatchAnchorNetSec", from: 0, to: 60.25 },
+        { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW)).not.toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "app1-batch",
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations: [
+        { field: "app1BatchesMade", from: 0, to: 2 },
+        { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
+        { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+      ],
     }), NOW)).toBeNull();
     expect(parseAutoTrackClaim(claim({
       mutations: [{ field: "batchesReady", from: 1, to: 0 }],
@@ -285,6 +316,70 @@ describe("auto-track coordination", () => {
     }), NOW);
     expect(result.outcome).toBe("conflict");
     expect(result.inventoryConsumption).toBeUndefined();
+  });
+
+  it("coordinates every applicator batch channel without inventory consumption", () => {
+    for (const slot of [1, 2, 3, 4] as const) {
+      const channel = `app${slot}-batch` as const;
+      const stored = {
+        dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+        runValues: {
+          "run-1": {
+            [`app${slot}BatchesMade`]: 0,
+            [`app${slot}BatchAnchorNetSec`]: 0,
+            [`app${slot}BatchCorrectionGeneration`]: 0,
+          },
+        },
+        runValuesUpdatedAt: { "run-1": 10 },
+      };
+      const event = claim({
+        channel,
+        eventId: `client-a:${channel}:1`,
+        correctionGeneration: 0,
+        dueAt: 60,
+        nextDueAt: 120,
+        mutations: applicatorMutations(slot, 0, 0, 0),
+      });
+      const accepted = applyAutoTrackClaim(stored, event, NOW);
+      expect(accepted.outcome).toBe("accepted");
+      expect(accepted.values[`app${slot}BatchesMade`]).toBe(1);
+      expect(accepted.inventoryConsumption).toBeUndefined();
+      const duplicate = applyAutoTrackClaim(accepted.data, event, NOW + 1);
+      expect(duplicate.outcome).toBe("duplicate");
+      expect(duplicate.values[`app${slot}BatchesMade`]).toBe(1);
+    }
+  });
+
+  it("rejects an applicator tick after a manual correction invalidates its channel", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: {
+        "run-1": {
+          app2BatchesMade: 3,
+          app2BatchAnchorNetSec: 180,
+          app2BatchCorrectionGeneration: 1,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 11 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "run-1": {
+            "app2-batch": { generation: "manual:11", sequence: 0, nextDueAt: 0, updatedAt: NOW },
+          },
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "app2-batch",
+      baseUpdatedAt: 11,
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations: applicatorMutations(2, 0, 0, 0),
+    }), NOW);
+    expect(result.outcome).toBe("conflict");
+    expect(result.values.app2BatchesMade).toBe(3);
   });
 
   it("does not issue inventory work for unconfigured sauce tracking", () => {

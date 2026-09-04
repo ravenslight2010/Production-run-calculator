@@ -4427,6 +4427,18 @@ components:
             - sauceBarrelsMade
             - sauceBarrelAnchorNetSec
             - sauceBarrelCorrectionGeneration
+            - app1BatchesMade
+            - app1BatchAnchorNetSec
+            - app1BatchCorrectionGeneration
+            - app2BatchesMade
+            - app2BatchAnchorNetSec
+            - app2BatchCorrectionGeneration
+            - app3BatchesMade
+            - app3BatchAnchorNetSec
+            - app3BatchCorrectionGeneration
+            - app4BatchesMade
+            - app4BatchAnchorNetSec
+            - app4BatchCorrectionGeneration
         from: { type: number, minimum: 0, maximum: 1000000 }
         to: { type: number, minimum: 0, maximum: 1000000 }
     AutoTrackClaim:
@@ -4437,7 +4449,7 @@ components:
         runId: { type: string, minLength: 1, maxLength: 160 }
         channel:
           type: string
-          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel]
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch]
         generation: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1, maximum: 10000000 }
         eventId: { type: string, minLength: 1, maxLength: 160 }

@@ -23436,29 +23436,30 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
 
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState } = hx;
-  const { calc } = useLiveRun();
+  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef } = hx;
+  const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
 
-  const [app1Made, setApp1Made] = useState(0);
-  const [app2Made, setApp2Made] = useState(0);
-  const [app3Made, setApp3Made] = useState(0);
-  const [app4Made, setApp4Made] = useState(0);
-
-  useEffect(() => {
-    setApp1Made(0);
-    setApp2Made(0);
-    setApp3Made(0);
-    setApp4Made(0);
-  }, [currentRunId]);
-
-  useEffect(() => {
-    if (runStatus === "ended") {
-      setApp1Made(0);
-      setApp2Made(0);
-      setApp3Made(0);
-      setApp4Made(0);
-    }
-  }, [runStatus]);
+  // These are canonical run values, not tab-local state: switching Frontline
+  // away, reloading, or adopting another station's progress leaves the made
+  // counter and its net-clock baseline intact.
+  const setManualAppProgress = useCallback((slot: "app1" | "app2" | "app3" | "app4", made: number) => {
+    const madeField = `${slot}BatchesMade` as keyof FormValues;
+    const anchorField = `${slot}BatchAnchorNetSec` as keyof FormValues;
+    const generationField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
+    form.setValue(madeField, Math.max(0, Math.floor(made)) as never, { shouldDirty: true });
+    form.setValue(anchorField, Math.max(0, elapsedBatchSec) as never, { shouldDirty: true });
+    form.setValue(
+      generationField,
+      (Math.max(0, Number(form.getValues(generationField)) || 0) + 1) as never,
+      { shouldDirty: true },
+    );
+    // The shared one-minute correction fence means a due automatic tick cannot
+    // overwrite this new baseline or replay the elapsed interval on resume.
+    autoSuppressUntilRef.current = Date.now() + 60_000;
+    const now = Date.now();
+    markRunValuesUpdated(currentRunId, now);
+    lastLocalEditRef.current = now;
+  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
 
@@ -23508,9 +23509,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       <BatchMadeRow
                         label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
                         totalBatches={calc.app1Batches}
-                        made={app1Made}
-                        onIncrement={() => setApp1Made(n => n + 1)}
-                        onDecrement={() => setApp1Made(n => Math.max(0, n - 1))}
+                        made={Math.max(0, Number(v.app1BatchesMade) || 0)}
+                        onIncrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) + 1)}
+                        onDecrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) - 1)}
                         isLive={isLive}
                         testId="output-app1-batches"
                         sub={v.app1CheeseRecipeName?.trim() || undefined}
@@ -23529,9 +23530,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       <BatchMadeRow
                         label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
                         totalBatches={calc.app2Batches}
-                        made={app2Made}
-                        onIncrement={() => setApp2Made(n => n + 1)}
-                        onDecrement={() => setApp2Made(n => Math.max(0, n - 1))}
+                        made={Math.max(0, Number(v.app2BatchesMade) || 0)}
+                        onIncrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) + 1)}
+                        onDecrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) - 1)}
                         isLive={isLive}
                         testId="output-app2-batches"
                         sub={v.app2CheeseRecipeName?.trim() || undefined}
@@ -23591,9 +23592,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                         <BatchMadeRow
                           label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
                           totalBatches={calc.app3Batches}
-                          made={app3Made}
-                          onIncrement={() => setApp3Made(n => n + 1)}
-                          onDecrement={() => setApp3Made(n => Math.max(0, n - 1))}
+                          made={Math.max(0, Number(v.app3BatchesMade) || 0)}
+                          onIncrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) + 1)}
+                          onDecrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) - 1)}
                           isLive={isLive}
                           testId="output-app3-batches"
                           sub={v.app3CheeseRecipeName?.trim() || undefined}
@@ -23614,9 +23615,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                         <BatchMadeRow
                           label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
                           totalBatches={calc.app4Batches}
-                          made={app4Made}
-                          onIncrement={() => setApp4Made(n => n + 1)}
-                          onDecrement={() => setApp4Made(n => Math.max(0, n - 1))}
+                          made={Math.max(0, Number(v.app4BatchesMade) || 0)}
+                          onIncrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) + 1)}
+                          onDecrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) - 1)}
                           isLive={isLive}
                           testId="output-app4-batches"
                           sub={v.app4CheeseRecipeName?.trim() || undefined}
