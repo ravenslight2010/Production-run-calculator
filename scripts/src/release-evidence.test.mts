@@ -14,6 +14,9 @@ import {
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
+  PRODUCTION_AUDIT_TIMEOUT_MS,
+  PRODUCTION_AUDIT_WARNING_MS,
+  PRODUCTION_DEPENDENCY_AUDIT_STEP,
   defaultReleaseEvidenceDir,
   formatReleaseReport,
   parseBrowserDurationRegressions,
@@ -25,6 +28,21 @@ import {
   validateReleaseReport,
   verifyReleaseEvidence,
 } from "./release-check.mts";
+
+assert.equal(
+  PRODUCTION_DEPENDENCY_AUDIT_STEP.timeoutMs,
+  PRODUCTION_AUDIT_TIMEOUT_MS,
+  "the production dependency audit must have a hard timeout",
+);
+assert.equal(
+  PRODUCTION_DEPENDENCY_AUDIT_STEP.warningMs,
+  PRODUCTION_AUDIT_WARNING_MS,
+  "the production dependency audit must warn before its hard timeout",
+);
+assert.ok(
+  PRODUCTION_AUDIT_WARNING_MS < PRODUCTION_AUDIT_TIMEOUT_MS,
+  "the production dependency audit warning must precede its timeout",
+);
 
 async function fixture(
   files: readonly string[] = ["release-check-report.md"],

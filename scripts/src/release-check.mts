@@ -378,12 +378,19 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   },
 ] as const;
 
+export const PRODUCTION_AUDIT_TIMEOUT_MS = 5 * 60_000;
+export const PRODUCTION_AUDIT_WARNING_MS = 4 * 60_000;
+
+export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
+  label: "production dependency audit",
+  args: ["run", "audit:prod"],
+  timeoutMs: PRODUCTION_AUDIT_TIMEOUT_MS,
+  warningMs: PRODUCTION_AUDIT_WARNING_MS,
+  stage: "prerequisites",
+};
+
 const steps: ReleaseStep[] = [
-  {
-    label: "production dependency audit",
-    args: ["run", "audit:prod"],
-    stage: "prerequisites",
-  },
+  PRODUCTION_DEPENDENCY_AUDIT_STEP,
   {
     label: "shell lint inventory",
     args: ["run", "check:shell-inventory"],
