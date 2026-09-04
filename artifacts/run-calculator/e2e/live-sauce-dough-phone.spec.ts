@@ -6,50 +6,36 @@
  * Dough target-ball-weight readout are all asserted through the browser.
  */
 
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { Client } from "pg";
-import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import { expect, test, type Page } from "@playwright/test";
 import {
-  dismissOnboardingIfPresent,
-  signUpAndHandleOnboarding,
-} from "./onboarding";
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
+  type E2ECapability,
+} from "./isolation";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
 const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
-const testUsernames = new Set<string>();
-const testProfileKeys = new Set<string>();
+let authorizedFixtures: AuthorizedBrowserFixtures;
+
+test.beforeAll(async ({ playwright }) => {
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    API_BASE,
+    SIGNUP_CODE,
+  );
+});
 
 test.beforeEach(async () => {
-  const url = requireIsolatedTestDatabase("live Sauce/Dough phone beforeEach");
-  const db = new Client({ connectionString: url });
-  try {
-    await db.connect();
-    await db.query("DELETE FROM daily_sync WHERE date = $1", [
-      new Date().toISOString().slice(0, 10),
-    ]);
-  } finally {
-    await db.end().catch(() => {});
-  }
+  await authorizedFixtures.removeTodaySync([
+    new Date().toISOString().slice(0, 10),
+  ]);
 });
 
 test.afterAll(async () => {
-  if (!process.env.DATABASE_URL) return;
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    if (testProfileKeys.size > 0) {
-      await db.query("DELETE FROM brand_profiles WHERE key = ANY($1::text[])", [
-        [...testProfileKeys],
-      ]);
-    }
-    await db.query("DELETE FROM daily_sync WHERE date = $1", [
-      new Date().toISOString().slice(0, 10),
-    ]);
-    await cleanupTestUsers(db, testUsernames);
-  } finally {
-    await db.end().catch(() => {});
-  }
+  await authorizedFixtures?.cleanup({
+    syncDates: [new Date().toISOString().slice(0, 10)],
+  });
 });
 
 function uid(): string {
@@ -57,43 +43,18 @@ function uid(): string {
 }
 
 async function createAuthorizedServerFixture(
-  request: APIRequestContext,
-  db: Client,
   username: string,
 ): Promise<{ token: string; brand: string; flavor: string; runId: string }> {
-  const signUp = await request.post(`${API_BASE}/api/auth/sign-up`, {
-    data: { username, password: PASSWORD, accessCode: SIGNUP_CODE },
+  const auth = await authorizedFixtures.createAccount({
+    username,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
-  expect(signUp.ok(), `fixture sign-up failed: ${signUp.status()}`).toBe(true);
-  const auth = await signUp.json() as { token: string; user: { userId: string } };
-  await db.query(
-    `INSERT INTO user_roles (user_id, role)
-     VALUES ($1, 'manager')
-     ON CONFLICT (user_id) DO UPDATE SET role = 'manager', updated_at = NOW()`,
-    [auth.user.userId],
-  );
-  await db.query(
-    "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-    [JSON.stringify([
-      "manage-staff",
-      "manage-inventory",
-      "edit-production-rules",
-      "approve-password-resets",
-      "review-incidents",
-      "use-ai-tools",
-      "manage-factory-settings",
-      "manage-profiles",
-    ])],
-  );
-  await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [
-    auth.user.userId,
-  ]);
 
   const brand = `Frontline ${uid()}`;
   const flavor = "Phone Fixture";
   const key = `${brand.toLowerCase()}__${flavor.toLowerCase()}`;
   const runId = `frontline-run-${uid()}`;
-  testProfileKeys.add(key);
   const now = Date.now();
   const values = {
     casesNeeded: 500,
@@ -121,78 +82,62 @@ async function createAuthorizedServerFixture(
     app1BatchAnchorNetSec: 0,
     app1BatchCorrectionGeneration: 0,
   };
-  const cookie = { Cookie: `rc_auth=${auth.token}` };
-  const profile = await request.post(`${API_BASE}/api/brand-profiles`, {
-    headers: cookie,
-    data: {
-      items: [{
-        key,
-        brand,
-        flavor,
-        values,
-        crustValues: {},
-        updatedAt: now,
-      }],
-    },
+  await authorizedFixtures.seedBrandProfile(auth, {
+    key,
+    brand,
+    flavor,
+    values,
+    updatedAt: now,
   });
-  expect(profile.ok(), `fixture profile failed: ${profile.status()}`).toBe(true);
-  const epochResponse = await request.get(`${API_BASE}/api/sync/reset-epoch`, {
-    headers: cookie,
-  });
-  const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
   const date = new Date().toISOString().slice(0, 10);
-  const sync = await request.put(
-    `${API_BASE}/api/sync/today?today=${date}&epoch=${epoch}`,
-    {
-      headers: cookie,
-      data: {
-        senderId: `frontline-fixture-${username}`,
-        payload: {
-          dayState: {
-            date,
-            runs: [{
-              id: runId,
-              brand,
-              flavor,
-              startedAt: now,
-              pausedAt: undefined,
-              endedAt: undefined,
-              metaUpdatedAt: now,
-              seeded: false,
-            }],
-            currentIndex: 0,
-            resetAt: 0,
-            substitutions: [],
-            substitutionLog: [],
-            stagedItems: {},
-          },
-          runValues: { [runId]: values },
-          runValuesUpdatedAt: { [runId]: now },
-          packagingProgress: {},
-        },
+  await authorizedFixtures.seedTodaySync({
+    token: auth.token,
+    senderId: `frontline-fixture-${username}`,
+    date,
+    payload: {
+      dayState: {
+        date,
+        runs: [{
+          id: runId,
+          brand,
+          flavor,
+          startedAt: now,
+          pausedAt: undefined,
+          endedAt: undefined,
+          metaUpdatedAt: now,
+          seeded: false,
+        }],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
       },
+      runValues: { [runId]: values },
+      runValuesUpdatedAt: { [runId]: now },
+      packagingProgress: {},
     },
-  );
-  expect(sync.ok(), `fixture sync failed: ${sync.status()}`).toBe(true);
+  });
   return { token: auth.token, brand, flavor, runId };
 }
 
-async function signUpAndDismissOnboarding(page: Page, username: string): Promise<void> {
-  await signUpAndHandleOnboarding(page, username, PASSWORD, {
-    signupCode: SIGNUP_CODE,
-    onboarding: {
-      dialog: (currentPage) => currentPage.getByRole("dialog"),
-      button: (dialog) =>
-        dialog.getByRole("button", { name: /get started|close/i }).first(),
-      actionLabel: "onboarding completion action",
-      afterComplete: async (currentPage) => {
-        await currentPage
-          .locator('[data-state="open"][aria-hidden="true"]')
-          .waitFor({ state: "detached", timeout: 5_000 })
-          .catch(() => {});
-      },
-    },
+async function openAsAuthorizedFixture(
+  page: Page,
+  username: string,
+  capabilities: readonly E2ECapability[] = [],
+): Promise<void> {
+  const account = await authorizedFixtures.createAccount({
+    username,
+    password: PASSWORD,
+    capabilities,
   });
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: account.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 }
 
 async function seedRunningValues(
@@ -245,18 +190,6 @@ async function seedRunningValues(
   }, valueOverrides);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  await dismissOnboardingIfPresent(page, {
-    dialog: (currentPage) => currentPage.getByRole("dialog"),
-    button: (dialog) =>
-      dialog.getByRole("button", { name: /get started|close/i }).first(),
-    actionLabel: "onboarding completion action",
-    afterComplete: async (currentPage) => {
-      await currentPage
-        .locator('[data-state="open"][aria-hidden="true"]')
-        .waitFor({ state: "detached", timeout: 5_000 })
-        .catch(() => {});
-    },
-  });
   for (const field of [
     "casesNeeded",
     "pizzasPerCase",
@@ -283,8 +216,7 @@ async function seedRunningValues(
 test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const username = uid();
-  testUsernames.add(username);
-  await signUpAndDismissOnboarding(page, username);
+  await openAsAuthorizedFixture(page, username);
   await seedRunningValues(page);
 
   await page.getByTestId("tab-sauce").click();
@@ -311,8 +243,7 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
 test("Dough and Sauce phone quick checks share line-speed feedback across tab switches", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const username = uid();
-  testUsernames.add(username);
-  await signUpAndDismissOnboarding(page, username);
+  await openAsAuthorizedFixture(page, username);
   await seedRunningValues(page, {
     casesNeeded: 100,
     casesPerSkid: 10,
@@ -350,15 +281,7 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
   test.setTimeout(105_000);
   await page.setViewportSize({ width: 390, height: 844 });
   const username = uid();
-  testUsernames.add(username);
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
-  await db.connect();
-  let fixture: Awaited<ReturnType<typeof createAuthorizedServerFixture>>;
-  try {
-    fixture = await createAuthorizedServerFixture(request, db, username);
-  } finally {
-    await db.end().catch(() => {});
-  }
+  const fixture = await createAuthorizedServerFixture(username);
   await page.context().addCookies([{
     name: "rc_auth",
     value: fixture.token,

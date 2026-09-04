@@ -51,10 +51,12 @@
  */
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
-import { Client as PgClient } from "pg";
 import { computeCasesOnLine } from "@workspace/inventory-math";
-import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
-import { signUpAndHandleOnboarding } from "./onboarding";
+import {
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
+  type E2ECapability,
+} from "./isolation";
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -63,61 +65,22 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const testUsernames = new Set<string>();
+const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+let authorizedFixtures: AuthorizedBrowserFixtures;
 
-test.afterAll(async () => {
-  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
-  const db = new PgClient({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    await cleanupTestUsers(db, testUsernames);
-  } finally {
-    await db.end().catch(() => {});
-  }
+test.beforeAll(async ({ playwright }) => {
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    API_BASE,
+    SIGNUP_CODE,
+  );
 });
 
-// ── auth helpers ──────────────────────────────────────────────────────────────
-
-/**
- * Sign up via the browser /sign-up page, then dismiss the "Get Started"
- * onboarding dialog that auto-opens on first login.
- *
- * Uses waitFor (not isVisible) so the 5-second patience window catches dialogs
- * that appear slightly after the app's startup effects complete.
- */
-async function signUpAndDismissDialog(
-  page: Page,
-  username: string,
-  password: string,
-): Promise<void> {
-  await signUpAndHandleOnboarding(page, username, password, {
-    signupCode: SIGNUP_CODE,
-    onboarding: {
-      dialog: (currentPage) => currentPage.getByRole("dialog"),
-      visibilityTimeout: 8_000,
-      afterComplete: async (currentPage) => {
-        await currentPage
-          .locator('[data-state="open"][aria-hidden="true"]')
-          .waitFor({ state: "detached", timeout: 5_000 })
-          .catch(() => {});
-        await currentPage.waitForTimeout(300);
-      },
-    },
+test.afterAll(async () => {
+  await authorizedFixtures?.cleanup({
+    syncDates: [new Date().toISOString().slice(0, 10)],
   });
-}
-
-async function promoteCurrentPageUserToManager(page: Page): Promise<void> {
-  const identity = await page.evaluate(async () => {
-    const response = await fetch("/api/me");
-    return response.ok ? await response.json() as { userId?: string } : null;
-  });
-  const userId = identity?.userId;
-  expect(userId, "signed-in test user id").toBeTruthy();
-  const client = new PgClient({ connectionString: process.env.DATABASE_URL });
-  await client.connect();
-  await client.query("UPDATE user_roles SET role = 'manager' WHERE user_id = $1", [userId]);
-  await client.end();
-}
+});
 
 // ── form helpers ──────────────────────────────────────────────────────────────
 
@@ -502,7 +465,7 @@ async function seedDoughCounters(
 
 /**
  * Full setup for one test:
- *   1. Sign up via browser and dismiss the onboarding dialog.
+ *   1. Create an isolated authorized account and open the app with its cookie.
  *   2. Navigate to the Run tab.
  *   3. Fill form values (cycleSpeed=30, crustsPerCycle=2, pizzasPerCase=6,
  *      casesPerSkid=10, freezerTime=5, casesNeeded=200).
@@ -517,10 +480,24 @@ async function seedDoughCounters(
  *   6. Wait for tile-cases-completed (confirms casesNeeded > 0 and run live).
  * Returns safeBaseMs, which is the exact startedAt the app stored.
  */
-async function setupAndStartRun(page: Page, casesPerSkid = "10"): Promise<number> {
+async function setupAndStartRun(
+  page: Page,
+  casesPerSkid = "10",
+  capabilities: readonly E2ECapability[] = [],
+): Promise<number> {
   const username = uid();
-  testUsernames.add(username);
-  await signUpAndDismissDialog(page, username, "TestPass123!");
+  const account = await authorizedFixtures.createAccount({
+    username,
+    password: "TestPass123!",
+    capabilities,
+  });
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: account.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
   await page.locator('[data-testid="tab-run"]').click();
   await fillFormValues(page, casesPerSkid);
@@ -589,15 +566,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
    * local/disposable database boundary as global-setup.ts.
    */
   test.beforeEach(async () => {
-    const url = requireIsolatedTestDatabase("screen-off-wake beforeEach");
-    const client = new PgClient({ connectionString: url });
-    try {
-      await client.connect();
-      const today = new Date().toISOString().slice(0, 10);
-      await client.query("DELETE FROM daily_sync WHERE date = $1", [today]);
-    } finally {
-      await client.end().catch(() => {});
-    }
+    await authorizedFixtures.removeTodaySync([
+      new Date().toISOString().slice(0, 10),
+    ]);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1102,7 +1073,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         expect(result).toEqual({ ok: true, status: 200 });
       };
 
-      const safeBaseMs = await setupAndStartRun(page);
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
       // setupAndStartRun deliberately exercises the same focus path used by a
       // returning PWA. Let that initial reconciliation settle before this
       // scenario starts the second device, so Device A's Stop is an ordinary
@@ -1122,7 +1097,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toContainText("Production state recovered.", { timeout: 20_000 });
       // This scenario exercises manager-only profile/factory APIs. Other
       // screen-wake cases intentionally run as floor staff.
-      await promoteCurrentPageUserToManager(page);
       // Browser time is deliberately fixed at 21:00 for this clock suite.
       // Keep profile LWW stamps ahead of real Node time so the peer's mocked
       // clock cannot make an older remote profile look stale.

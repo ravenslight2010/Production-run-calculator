@@ -32,6 +32,11 @@
 
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
+import {
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
+  requireIsolatedTestDatabase,
+} from "./isolation";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,53 +46,6 @@ function uid(): string {
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
-
-/**
- * API sign-up (no browser) → promote to manager in DB.
- * Returns { token, userId } so the caller can use the token for
- * subsequent API calls BEFORE opening the browser, ensuring the
- * brand profile exists on the server before the app's startup sync runs.
- */
-async function apiSignUp(
-  request: APIRequestContext,
-  db: Client,
-  username: string,
-  password: string,
-): Promise<{ token: string; userId: string }> {
-  const resp = await request.post(`${API_BASE}/api/auth/sign-up`, {
-    headers: { "Content-Type": "application/json" },
-    data: { username, password, accessCode: SIGNUP_CODE },
-  });
-  expect(resp.ok(), `sign-up failed: ${resp.status()}`).toBe(true);
-  const body = await resp.json() as { token: string; user: { userId: string } };
-  const { token, user: { userId } } = body;
-
-  // Promote to manager so Accept (requires use-ai-tools capability) works
-  await db.query(
-    "UPDATE user_roles SET role = 'manager' WHERE user_id = $1",
-    [userId],
-  );
-  // Other browser fixtures exercise custom manager capability sets. Restore
-  // the complete built-in manager definition so this API-first fixture remains
-  // independent of serial release ordering.
-  await db.query(
-    "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-    [JSON.stringify([
-      "manage-staff",
-      "manage-inventory",
-      "edit-production-rules",
-      "approve-password-resets",
-      "review-incidents",
-      "use-ai-tools",
-      "manage-factory-settings",
-      "manage-profiles",
-    ])],
-  );
-  // Skip the "Get Started" onboarding overlay that auto-opens on first login
-  await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [userId]);
-
-  return { token, userId };
-}
 
 /**
  * Browser sign-in form → wait for the main app to be ready.
@@ -146,37 +104,27 @@ async function signIn(
  * "No saved setup found for this product".
  */
 async function createProfile(
-  request: APIRequestContext,
+  fixtures: AuthorizedBrowserFixtures,
   token: string,
   brand: string,
   flavor: string,
   cycleSpeed: number,
 ): Promise<void> {
-  const key = `${brand.toLowerCase()}__${flavor.toLowerCase()}`;
-  const resp = await request.post(`${API_BASE}/api/brand-profiles`, {
-    headers: { "Content-Type": "application/json", Cookie: `rc_auth=${token}` },
-    data: {
-      items: [
-        {
-          key,
-          brand,
-          flavor,
-          values: {
-            dieType: "8-Cut", // qualifies the profile — see profileObjHasRealData()
-            cycleSpeed,
-            crustsPerCycle: 4,
-            speedAdjustment: 1,
-            freezerTime: 8,
-            casesNeeded: 100,
-            pizzasPerCase: 12,
-          },
-          crustValues: {},
-          updatedAt: Date.now() - 2000,
-        },
-      ],
+  await fixtures.seedBrandProfile({ token }, {
+    brand,
+    flavor,
+    values: {
+      dieType: "8-Cut", // qualifies the profile — see profileObjHasRealData()
+      cycleSpeed,
+      crustsPerCycle: 4,
+      speedAdjustment: 1,
+      freezerTime: 8,
+      casesNeeded: 100,
+      pizzasPerCase: 12,
     },
+    crustValues: {},
+    updatedAt: Date.now() - 2000,
   });
-  expect(resp.ok(), `POST /api/brand-profiles failed: ${resp.status()}`).toBe(true);
 }
 
 /** Inject a pending speed-target suggestion via the observe endpoint. */
@@ -225,14 +173,28 @@ async function goToSetup(page: Page): Promise<void> {
 // ── DB client lifecycle ───────────────────────────────────────────────────────
 
 let db: Client;
+let authorizedFixtures: AuthorizedBrowserFixtures;
 
-test.beforeAll(async () => {
-  db = new Client({ connectionString: process.env.DATABASE_URL });
+test.beforeAll(async ({ playwright }) => {
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    API_BASE,
+    SIGNUP_CODE,
+  );
+  db = new Client({
+    connectionString: requireIsolatedTestDatabase("run insights fixture setup"),
+  });
   await db.connect();
 });
 
 test.afterAll(async () => {
-  await db.end();
+  try {
+    await authorizedFixtures?.cleanup({
+      syncDates: [new Date().toISOString().slice(0, 10)],
+    });
+  } finally {
+    await db?.end().catch(() => {});
+  }
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -262,11 +224,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // can be terminated before afterEach cleanup, leaving a pending fixture
     // that would be rendered alongside this test's deliberately unique one.
     await db.query("DELETE FROM run_suggestions WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
-    await db.query("DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
     await db.query(
-      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
-      [new Date().toISOString().slice(0, 10)],
+      "DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand%_e2e_ri_%' AND scope = 'live'",
     );
+    await authorizedFixtures.removeBrandProfiles();
+    await authorizedFixtures.removeTodaySync([
+      new Date().toISOString().slice(0, 10),
+    ]);
   });
 
   test.afterEach(async ({ page }) => {
@@ -275,12 +239,10 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // it recreate a suggestion after cleanup.
     await page.close();
     await db.query("DELETE FROM run_suggestions WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
-    await db.query("DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
-    await db.query(
-      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
-      [new Date().toISOString().slice(0, 10)],
-    );
-    if (username) await db.query("DELETE FROM users WHERE username = $1", [username]);
+    await authorizedFixtures.removeBrandProfiles();
+    await authorizedFixtures.removeTodaySync([
+      new Date().toISOString().slice(0, 10),
+    ]);
   });
 
   test("Accept changes cycleSpeed in the saved profile and shows confirmation", async ({
@@ -292,9 +254,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // Step 1: API sign-up + manager promotion BEFORE opening the browser,
     // so the profile exists when the app's startup sync (seedProfilesFromServer)
     // runs and populates localStorage.
-    ({ token } = await apiSignUp(request, db, username, "TestPass123!"));
+    ({ token } = await authorizedFixtures.createAccount({
+      username,
+      password: "TestPass123!",
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    }));
     await createProfile(
-      request,
+      authorizedFixtures,
       token,
       ACCEPT_PRODUCT.brand,
       ACCEPT_PRODUCT.flavor,
@@ -370,9 +336,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     request,
   }) => {
     username = uid();
-    ({ token } = await apiSignUp(request, db, username, "TestPass123!"));
+    ({ token } = await authorizedFixtures.createAccount({
+      username,
+      password: "TestPass123!",
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    }));
     await createProfile(
-      request,
+      authorizedFixtures,
       token,
       DISMISS_PRODUCT.brand,
       DISMISS_PRODUCT.flavor,
@@ -439,9 +409,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     request,
   }) => {
     username = uid();
-    ({ token } = await apiSignUp(request, db, username, "TestPass123!"));
+    ({ token } = await authorizedFixtures.createAccount({
+      username,
+      password: "TestPass123!",
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    }));
     await createProfile(
-      request,
+      authorizedFixtures,
       token,
       FOLLOW_UP_PRODUCT.brand,
       FOLLOW_UP_PRODUCT.flavor,
