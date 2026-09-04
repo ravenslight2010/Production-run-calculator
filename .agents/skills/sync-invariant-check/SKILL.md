@@ -15,7 +15,7 @@ Read this skill before shipping any change to:
 - `artifacts/api-server/src/routes/sync.ts`
 - `artifacts/api-server/src/lib/protectRunValues.ts`
 - `artifacts/run-calculator/src/storage.ts` (sync-receive helpers, stamp maps)
-- `artifacts/run-calculator/src/home.tsx` (SSE apply callback, push logic, `buildSyncPayload`, `applySyncCallbackRef`)
+- `artifacts/run-calculator/src/pages/home.tsx` (SSE apply callback, push logic, `buildSyncPayload`, `applySyncCallbackRef`)
 - the current web sync handlers and shared storage helpers listed above; any
   separately maintained native sync client must be inspected from its current
   checkout rather than an archived repository path
