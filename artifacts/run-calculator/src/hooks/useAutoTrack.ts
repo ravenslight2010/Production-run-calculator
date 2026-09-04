@@ -477,6 +477,10 @@ export function useAutoTrack({
     app3: useRef(0),
     app4: useRef(0),
   };
+  const coordinationIdentity =
+    `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
+  const coordinationIdentityRef = useRef(coordinationIdentity);
+  coordinationIdentityRef.current = coordinationIdentity;
   const dueRefForChannel = (channel: AutoTrackChannel) => {
     if (channel === "case") return caseNextDueMsRef;
     if (channel === "tray-consume") return trayNextDueMsRef;
@@ -712,7 +716,8 @@ export function useAutoTrack({
     if (coordinationPendingRef.current.has(channel)) return;
 
     const sequence = (coordinationSequenceRef.current[channel] ?? 0) + 1;
-    const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
+    const generation = coordinationIdentity;
+    const claimIdentity = coordinationIdentity;
     const eventId = coordinationRetryEventRef.current[channel]
       ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
     const correctionMutation = mutations.find((mutation) =>
@@ -737,6 +742,10 @@ export function useAutoTrack({
       correctionGeneration,
       mutations,
     }).then((result) => {
+      // The hook shares one form across selected runs. A response from the
+      // previously selected run must not write into the new run or advance its
+      // coordination bookkeeping.
+      if (coordinationIdentityRef.current !== claimIdentity) return;
       // A manual correction can happen while this request is in flight. Its
       // incremented generation is the local authority until that snapshot
       // reaches the server, so never let the older acknowledgement restore the
@@ -765,6 +774,7 @@ export function useAutoTrack({
       coordinationRetryEventRef.current[channel] = undefined;
       applyValues(result.values);
     }).catch(() => {
+      if (coordinationIdentityRef.current !== claimIdentity) return;
       const dueRef = dueRefForChannel(channel);
       dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
       // A failed coordinated case claim did not actually apply the mutation.
@@ -777,11 +787,15 @@ export function useAutoTrack({
       }
       setCoordinationDelayed(true);
     }).finally(() => {
+      // A new run may already have an in-flight claim on this same channel.
+      // Only the owner that inserted the pending marker may remove it.
+      if (coordinationIdentityRef.current !== claimIdentity) return;
       coordinationPendingRef.current.delete(channel);
       setCoordinationPendingCount(coordinationPendingRef.current.size);
     });
   }, [
     claimAutoTrackEvent,
+    coordinationIdentity,
     endedAt,
     form,
     onPackagingProgressAutoAdvance,

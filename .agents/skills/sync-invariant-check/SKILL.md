@@ -22,6 +22,8 @@ Read this skill before shipping any change to:
 - Any file that adds a field to `SyncPayload`, `RunMeta`, or `FormValues`/`DEFAULT_VALUES`
 - Foreground/focus/visibility/online wake handling or any code that releases
   auto-track after a sleeping-device reconciliation
+- Automatic case, Sauce, or Frontline applicator claim coordination, canonical
+  claim responses, retry identity, or per-run coordination registers
 
 ## Boundary with state-accuracy checks
 
@@ -49,6 +51,7 @@ Out of scope: inventory SSE stream (separate invariants).
 | Reset / rollover / `POST /sync/reset` | §5 (epoch guard fail-closed), §6 (reset-path blank guard) |
 | Any new sync write path (web or mobile) | §3 (`?today=` threading), §4 (body budget), §5 (epoch param + stale handling) |
 | Foreground wake / focus / visibility / online recovery | §7 (adopt-before-publish barrier), plus State Accuracy §5 |
+| Automatic Sauce/applicator claims or acknowledgements | §8 (per-run claim ownership), plus State Accuracy §5 |
 
 ---
 
@@ -264,16 +267,46 @@ here.
 
 ---
 
+## §8 — Per-run automatic claim ownership
+
+Automatic tracking claims are scoped by run ID, channel, lifecycle generation,
+sequence, event ID, and the claimed run's value stamp.
+
+1. The server reads mutations, correction generations, recipes, and inventory
+   instructions only from `runValues[claim.runId]`. It updates only that run's
+   value stamp and `autoTrackCoordination.runs[claim.runId][channel]`.
+2. Validate lifecycle against the canonical run metadata. Pending, paused, and
+   ended runs cannot emit Sauce/applicator claims; the case channel's bounded
+   Packaging drain policy does not extend to them.
+3. A response is canonical. The client applies returned values and the returned
+   sequence/next-due state, never the optimistic claim payload. A conflict is a
+   retry from newly adopted canonical values; an identical accepted retry is
+   duplicate/idempotent.
+4. Capture run identity when dispatching. If selection or lifecycle generation
+   changes before resolution, the old `then`, `catch`, and `finally` paths must
+   not write the shared form, advance refs, schedule a retry, or clear a new
+   run's same-channel pending marker.
+5. Two-run tests must keep the non-claiming run's values, value stamp, and
+   coordination register byte-for-byte unchanged. Include a stale claim after a
+   lifecycle/selection generation change for both Sauce and an applicator.
+
+Use `state-accuracy-check` for cadence, caps, pause/rebase math, and pending
+counter policy. This section owns transport identity and canonical convergence.
+
+---
+
 ## Focused validation
 
 Run the exact handoff regression set after sync or wake changes:
 
 ```bash
 pnpm --filter @workspace/api-server exec vitest run \
-  src/routes/sync.integration.test.ts src/routes/syncReset.integration.test.ts
+  src/lib/autoTrackCoordination.test.ts src/routes/sync.integration.test.ts \
+  src/routes/syncReset.integration.test.ts
 pnpm --filter @workspace/run-calculator exec vitest run \
   src/foregroundSyncWakeGuard.test.ts src/syncReceiveCasesOnSkid.test.ts \
-  src/syncWriteResponse.test.ts src/blankRunValueSync.test.ts
+  src/syncWriteResponse.test.ts src/blankRunValueSync.test.ts \
+  src/hooks/__tests__/useAutoTrack.applicators.test.tsx
 ```
 
 If a test needs a broader change, run the corresponding package's full
@@ -294,4 +327,5 @@ Sync invariant check:
 [ ] §5 Epoch/reset: isStaleResetPush fails closed when serverEpoch>0; client sends ?epoch= and parses stale body; resetBoundaryAt clamped server-side with 5min skew; integration tests pass
 [ ] §6 Empty-over-populated: blank guard in additive path AND reset path; stamp advanced to Date.now() when guard fires; CURRENT_BLANK_RUN_VALUE updated if DEFAULT_VALUES changed
 [ ] §7 Wake handoff: pull/adopt canonical client-date state before publishing or releasing lifecycle/auto-track work; failed pulls stay unreconciled; canonical retry is idempotent; reset-stale data is not applied; post-wake counters rebase without hidden-time delta
+[ ] §8 Auto-track claims: run-scoped values/stamps/registers; canonical response adoption; idempotent retry; stale run acknowledgements cannot contaminate the selected run
 ```

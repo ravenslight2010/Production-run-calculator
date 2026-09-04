@@ -91,6 +91,117 @@ describe("useAutoTrack applicator batches", () => {
     expect(stored.app1BatchCorrectionGeneration).toBe(1);
   });
 
+  it("does not apply run A's in-flight acknowledgement after switching to run B", async () => {
+    const { form: fakeForm, values: stored } = form();
+    const resolvers = new Map<string, (result: any) => void>();
+    const claim = vi.fn((event: any) => new Promise((resolve) => {
+      resolvers.set(event.runId, resolve);
+    }));
+    const props = {
+      runId: "run-a",
+      runGeneration: "1",
+      runStatus: "running" as const,
+      nowTime: new Date(),
+      elapsedBatchSec: 61,
+      calc,
+      v: values(),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    };
+    const { rerender } = renderHook(
+      ({ input }) => useAutoTrack(input),
+      { initialProps: { input: props } },
+    );
+    await waitFor(() => expect(resolvers.has("run-a")).toBe(true));
+    rerender({
+      input: {
+        ...props,
+        runId: "run-b",
+        runGeneration: "2",
+        elapsedBatchSec: 0,
+        v: values({ app1BatchesMade: 7, app1BatchAnchorNetSec: 0 }),
+      },
+    });
+    stored.app1BatchesMade = 7;
+    const event = claim.mock.calls.map(([candidate]) => candidate)
+      .find((candidate) => candidate.runId === "run-a");
+    resolvers.get("run-a")!({
+      outcome: "accepted",
+      state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+      values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(stored.app1BatchesMade).toBe(7);
+  });
+
+  it("does not apply run A's in-flight Sauce acknowledgement after switching to run B", async () => {
+    const { form: fakeForm, values: stored } = form();
+    const resolvers = new Map<string, (result: any) => void>();
+    const claim = vi.fn((event: any) => new Promise((resolve) => {
+      resolvers.set(event.runId, resolve);
+    }));
+    const props = {
+      runId: "sauce-run-a",
+      runGeneration: "1",
+      runStatus: "running" as const,
+      nowTime: new Date(),
+      elapsedBatchSec: 61,
+      calc: { ...calc, sauceDepletionSec: 60 },
+      v: values(),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    };
+    const { rerender } = renderHook(
+      ({ input }) => useAutoTrack(input),
+      { initialProps: { input: props } },
+    );
+    await waitFor(() => expect(resolvers.has("sauce-run-a")).toBe(true));
+    rerender({
+      input: {
+        ...props,
+        runId: "sauce-run-b",
+        runGeneration: "2",
+        elapsedBatchSec: 0,
+        v: values({ sauceBarrelsMade: 5 }),
+      },
+    });
+    stored.sauceBarrelsMade = 5;
+    const event = claim.mock.calls.map(([candidate]) => candidate)
+      .find((candidate) => candidate.runId === "sauce-run-a" && candidate.channel === "sauce-barrel");
+    resolvers.get("sauce-run-a")!({
+      outcome: "accepted",
+      state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+      values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(stored.sauceBarrelsMade).toBe(5);
+  });
+
+  it.each(["pending", "paused", "ended"] as const)(
+    "does not emit applicator claims while the run is %s",
+    async (runStatus) => {
+      const { form: fakeForm } = form();
+      const claim = vi.fn();
+      renderHook(() => useAutoTrack({
+        runId: `${runStatus}-run`,
+        runStatus,
+        endedAt: runStatus === "ended" ? Date.now() : null,
+        nowTime: new Date(),
+        elapsedBatchSec: 61,
+        calc,
+        v: values({ freezerTime: runStatus === "ended" ? 30 : 0 }),
+        form: fakeForm,
+        claimAutoTrackEvent: claim,
+      }));
+      await Promise.resolve();
+      expect(claim.mock.calls.some(([event]) => event.channel.startsWith("app"))).toBe(false);
+    },
+  );
+
   it("does not claim while a manual correction suppression window is open", async () => {
     const { form: fakeForm } = form();
     const claim = vi.fn();

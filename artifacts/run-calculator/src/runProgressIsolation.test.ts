@@ -10,6 +10,12 @@ const CONTAMINATED_VALUES: FormValues = {
   casesOnCurrentSkid: 41,
   traysOnLine: 18,
   batchesReady: 3,
+  sauceBarrelsMade: 2,
+  sauceBarrelAnchorNetSec: 240,
+  sauceBarrelCorrectionGeneration: 4,
+  app1BatchesMade: 3,
+  app1BatchAnchorNetSec: 180,
+  app1BatchCorrectionGeneration: 2,
 };
 
 describe("isolatePendingRunPackagingProgress", () => {
@@ -23,6 +29,12 @@ describe("isolatePendingRunPackagingProgress", () => {
     expect(result.casesNeeded).toBe(144);
     expect(result.traysOnLine).toBe(18);
     expect(result.batchesReady).toBe(3);
+    expect(result.sauceBarrelsMade).toBe(0);
+    expect(result.sauceBarrelAnchorNetSec).toBe(0);
+    expect(result.sauceBarrelCorrectionGeneration).toBe(0);
+    expect(result.app1BatchesMade).toBe(0);
+    expect(result.app1BatchAnchorNetSec).toBe(0);
+    expect(result.app1BatchCorrectionGeneration).toBe(0);
   });
 
   it("preserves progress for the run that actually started", () => {
@@ -39,7 +51,17 @@ describe("isolatePendingRunPackagingProgress", () => {
 
   it("keeps an already-clean pending value object stable", () => {
     const pendingRun: RunMeta = { id: "pending", brand: "", flavor: "" };
-    const clean = { ...CONTAMINATED_VALUES, skidsCompleted: 0, casesOnCurrentSkid: 0 };
+    const clean = {
+      ...CONTAMINATED_VALUES,
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      app1BatchesMade: 0,
+      app1BatchAnchorNetSec: 0,
+      app1BatchCorrectionGeneration: 0,
+    };
 
     expect(isolatePendingRunPackagingProgress(pendingRun, clean)).toBe(clean);
   });

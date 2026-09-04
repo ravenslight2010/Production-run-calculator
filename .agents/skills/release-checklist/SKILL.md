@@ -225,6 +225,24 @@ The phone, accessibility, visual, and PWA configs intentionally do not inherit
 this destructive setup. Run them independently and do not replace them with
 the main suite.
 
+### Frontline, Sauce, and pending-run progress
+
+Changes to Frontline applicator auto-tracking, Sauce barrel tracking,
+coordination claims, or pending-run progress require all of:
+
+- `state-accuracy-check` evidence for cadence, fractional carry/anchors, caps,
+  suppression, pause/resume, lifecycle eligibility, and pending → running rebase;
+- `sync-invariant-check` evidence for run-scoped stamps/registers, canonical
+  responses, retries, and delayed acknowledgement isolation;
+- focused API/client regressions plus the bounded live-station switch/reload
+  journey from `operational-browser-verification`;
+- desktop and 390×844 responsive browser evidence for the affected live station;
+- retained release evidence tied to the exact revision being assessed.
+
+Missing, stale, differently-revisioned, or desktop-only evidence is a no-go.
+Do not substitute a unit pass for the live-station browser journey, and do not
+regenerate the full publication record merely to validate a task-local guardrail.
+
 ## Environment-dependent checks
 
 These are expected when the environment supports them, but a missing service

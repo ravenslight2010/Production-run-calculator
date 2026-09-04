@@ -350,6 +350,113 @@ describe("auto-track coordination", () => {
     }
   });
 
+  it.each([
+    {
+      channel: "app1-batch" as const,
+      values: {
+        app1BatchesMade: 0,
+        app1BatchAnchorNetSec: 0,
+        app1BatchCorrectionGeneration: 0,
+      },
+      mutations: applicatorMutations(1, 0, 0, 0),
+    },
+    {
+      channel: "sauce-barrel" as const,
+      values: {
+        sauceBarrelsMade: 0,
+        sauceBarrelAnchorNetSec: 0,
+        sauceBarrelCorrectionGeneration: 0,
+        frontlineRecipeName: "Tomato Sauce",
+        frontlineRecipe: [],
+        sauceBarrelLbs: 200,
+      },
+      mutations: sauceMutations(0, 0, 0),
+    },
+  ])("keeps a $channel claim scoped to its owning run", ({ channel, values, mutations }) => {
+    const run2Values = { ...values };
+    const stored = {
+      dayState: {
+        runs: [
+          { id: "run-1", startedAt: 1, metaUpdatedAt: 2 },
+          { id: "run-2", startedAt: 1, metaUpdatedAt: 7 },
+        ],
+      },
+      runValues: { "run-1": values, "run-2": run2Values },
+      runValuesUpdatedAt: { "run-1": 10, "run-2": 20 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "run-2": {
+            [channel]: {
+              generation: "run-2:7",
+              sequence: 4,
+              nextDueAt: 300,
+              acceptedEventId: "run-2:event:4",
+              updatedAt: NOW - 1,
+            },
+          },
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel,
+      generation: "run-1:2",
+      eventId: `run-1:${channel}:1`,
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations,
+    }), NOW);
+
+    expect(result.outcome).toBe("accepted");
+    expect((result.data.runValues as any)["run-2"]).toEqual(run2Values);
+    expect((result.data.runValuesUpdatedAt as any)["run-2"]).toBe(20);
+    expect((result.data.autoTrackCoordination as any).runs["run-2"][channel])
+      .toEqual(stored.autoTrackCoordination.runs["run-2"][channel]);
+  });
+
+  it.each([
+    { channel: "app1-batch" as const, mutations: applicatorMutations(1, 0, 0, 0) },
+    { channel: "sauce-barrel" as const, mutations: sauceMutations(0, 0, 0) },
+  ])("rejects a stale $channel claim after run selection lifecycle changes without touching either register", ({ channel, mutations }) => {
+    const stored = {
+      dayState: {
+        runs: [
+          { id: "run-1", startedAt: 1, metaUpdatedAt: 9 },
+          { id: "run-2", startedAt: 1, metaUpdatedAt: 7 },
+        ],
+      },
+      runValues: {
+        "run-1": {
+          ...(channel === "sauce-barrel"
+            ? { sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0 }
+            : { app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0 }),
+        },
+        "run-2": { sentinel: 42 },
+      },
+      runValuesUpdatedAt: { "run-1": 10, "run-2": 20 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "run-1": { [channel]: { generation: "run-1:2", sequence: 0, nextDueAt: 60, updatedAt: NOW - 2 } },
+          "run-2": { [channel]: { generation: "run-2:7", sequence: 3, nextDueAt: 240, updatedAt: NOW - 1 } },
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel,
+      generation: "run-1:2",
+      eventId: `run-1:${channel}:1`,
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 120,
+      mutations,
+    }), NOW);
+
+    expect(result.outcome).toBe("stale");
+    expect(result.data).toEqual(stored);
+  });
+
   it("rejects an applicator tick after a manual correction invalidates its channel", () => {
     const stored = {
       dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
