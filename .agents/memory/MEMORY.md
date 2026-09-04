@@ -15,7 +15,7 @@
 - [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
-- [Profile/autosave clobber guards](autosave-edit-attribution.md) + [Open form profiles](open-form-profile-clobber.md) — save only attributed data; out-of-band profile updates reload open forms.
+- [Profile/autosave clobber guards](autosave-edit-attribution.md) — save only attributed data; out-of-band profile updates reload open forms.
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.

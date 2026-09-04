@@ -575,6 +575,107 @@ test.describe("phone layout smoke", () => {
     });
   }
 
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+  ] as const) {
+    test(`Floor Mode remains opaque and closable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToSandbox(page);
+
+      // New accounts start with Floor Mode disabled, but enabling it here
+      // exercises the account-backed setting and the real header launch path.
+      await page.getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
+      const floorSwitch = page.getByTestId("switch-floor-mode");
+      await expect(floorSwitch).toBeVisible();
+      await expect(floorSwitch).not.toBeChecked();
+      await floorSwitch.click();
+      await expect(floorSwitch).toBeChecked();
+      await page.keyboard.press("Escape");
+
+      await page.getByTitle("Floor mode — big numbers, status color").click();
+      const overlay = page.getByTestId("floor-mode-overlay");
+      await expect(overlay).toBeVisible();
+      const exit = page.getByRole("button", {
+        name: "Exit Floor Mode and return to calculator",
+      });
+      await expect(exit).toBeVisible();
+
+      const geometry = await exit.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const viewport = window.visualViewport;
+        const probe = document.createElement("div");
+        probe.style.cssText =
+          "position:fixed;visibility:hidden;pointer-events:none;" +
+          "padding-top:env(safe-area-inset-top);" +
+          "padding-right:env(safe-area-inset-right);" +
+          "padding-bottom:env(safe-area-inset-bottom);" +
+          "padding-left:env(safe-area-inset-left);";
+        document.body.append(probe);
+        const safeArea = getComputedStyle(probe);
+        const px = (value: string) => Number.parseFloat(value) || 0;
+        probe.remove();
+        return {
+          rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+          viewport: {
+            width: viewport?.width ?? window.innerWidth,
+            height: viewport?.height ?? window.innerHeight,
+          },
+          safeArea: {
+            top: px(safeArea.paddingTop),
+            right: px(safeArea.paddingRight),
+            bottom: px(safeArea.paddingBottom),
+            left: px(safeArea.paddingLeft),
+          },
+          width: rect.width,
+          height: rect.height,
+        };
+      });
+      expect(geometry.width).toBeGreaterThanOrEqual(44);
+      expect(geometry.height).toBeGreaterThanOrEqual(44);
+      expect(geometry.rect.left).toBeGreaterThanOrEqual(geometry.safeArea.left - 1);
+      expect(geometry.rect.right).toBeLessThanOrEqual(
+        geometry.viewport.width - geometry.safeArea.right + 1,
+      );
+      expect(geometry.rect.top).toBeGreaterThanOrEqual(geometry.safeArea.top - 1);
+      expect(geometry.rect.bottom).toBeLessThanOrEqual(
+        geometry.viewport.height - geometry.safeArea.bottom + 1,
+      );
+
+      await assertPhoneLayout(page, "Floor Mode overlay", {
+        skipModalOverlayCoverage: true,
+      });
+      // The old 90-second inactivity path dimmed this layer. Waiting briefly
+      // still verifies the overlay remains fully opaque without slowing the
+      // suite by the removed interval.
+      await page.waitForTimeout(1_000);
+      await expect(overlay).toHaveCSS("opacity", "1");
+
+      // Verify pointer/touch-style activation, then keyboard activation and
+      // the return to the calculator from both paths.
+      // The Replit preview banner is browser chrome outside the app and can
+      // intercept a synthetic click at the top edge; installed/full-screen
+      // station displays do not render it.
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+      await exit.click();
+      await expect(overlay).toBeHidden();
+      await page.getByTitle("Floor mode — big numbers, status color").click();
+      await expect(overlay).toBeVisible();
+      await exit.focus();
+      await expect(exit).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(overlay).toBeHidden();
+      await expect(page.getByTestId("tab-run")).toBeVisible();
+    });
+  }
+
   test("sync details stay fully visible from phone through desktop widths", async ({
     page,
   }) => {

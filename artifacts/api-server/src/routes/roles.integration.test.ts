@@ -1751,19 +1751,19 @@ describe("per-user Floor Mode preference", () => {
   // POST /me/floor-mode. Users are seeded directly (not via /auth/sign-up) so
   // these tests don't eat into the shared public-auth rate-limit budget the
   // sign-up gate tests below depend on.
-  it("a freshly created user defaults to floorModeEnabled=true (DB default + /me shape)", async () => {
+  it("a freshly created user defaults to floorModeEnabled=false (DB default + /me shape)", async () => {
     // The seeded OPERATOR row never set the column, so it exercises the same
     // DB-level default a real sign-up insert gets.
     const [row] = await db
       .select()
       .from(usersTable)
       .where(sql`${usersTable.id} = ${OPERATOR}`);
-    expect(row.floorModeEnabled).toBe(true);
+    expect(row.floorModeEnabled).toBe(false);
 
     const me = await req(OPERATOR, "GET", "/api/me");
     expect(me.status).toBe(200);
     const meBody = (await me.json()) as { floorModeEnabled: boolean };
-    expect(meBody.floorModeEnabled).toBe(true);
+    expect(meBody.floorModeEnabled).toBe(false);
   });
 
   it("POST /me/floor-mode persists off AND back on (settable both directions)", async () => {
@@ -1803,7 +1803,7 @@ describe("per-user Floor Mode preference", () => {
       .select()
       .from(usersTable)
       .where(sql`${usersTable.id} = ${OPERATOR}`);
-    expect(row.floorModeEnabled).toBe(true);
+    expect(row.floorModeEnabled).toBe(false);
   });
 
   it("rejects unauthenticated requests with 401", async () => {

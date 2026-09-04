@@ -5078,7 +5078,7 @@ export default function Home() {
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
   // the user across devices instead of being tied to one browser.
-  const floorModeEnabled = me?.floorModeEnabled ?? true;
+  const floorModeEnabled = me?.floorModeEnabled ?? false;
   function toggleFloorModeEnabled() {
     const next = !floorModeEnabled;
     if (!next) setShowFloorMode(false);
@@ -5105,11 +5105,6 @@ export default function Home() {
     } catch { /* ignore storage errors */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
-  // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
-  // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
-  const [floorDimmed, setFloorDimmed] = useState(false);
-
-
   // Keep the local PIN cache fresh as an offline fallback for checkPin(). We
   // persist an empty string too: "" is a valid facility value ("no gate"), so a
   // PIN cleared on another device must survive a reload/offline session here, or
@@ -14063,28 +14058,6 @@ export default function Home() {
     };
   }, [floorModeEnabled]); // setShowFloorMode is a stable setter
 
-  // Floor Mode auto-dim: once Floor Mode is showing, dim it after a stretch of
-  // inactivity and restore instantly on any interaction. Paired with the slow
-  // CSS drift (.floor-drift) this keeps a left-on floor monitor safe from
-  // burn-in/glare without hiding the live numbers when someone is watching.
-  useEffect(() => {
-    if (!showFloorMode) { setFloorDimmed(false); return; }
-    const DIM_MS = 90 * 1000;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    function arm() {
-      setFloorDimmed(false);
-      if (timerId) clearTimeout(timerId);
-      timerId = setTimeout(() => setFloorDimmed(true), DIM_MS);
-    }
-    arm();
-    const events = ["touchstart", "mousedown", "keydown", "mousemove"] as const;
-    events.forEach(ev => window.addEventListener(ev, arm, { passive: true }));
-    return () => {
-      if (timerId) clearTimeout(timerId);
-      events.forEach(ev => window.removeEventListener(ev, arm));
-    };
-  }, [showFloorMode]);
-
   // Reset all runs at midnight — archive current day first, auto-end any active run
   useEffect(() => {
     function msUntilMidnight() {
@@ -14581,7 +14554,7 @@ export default function Home() {
     doughRecipesList, doughSauceMigratedRef, doughSubTab, doughVariantPick, downtimeDays, editingStop,
     enabledCheeseRecipes, endRun, endStop, existingImportRecipeNames, expandedHistoryDay, expandedScheduleDay,
     exportCSV, exportExcel, exportHistoryCSV, exportQuickBooks, exportSelection, exporting,
-    fetchSchedulePayload, flashSaved, flavorInput, flavorScrollKeep, flexibleViolations, floorDimmed,
+    fetchSchedulePayload, flashSaved, flavorInput, flavorScrollKeep, flexibleViolations,
     floorModeEnabled, floorModeMigratedRef, forceSignedOut, form, freezerPullItems, frontlineFields,
     frontlineIngredients, frontlineRecipeNameOptions, frontlineRecipeNames, gripSheets, gripSheetsList, handleApplyBrandFlavorMerge,
     handleApplyMerge, handleApplyRecipeNameMerge, handleCheeseImportConfirm, handleCheeseImportFile, handleConfirmMerge, handleImportFile,
@@ -14631,7 +14604,7 @@ export default function Home() {
     setCircles, setConfirmDeleteBrand, setConfirmDeleteFlavor, setConfirmDeleteStopId, setConfirmRemoveBlanks, setConfirmRemoveRun,
     setCopiedSummary, setDayState, setDieTypes, setDoughIngredients, setDoughRecipeNames, setDoughSubTab,
     setDoughVariantPick, setEditingStop, setExpandedHistoryDay, setExpandedScheduleDay, setExportSelection,
-    setExporting, setFlavorInput, setFloorDimmed, setFrontlineIngredients, setFrontlineRecipeNames, setGripSheets,
+    setExporting, setFlavorInput, setFrontlineIngredients, setFrontlineRecipeNames, setGripSheets,
     setHistory, setImportDefaultDate, setImportIntoEditor, setImportProgress, setImportResult, setIngredientTypes,
     setIsFullscreen, setIsOnline, setManageBrandFilter, setManageCategory, setManageInput, setManualStopEnd,
     setManualStopNotes, setManualStopReason, setManualStopStart, setManualStopType, setMergeBatchBusy, setMergeBfBrand,
@@ -14690,7 +14663,7 @@ export default function Home() {
     doughRecipeNameOptions, doughRecipeNames, doughRecipesList, doughSubTab, doughVariantPick,
     downtimeDays, editingStop, enabledCheeseRecipes, existingImportRecipeNames,
     expandedHistoryDay, expandedScheduleDay, exportSelection, exporting,
-    flashSaved, flavorInput, flexibleViolations, floorDimmed, floorModeEnabled,
+    flashSaved, flavorInput, flexibleViolations, floorModeEnabled,
     freezerPullItems, frontlineFields, frontlineIngredients,
     frontlineRecipeNameOptions, frontlineRecipeNames, gripSheets, gripSheetsList,
     histBenchmarkPpm, history, importDefaultDate, importIntoEditor,
@@ -14776,7 +14749,7 @@ export default function Home() {
       dieLineDefaultOverrides, dieTypes, doughFields, doughIngredients, doughPoolDrift,
       doughRecipeNameOptions, doughRecipeNames, doughRecipesList, doughSubTab, doughVariantPick,
       downtimeDays, editingStop, enabledCheeseRecipes,
-      exportSelection, exporting, flashSaved, flexibleViolations, floorDimmed, floorModeEnabled,
+      exportSelection, exporting, flashSaved, flexibleViolations, floorModeEnabled,
       frontlineFields, frontlineIngredients, frontlineRecipeNameOptions, frontlineRecipeNames,
       gripSheets, gripSheetsList, histBenchmarkPpm, history,
       ingredientCatalog, ingredientTypeOptions, ingredientTypes,
@@ -19959,7 +19932,7 @@ function PauseTunnelDecision({
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
-    endStop, floorDimmed, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
     persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
@@ -20000,12 +19973,19 @@ function FloorModeView() {
 
         return (
           <div
+            data-testid="floor-mode-overlay"
             className="fixed inset-0 z-[40] flex flex-col font-sans select-none"
-            style={{ background: bg, color: "white", opacity: floorDimmed ? 0.45 : 1, transition: "opacity 1200ms ease" }}
+            style={{ background: bg, color: "white" }}
           >
-            <div className="floor-drift flex flex-1 flex-col min-h-0">
             {/* Header */}
-            <header className="flex justify-between items-center px-5 pt-5 pb-2 shrink-0">
+            <header
+              className="relative z-10 flex justify-between items-center pb-2 shrink-0"
+              style={{
+                paddingTop: "calc(1.25rem + env(safe-area-inset-top))",
+                paddingLeft: "calc(1.25rem + env(safe-area-inset-left))",
+                paddingRight: "calc(1.25rem + env(safe-area-inset-right))",
+              }}
+            >
               <div className="flex flex-col gap-1.5">
                 <span className="text-lg font-bold break-words min-w-0" style={{ color: "rgba(255,255,255,0.75)" }}>
                   {currentRun ? runLabel(currentRun) : "No Active Run"}
@@ -20018,7 +19998,8 @@ function FloorModeView() {
               <button
                 type="button"
                 onClick={() => setShowFloorMode(false)}
-                className="p-2.5 rounded-full transition-colors"
+                aria-label="Exit Floor Mode and return to calculator"
+                className="min-h-11 min-w-11 p-2.5 rounded-full transition-colors"
                 style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.5)" }}
                 title="Exit floor mode"
               >
@@ -20026,6 +20007,7 @@ function FloorModeView() {
               </button>
             </header>
 
+            <div className="floor-drift flex flex-1 flex-col min-h-0">
             {/* Big three numbers */}
             <main className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
               <div className="flex flex-col items-center">

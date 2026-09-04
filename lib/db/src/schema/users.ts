@@ -20,7 +20,8 @@ import { boolean, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 // having existed since before the token was issued.
 // `floorModeEnabled` is the user's Floor Mode (idle big-numbers monitor)
 // on/off preference; per-user (not device-local) so it follows them across
-// devices. Defaults on, matching the previous device-local default.
+// devices. New accounts default to off; existing stored values are preserved
+// when the schema default changes.
 // `notificationPrefs` is the user's per-alert push-notification preferences —
 // a map of alert kind (e.g. "batchDue") → boolean. A MISSING key means the
 // alert is ON (default), so new alert kinds are automatically enabled for
@@ -32,7 +33,7 @@ export const usersTable = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   onboardingSeen: boolean("onboarding_seen").notNull().default(false),
   tourCompleted: boolean("tour_completed").notNull().default(false),
-  floorModeEnabled: boolean("floor_mode_enabled").notNull().default(true),
+  floorModeEnabled: boolean("floor_mode_enabled").notNull().default(false),
   notificationPrefs: jsonb("notification_prefs")
     .$type<Record<string, boolean>>()
     .notNull()
