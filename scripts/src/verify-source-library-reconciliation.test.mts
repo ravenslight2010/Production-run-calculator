@@ -42,6 +42,34 @@ for (const proposal of report.proposals) {
   rowsByTable.set(table, [...(rowsByTable.get(table) ?? []), row]);
 }
 
+const stubs = report.findings.allZeroStubs as Array<Record<string, unknown>>;
+const pendingCanonical = String(stubs[0].canonicalName);
+const protectedStub = String(stubs[1].name);
+const historicalStub = String(stubs[2].name);
+const dailyRunReferences: Array<Record<string, unknown>> = [
+  {
+    date: "2026-08-26",
+    run_id: "pending",
+    started: false,
+    field: "app1CheeseRecipeName",
+    value: pendingCanonical,
+  },
+  {
+    date: "2026-08-26",
+    run_id: "started",
+    started: true,
+    field: "app1CheeseRecipeName",
+    value: protectedStub,
+  },
+  {
+    date: "2026-08-25",
+    run_id: "historical",
+    started: false,
+    field: "app1CheeseRecipeName",
+    value: historicalStub,
+  },
+];
+
 const query = async (text: string, values?: readonly unknown[]) => {
   queries.push(text);
   assert.doesNotMatch(text, /\b(?:insert|update|delete|truncate|alter|drop|create)\b/i);
@@ -54,7 +82,7 @@ const query = async (text: string, values?: readonly unknown[]) => {
     };
   }
   if (text.includes("FROM brand_profiles")) return { rows: [] };
-  if (text.includes("FROM daily_sync")) return { rows: [] };
+  if (text.includes("FROM daily_sync")) return { rows: dailyRunReferences };
   if (text.includes("FROM spec_import_aliases")) {
     const expected = (values?.[0] as string[]) ?? [];
     return {
@@ -77,11 +105,23 @@ const query = async (text: string, values?: readonly unknown[]) => {
   }
   if (text.startsWith("SELECT id, name, components FROM cheese_recipes")) {
     return {
-      rows: report.findings.allZeroStubs.map((stub) => ({
-        id: (stub as Record<string, unknown>).canonicalId,
-        name: (stub as Record<string, unknown>).canonicalName,
-        components: [{ lbs: 1 }],
-      })),
+      rows: [
+        ...stubs.map((stub) => ({
+          id: stub.canonicalId,
+          name: stub.canonicalName,
+          components: [{ lbs: 1 }],
+        })),
+        {
+          id: stubs[1].id,
+          name: stubs[1].name,
+          components: [],
+        },
+        {
+          id: stubs[2].id,
+          name: stubs[2].name,
+          components: [{ lbs: 1 }],
+        },
+      ],
     };
   }
   for (const table of ["dough_recipes", "sauce_recipes", "cheese_recipes", "mixes"]) {
@@ -102,8 +142,28 @@ assert.equal(output.pools.exactMatches, 68);
 assert.equal(output.aliases.expected, 25);
 assert.equal(output.aliases.exactMatches, 25);
 assert.equal(output.pendingRuns.stale, 0);
+assert.equal(output.pendingRuns.inspected, 1);
+assert.equal(output.pendingRuns.canonical, 1);
+assert.equal(output.protectedHistory.references, 2);
 assert.equal(output.stubs.canonicalExact, 3);
-assert.equal(output.stubs.deletedExpected, 3);
+assert.equal(output.stubs.deletedExpected, 1);
+assert.equal(output.stubs.remainingProtected, 2);
+assert.equal(output.stubs.unexpectedlyRemaining, 0);
+assert.doesNotMatch(JSON.stringify(output), /basha|pepperoni|bbq chicken/i);
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
+
+dailyRunReferences[0].value = String(stubs[0].name);
+const stalePendingOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+);
+assert.equal(stalePendingOutput.ok, false);
+assert.equal(stalePendingOutput.pendingRuns.stale, 1);
+assert.equal(stalePendingOutput.protectedHistory.references, 2);
+assert.equal(stalePendingOutput.stubs.remainingProtected, 2);
+assert.deepEqual(stalePendingOutput.failures, [{ check: "pendingRuns", count: 1 }]);
+assert.doesNotMatch(JSON.stringify(stalePendingOutput), /basha|pepperoni|bbq chicken/i);
 console.log("Source library reconciliation verifier tests passed.");

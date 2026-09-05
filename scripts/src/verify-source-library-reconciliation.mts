@@ -195,19 +195,18 @@ function buildMappings(report: Report): Mapping[] {
 }
 
 function mappingFor(value: string, mappings: Mapping[]): Mapping[] {
-  return mappings.filter((mapping) => normalizedName(mapping.old) === normalizedName(value));
-}
-
-function canonicalValuesFor(value: string, mappings: Mapping[]): string[] {
-  return [...new Set(mappingFor(value, mappings).map((mapping) => mapping.canonical))];
+  const normalized = normalizedName(value);
+  return mappings.filter((mapping) =>
+    normalizedName(mapping.old) === normalized || normalizedName(mapping.canonical) === normalized);
 }
 
 function classifyReference(value: string, mappings: Mapping[]) {
   const matches = mappingFor(value, mappings);
   if (matches.length === 0) return { old: false, canonical: false, nonCanonical: false };
-  const old = matches.some((mapping) => value === mapping.old || normalizedName(value) === normalizedName(mapping.old));
-  const canonical = matches.some((mapping) => value === mapping.canonical);
-  const canonicalByName = matches.some((mapping) => normalizedName(value) === normalizedName(mapping.canonical));
+  const old = matches.some((mapping) => normalizedName(value) === normalizedName(mapping.old));
+  const canonical = !old && matches.some((mapping) => value === mapping.canonical);
+  const canonicalByName = !old && matches.some((mapping) =>
+    normalizedName(value) === normalizedName(mapping.canonical));
   return { old, canonical: !old && canonical, nonCanonical: !old && !canonical && canonicalByName };
 }
 
