@@ -40,6 +40,7 @@ import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
+import { aiCostLimit } from "../middlewares/costLimitMiddleware";
 import { requireCapability } from "../middlewares/requireCapability";
 import { getOrCreateUserRole, getStaffMember } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
@@ -610,6 +611,7 @@ router.post(
     keyGenerator: (req) => `inv-count:${req.userId ?? req.ip ?? "unknown"}`,
     store: photoRateStore,
   }),
+  aiCostLimit,
   async (req, res): Promise<void> => {
     const parsed = CountObservationBody.safeParse(req.body);
     if (!parsed.success) {

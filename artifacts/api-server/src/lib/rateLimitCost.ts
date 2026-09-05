@@ -30,6 +30,7 @@ export const AI_ENDPOINT_COSTS: Record<string, number> = {
   "/api/ai/proactive-alert": 5,
   "/api/ai/forecast": 20,
   "/api/ai/optimize": 12,
+  "/api/inventory/count-observations": 20,
 };
 
 export async function checkCostLimit(

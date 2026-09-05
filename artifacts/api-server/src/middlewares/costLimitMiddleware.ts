@@ -22,6 +22,8 @@ function publicAiPath(req: Request): string {
   const mountedPath = `${req.baseUrl ?? ""}${req.path ?? ""}`;
   if (mountedPath.startsWith("/api/ai/")) return mountedPath;
   if (mountedPath.startsWith("/ai/")) return `/api${mountedPath}`;
+  if (mountedPath.startsWith("/api/")) return mountedPath;
+  if (mountedPath.startsWith("/")) return `/api${mountedPath}`;
 
   // This fallback also keeps direct middleware tests, where baseUrl is absent,
   // aligned with the public route naming convention.

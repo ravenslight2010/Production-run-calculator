@@ -18,6 +18,7 @@ describe("aiRequestCost — maps the mounted request path to the cost multiplier
     expect(aiRequestCost(requestAt("/forecast", "/api/ai"))).toBe(20);
     expect(aiRequestCost(requestAt("/optimize", "/api/ai"))).toBe(12);
     expect(aiRequestCost(requestAt("/proactive-alert", "/api/ai"))).toBe(5);
+    expect(aiRequestCost(requestAt("/count-observations", "/api/inventory"))).toBe(20);
   });
 
   it("prices unlisted endpoints at the base cost of 1", () => {
@@ -27,5 +28,9 @@ describe("aiRequestCost — maps the mounted request path to the cost multiplier
 
   it("normalizes the app's /ai mount to the public /api/ai path", () => {
     expect(aiRequestCost(requestAt("/forecast", "/ai"))).toBe(20);
+  });
+
+  it("normalizes directly mounted inventory routes to their public API path", () => {
+    expect(aiRequestCost(requestAt("/inventory/count-observations"))).toBe(20);
   });
 });
