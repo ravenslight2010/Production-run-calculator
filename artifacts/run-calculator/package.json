@@ -124,6 +124,7 @@
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/ingredient-catalog": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
+    "@workspace/live-calc": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/mix-reconcile": "workspace:*",
     "@workspace/mixes": "workspace:*",

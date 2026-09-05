@@ -215,6 +215,9 @@ importers:
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../../lib/inventory-math
+      '@workspace/live-calc':
+        specifier: workspace:*
+        version: link:../../lib/live-calc
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
@@ -531,6 +534,9 @@ importers:
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../../lib/inventory-math
+      '@workspace/live-calc':
+        specifier: workspace:*
+        version: link:../../lib/live-calc
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
@@ -1008,6 +1014,16 @@ importers:
         version: 25.6.2
 
   lib/inventory-math:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0)
+
+  lib/live-calc:
+    dependencies:
+      '@workspace/inventory-math':
+        specifier: workspace:*
+        version: link:../inventory-math
     devDependencies:
       vitest:
         specifier: ^4.1.9

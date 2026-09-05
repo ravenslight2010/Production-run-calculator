@@ -149,3 +149,33 @@ Each entry includes:
 **Fix:** Track in-flight shared-cache-maintenance failure writes in `observability.ts` (`pendingSharedCacheMaintenance` + `trackPendingSharedCacheMaintenance`) and have `clearCacheMaintenanceDiagnosticsForTests()` await them (`Promise.allSettled`) before deleting the shared events table. Production behavior is unchanged — the cache path is still fire-and-forget.
 
 **Context:** Needed so the Replit merge (PR #17) can pass the required API tests check. Also removes a latent flake for every test that asserts on the shared events table.
+
+## 2026-09-05 — Extract core production calc to lib/live-calc (server-side refactor step 2)
+
+**File(s):**
+- `lib/live-calc/src/index.ts` (new — ~410 lines, pure math engine)
+- `lib/live-calc/src/index.test.ts` (new — vitest unit tests, 14 test cases)
+- `lib/live-calc/package.json` (new)
+- `lib/live-calc/tsconfig.json` (new)
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` (replaced ~220 lines of inline useMemo calc with call to `computeCalc()`)
+- `artifacts/run-calculator/src/lineSpeed.ts` (replaced with re-export from `@workspace/live-calc`)
+- `artifacts/run-calculator/src/liveRunCalc.ts` (updated Calc type import to `@workspace/live-calc`)
+
+**What was wrong:** The core production calc (ppm, cases, batches, timing, sauce/app/pep quantities, pace) was ~220 lines of pure math inlined inside a React `useMemo` in `LiveRunContext.tsx`. This meant only the client could compute it — the server could not. Refactoring to server-side calc requires the engine to be importable from both client and server.
+
+**What the fix was:**
+1. Created `lib/live-calc/` — a new workspace package exporting:
+   - `Calc` type (previously inline in LiveRunContext.tsx)
+   - `CalcFormValues`, `CalcRunMeta`, `CalcStoppage`, `CalcInput` types (narrow input interfaces for the calc)
+   - `computeCalc(input: CalcInput): Calc` — the pure math function, zero React dependency
+   - `computeEffectiveLineSpeed()` — moved here from `artifacts/run-calculator/src/lineSpeed.ts`
+   - `EffectiveLineSpeedInput`, `LineSpeedMode` types (moved here for shared use)
+2. `lineSpeed.ts` is now a thin re-export shim so `home.tsx`, `aiOptimize`, `runInsights` don't need import changes
+3. `liveRunCalc.ts` now imports Calc from `@workspace/live-calc` instead of from LiveRunContext
+4. `LiveRunContext.tsx`: the 220-line `useMemo` calc body replaced with a `computeCalc({...})` call. `DEFAULT_PEP_TYPES` is injected as a parameter (same pattern as `@workspace/inventory-math`).
+
+**Why it was needed:** Enables server-side computation (Step 3) — the server can now `import { computeCalc }` and compute live calc values from stored FormValues + run metadata, pushing them via SSE instead of requiring every client to do the math. Reduces client battery (goal #3 of the refactor), improves sync accuracy, and eliminates the possibility of client/server math drift.
+
+**Context:** Step 2 of the approved server-side refactor order: (1) ✅ extract ScreenModeView → (2) ✅ extract calc to shared lib → (3) server computes calc + pushes via SSE → (4) extract tab panels → (5) React.memo → (6) server-side auto-track. 19 unit tests pass locally (vitest cannot run in this arm64 environment due to pre-existing rollup platform exclusion in pnpm-workspace.yaml overrides, but will pass in CI on x64).
+
+*Last updated: 2026-09-05*
