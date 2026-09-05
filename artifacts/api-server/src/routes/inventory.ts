@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
 import {
@@ -38,7 +38,7 @@ import {
 } from "@workspace/api-zod";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
-import { rateLimit } from "../middlewares/rateLimit";
+import { rateLimit, type RateLimitStore } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { aiCostLimit } from "../middlewares/costLimitMiddleware";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -143,6 +143,16 @@ const labelVerifyRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
+
+export type InventoryRouterOptions = {
+  /**
+   * Override the retained-count limiters when constructing an isolated router
+   * (for example, to represent a second API instance in an integration test).
+   * The application default remains the production-aware middleware above.
+   */
+  countObservationRateStore?: RateLimitStore;
+  countObservationCostLimit?: RequestHandler;
+};
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
 type SseClient = { res: Response; clientId: string; scope: string };
@@ -600,6 +610,81 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 // ── Photo count observations ────────────────────────────────────────────────
 // Analysis and review are deliberately separate from restock. A cancelled or
 // abandoned observation has no inventory side effects.
+function registerCountObservationRoute(
+  target: IRouter,
+  options: InventoryRouterOptions = {},
+): void {
+  target.post(
+    "/inventory/count-observations",
+    requireCapability("manage-inventory"),
+    rateLimit({
+      windowMs: PHOTO_RATE_WINDOW_MS,
+      max: PHOTO_RATE_MAX,
+      keyGenerator: (req) => `inv-count:${req.userId ?? req.ip ?? "unknown"}`,
+      store: options.countObservationRateStore ?? photoRateStore,
+    }),
+    options.countObservationCostLimit ?? aiCostLimit,
+    async (req, res): Promise<void> => {
+      const parsed = CountObservationBody.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Attach one to three valid photos." });
+        return;
+      }
+      const { photos, candidates } = parsed.data;
+      const candidateLines = candidates.map((c) =>
+        `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`).join("\n");
+      const prompt = buildCountPrompt(candidateLines);
+      const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+        { type: "text", text: prompt.user },
+        ...photos.map((p) => ({ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.imageBase64}` } })),
+      ];
+      const result = await fetchModelJsonWithRetry({
+        label: "inventory-count vision",
+        log: req.log,
+        call: async () => {
+          const response = await openai.chat.completions.create({
+            model: pickModel("full"),
+            max_completion_tokens: 4096,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: prompt.system },
+              { role: "user", content },
+            ],
+          });
+          return response.choices[0]?.message?.content ?? "";
+        },
+      });
+      if (!result.ok) {
+        if (result.reason === "malformed") {
+          res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
+          return;
+        }
+        const failure = aiCallFailureHttp(result, "Could not analyze these photos.");
+        res.status(failure.status).json({ error: failure.error });
+        return;
+      }
+      const draft = sanitizeCountDraft(result.raw, new Set(candidates.map((c) => c.key)));
+      if (!draft) {
+        res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
+        return;
+      }
+      if (new Set(photos.map((p) => p.imageBase64)).size !== photos.length) {
+        draft.reviewFlags = [...new Set([...draft.reviewFlags, "Duplicate photo attached"])];
+      }
+      const [row] = await db.insert(inventoryObservationsTable).values({
+        scope: currentScope(),
+        status: "draft",
+        photos: photos.map((p, index) => ({ index, mimeType: p.mimeType })),
+        draft,
+      }).returning();
+      res.status(201).json(observationResponse(row));
+    },
+  );
+}
+
+// The full application router keeps photo-driven inventory changes retired.
+// The isolated factory above remains available for the retained-budget
+// integration proof and for any future explicitly enabled deployment.
 router.post(
   "/inventory/count-observations",
   (_req, res) => {
@@ -607,70 +692,19 @@ router.post(
       error: "Photo inventory counts are disabled. Use typed or barcode inventory controls.",
     });
   },
-  requireCapability("manage-inventory"),
-  rateLimit({
-    windowMs: PHOTO_RATE_WINDOW_MS,
-    max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => `inv-count:${req.userId ?? req.ip ?? "unknown"}`,
-    store: photoRateStore,
-  }),
-  aiCostLimit,
-  async (req, res): Promise<void> => {
-    const parsed = CountObservationBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Attach one to three valid photos." });
-      return;
-    }
-    const { photos, candidates } = parsed.data;
-    const candidateLines = candidates.map((c) =>
-      `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`).join("\n");
-    const prompt = buildCountPrompt(candidateLines);
-    const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
-      { type: "text", text: prompt.user },
-      ...photos.map((p) => ({ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.imageBase64}` } })),
-    ];
-    const result = await fetchModelJsonWithRetry({
-      label: "inventory-count vision",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("full"),
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: prompt.system },
-            { role: "user", content },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "malformed") {
-        res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
-        return;
-      }
-      const failure = aiCallFailureHttp(result, "Could not analyze these photos.");
-      res.status(failure.status).json({ error: failure.error });
-      return;
-    }
-    const draft = sanitizeCountDraft(result.raw, new Set(candidates.map((c) => c.key)));
-    if (!draft) {
-      res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
-      return;
-    }
-    if (new Set(photos.map((p) => p.imageBase64)).size !== photos.length) {
-      draft.reviewFlags = [...new Set([...draft.reviewFlags, "Duplicate photo attached"])];
-    }
-    const [row] = await db.insert(inventoryObservationsTable).values({
-      scope: currentScope(),
-      status: "draft",
-      photos: photos.map((p, index) => ({ index, mimeType: p.mimeType })),
-      draft,
-    }).returning();
-    res.status(201).json(observationResponse(row));
-  },
 );
+registerCountObservationRoute(router);
+
+/**
+ * Construct the retained-count route independently from the full application
+ * router. This is also useful for integration tests that model multiple API
+ * instances with separate middleware objects and a shared backing store.
+ */
+export function createInventoryRouter(options: InventoryRouterOptions = {}): IRouter {
+  const isolatedRouter: IRouter = Router();
+  registerCountObservationRoute(isolatedRouter, options);
+  return isolatedRouter;
+}
 
 router.get("/inventory/count-observations/:id", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const id = Number(req.params.id);

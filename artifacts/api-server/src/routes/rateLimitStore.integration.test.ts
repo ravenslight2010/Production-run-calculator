@@ -21,10 +21,25 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import { sql } from "drizzle-orm";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
+import express, { type Express } from "express";
 import type { RateLimitStore } from "../middlewares/rateLimit";
+
+// The integration route only reaches request validation in this suite. Keep the
+// capability gate focused on routing and avoid seeding the role tables just to
+// establish the test user identity.
+vi.mock("../middlewares/requireCapability", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  requireCapability: () => (req: any, _res: unknown, next: () => void) => {
+    const userId = req.headers?.["x-test-user"];
+    if (typeof userId === "string") req.userId = userId;
+    next();
+  },
+}));
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -32,10 +47,13 @@ let pool: DbModule["pool"];
 let rateLimitCountersTable: DbModule["rateLimitCountersTable"];
 
 let PostgresRateLimitStore: typeof import("../middlewares/rateLimitStore").PostgresRateLimitStore;
+let createAiCostLimit: typeof import("../middlewares/costLimitMiddleware").createAiCostLimit;
+let createInventoryRouter: typeof import("./inventory").createInventoryRouter;
 
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
+let inventoryServers: Server[] = [];
 
 const WINDOW_MS = 60_000;
 const MAX = 10;
@@ -71,19 +89,59 @@ beforeAll(async () => {
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const storeMod = await import("../middlewares/rateLimitStore");
+  const costMod = await import("../middlewares/costLimitMiddleware");
+  const inventoryMod = await import("./inventory");
   db = dbMod.db;
   pool = dbMod.pool;
   rateLimitCountersTable = dbMod.rateLimitCountersTable;
   PostgresRateLimitStore = storeMod.PostgresRateLimitStore;
+  createAiCostLimit = costMod.createAiCostLimit;
+  createInventoryRouter = inventoryMod.createInventoryRouter;
 
   // Swallow benign idle-client errors. During teardown the throwaway DB is
   // dropped WITH (FORCE), which can terminate a connection that is still closing
   // just after pool.end() resolved; pg surfaces that as an 'error' event on the
   // pool. Without a listener it becomes an unhandled error and fails the run.
   pool.on("error", () => {});
+
+  // Mount two independently constructed routers, as two API instances would.
+  // Their weighted AI limiters use separate Postgres store objects but the same
+  // disposable database.
+  const makeApp = (router: ReturnType<typeof createInventoryRouter>): Express => {
+    const app: Express = express();
+    app.use(express.json({ limit: "10mb" }));
+    app.use((req, _res, next) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+      next();
+    });
+    app.use(router);
+    return app;
+  };
+  const appA = makeApp(createInventoryRouter({
+    countObservationCostLimit: createAiCostLimit({
+      maxCost: 40,
+      store: newInstance(),
+    }),
+  }));
+  const appB = makeApp(createInventoryRouter({
+    countObservationCostLimit: createAiCostLimit({
+      maxCost: 40,
+      store: newInstance(),
+    }),
+  }));
+  for (const app of [appA, appB]) {
+    const server = await new Promise<Server>((resolve) => {
+      const listening = app.listen(0, () => resolve(listening));
+    });
+    inventoryServers.push(server);
+  }
 }, 60_000);
 
 afterAll(async () => {
+  await Promise.all(
+    inventoryServers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+  );
   if (pool) await pool.end();
   if (adminPool) {
     if (testDbName) {
@@ -203,5 +261,50 @@ describe("PostgresRateLimitStore — shared cross-instance counting", () => {
 
     expect(a.count).toBe(3);
     expect(b.count).toBe(1);
+  });
+
+  it("keeps the retained photo budget shared across independently constructed inventory routers", async () => {
+    const imagePayload = "retained-photo-payload-that-must-not-appear";
+    const body = {
+      // Invalid photos stop before the provider and DB insert, while still
+      // charging the route's weighted cost limiter.
+      photos: [],
+      candidates: [],
+      imageBase64: imagePayload,
+    };
+    const [serverA, serverB] = inventoryServers;
+    const addressA = serverA?.address() as AddressInfo;
+    const addressB = serverB?.address() as AddressInfo;
+    const headers = {
+      "content-type": "application/json",
+      "x-test-user": "retained-photo-shared-user",
+    };
+    const post = (port: number) =>
+      fetch(`http://127.0.0.1:${port}/inventory/count-observations`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+    const first = await post(addressA.port);
+    const second = await post(addressB.port);
+    const blocked = await post(addressA.port);
+
+    expect(first.status).toBe(400);
+    expect(first.headers.get("x-cost-used")).toBe("20");
+    expect(second.status).toBe(400);
+    expect(second.headers.get("x-cost-used")).toBe("40");
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("x-cost-limit")).toBe("40");
+    expect(blocked.headers.get("x-cost-requested")).toBe("20");
+    expect(blocked.headers.get("x-cost-used")).toBe("40");
+    const blockedBody = await blocked.text();
+    expect(JSON.parse(blockedBody)).toEqual({
+      error: expect.stringMatching(
+        /^Cost limit exceeded\. Budget: 40, used: 40, requested: 20\. Retry after \d+s\.$/,
+      ),
+    });
+    expect(blockedBody).not.toContain(imagePayload);
+    expect(blockedBody).not.toContain("Extract one product/count observation");
   });
 });
