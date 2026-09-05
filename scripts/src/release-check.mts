@@ -10,6 +10,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+  DEFAULT_FROM_DATE,
+  DEFAULT_HEAL_ID,
+  DEFAULT_REPORT,
+} from "./verify-source-library-reconciliation.mts";
 
 export type ReleaseStep = {
   label: string;
@@ -168,6 +173,8 @@ const fullBrowserReportPath = resolve(
   releaseEvidenceDir,
   "browser-full/FINAL-REPORT.md",
 );
+export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
+  "source-library-reconciliation.json";
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
@@ -178,6 +185,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
 ] as const;
@@ -389,8 +397,44 @@ export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
+const sourceLibraryReport =
+  cliOptionValue("--source-library-report") ??
+  process.env.SOURCE_LIBRARY_RECONCILIATION_REPORT ??
+  DEFAULT_REPORT;
+const sourceLibraryHealId =
+  cliOptionValue("--source-library-heal-id") ??
+  process.env.SOURCE_LIBRARY_RECONCILIATION_HEAL_ID ??
+  DEFAULT_HEAL_ID;
+const sourceLibraryHealDate =
+  sourceLibraryHealId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/u)?.[1];
+const sourceLibraryFromDate =
+  cliOptionValue("--source-library-from-date") ??
+  process.env.SOURCE_LIBRARY_RECONCILIATION_FROM_DATE ??
+  sourceLibraryHealDate ??
+  DEFAULT_FROM_DATE;
+export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
+  label: "source-library reconciliation verification",
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "exec",
+    "tsx",
+    "./src/verify-source-library-reconciliation.mts",
+    "--report",
+    sourceLibraryReport,
+    "--heal-id",
+    sourceLibraryHealId,
+    "--from-date",
+    sourceLibraryFromDate,
+    "--output",
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
+  ],
+  stage: "prerequisites",
+};
+
 const steps: ReleaseStep[] = [
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
+  SOURCE_LIBRARY_RECONCILIATION_STEP,
   {
     label: "shell lint inventory",
     args: ["run", "check:shell-inventory"],
@@ -776,10 +820,18 @@ export async function verifyReleaseEvidence(
     );
   }
   const evidenceMode = reportMode;
+  const expectedGateLabels =
+    options.expectedLabels ?? releaseGateLabelsForMode(evidenceMode);
+  const requiresSourceLibraryEvidence = expectedGateLabels.includes(
+    "source-library reconciliation verification",
+  );
   const requiredEvidence = [
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
+    ...(requiresSourceLibraryEvidence
+      ? [SOURCE_LIBRARY_RECONCILIATION_EVIDENCE]
+      : []),
     ...(evidenceMode === "full"
       ? ["browser-full/FINAL-REPORT.md" as const]
       : []),
@@ -811,6 +863,12 @@ export async function verifyReleaseEvidence(
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
   });
+  if (requiresSourceLibraryEvidence) {
+    const sourceLibraryEvidence = await readFile(
+      resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
+    );
+    validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence);
+  }
   if (evidenceMode === "full") {
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
@@ -827,6 +885,70 @@ export async function verifyReleaseEvidence(
       files.length === 1 ? "" : "s"
     }.`,
   );
+}
+
+export function validateSourceLibraryReconciliationEvidence(
+  evidenceBytes: Uint8Array,
+): void {
+  const MAX_EVIDENCE_BYTES = 64 * 1024;
+  if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
+    throw new Error(
+      `Source-library reconciliation evidence exceeds the ${MAX_EVIDENCE_BYTES}-byte bound.`,
+    );
+  }
+  let evidence: unknown;
+  try {
+    evidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
+  } catch {
+    throw new Error(
+      `Source-library reconciliation evidence is not valid JSON: ${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.`,
+    );
+  }
+  if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error(
+      "Source-library reconciliation evidence must be a JSON object.",
+    );
+  }
+  const output = evidence as Record<string, unknown>;
+  if (output.verifier !== "source-library-reconciliation") {
+    throw new Error(
+      "Source-library reconciliation evidence has the wrong verifier identity.",
+    );
+  }
+  if (output.ok !== true) {
+    const failures = Array.isArray(output.failures)
+      ? output.failures
+          .filter(
+            (failure): failure is Record<string, unknown> =>
+              Boolean(failure) &&
+              typeof failure === "object" &&
+              !Array.isArray(failure),
+          )
+          .map((failure) => `${String(failure.check ?? "unknown")} (${String(failure.count ?? "?")})`)
+      : [];
+    throw new Error(
+      `Source-library reconciliation verification failed${
+        failures.length > 0 ? `: ${failures.join(", ")}` : "."
+      }`,
+    );
+  }
+  if (!Array.isArray(output.failures) || output.failures.length !== 0) {
+    throw new Error(
+      "Source-library reconciliation evidence is marked ok but contains failures.",
+    );
+  }
+  const fingerprint = output.idempotencyFingerprint;
+  if (
+    fingerprint === null ||
+    typeof fingerprint !== "object" ||
+    Array.isArray(fingerprint) ||
+    (fingerprint as Record<string, unknown>).algorithm !== "sha256" ||
+    !/^[a-f0-9]{64}$/u.test(String((fingerprint as Record<string, unknown>).value ?? ""))
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence is missing its bounded idempotency fingerprint.",
+    );
+  }
 }
 
 export function validateFullBrowserReport(
@@ -1345,6 +1467,10 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-web.log", "Web startup log"),
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
+    evidenceLink(
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+      "Source-library reconciliation evidence",
+    ),
     "",
     "## Browser duration review",
     "",
@@ -1448,6 +1574,19 @@ async function writeReleaseReport(
         file !== undefined,
     ),
   );
+  try {
+    await access(
+      resolve(
+        rootDir,
+        releaseEvidenceDir,
+        SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+      ),
+    );
+    availableEvidenceFiles.add(SOURCE_LIBRARY_RECONCILIATION_EVIDENCE);
+  } catch {
+    // The source-library release gate reports a missing artifact when the
+    // complete release decision requires it.
+  }
   try {
     await access(
       resolve(rootDir, releaseEvidenceDir, "browser-full/FINAL-REPORT.md"),

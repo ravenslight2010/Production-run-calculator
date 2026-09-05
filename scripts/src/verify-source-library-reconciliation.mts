@@ -12,9 +12,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
-const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
-const DEFAULT_FROM_DATE = "2026-08-26";
+export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
+export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
+export const DEFAULT_FROM_DATE = "2026-08-26";
 const SOURCE_LINK_FIELDS = [
   "doughRecipeName",
   "frontlineRecipeName",
@@ -525,7 +525,7 @@ export async function verifySourceLibraryReconciliation(
     ["aliases", aliases.counts.missing + aliases.counts.mismatches],
     ["profiles", profileSummary.stale + profileSummary.nonCanonical],
     ["pendingRuns", pendingSummary.stale + pendingSummary.nonCanonical],
-    ["stubs", stubState.counts.canonicalMissing + stubState.counts.canonicalMismatches + stubState.counts.unexpectedlyDeleted + stubState.counts.unexpectedlyRemaining],
+    ["protectedStubs", stubState.counts.canonicalMissing + stubState.counts.canonicalMismatches + stubState.counts.unexpectedlyDeleted + stubState.counts.unexpectedlyRemaining],
   ];
   const failures = failureCandidates.filter(([, count]) => count > 0).map(([check, count]) => ({ check, count }));
   const fingerprintInput = {
@@ -571,6 +571,16 @@ function argument(name: string, fallback?: string) {
   return value;
 }
 
+function outputPathArgument(): string | undefined {
+  const value = argument("--output");
+  return value ? path.resolve(process.cwd(), value) : undefined;
+}
+
+async function writeOutput(outputPath: string | undefined, output: unknown): Promise<void> {
+  if (!outputPath) return;
+  fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
+}
+
 function dateFromHealId(healId: string) {
   const match = healId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/);
   return match?.[1];
@@ -583,6 +593,7 @@ async function main() {
     : path.resolve(ROOT, DEFAULT_REPORT);
   const healId = argument("--heal-id", DEFAULT_HEAL_ID)!;
   const fromDate = argument("--from-date", dateFromHealId(healId) ?? DEFAULT_FROM_DATE)!;
+  const outputPath = outputPathArgument();
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
@@ -601,6 +612,7 @@ async function main() {
       fromDate,
     );
     await client.query("ROLLBACK");
+    await writeOutput(outputPath, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);
     if (!output.ok) process.exitCode = 1;
   } finally {
@@ -610,12 +622,26 @@ async function main() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
-    process.stdout.write(`${JSON.stringify({
+    const output = {
       verifier: "source-library-reconciliation",
       ok: false,
       failures: [{ check: "input-or-database", count: 1 }],
       error: error instanceof Error ? error.message : "Verification failed",
-    })}\n`);
+    };
+    const outputArgument = process.argv.indexOf("--output");
+    const outputPath =
+      outputArgument >= 0 && process.argv[outputArgument + 1]
+        ? path.resolve(process.cwd(), process.argv[outputArgument + 1])
+        : undefined;
+    if (outputPath) {
+      try {
+        fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
+      } catch {
+        // Preserve the original verifier error on stdout/stderr if evidence
+        // cannot be written; the release gate still fails closed.
+      }
+    }
+    process.stdout.write(`${JSON.stringify(output)}\n`);
     process.exitCode = 1;
   });
 }

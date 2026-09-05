@@ -14,6 +14,8 @@ import {
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
+  SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  SOURCE_LIBRARY_RECONCILIATION_STEP,
   PRODUCTION_AUDIT_TIMEOUT_MS,
   PRODUCTION_AUDIT_WARNING_MS,
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
@@ -26,6 +28,7 @@ import {
   resolveReleaseEvidenceDir,
   validateFullBrowserReport,
   validateReleaseReport,
+  validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
 
@@ -55,7 +58,33 @@ async function fixture(
     await mkdir(join(path, ".."), { recursive: true });
     await writeFile(
       path,
-      file === "release-check-report.md" ? report : "fixture evidence\n",
+      file === "release-check-report.md"
+        ? report
+        : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
+          ? `${JSON.stringify({
+              verifier: "source-library-reconciliation",
+              repairBoundary: { fromDate: "2026-08-26" },
+              report: {
+                sha256: "a".repeat(64),
+                formatVersion: 1,
+                automaticProposals: 0,
+                stubs: 0,
+              },
+              marker: {},
+              pools: {},
+              aliases: {},
+              profiles: {},
+              pendingRuns: {},
+              protectedHistory: { references: 0 },
+              stubs: {},
+              idempotencyFingerprint: {
+                algorithm: "sha256",
+                value: "b".repeat(64),
+              },
+              ok: true,
+              failures: [],
+            })}\n`
+          : "fixture evidence\n",
     );
   }
   return root;
@@ -80,6 +109,30 @@ async function run(): Promise<void> {
   assert.ok(
     releaseGateLabelsForMode("standard").includes("onboarding bypass guard"),
     "standard release checks must include the onboarding bypass guard",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("standard").includes(
+      "source-library reconciliation verification",
+    ),
+    "standard release checks must include source-library reconciliation verification",
+  );
+  assert.deepEqual(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.args.slice(0, 5),
+    [
+      "--filter",
+      "@workspace/scripts",
+      "exec",
+      "tsx",
+      "./src/verify-source-library-reconciliation.mts",
+    ],
+    "the release gate must invoke the read-only source-library verifier",
+  );
+  assert.ok(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--report") &&
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--heal-id") &&
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--from-date") &&
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--output"),
+    "the source-library gate must pass its report, heal boundary, and evidence output",
   );
   assert.equal(
     defaultReleaseEvidenceDir("standard"),
@@ -197,6 +250,57 @@ async function run(): Promise<void> {
       expectedMode: "standard",
       expectedLabels: validLabels,
     }),
+  );
+  assert.doesNotThrow(() =>
+    validateSourceLibraryReconciliationEvidence(
+      Buffer.from(
+        JSON.stringify({
+          verifier: "source-library-reconciliation",
+          idempotencyFingerprint: {
+            algorithm: "sha256",
+            value: "c".repeat(64),
+          },
+          ok: true,
+          failures: [],
+        }),
+      ),
+    ),
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify({
+            verifier: "source-library-reconciliation",
+            idempotencyFingerprint: {
+              algorithm: "sha256",
+              value: "c".repeat(64),
+            },
+            ok: false,
+            failures: [{ check: "pendingRuns", count: 2 }],
+          }),
+        ),
+      ),
+    /pendingRuns \(2\)/,
+    "a pending-reference failure must block retained release evidence and name the check",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify({
+            verifier: "source-library-reconciliation",
+            idempotencyFingerprint: {
+              algorithm: "sha256",
+              value: "c".repeat(64),
+            },
+            ok: false,
+            failures: [{ check: "protectedStubs", count: 1 }],
+          }),
+        ),
+      ),
+    /protectedStubs \(1\)/,
+    "a protected-stub failure must block retained release evidence and name the check",
   );
   const timedReport = formatReleaseReport(
     validLabels.map((label) => ({
@@ -360,6 +464,11 @@ async function run(): Promise<void> {
   assert.match(
     alertingReleaseReport,
     /`e2e\/slow\.spec\.ts`: \+40000ms \(\+66\.7%\)/,
+  );
+  assert.match(
+    alertingReleaseReport,
+    /Source-library reconciliation evidence: not produced/,
+    "release reports must link the retained source-library evidence",
   );
   assert.doesNotThrow(() =>
     validateReleaseReport(alertingReleaseReport, {
