@@ -50,7 +50,7 @@
  *   pnpm --filter @workspace/run-calculator exec playwright test screen-off-wake
  */
 
-import { test, expect, type Browser, type Page } from "@playwright/test";
+import { test, expect, type Browser, type Page, type Request } from "@playwright/test";
 import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
 import {
   AuthorizedBrowserFixtures,
@@ -1181,11 +1181,33 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // the test still proves hidden time was not replayed on wake.
       const nextVisibleIntervalAt = wakeAt + 2_100;
       await mockDateNow(page, nextVisibleIntervalAt);
+      const recoveryStatus = page.getByTestId("foreground-recovery-status");
+      const syncAckBeforeWake = await recoveryStatus.getAttribute("data-foreground-sync-ack");
+      const wakeClaimChannels: string[] = [];
+      const recordWakeClaim = (request: Request) => {
+        if (
+          request.method() !== "POST"
+          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+        ) return;
+        const claim = request.postDataJSON()?.claim as { channel?: string } | undefined;
+        if (
+          claim?.channel === "tray-produce"
+          || claim?.channel === "batch-consume"
+        ) {
+          wakeClaimChannels.push(claim.channel);
+        }
+      };
+      page.on("request", recordWakeClaim);
       await simulateScreenOff(page);
       await simulateWake(page);
-      await expect(page.getByTestId("foreground-recovery-status"))
-        .toContainText("Production state recovered.", { timeout: 10_000 });
-      await page.waitForTimeout(1_100);
+      await expect.poll(
+        () => recoveryStatus.getAttribute("data-foreground-sync-ack"),
+        { timeout: 10_000, message: "wake did not acknowledge shared sync after releasing its fence" },
+      ).not.toBe(syncAckBeforeWake);
+      await expect.poll(
+        () => [...new Set(wakeClaimChannels)].sort(),
+        { timeout: 10_000, message: "wake did not issue both dough claim requests" },
+      ).toEqual(["batch-consume", "tray-produce"]);
       await expect.poll(
         () => readDoughCounters(page),
         { timeout: 10_000, message: "post-wake dough cadence did not use the edited speed" },
@@ -1193,6 +1215,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         trays: 11,
         batches: 1.75,
       });
+      page.off("request", recordWakeClaim);
 
       const snapshot = await readLiveRunSnapshot(page);
       const values = snapshot.values;

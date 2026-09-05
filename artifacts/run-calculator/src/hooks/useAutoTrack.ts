@@ -215,6 +215,13 @@ interface AutoTrackParams {
    */
 
   autoTrackRebaseAfterBlock?: boolean;
+  /**
+   * Monotonic foreground sync acknowledgement. A wake can raise and release
+   * the boolean fence before React commits its intermediate blocked render;
+   * this acknowledgement retriggers the normal tick after the shared row is
+   * applied without bypassing the fence.
+   */
+  autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
   /** Stop sauce completion once dough hands off to the next unstarted run. */
   nextRunPrepActive?: boolean;
@@ -375,6 +382,7 @@ export function useAutoTrack({
   // Preserve the established behavior for callers that only provide the
   // original boolean barrier. Home opts out explicitly for unchanged pulls.
   autoTrackRebaseAfterBlock = true,
+  autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
   nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
@@ -499,7 +507,7 @@ export function useAutoTrack({
     return hopperProdNextDueMsRef;
   };
 
-  useEffect(() => {
+useEffect(() => {
     const adopt = (event: Event) => {
       const coordination = (event as CustomEvent<{
         runs?: Record<string, Partial<Record<AutoTrackChannel, {
@@ -990,6 +998,9 @@ export function useAutoTrack({
   // start one complete case interval from that transition.
   useEffect(() => {
     const wasActive = previousPackagingAutoTrackActiveRef.current;
+    // A foreground acknowledgement can arrive in the same render as the
+    // wake clock update. Use the current wall-clock sample for that handoff so
+    // a mocked or real wake is not evaluated against the pre-wake Date object.
     const nowMs = nowTime.getTime();
     // A phase transition caused by a normal one-second clock tick represents
     // the line physically becoming ready for packaging, so its first case
@@ -1065,6 +1076,10 @@ export function useAutoTrack({
   // turn hidden time into a new counter write.
   const previouslyBlockedRef = useRef(autoTrackBlocked);
   const foregroundRebaseRequestedRef = useRef(false);
+  const previousWakeAcknowledgementRef = useRef(autoTrackWakeAcknowledgement);
+  const wakeRebasePendingRef = useRef(false);
+  const wakeRebaseRunIdRef = useRef(runId);
+  const wakeRebaseAppliedRef = useRef(false);
   const rebaseAfterForegroundSync = useCallback(() => {
     const nowMs = nowTime.getTime();
     const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
@@ -1097,6 +1112,18 @@ export function useAutoTrack({
   ]);
 
   useEffect(() => {
+    if (wakeRebaseRunIdRef.current !== runId) {
+      wakeRebaseRunIdRef.current = runId;
+      wakeRebaseAppliedRef.current = false;
+    }
+    if (autoTrackWakeAcknowledgement !== previousWakeAcknowledgementRef.current) {
+      previousWakeAcknowledgementRef.current = autoTrackWakeAcknowledgement;
+      wakeRebasePendingRef.current = runStatus === "running" && Boolean(autoTrackSuggestion);
+    }
+    if (runStatus !== "running") {
+      wakeRebasePendingRef.current = false;
+    }
+    let rebasedForForegroundSync = false;
     if (autoTrackBlocked) {
       if (autoTrackRebaseAfterBlock) {
         foregroundRebaseRequestedRef.current = true;
@@ -1105,12 +1132,37 @@ export function useAutoTrack({
     } else if (previouslyBlockedRef.current && foregroundRebaseRequestedRef.current) {
       rebaseAfterForegroundSync();
       foregroundRebaseRequestedRef.current = false;
+      rebasedForForegroundSync = true;
+    }
+    // The wake acknowledgement can be committed in the same React render that
+    // releases the boolean fence, so the hook may never observe a blocked
+    // render. Rebase the ordinary timers from the acknowledged wake instant in
+    // that case; this prevents hidden time from becoming an automatic claim.
+    if (
+      wakeRebasePendingRef.current
+      && !autoTrackBlocked
+      && !autoTrackBlockedRef?.current
+    ) {
+      if (!rebasedForForegroundSync && !wakeRebaseAppliedRef.current) {
+        rearmCaseTimer(nowTime.getTime());
+        rearmDoughTimers(nowTime.getTime());
+        wakeRebaseAppliedRef.current = true;
+      }
+      wakeRebasePendingRef.current = false;
     }
     previouslyBlockedRef.current = autoTrackBlocked;
   }, [
     autoTrackBlocked,
     autoTrackRebaseAfterBlock,
+    autoTrackWakeAcknowledgement,
+    autoTrackBlockedRef,
+    autoTrackSuggestion,
+    nowTime,
     rebaseAfterForegroundSync,
+    rearmCaseTimer,
+    rearmDoughTimers,
+    runId,
+    runStatus,
     resetBookkeeping,
   ]);
 
@@ -1265,6 +1317,7 @@ export function useAutoTrack({
     autoTrackBlocked,
     autoTrackBlockedRef,
     autoTrackProgress,
+    autoTrackWakeAcknowledgement,
     calc,
     claimAutoTrackEvent,
     commitAutomatic,
@@ -1623,7 +1676,13 @@ export function useAutoTrack({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoTrackBlocked, autoTrackBlockedRef, coordinationDelayed, nowTime]);
+  }, [
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackWakeAcknowledgement,
+    coordinationDelayed,
+    nowTime,
+  ]);
 
   return {
     autoTrackProgress,

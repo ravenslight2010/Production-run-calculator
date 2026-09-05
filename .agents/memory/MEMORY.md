@@ -14,8 +14,9 @@
 - [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
-- [Profile/autosave clobber guards](autosave-edit-attribution.md) — save only attributed data; out-of-band profile updates reload open forms.
+- [Profile/autosave clobber guards](autosave-edit-attribution.md) + [Open form clobbers profiles](open-form-profile-clobber.md) — save only attributed data and reload open forms after out-of-band profile rewrites.
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
+- [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
@@ -31,7 +32,7 @@
 - [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.
 - [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) + [home.tsx render TDZ](home-render-tdz.md) — `<Comp<T>/>` white-screens Vite dev (drop the type arg); render-time helpers must not read refs declared later in the file — only real-browser e2e catches it.
 - [Fill-missing assistant](fill-missing-assistant.md) + [shared lib](fill-missing-shared-lib.md) — source priority learned→profile→spec→default→AI; never auto-apply; record must carry subTab; pure logic in @workspace/fill-missing.
-- [Web test harness](web-test-harness.md) — web Vitest runs serialized with generous timeouts; preserve that configuration to avoid contention flakes.
+- [Browser test reliability](runtest-expo-web-quirks.md) + [Web test harness](web-test-harness.md) — use fallbacks for browser flakes and keep web Vitest serialized with generous timeouts.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
 - [AI merge suggestions + learned aliases](merge-suggest.md) — AI dedupe assist + factory-wide learned merge memory; cost-guard must sanitize body (blank padding bypasses count cap); web+mobile parity.
 - [Spec-sheet Excel importer](spec-import.md) + [scale harness](spec-import-scale-harness.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool; run BOTH real-AI harnesses after model changes; prompt cells wrap under PROMPT_MAX_CELL_CHARS.
@@ -44,7 +45,7 @@
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Production-line canvas](production-line-canvas-reference.md) — physical line is right-to-left, App 4 feeds the two-wide freezer, then wrapper/packaging; tray and lane-width rules are captured.
 - [Merge deny, history, and tombstones](merge-deny-and-change-history.md) + [merge-tombstones](merge-tombstones.md) — denied pairs, undo history, tombstones, and un-delete stamps preserve safe cross-device master-data merges.
-- [Browser test reliability](runtest-expo-web-quirks.md) + [phone overrides](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — use fallback when runTest flakes; reapply controlled values after reload; clean stray users.
+- [Phone/browser test reliability](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — reapply controlled values after reload, use fallbacks for flakes, and clean stray users.
 - [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — one fail-safe grounding path; keyed nudges are deduped while all-staff Q&A stays separate from manager-only optimize.
 - [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
 - [Voice AI](voice-ask-input.md) + [voice-ask-output.md] + [voice-commands.md) — speech controls hide when unsupported; commands reuse existing handlers and preserve web/mobile parity.
@@ -98,7 +99,6 @@
 - [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Learned ingredient batch weights](ingredient-batch-weights.md) — typed batch lbs follow the ingredient (server ci-store); learn only UI-visible fields, serialize saves, sauce branch checks rows lbs>0 not array truthiness.
 - [Mix applicator slots](mix-applicator-slots.md) — slot TYPE is generic "Mix"/"cheese", name lives in the CheeseRecipeName link; allowlist "mix"/"cheese" in stray filters; migration used targeted profile writes, not saveProfile.
-- [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; out-of-band profile rewrites (spec import) must reload the open form; identity-change w/o profile resets to defaults.
 - [Local→server name consolidation](local-to-server-name-consolidation.md) — one-time migration of legacy local name lists into server pools: reconcile leftovers (never drop), tombstone wipes, stamp re-pointed runs.
 - [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere; import slots MANDATORY when pep rows exist (before pep=1/2, after=3/4); prompt changes bump SPEC_PARSE_VERSION.
 - [Name-first dough/sauce relink](spec-import-name-first-relink.md) — spec import assigns the dough/sauce NAME pre-recipe; later recipe import relinks by loose name; ghost guard + registry gotchas for tests.
@@ -155,5 +155,4 @@
 - [Inline skill path references](inline-skill-path-references.md) — validate only whitespace-free file-like inline paths; resolve skill resources locally and explicit project prefixes from the repository root.
 - [Dough correction browser fixture](dough-correction-browser-fixture.md) — live-run tabs can rehydrate or mount lazily; assert active-tab UI and inspect actual `/api/sync/today` payloads.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
-- [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
-- [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
+- [Wake sync claim fence](wake-sync-claim-fence.md) — monotonic wake acknowledgment fences stale claims without deadlocking same-tick dough claim requests.

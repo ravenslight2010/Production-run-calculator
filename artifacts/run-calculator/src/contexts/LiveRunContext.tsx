@@ -185,6 +185,7 @@ export interface LiveRunProviderProps {
   autoTrackBlocked?: boolean;
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
   autoTrackRebaseAfterBlock?: boolean;
+  autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
 }
 
@@ -218,9 +219,10 @@ export function LiveRunProvider({
   autoTrackBlocked = false,
   autoTrackBlockedRef,
   autoTrackRebaseAfterBlock = false,
+  autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
 }: LiveRunProviderProps) {
-  const nowTime = useClock(runStatus);
+  const nowTime = useClock(runStatus, autoTrackWakeAcknowledgement);
   // A selected pending run must never inherit Packaging, Sauce, or Frontline
   // applicator completion from the previously viewed/active run while
   // react-hook-form settles a run switch. Staged Dough values remain intact
@@ -645,6 +647,7 @@ export function LiveRunProvider({
       autoTrackBlocked,
       autoTrackBlockedRef,
       autoTrackRebaseAfterBlock,
+      autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
       nextRunPrepActive,
     });

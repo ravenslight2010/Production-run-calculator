@@ -7599,6 +7599,7 @@ export default function Home() {
   const lastSyncedHistorySigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
   const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
+  const [foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement] = useState(0);
   const [foregroundRecoveryNotice, setForegroundRecoveryNotice] = useState<{
     kind: "recovering" | "failed" | "outcome";
     message: string;
@@ -7637,15 +7638,20 @@ export default function Home() {
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
       .then(async (): Promise<AutoTrackEventResult> => {
-    const waitStartedAt = typeof performance === "undefined" ? 0 : performance.now();
-    while (
-      navigator.onLine
-      && (foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current)
-      && (typeof performance === "undefined" || performance.now() - waitStartedAt < 2_000)
-    ) {
+    const sharedSyncSettled = () =>
+      foregroundSyncAcknowledgement > 1 && !foregroundSyncBarrierRef.current;
+    while (navigator.onLine) {
+      if (
+        !foregroundSyncBarrierRef.current
+        && (pushAcknowledgedRef.current || sharedSyncSettled())
+      ) break;
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
-    if (!navigator.onLine || foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current) {
+    if (
+      !navigator.onLine
+      || foregroundSyncBarrierRef.current
+      || (!pushAcknowledgedRef.current && !sharedSyncSettled())
+    ) {
       throw new Error("Automatic tracking is waiting for shared sync");
     }
     const currentBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
@@ -8915,22 +8921,23 @@ export default function Home() {
                } else {
                  showForegroundRecoveryNotice("outcome", "Production state recovered.");
                }
-              foregroundSyncBarrierRef.current = false;
-              // No-op if this wake did not adopt lifecycle state. If it did,
-              // the hook sees the true→false transition and re-baselines safely.
-              if (!cancelled) {
-                setAutoTrackBlocked(false);
-                const shouldPush = foregroundPushPendingRef.current;
-                foregroundPushPendingRef.current = false;
-                if (shouldPush) {
-                   // The canceled pre-wake write must be replayed before an
-                   // automatic claim can use the pulled baseline. Keep the
-                   // claim queue behind that replay's acknowledgment.
-                   pushAcknowledgedRef.current = false;
-                  requestAnimationFrame(() => {
-                    if (!cancelled) schedulePush(dayStateRef.current, 0);
-                  });
-                }
+             foregroundSyncBarrierRef.current = false;
+             // No-op if this wake did not adopt lifecycle state. If it did,
+             // the hook sees the true→false transition and re-baselines safely.
+             if (!cancelled) {
+               setForegroundSyncAcknowledgement((value) => value + 1);
+               setAutoTrackBlocked(false);
+               const shouldPush = foregroundPushPendingRef.current;
+               foregroundPushPendingRef.current = false;
+               if (shouldPush) {
+                 // The canceled pre-wake write must be replayed before an
+                 // automatic claim can use the pulled baseline. Keep the
+                 // claim queue behind that replay's acknowledgment.
+                 pushAcknowledgedRef.current = false;
+                 requestAnimationFrame(() => {
+                   if (!cancelled) schedulePush(dayStateRef.current, 0);
+                 });
+               }
               } else {
                 // The first Strict Mode pass can be cancelled after doing the
                 // work but before its state updates. Do not strand the
@@ -16911,6 +16918,7 @@ export default function Home() {
                 role="status"
                 aria-live="polite"
                 data-testid="foreground-recovery-status"
+                data-foreground-sync-ack={foregroundSyncAcknowledgement}
               >
                 <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
                 <span className="min-w-0 flex-1">{foregroundRecoveryNotice.message}</span>
@@ -19512,6 +19520,7 @@ export default function Home() {
         autoTrackBlocked={autoTrackBlocked}
         autoTrackBlockedRef={foregroundSyncBarrierRef}
         autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
+        autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
