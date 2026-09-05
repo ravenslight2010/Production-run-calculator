@@ -1,0 +1,81 @@
+{
+  "formatVersion": 1,
+  "sourceHash": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+  "model": "gemini-2.5-flash",
+  "operations": {
+    "parse-spec-sheet": {
+      "cases": 76,
+      "materialCases": 76,
+      "nonMaterialCases": 0,
+      "providerCalls": 1,
+      "reviewerFailures": 76,
+      "duplicateWarnings": 0,
+      "falseWarnings": 0,
+      "falseRejects": 0,
+      "noOpVerdicts": 76,
+      "latencyMs": 20732,
+      "inputTokens": null,
+      "outputTokens": null,
+      "failureClass": "SyntaxError"
+    },
+    "match-import": {
+      "cases": 22,
+      "materialCases": 22,
+      "nonMaterialCases": 0,
+      "providerCalls": 1,
+      "reviewerFailures": 22,
+      "duplicateWarnings": 0,
+      "falseWarnings": 0,
+      "falseRejects": 0,
+      "noOpVerdicts": 22,
+      "latencyMs": 14851,
+      "inputTokens": null,
+      "outputTokens": null,
+      "failureClass": "SyntaxError"
+    },
+    "match-premix": {
+      "cases": 78,
+      "materialCases": 0,
+      "nonMaterialCases": 78,
+      "providerCalls": 1,
+      "reviewerFailures": 78,
+      "duplicateWarnings": 0,
+      "falseWarnings": 0,
+      "falseRejects": 0,
+      "noOpVerdicts": 78,
+      "latencyMs": 24169,
+      "inputTokens": null,
+      "outputTokens": null,
+      "failureClass": "SyntaxError"
+    },
+    "suggest-merges": {
+      "cases": 3,
+      "materialCases": 3,
+      "nonMaterialCases": 0,
+      "providerCalls": 1,
+      "reviewerFailures": 0,
+      "duplicateWarnings": 3,
+      "falseWarnings": 0,
+      "falseRejects": 0,
+      "noOpVerdicts": 0,
+      "latencyMs": 9619,
+      "inputTokens": null,
+      "outputTokens": null
+    },
+    "fill-missing": {
+      "cases": 125,
+      "materialCases": 0,
+      "nonMaterialCases": 125,
+      "providerCalls": 1,
+      "reviewerFailures": 125,
+      "duplicateWarnings": 0,
+      "falseWarnings": 0,
+      "falseRejects": 0,
+      "noOpVerdicts": 125,
+      "latencyMs": 18479,
+      "inputTokens": null,
+      "outputTokens": null,
+      "failureClass": "SyntaxError"
+    }
+  }
+}

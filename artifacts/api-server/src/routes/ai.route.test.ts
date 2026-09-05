@@ -918,9 +918,9 @@ describe("POST /ai/optimize — happy path glue (build -> call -> sanitize)", ()
       generatedAt: number;
     };
 
-    // Two model calls: the recommendations pass, then the advisory reviewer
-    // ("second set of eyes") pass over the sanitized recommendations.
-    expect(mock.calls).toBe(2);
+    // The paid advisory reviewer was retired after it demonstrated no unique
+    // material catches in the labeled retained corpus.
+    expect(mock.calls).toBe(1);
     // The first (recommendations) call got the built prompt (system + user that
     // includes the run id), proving build -> call wiring.
     expect(mock.firstMessages?.[0]?.role).toBe("system");
