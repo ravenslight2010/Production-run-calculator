@@ -139,3 +139,13 @@ Each entry includes:
 **Fix:** Regenerated the file with `pnpm --filter @workspace/scripts run audit:source-heal-plan` (file-only generator, no DB needed). Verified `test:source-heal-plan --check` passes under both Node 22 and Node 24.
 
 **Context:** Needed so the Replit merge (PR #17) can pass the required Typecheck check. If Replit regenerates this file in a different environment, keep the committed output in sync with the generator.
+
+## 2026-09-05 — Fix flaky AI cache telemetry race in API tests
+
+**File(s):** `artifacts/api-server/src/lib/observability.ts`
+
+**Problem:** The `API tests (Postgres)` required check failed in `aiResultCache.integration.test.ts` ("keeps cache requests available and local recurrence visible when shared diagnostics reject") — one `cache_maintenance_events` row (id 1, scope live) persisted after the test's diagnostics trigger should have rejected every write. `prune` in `aiResultCache.ts` records cache-maintenance diagnostics fire-and-forget (`void recordCacheMaintenance(...)`), so an event committed by the previous test can still land after the next test's `beforeEach` clear, racing the empty-table assertion.
+
+**Fix:** Track in-flight shared-cache-maintenance failure writes in `observability.ts` (`pendingSharedCacheMaintenance` + `trackPendingSharedCacheMaintenance`) and have `clearCacheMaintenanceDiagnosticsForTests()` await them (`Promise.allSettled`) before deleting the shared events table. Production behavior is unchanged — the cache path is still fire-and-forget.
+
+**Context:** Needed so the Replit merge (PR #17) can pass the required API tests check. Also removes a latent flake for every test that asserts on the shared events table.
