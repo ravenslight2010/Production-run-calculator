@@ -398,9 +398,12 @@ export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
 };
 
 const sourceLibraryReport =
-  cliOptionValue("--source-library-report") ??
-  process.env.SOURCE_LIBRARY_RECONCILIATION_REPORT ??
-  DEFAULT_REPORT;
+  resolve(
+    rootDir,
+    cliOptionValue("--source-library-report") ??
+      process.env.SOURCE_LIBRARY_RECONCILIATION_REPORT ??
+      DEFAULT_REPORT,
+  );
 const sourceLibraryHealId =
   cliOptionValue("--source-library-heal-id") ??
   process.env.SOURCE_LIBRARY_RECONCILIATION_HEAL_ID ??
