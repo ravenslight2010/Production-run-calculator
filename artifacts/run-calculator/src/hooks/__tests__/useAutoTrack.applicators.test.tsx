@@ -36,6 +36,76 @@ function values(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAutoTrack applicator batches", () => {
+  it("serializes tray and batch claims that become due in the same tick", async () => {
+    const { form: fakeForm, values: stored } = form();
+    stored.traysOnLine = 10;
+    stored.batchesReady = 2;
+    const resolvers: Array<{
+      event: any;
+      resolve: (result: any) => void;
+    }> = [];
+    const claim = vi.fn((event: any) => new Promise((resolve) => {
+      resolvers.push({ event, resolve });
+    }));
+
+    renderHook(() => useAutoTrack({
+      runId: "same-tick-dough",
+      runGeneration: "1",
+      runStatus: "running",
+      nowTime: new Date(1_700_000_000_000),
+      elapsedBatchSec: 1,
+      calc: {
+        ...calc,
+        ppm: 30,
+        perTray: 60,
+        perBatch: 120,
+        traysNeeded: 5,
+        batchesNeeded: 2,
+      },
+      v: values({ traysOnLine: 10, batchesReady: 2 }),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    }));
+
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+    expect(resolvers[0].event.channel).toBe("tray-consume");
+    // The batch event is queued behind the tray acknowledgement rather than
+    // racing it with the same stale run-value snapshot.
+    expect(claim).toHaveBeenCalledTimes(1);
+
+    const trayEvent = resolvers[0].event;
+    resolvers[0].resolve({
+      outcome: "accepted",
+      state: {
+        generation: trayEvent.generation,
+        sequence: trayEvent.sequence,
+        nextDueAt: trayEvent.nextDueAt,
+      },
+      values: { traysOnLine: 9 },
+    });
+
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(2));
+    expect(resolvers[1].event.channel).toBe("batch-consume");
+    expect(resolvers[1].event.mutations).toEqual([
+      { field: "batchesReady", from: 2, to: 1.75 },
+    ]);
+
+    const batchEvent = resolvers[1].event;
+    resolvers[1].resolve({
+      outcome: "accepted",
+      state: {
+        generation: batchEvent.generation,
+        sequence: batchEvent.sequence,
+        nextDueAt: batchEvent.nextDueAt,
+      },
+      values: { batchesReady: 1.75 },
+    });
+    await waitFor(() => {
+      expect(stored.traysOnLine).toBe(9);
+      expect(stored.batchesReady).toBe(1.75);
+    });
+  });
+
   it("claims an eligible app at its own fractional cadence and excludes mix rows", async () => {
     const { form: fakeForm, values: stored } = form();
     const claim = vi.fn(async (event: any) => ({

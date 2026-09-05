@@ -467,6 +467,10 @@ export function useAutoTrack({
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
+  // Claims for different channels can become due in the same render. Keep
+  // them FIFO so the later claim is built from the first acknowledgement's
+  // form values instead of racing the shared run-value stamp.
+  const coordinationClaimQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [coordinationPendingCount, setCoordinationPendingCount] = useState(0);
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
   // Net-elapsed seconds (not a wall-clock display due time) for sauce claims.
@@ -715,84 +719,110 @@ export function useAutoTrack({
     }
     if (coordinationPendingRef.current.has(channel)) return;
 
-    const sequence = (coordinationSequenceRef.current[channel] ?? 0) + 1;
-    const generation = coordinationIdentity;
     const claimIdentity = coordinationIdentity;
-    const eventId = coordinationRetryEventRef.current[channel]
-      ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
     const correctionMutation = mutations.find((mutation) =>
       mutation.field === "sauceBarrelCorrectionGeneration" || mutation.field.endsWith("BatchCorrectionGeneration"),
     );
-    const correctionGeneration = correctionMutation?.from;
-    coordinationRetryEventRef.current[channel] = eventId;
     coordinationPendingRef.current.add(channel);
     setCoordinationPendingCount(coordinationPendingRef.current.size);
-    setCoordinationDelayed(false);
-    void claimAutoTrackEvent({
-      version: 1,
-      runId,
-      channel,
-      generation,
-      sequence,
-      eventId,
-      dueAt,
-      nextDueAt,
-      // Home replaces this placeholder with its last adopted canonical stamp.
-      baseUpdatedAt: 0,
-      correctionGeneration,
-      mutations,
-    }).then((result) => {
-      // The hook shares one form across selected runs. A response from the
-      // previously selected run must not write into the new run or advance its
-      // coordination bookkeeping.
-      if (coordinationIdentityRef.current !== claimIdentity) return;
-      // A manual correction can happen while this request is in flight. Its
-      // incremented generation is the local authority until that snapshot
-      // reaches the server, so never let the older acknowledgement restore the
-      // pre-correction made count or net-time anchor.
-      if (
-        correctionMutation
-        && Number(form.getValues(correctionMutation.field as keyof FormValues)) !== correctionMutation.from
-      ) {
-        coordinationRetryEventRef.current[channel] = undefined;
-        return;
-      }
-      // A concurrent channel or peer may have advanced the shared run-value
-      // stamp after this claim was queued. Treat that canonical conflict like
-      // a failed claim so the catch path retries from the newly adopted values
-      // instead of accepting the unchanged server value and waiting for the
-      // next production interval.
-      if (result.outcome === "conflict") {
-        throw new Error("Automatic tracking claim conflicted with a newer value");
-      }
-      coordinationSequenceRef.current[channel] = Math.max(
-        coordinationSequenceRef.current[channel] ?? 0,
-        result.state.sequence,
-      );
-      const dueRef = dueRefForChannel(channel);
-      dueRef.current = result.state.nextDueAt;
-      coordinationRetryEventRef.current[channel] = undefined;
-      applyValues(result.values);
-    }).catch(() => {
-      if (coordinationIdentityRef.current !== claimIdentity) return;
-      const dueRef = dueRefForChannel(channel);
-      dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
-      // A failed coordinated case claim did not actually apply the mutation.
-      // Re-baseline so the next tick retries the same absolute catch-up rather
-      // than mistaking the unchanged form value for an external reset.
-      if (channel === "case") {
-        lastExpectedCasesRef.current = -1;
-        formResetSkippedRef.current = false;
-        caseClaimRetryRef.current = true;
-      }
-      setCoordinationDelayed(true);
-    }).finally(() => {
-      // A new run may already have an in-flight claim on this same channel.
-      // Only the owner that inserted the pending marker may remove it.
-      if (coordinationIdentityRef.current !== claimIdentity) return;
-      coordinationPendingRef.current.delete(channel);
-      setCoordinationPendingCount(coordinationPendingRef.current.size);
-    });
+    const queuedClaim = coordinationClaimQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        // A new run may have been selected while this claim waited behind an
+        // older channel. resetBookkeeping() clears the old pending marker; do
+        // not send the stale queued event into the new run.
+        if (coordinationIdentityRef.current !== claimIdentity) return;
+
+        const sequence = (coordinationSequenceRef.current[channel] ?? 0) + 1;
+        const generation = claimIdentity;
+        const eventId = coordinationRetryEventRef.current[channel]
+          ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
+        // Rebase simple counter mutations at send time. A same-tick tray
+        // acknowledgement can update the form before the queued batch claim
+        // starts; sending the original `from` would make that second claim
+        // stale even though it touches a different dough counter.
+        const claimMutations = correctionMutation
+          ? mutations
+          : mutations.map((mutation) => {
+              const from = Number(form.getValues(mutation.field as keyof FormValues)) || 0;
+              const delta = mutation.to - mutation.from;
+              return {
+                ...mutation,
+                from,
+                to: Math.max(0, Math.round((from + delta) * 100) / 100),
+              };
+            });
+        const correctionGeneration = correctionMutation?.from;
+        coordinationRetryEventRef.current[channel] = eventId;
+        setCoordinationDelayed(false);
+        try {
+          const result = await claimAutoTrackEvent({
+            version: 1,
+            runId,
+            channel,
+            generation,
+            sequence,
+            eventId,
+            dueAt,
+            nextDueAt,
+            // Home replaces this placeholder with its last adopted canonical stamp.
+            baseUpdatedAt: 0,
+            correctionGeneration,
+            mutations: claimMutations,
+          });
+          // The hook shares one form across selected runs. A response from the
+          // previously selected run must not write into the new run or advance
+          // its coordination bookkeeping.
+          if (coordinationIdentityRef.current !== claimIdentity) return;
+          // A manual correction can happen while this request is in flight. Its
+          // incremented generation is the local authority until that snapshot
+          // reaches the server, so never let the older acknowledgement restore
+          // the pre-correction made count or net-time anchor.
+          if (
+            correctionMutation
+            && Number(form.getValues(correctionMutation.field as keyof FormValues)) !== correctionMutation.from
+          ) {
+            coordinationRetryEventRef.current[channel] = undefined;
+            return;
+          }
+          // A concurrent channel or peer may have advanced the shared run-value
+          // stamp after this claim was queued. Treat that canonical conflict like
+          // a failed claim so the catch path retries from the newly adopted values
+          // instead of accepting the unchanged server value and waiting for the
+          // next production interval.
+          if (result.outcome === "conflict") {
+            throw new Error("Automatic tracking claim conflicted with a newer value");
+          }
+          coordinationSequenceRef.current[channel] = Math.max(
+            coordinationSequenceRef.current[channel] ?? 0,
+            result.state.sequence,
+          );
+          const dueRef = dueRefForChannel(channel);
+          dueRef.current = result.state.nextDueAt;
+          coordinationRetryEventRef.current[channel] = undefined;
+          applyValues(result.values);
+        } catch {
+          if (coordinationIdentityRef.current !== claimIdentity) return;
+          const dueRef = dueRefForChannel(channel);
+          dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
+          // A failed coordinated case claim did not actually apply the mutation.
+          // Re-baseline so the next tick retries the same absolute catch-up
+          // rather than mistaking the unchanged form value for an external reset.
+          if (channel === "case") {
+            lastExpectedCasesRef.current = -1;
+            formResetSkippedRef.current = false;
+            caseClaimRetryRef.current = true;
+          }
+          setCoordinationDelayed(true);
+        } finally {
+          // A new run may already have an in-flight claim on this same channel.
+          // Only the owner that inserted the pending marker may remove it.
+          if (coordinationIdentityRef.current !== claimIdentity) return;
+          coordinationPendingRef.current.delete(channel);
+          setCoordinationPendingCount(coordinationPendingRef.current.size);
+        }
+      });
+    coordinationClaimQueueRef.current = queuedClaim.then(() => {}, () => {});
   }, [
     claimAutoTrackEvent,
     coordinationIdentity,

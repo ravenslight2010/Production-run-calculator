@@ -1181,6 +1181,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // the test still proves hidden time was not replayed on wake.
       const nextVisibleIntervalAt = wakeAt + 2_100;
       await mockDateNow(page, nextVisibleIntervalAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Production state recovered.", { timeout: 10_000 });
       await page.waitForTimeout(1_100);
       await expect.poll(
         () => readDoughCounters(page),
