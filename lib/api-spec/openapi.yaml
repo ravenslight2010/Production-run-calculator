@@ -4483,6 +4483,21 @@ components:
       enum: [deterministic, enriched, unavailable]
       description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
 
+    AiModelStatus:
+      type: string
+      enum: [completed, provider-unavailable, rate-limited, malformed]
+      description: Optional provider outcome detail for an advisory response
+
+    SuggestionMetadata:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
+
     AutoTrackMutation:
       type: object
       required: [field, from, to]
@@ -5143,6 +5158,7 @@ components:
       required:
         - workbookText
         - generatedAt
+        - decision
       properties:
         workbookText:
           type: string
@@ -5151,6 +5167,15 @@ components:
           type: number
         note:
           type: string
+        decision:
+          type: string
+          enum: [suggestion]
+        aiGenerated:
+          type: boolean
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     PhotoGuess:
       type: object
@@ -7972,6 +7997,7 @@ components:
       required:
         - suggestions
         - generatedAt
+        - decision
       properties:
         suggestions:
           type: array
@@ -7982,6 +8008,15 @@ components:
         note:
           type: string
           description: Optional message when no suggestions could be made
+        decision:
+          type: string
+          enum: [suggestion]
+        aiGenerated:
+          type: boolean
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     MatchImportCandidateFlavor:
       type: object
@@ -10195,6 +10230,7 @@ components:
         - generatedAt
         - aiGenerated
         - aiStatus
+        - decision
       properties:
         suggestions:
           type: array
@@ -10211,6 +10247,11 @@ components:
         note:
           type: string
           description: Optional brief overall comment from the model
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     SpecImportAlias:
       type: object
@@ -10504,6 +10545,7 @@ components:
         - profiles
         - recipes
         - generatedAt
+        - decision
       properties:
         profiles:
           type: array
@@ -10526,6 +10568,15 @@ components:
             $ref: "#/components/schemas/SpecImportWarning"
         generatedAt:
           type: number
+        decision:
+          type: string
+          enum: [suggestion]
+        aiGenerated:
+          type: boolean
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     SpecImportWarning:
       type: object
@@ -10587,6 +10638,7 @@ components:
         - generatedAt
         - aiGenerated
         - aiStatus
+        - decision
       properties:
         brandMatches:
           type: array
@@ -10621,6 +10673,11 @@ components:
         note:
           type: string
           description: Optional message when no matches could be made
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     MatchPremixInput:
       type: object
@@ -10673,6 +10730,7 @@ components:
         - generatedAt
         - aiGenerated
         - aiStatus
+        - decision
       properties:
         matches:
           type: array
@@ -10688,6 +10746,11 @@ components:
         note:
           type: string
           description: Optional message when no matches could be made
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     FieldCheckObservationBatch:
       type: object

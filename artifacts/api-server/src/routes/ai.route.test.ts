@@ -804,6 +804,56 @@ describe("AI import and matching response contracts", () => {
     expect(fallbackBody.aiStatus).toBe("unavailable");
   });
 
+  it("keeps request-local deterministic matches out of cached unresolved suggestions", async () => {
+    mock.cachedValue = {
+      brandMatches: [{ candidate: "Unknown Brand", match: "Acme" }],
+      flavorMatches: [],
+      ingredientMatches: [],
+      appTypeMatches: [],
+      pepTypeMatches: [],
+      aiStatus: "enriched",
+    };
+
+    const first = AiMatchImportResponse.parse(
+      await (
+        await postMatchImport(
+          makeMatchImportBody({
+            brands: ["Acme", "Beta"],
+            unmatchedBrands: ["Acme", "Unknown Brand"],
+            unmatchedFlavors: [],
+            unmatchedIngredients: [],
+            unmatchedAppTypes: [],
+            unmatchedPepTypes: [],
+          }),
+        )
+      ).json(),
+    );
+    const second = AiMatchImportResponse.parse(
+      await (
+        await postMatchImport(
+          makeMatchImportBody({
+            brands: ["Acme", "Beta"],
+            unmatchedBrands: ["Beta", "Unknown Brand"],
+            unmatchedFlavors: [],
+            unmatchedIngredients: [],
+            unmatchedAppTypes: [],
+            unmatchedPepTypes: [],
+          }),
+        )
+      ).json(),
+    );
+
+    expect(first.brandMatches.map((match) => match.candidate)).toEqual([
+      "Acme",
+      "Unknown Brand",
+    ]);
+    expect(second.brandMatches.map((match) => match.candidate)).toEqual([
+      "Beta",
+      "Unknown Brand",
+    ]);
+    expect(mock.calls).toBe(0);
+  });
+
   it("parses deterministic and enriched premix matches with shared statuses", async () => {
     const deterministic = await postMatchPremix(
       makeMatchPremixBody({ unmatchedNames: ["Acme Pepperoni Mix"] }),

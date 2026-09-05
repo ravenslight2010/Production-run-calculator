@@ -157,6 +157,7 @@ describe("generated Zod schema runtime contracts", () => {
         generatedAt: 1_750_000_000_000,
         aiGenerated: aiStatus === "enriched",
         aiStatus,
+        decision: "suggestion",
       });
       expect(matchImport.aiStatus).toBe(aiStatus);
 
@@ -165,6 +166,7 @@ describe("generated Zod schema runtime contracts", () => {
         generatedAt: 1_750_000_000_000,
         aiGenerated: aiStatus === "enriched",
         aiStatus,
+        decision: "suggestion",
       });
       expect(matchPremix.aiStatus).toBe(aiStatus);
 
@@ -173,6 +175,7 @@ describe("generated Zod schema runtime contracts", () => {
         generatedAt: 1_750_000_000_000,
         aiGenerated: aiStatus === "enriched",
         aiStatus,
+        decision: "suggestion",
       });
       expect(suggestMerges.aiStatus).toBe(aiStatus);
     }

@@ -28,6 +28,15 @@ import {
 import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
+import {
+  extractReviewedDocument,
+  specImagesAdapter,
+  workbookTextAdapter,
+} from "../lib/reviewedDocumentExtraction";
+import {
+  resolveUnresolvedData,
+  resolveUnresolvedDataWithEnrichment,
+} from "../lib/unresolvedDataResolution";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { aiCostLimit, chargeAiCost } from "../middlewares/costLimitMiddleware";
@@ -62,7 +71,7 @@ import {
   sanitizeMatchPremix,
   validateMatchPremixBody,
 } from "./aiMatchPremix";
-import { recipeTargets } from "@workspace/spec-import";
+import { recipeTargets, type ParsedSpecImport } from "@workspace/spec-import";
 import {
   buildSuggestMergesPrompt,
   buildKnownPairsNote,
@@ -1916,53 +1925,69 @@ router.post(
       correctionDomains: ["brand", "flavor", "die", "item", "ingredient", "recipe"],
     });
 
-    // A malformed reply here is user-visible data loss (the fill-missing panel
-    // shows nothing to apply), so retry once before the empty fallback.
-    const result = await fetchModelJsonWithRetry({
-      label: "ai-fill-missing",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("cheap"),
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "AI provider error");
-        res.status(failure.status).json({ error: failure.error });
-        return;
-      }
-      res.json({ suggestions: [], generatedAt: Date.now() });
-      return;
-    }
-    const raw: unknown = result.raw;
-
+    // Source-priority resolution already happened in the client. Declare each
+    // validated requested field unresolved explicitly so this retained route
+    // still uses the shared two-phase status/orchestration boundary.
     const requested: RequestedField[] = validation.data.fields.map((f) => ({
       key: f.key,
       kind: f.kind,
       options: f.options,
     }));
-    const { suggestions, note } = sanitizeFillMissingSuggestions(raw, requested);
-
+    const resolution = await resolveUnresolvedData({
+      label: "ai-fill-missing",
+      log: req.log,
+      input: requested,
+      resolveDeterministically: (fields) => ({ resolved: undefined, unresolved: fields }),
+      hasUnresolved: (fields) => fields.length > 0,
+      buildModelInput: (fields) => ({ fields, system, userPrompt }),
+      call: async ({ system: promptSystem, userPrompt: promptUser }) => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("cheap"),
+          max_completion_tokens: 4096,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: promptSystem },
+            { role: "user", content: promptUser },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+      sanitize: (raw, fields) => sanitizeFillMissingSuggestions(raw, fields),
+      merge: (_resolved, suggestions) => suggestions,
+    });
+    if (resolution.metadata.aiStatus === "unavailable") {
+      if (
+        resolution.metadata.modelStatus === "provider-unavailable" ||
+        resolution.metadata.modelStatus === "rate-limited"
+      ) {
+        const failure = aiCallFailureHttp(
+          {
+            reason:
+              resolution.metadata.modelStatus === "rate-limited" ? "rate-limited" : "provider",
+          },
+          "AI provider error",
+        );
+        res.status(failure.status).json({ error: failure.error });
+        return;
+      }
+      res.json({
+        suggestions: [],
+        generatedAt: Date.now(),
+        ...resolution.metadata,
+      });
+      return;
+    }
     const verdicts = await reviewSuggestions({
       featureLabel: "auto-filled values for missing product/run setup fields",
       instructions:
         "Flag any value that is implausible for its field, contradicts the product's known brand/flavor/size, or is an unsafe default to commit. Approve values that are clearly correct and well-justified.",
-      items: suggestions.map((s, i) => ({
+      items: resolution.data.suggestions.map((s, i) => ({
         id: `fm-${i}`,
         text: `${s.key} = "${s.value}" — ${s.rationale}`,
       })),
       log: req.log,
     });
-    const reviewed = suggestions.map((s, i) => {
+    const reviewed = resolution.data.suggestions.map((s, i) => {
       const v = verdicts.get(`fm-${i}`);
       return v ? { ...s, review: v } : s;
     });
@@ -1970,7 +1995,8 @@ router.post(
     res.json({
       suggestions: reviewed,
       generatedAt: Date.now(),
-      ...(note ? { note } : {}),
+      ...resolution.metadata,
+      ...(resolution.data.note ? { note: resolution.data.note } : {}),
     });
   },
 );
@@ -1991,30 +2017,6 @@ router.post(
       return;
     }
 
-    const deterministic = resolveDeterministicMatchImport(validation.data);
-    const deterministicMatches = deterministic.resolved;
-    const unresolved = deterministic.unresolved;
-    if (
-      unresolved.unmatchedBrands.length === 0 &&
-      unresolved.unmatchedFlavors.length === 0 &&
-      (unresolved.unmatchedIngredients ?? []).length === 0 &&
-      (unresolved.unmatchedAppTypes ?? []).length === 0 &&
-      (unresolved.unmatchedPepTypes ?? []).length === 0
-    ) {
-      res.json({
-        ...deterministicMatches,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-        generatedAt: Date.now(),
-      });
-      return;
-    }
-
-    const { system, user } = buildMatchImportPrompt(unresolved);
-    const userPrompt = await groundPromptWithMemory(req.log, user, {
-      correctionDomains: ["brand", "flavor"],
-    });
-
     type MatchImportCacheBody = {
       brandMatches: unknown[];
       flavorMatches: unknown[];
@@ -2024,10 +2026,24 @@ router.post(
       aiStatus: "enriched" | "unavailable";
       note?: string;
     };
-    let cachedMatchBody: MatchImportCacheBody;
     const model = pickModel("cheap");
+    let resolution;
     try {
-      const cached = await cachedAiResponse<MatchImportCacheBody>(req, res, {
+      resolution = await resolveUnresolvedDataWithEnrichment({
+        input: validation.data,
+        resolveDeterministically: resolveDeterministicMatchImport,
+        hasUnresolved: (unresolved) =>
+          unresolved.unmatchedBrands.length > 0 ||
+          unresolved.unmatchedFlavors.length > 0 ||
+          (unresolved.unmatchedIngredients ?? []).length > 0 ||
+          (unresolved.unmatchedAppTypes ?? []).length > 0 ||
+          (unresolved.unmatchedPepTypes ?? []).length > 0,
+        enrichUnresolved: async (unresolved) => {
+          const { system, user } = buildMatchImportPrompt(unresolved);
+          const userPrompt = await groundPromptWithMemory(req.log, user, {
+            correctionDomains: ["brand", "flavor"],
+          });
+          const cached = await cachedAiResponse<MatchImportCacheBody>(req, res, {
         operation: "match-import",
         model,
         system,
@@ -2125,72 +2141,82 @@ router.post(
             log: req.log,
           });
           const value: MatchImportCacheBody = {
-            brandMatches: [
-              ...deterministicMatches.brandMatches,
-              ...brandMatches.map((m, i) => {
-                const v = verdicts.get(`brand-${i}`);
-                return v ? { ...m, review: v } : m;
-              }),
-            ],
-            flavorMatches: [
-              ...deterministicMatches.flavorMatches,
-              ...flavorMatches.map((m, i) => {
-                const v = verdicts.get(`flavor-${i}`);
-                return v ? { ...m, review: v } : m;
-              }),
-            ],
-            ingredientMatches: [
-              ...deterministicMatches.ingredientMatches,
-              ...ingredientMatches.map((m, i) => {
-                const v = verdicts.get(`ingredient-${i}`);
-                return v ? { ...m, review: v } : m;
-              }),
-            ],
-            appTypeMatches: [
-              ...deterministicMatches.appTypeMatches,
-              ...appTypeMatches.map((m, i) => {
-                const v = verdicts.get(`app-${i}`);
-                return v ? { ...m, review: v } : m;
-              }),
-            ],
-            pepTypeMatches: [
-              ...deterministicMatches.pepTypeMatches,
-              ...pepTypeMatches.map((m, i) => {
-                const v = verdicts.get(`pep-${i}`);
-                return v ? { ...m, review: v } : m;
-              }),
-            ],
+            // Cache only the model-owned unresolved suggestions. Deterministic
+            // matches are request-local and are merged below on every response;
+            // storing them under a fingerprint built from the reduced unresolved
+            // prompt could replay another request's deterministic matches.
+            brandMatches: brandMatches.map((m, i) => {
+              const v = verdicts.get(`brand-${i}`);
+              return v ? { ...m, review: v } : m;
+            }),
+            flavorMatches: flavorMatches.map((m, i) => {
+              const v = verdicts.get(`flavor-${i}`);
+              return v ? { ...m, review: v } : m;
+            }),
+            ingredientMatches: ingredientMatches.map((m, i) => {
+              const v = verdicts.get(`ingredient-${i}`);
+              return v ? { ...m, review: v } : m;
+            }),
+            appTypeMatches: appTypeMatches.map((m, i) => {
+              const v = verdicts.get(`app-${i}`);
+              return v ? { ...m, review: v } : m;
+            }),
+            pepTypeMatches: pepTypeMatches.map((m, i) => {
+              const v = verdicts.get(`pep-${i}`);
+              return v ? { ...m, review: v } : m;
+            }),
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
           return { value, cacheable: rawIsValidShape };
         },
+          });
+          return {
+            suggestions: cached.value,
+            status: cached.value.aiStatus,
+            ...(cached.value.aiStatus === "unavailable" ? { modelStatus: "malformed" as const } : {}),
+          };
+        },
+        emptySuggestions: (): MatchImportCacheBody => ({
+          brandMatches: [],
+          flavorMatches: [],
+          ingredientMatches: [],
+          appTypeMatches: [],
+          pepTypeMatches: [],
+          aiStatus: "unavailable" as const,
+        }),
+        merge: (resolved, suggestions) => ({
+          brandMatches: [...resolved.brandMatches, ...suggestions.brandMatches],
+          flavorMatches: [...resolved.flavorMatches, ...suggestions.flavorMatches],
+          ingredientMatches: [...resolved.ingredientMatches, ...suggestions.ingredientMatches],
+          appTypeMatches: [...resolved.appTypeMatches, ...suggestions.appTypeMatches],
+          pepTypeMatches: [...resolved.pepTypeMatches, ...suggestions.pepTypeMatches],
+          ...(suggestions.note ? { note: suggestions.note } : {}),
+        }),
       });
-      cachedMatchBody = cached.value;
     } catch (err) {
       if (err instanceof AiCostLimitError) {
         finishAiCostLimitResponse(res);
         return;
       }
       if (err instanceof AiResponseError) {
+        // The resolver owns the success/status path. Preserve this route's
+        // established provider fallback while retaining freshly deterministic
+        // matches without attempting a second provider call.
+        const deterministic = resolveDeterministicMatchImport(validation.data);
         res.json({
-          ...deterministicMatches,
+          ...deterministic.resolved,
           aiGenerated: false,
           aiStatus: "unavailable",
+          decision: "suggestion",
           note: "AI matching is unavailable; deterministic matches were retained for review.",
           generatedAt: Date.now(),
-        });
-        return;
+        }); return;
       }
       throw err;
     }
 
-    res.json({
-      ...cachedMatchBody!,
-      aiGenerated: cachedMatchBody!.aiStatus === "enriched",
-      aiStatus: cachedMatchBody!.aiStatus,
-      generatedAt: Date.now(),
-    });
+    res.json({ ...resolution.data, ...resolution.metadata, generatedAt: Date.now() });
   },
 );
 
@@ -2220,10 +2246,16 @@ router.post(
     // that transient flakiness so the user's import doesn't silently come back
     // empty, and the empty-result fallback still applies once attempts are
     // exhausted.
-    const result = await fetchModelJsonWithRetry({
+    const extraction = await extractReviewedDocument<
+      { kind: "workbook-text"; workbookText: string },
+      ParsedSpecImport
+    >({
       label: "ai-parse-spec-sheet",
       log: req.log,
-      call: async () => {
+      adapter: workbookTextAdapter,
+      source: { kind: "workbook-text" as const, workbookText: validation.data.workbookText },
+      prompt: { system, user: userPrompt },
+      call: async ({ prompt }) => {
         const response = await openai.chat.completions.create({
           model: pickModel("full"),
           // Parsing echoes the whole workbook chunk back as structured JSON, so
@@ -2233,16 +2265,61 @@ router.post(
           max_completion_tokens: 65536,
           response_format: { type: "json_object" },
           messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
+            { role: "system", content: prompt.system },
+            { role: "user", content: prompt.user },
           ],
         });
         return response.choices[0]?.message?.content ?? "";
       },
+      sanitize: (raw) => sanitizeParseSpecSheet(raw, validation.data),
+      empty: (): ParsedSpecImport => ({ profiles: [], recipes: [] }),
+      review: async (parsed) => {
+        const verdicts = await reviewSuggestions({
+          featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",
+          instructions:
+            "Flag any profile or recipe with implausible weights, a mismatched brand/flavor, or values outside normal pizza-production ranges. Approve entries that look correctly parsed and plausible. Die types are commonly non-numeric custom dies (e.g. \"Argus\", \"Mystic\"), not inch sizes — do NOT flag a die merely for not being a standard numeric pizza size.",
+          items: [
+            ...parsed.profiles.map((p, i) => ({
+              id: `profile-${i}`,
+              text: `Spec profile: brand "${p.brand}", flavor "${p.flavor}"${p.dieType ? `, die ${p.dieType}` : ""}`,
+            })),
+            ...parsed.recipes.map((r, i) => {
+              const tgts = recipeTargets(r);
+              const ctx = tgts.length
+                ? ` (brand ${tgts[0].brand}, flavor ${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more profiles` : ""})`
+                : "";
+              return { id: `recipe-${i}`, text: `${r.kind} recipe "${r.name}"${ctx}` };
+            }),
+          ],
+          log: req.log,
+        });
+        return {
+          ...parsed,
+          profiles: parsed.profiles.map((p, i) => {
+            const v = verdicts.get(`profile-${i}`);
+            return v ? { ...p, review: v } : p;
+          }),
+          recipes: parsed.recipes.map((r, i) => {
+            const v = verdicts.get(`recipe-${i}`);
+            return v ? { ...r, review: v } : r;
+          }),
+        };
+      },
     });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "AI provider error");
+    if (!extraction.ok) {
+      if (
+        extraction.metadata.modelStatus === "provider-unavailable" ||
+        extraction.metadata.modelStatus === "rate-limited"
+      ) {
+        const failure = aiCallFailureHttp(
+          {
+            reason:
+              extraction.metadata.modelStatus === "provider-unavailable"
+                ? "provider"
+                : "rate-limited",
+          },
+          "AI provider error",
+        );
         res.status(failure.status).json({ error: failure.error });
         return;
       }
@@ -2250,46 +2327,18 @@ router.post(
         profiles: [],
         recipes: [],
         generatedAt: Date.now(),
+        ...extraction.metadata,
         note: "The AI couldn't parse this portion of the sheet (its response was cut off or malformed). Nothing from this portion was imported — try again or split the file.",
       });
       return;
     }
-    const raw: unknown = result.raw;
-
-    const parsed = sanitizeParseSpecSheet(raw, validation.data);
-
-    const verdicts = await reviewSuggestions({
-      featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",
-      instructions:
-        "Flag any profile or recipe with implausible weights, a mismatched brand/flavor, or values outside normal pizza-production ranges. Approve entries that look correctly parsed and plausible. Die types are commonly non-numeric custom dies (e.g. \"Argus\", \"Mystic\"), not inch sizes — do NOT flag a die merely for not being a standard numeric pizza size.",
-      items: [
-        ...parsed.profiles.map((p, i) => ({
-          id: `profile-${i}`,
-          text: `Spec profile: brand "${p.brand}", flavor "${p.flavor}"${p.dieType ? `, die ${p.dieType}` : ""}`,
-        })),
-        ...parsed.recipes.map((r, i) => {
-          const tgts = recipeTargets(r);
-          const ctx = tgts.length
-            ? ` (brand ${tgts[0].brand}, flavor ${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more profiles` : ""})`
-            : "";
-          return { id: `recipe-${i}`, text: `${r.kind} recipe "${r.name}"${ctx}` };
-        }),
-      ],
-      log: req.log,
-    });
-    const reviewedProfiles = parsed.profiles.map((p, i) => {
-      const v = verdicts.get(`profile-${i}`);
-      return v ? { ...p, review: v } : p;
-    });
-    const reviewedRecipes = parsed.recipes.map((r, i) => {
-      const v = verdicts.get(`recipe-${i}`);
-      return v ? { ...r, review: v } : r;
-    });
+    const parsed = extraction.data;
 
     res.json({
-      profiles: reviewedProfiles,
-      recipes: reviewedRecipes,
+      profiles: parsed.profiles,
+      recipes: parsed.recipes,
       generatedAt: Date.now(),
+      ...extraction.metadata,
       ...(parsed.note ? { note: parsed.note } : {}),
       ...(parsed.warnings?.length ? { warnings: parsed.warnings } : {}),
     });
@@ -2312,10 +2361,32 @@ router.post(
       return;
     }
     const { images } = validation.data;
-    const result = await fetchModelJsonWithRetry({
+    const extraction = await extractReviewedDocument({
       label: "ai-parse-spec-images",
       log: req.log,
-      call: async () => {
+      adapter: specImagesAdapter,
+      source: {
+        kind: "spec-images" as const,
+        images: images.map((image) => ({
+          imageBase64: image.imageBase64,
+          mimeType: image.mimeType ?? "image/jpeg",
+        })),
+      },
+      prompt: {
+        system:
+          "You transcribe photographed frozen-pizza spec sheets and recipe pages. " +
+          "Read every visible row and number exactly; do not interpret, summarize, " +
+          "or invent values. Preserve page order and represent each page as a " +
+          "tab-separated workbook-style section. Return only JSON.",
+        user:
+          "Transcribe all of these pages into one bounded workbook-style text. " +
+          "Use a heading such as [Photo 1] before each page, tab-separated cells " +
+          "for each row, and keep blank cells blank. Include all labels, headers, " +
+          "units, recipe ingredients, targets, and handwritten values you can read. " +
+          'Return exactly {"workbookText":string,"note":string}.',
+      },
+      call: async ({ prompt, source }) => {
+        if (source.kind !== "spec-images") throw new Error("Invalid spec-image source");
         const response = await openai.chat.completions.create({
           model: pickModel("full"),
           max_completion_tokens: 65536,
@@ -2324,10 +2395,7 @@ router.post(
             {
               role: "system",
               content:
-                "You transcribe photographed frozen-pizza spec sheets and recipe pages. " +
-                "Read every visible row and number exactly; do not interpret, summarize, " +
-                "or invent values. Preserve page order and represent each page as a " +
-                "tab-separated workbook-style section. Return only JSON.",
+                prompt.system,
             },
             {
               role: "user",
@@ -2335,13 +2403,9 @@ router.post(
                 {
                   type: "text",
                   text:
-                    "Transcribe all of these pages into one bounded workbook-style text. " +
-                    "Use a heading such as [Photo 1] before each page, tab-separated cells " +
-                    "for each row, and keep blank cells blank. Include all labels, headers, " +
-                    "units, recipe ingredients, targets, and handwritten values you can read. " +
-                    'Return exactly {"workbookText":string,"note":string}.',
+                    prompt.user,
                 },
-                ...images.map((image) => ({
+                ...source.images.map((image) => ({
                   type: "image_url" as const,
                   image_url: {
                     url: `data:${image.mimeType || "image/jpeg"};base64,${image.imageBase64}`,
@@ -2353,27 +2417,47 @@ router.post(
         });
         return response.choices[0]?.message?.content ?? "";
       },
+      sanitize: (raw) => {
+        const value = raw as { workbookText?: unknown; note?: unknown };
+        return {
+          workbookText: typeof value.workbookText === "string" ? value.workbookText.trim() : "",
+          note: typeof value.note === "string" ? value.note : "",
+        };
+      },
+      empty: () => ({ workbookText: "", note: "" }),
     });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "Vision provider error");
+    if (!extraction.ok) {
+      if (
+        extraction.metadata.modelStatus === "provider-unavailable" ||
+        extraction.metadata.modelStatus === "rate-limited"
+      ) {
+        const failure = aiCallFailureHttp(
+          {
+            reason:
+              extraction.metadata.modelStatus === "rate-limited"
+                ? "rate-limited"
+                : "provider",
+          },
+          "Vision provider error",
+        );
         res.status(failure.status).json({ error: failure.error });
       } else {
         res.json({
           workbookText: "",
           generatedAt: Date.now(),
+          ...extraction.metadata,
           note: "The photos could not be read. Please retake them with better lighting and focus.",
         });
       }
       return;
     }
-    const raw = result.raw as { workbookText?: unknown; note?: unknown };
-    const workbookText = typeof raw.workbookText === "string" ? raw.workbookText.trim() : "";
+    const { workbookText, note } = extraction.data;
     if (!workbookText) {
       res.json({
         workbookText: "",
         generatedAt: Date.now(),
-        note: typeof raw.note === "string" ? raw.note : "The photos did not contain readable spec-sheet text.",
+        ...extraction.metadata,
+        note: note || "The photos did not contain readable spec-sheet text.",
       });
       return;
     }
@@ -2382,7 +2466,8 @@ router.post(
     res.json({
       workbookText: workbookText.slice(0, 60_000),
       generatedAt: Date.now(),
-      ...(typeof raw.note === "string" && raw.note.trim() ? { note: raw.note.trim() } : {}),
+      ...extraction.metadata,
+      ...(note.trim() ? { note: note.trim() } : {}),
     });
   },
 );
@@ -2403,31 +2488,27 @@ router.post(
       return;
     }
 
-    const deterministic = resolveDeterministicMatchPremix(validation.data);
-    if (deterministic.unresolvedNames.length === 0) {
-      res.json({
-        matches: deterministic.matches,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-        generatedAt: Date.now(),
-      });
-      return;
-    }
-
-    const aiInput = { ...validation.data, unmatchedNames: deterministic.unresolvedNames };
-    const { system, user } = buildMatchPremixPrompt(aiInput);
-    const userPrompt = await groundPromptWithMemory(req.log, user, {
-      correctionDomains: ["brand", "flavor"],
-    });
-
     type MatchPremixCacheBody = {
       matches: unknown[];
       aiStatus: "enriched" | "unavailable";
     };
-    let cachedPremixBody: MatchPremixCacheBody;
     const model = pickModel("cheap");
+    let resolution;
     try {
-      const cached = await cachedAiResponse(req, res, {
+      resolution = await resolveUnresolvedDataWithEnrichment({
+        input: validation.data,
+        resolveDeterministically: (data) => {
+          const deterministic = resolveDeterministicMatchPremix(data);
+          return { resolved: deterministic.matches, unresolved: deterministic.unresolvedNames };
+        },
+        hasUnresolved: (names) => names.length > 0,
+        enrichUnresolved: async (unresolvedNames) => {
+          const aiInput = { ...validation.data, unmatchedNames: unresolvedNames };
+          const { system, user } = buildMatchPremixPrompt(aiInput);
+          const userPrompt = await groundPromptWithMemory(req.log, user, {
+            correctionDomains: ["brand", "flavor"],
+          });
+          const cached = await cachedAiResponse(req, res, {
         operation: "match-premix",
         model,
         system,
@@ -2486,18 +2567,28 @@ router.post(
           };
           return { value, cacheable: rawIsValidShape };
         },
+          });
+          return {
+            suggestions: cached.value.matches,
+            status: cached.value.aiStatus,
+            ...(cached.value.aiStatus === "unavailable" ? { modelStatus: "malformed" as const } : {}),
+          };
+        },
+        emptySuggestions: () => [],
+        merge: (resolved, suggestions) => ({ matches: [...resolved, ...suggestions] }),
       });
-      cachedPremixBody = cached.value;
     } catch (err) {
       if (err instanceof AiCostLimitError) {
         finishAiCostLimitResponse(res);
         return;
       }
       if (err instanceof AiResponseError) {
+        const deterministic = resolveDeterministicMatchPremix(validation.data);
         res.json({
           matches: deterministic.matches,
           aiGenerated: false,
           aiStatus: "unavailable",
+          decision: "suggestion",
           note: "AI matching is unavailable; deterministic matches were retained for review.",
           generatedAt: Date.now(),
         });
@@ -2506,12 +2597,7 @@ router.post(
       throw err;
     }
 
-    res.json({
-      matches: [...deterministic.matches, ...(cachedPremixBody?.matches ?? [])],
-      aiGenerated: cachedPremixBody?.aiStatus === "enriched",
-      aiStatus: cachedPremixBody?.aiStatus,
-      generatedAt: Date.now(),
-    });
+    res.json({ ...resolution.data, ...resolution.metadata, generatedAt: Date.now() });
   },
 );
 
@@ -2531,32 +2617,34 @@ router.post(
       return;
     }
 
-    const { system, user } = buildSuggestMergesPrompt(validation.data);
-
     // Load corrections now so we can (a) add a prompt hint listing already-
     // known pairs (saves tokens, helps the model skip them) and (b) apply a
     // deterministic post-filter after the AI responds that guarantees known
     // pairs are never returned regardless of model behaviour.
     const corrections = await loadCorrections(req.log);
-    const knownPairsNote = buildKnownPairsNote(corrections, validation.data.names);
-    const userWithHint = knownPairsNote ? `${user}\n\n${knownPairsNote}` : user;
-
-    // groundPromptWithMemory will also append the full corrections block
-    // (facility memory + all confirmed name equivalences), so the model sees
-    // both the targeted "skip these" note AND the wider corrections context.
-    const userPrompt = await groundPromptWithMemory(req.log, userWithHint, {
-      correctionDomains: ["ingredient", "die"],
-    });
-
     type MergeCacheBody = {
       suggestions: unknown[];
       aiStatus: "enriched" | "unavailable";
       note?: string;
     };
-    let cachedMergeBody: MergeCacheBody;
     const model = pickModel("cheap");
+    let resolution;
     try {
-      const cached = await cachedAiResponse<MergeCacheBody>(req, res, {
+      resolution = await resolveUnresolvedDataWithEnrichment({
+        input: validation.data.names,
+        // Corrections are a post-sanitize exclusion, not auto-applied merges.
+        // Every remaining name is unresolved and needs advisory enrichment.
+        resolveDeterministically: (names) => ({ resolved: [], unresolved: names }),
+        hasUnresolved: (names) => names.length > 1,
+        enrichUnresolved: async (names) => {
+          const promptInput = { ...validation.data, names };
+          const { system, user } = buildSuggestMergesPrompt(promptInput);
+          const knownPairsNote = buildKnownPairsNote(corrections, names);
+          const userWithHint = knownPairsNote ? `${user}\n\n${knownPairsNote}` : user;
+          const userPrompt = await groundPromptWithMemory(req.log, userWithHint, {
+            correctionDomains: ["ingredient", "die"],
+          });
+          const cached = await cachedAiResponse<MergeCacheBody>(req, res, {
         operation: "suggest-merges",
         model,
         system,
@@ -2597,7 +2685,7 @@ router.post(
           const raw = result.raw;
           const rawIsValidShape = isObject(raw) && Array.isArray(raw.suggestions);
           const suggestions = filterKnownMerges(
-            sanitizeSuggestMerges(raw, validation.data.names),
+            sanitizeSuggestMerges(raw, names),
             corrections,
           );
           const note =
@@ -2624,8 +2712,22 @@ router.post(
           };
           return { value, cacheable: rawIsValidShape };
         },
+          });
+          return {
+            suggestions: cached.value,
+            status: cached.value.aiStatus,
+            ...(cached.value.aiStatus === "unavailable" ? { modelStatus: "malformed" as const } : {}),
+          };
+        },
+        emptySuggestions: (): MergeCacheBody => ({
+          suggestions: [],
+          aiStatus: "unavailable",
+        }),
+        merge: (_resolved, suggestions) => ({
+          suggestions: suggestions.suggestions,
+          ...(suggestions.note ? { note: suggestions.note } : {}),
+        }),
       });
-      cachedMergeBody = cached.value;
     } catch (err) {
       if (err instanceof AiCostLimitError) {
         finishAiCostLimitResponse(res);
@@ -2636,6 +2738,7 @@ router.post(
           suggestions: [],
           aiGenerated: false,
           aiStatus: "unavailable",
+          decision: "suggestion",
           note: "AI merge suggestions are unavailable. No changes were applied.",
           generatedAt: Date.now(),
         });
@@ -2644,12 +2747,7 @@ router.post(
       throw err;
     }
 
-    res.json({
-      ...cachedMergeBody!,
-      aiGenerated: cachedMergeBody!.aiStatus === "enriched",
-      aiStatus: cachedMergeBody!.aiStatus,
-      generatedAt: Date.now(),
-    });
+    res.json({ ...resolution.data, ...resolution.metadata, generatedAt: Date.now() });
   },
 );
 

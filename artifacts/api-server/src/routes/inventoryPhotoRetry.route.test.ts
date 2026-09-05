@@ -171,33 +171,24 @@ describe("POST /inventory/production-sheet-photo retry on malformed model output
   });
 });
 
-describe("POST /inventory/count-observations cost budget", () => {
-  it("charges retained vision analysis and returns a payload-safe 429 before the provider", async () => {
+describe("POST /inventory/count-observations retirement", () => {
+  it("returns a payload-safe 410 without reaching the provider", async () => {
     const imagePayload = "retained-photo-payload-that-must-not-appear";
     const body = {
-      // Keep the request invalid so the first two charged requests stop before
-      // the DB insert; the third must be rejected by the cost limiter first.
       photos: [],
       candidates: [],
       imageBase64: imagePayload,
     };
 
-    const first = await post("/inventory/count-observations", body);
-    const second = await post("/inventory/count-observations", body);
-    const blocked = await post("/inventory/count-observations", body);
+    const response = await post("/inventory/count-observations", body);
 
-    expect(first.status).toBe(400);
-    expect(second.status).toBe(400);
-    expect(blocked.status).toBe(429);
+    expect(response.status).toBe(410);
     expect(mock.calls).toBe(0);
-    expect(blocked.headers.get("x-cost-limit")).toBe("40");
-    expect(blocked.headers.get("x-cost-requested")).toBe("20");
-    expect(blocked.headers.get("x-cost-used")).toBe("40");
-    const blockedBody = await blocked.text();
-    expect(JSON.parse(blockedBody)).toEqual({
-      error: "Cost limit exceeded. Budget: 40, used: 40, requested: 20. Retry after 60s.",
+    const responseBody = await response.text();
+    expect(JSON.parse(responseBody)).toEqual({
+      error: "Photo inventory counts are disabled. Use typed or barcode inventory controls.",
     });
-    expect(blockedBody).not.toContain(imagePayload);
-    expect(blockedBody).not.toContain("Identify the distinct");
+    expect(responseBody).not.toContain(imagePayload);
+    expect(responseBody).not.toContain("Identify the distinct");
   });
 });

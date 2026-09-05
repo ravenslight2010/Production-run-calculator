@@ -59,6 +59,10 @@ export async function saveFillMissingValues(values: LearnedValueRow[]): Promise<
 export type ReviewedFillMissingSuggestion = FillMissingSuggestion & { review?: ReviewVerdict };
 export type ReviewedFillMissingResult = Omit<FillMissingResult, "suggestions"> & {
   suggestions: ReviewedFillMissingSuggestion[];
+  decision: "suggestion";
+  aiGenerated?: boolean;
+  aiStatus?: "deterministic" | "enriched" | "unavailable";
+  modelStatus?: "completed" | "provider-unavailable" | "rate-limited" | "malformed";
 };
 
 export async function requestFillMissing(

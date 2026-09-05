@@ -17,6 +17,31 @@ export const AiStatus = {
   unavailable: 'unavailable',
 } as const;
 
+/**
+ * Optional provider outcome detail for an advisory response
+ */
+export type AiModelStatus = typeof AiModelStatus[keyof typeof AiModelStatus];
+
+
+export const AiModelStatus = {
+  completed: 'completed',
+  'provider-unavailable': 'provider-unavailable',
+  'rate-limited': 'rate-limited',
+  malformed: 'malformed',
+} as const;
+
+export type SuggestionMetadataDecision = typeof SuggestionMetadataDecision[keyof typeof SuggestionMetadataDecision];
+
+
+export const SuggestionMetadataDecision = {
+  suggestion: 'suggestion',
+} as const;
+
+export interface SuggestionMetadata {
+  decision: SuggestionMetadataDecision;
+  modelStatus?: AiModelStatus;
+}
+
 export type AutoTrackMutationField = typeof AutoTrackMutationField[keyof typeof AutoTrackMutationField];
 
 
@@ -454,11 +479,22 @@ export interface ParseSpecImagesInput {
   images: ParseSpecImagesInputImagesItem[];
 }
 
+export type ParseSpecImagesResultDecision = typeof ParseSpecImagesResultDecision[keyof typeof ParseSpecImagesResultDecision];
+
+
+export const ParseSpecImagesResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface ParseSpecImagesResult {
   /** Bounded workbook-style transcription suitable for the existing spec parser */
   workbookText: string;
   generatedAt: number;
   note?: string;
+  decision: ParseSpecImagesResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }
 
 export type PhotoGuessCategory = typeof PhotoGuessCategory[keyof typeof PhotoGuessCategory];
@@ -2387,11 +2423,22 @@ export interface FillMissingSuggestion {
   review?: ReviewVerdict;
 }
 
+export type FillMissingResultDecision = typeof FillMissingResultDecision[keyof typeof FillMissingResultDecision];
+
+
+export const FillMissingResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface FillMissingResult {
   suggestions: FillMissingSuggestion[];
   generatedAt: number;
   /** Optional message when no suggestions could be made */
   note?: string;
+  decision: FillMissingResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -3702,6 +3749,13 @@ export interface MergeSuggestion {
   review?: ReviewVerdict;
 }
 
+export type SuggestMergesResultDecision = typeof SuggestMergesResultDecision[keyof typeof SuggestMergesResultDecision];
+
+
+export const SuggestMergesResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface SuggestMergesResult {
   suggestions: MergeSuggestion[];
   /** Epoch ms when the suggestions were generated */
@@ -3711,6 +3765,8 @@ export interface SuggestMergesResult {
   aiStatus: AiStatus;
   /** Optional brief overall comment from the model */
   note?: string;
+  decision: SuggestMergesResultDecision;
+  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -3861,6 +3917,13 @@ export interface SpecImportRecipe {
   review?: ReviewVerdict;
 }
 
+export type ParseSpecSheetResultDecision = typeof ParseSpecSheetResultDecision[keyof typeof ParseSpecSheetResultDecision];
+
+
+export const ParseSpecSheetResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface SpecImportWarning {
   /** Brand of the profile the warning concerns */
   brand: string;
@@ -3877,6 +3940,10 @@ export interface ParseSpecSheetResult {
   /** Flavor-grounding corrections/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row. */
   warnings?: SpecImportWarning[];
   generatedAt: number;
+  decision: ParseSpecSheetResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }
 
 export interface MatchImportNameMatch {
@@ -3909,6 +3976,13 @@ export interface MatchImportIngredientMatch {
   review?: ReviewVerdict;
 }
 
+export type MatchImportResultDecision = typeof MatchImportResultDecision[keyof typeof MatchImportResultDecision];
+
+
+export const MatchImportResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];
@@ -3924,6 +3998,8 @@ export interface MatchImportResult {
   aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+  decision: MatchImportResultDecision;
+  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -3950,6 +4026,13 @@ export interface MatchPremixMatch {
   review?: ReviewVerdict;
 }
 
+export type MatchPremixResultDecision = typeof MatchPremixResultDecision[keyof typeof MatchPremixResultDecision];
+
+
+export const MatchPremixResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface MatchPremixResult {
   matches: MatchPremixMatch[];
   generatedAt: number;
@@ -3958,6 +4041,8 @@ export interface MatchPremixResult {
   aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+  decision: MatchPremixResultDecision;
+  modelStatus?: AiModelStatus;
 }
 
 export type FieldCheckObservationInputCheckName = typeof FieldCheckObservationInputCheckName[keyof typeof FieldCheckObservationInputCheckName];

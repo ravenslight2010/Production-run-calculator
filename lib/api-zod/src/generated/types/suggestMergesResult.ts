@@ -5,8 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiModelStatus } from './aiModelStatus';
 import type { AiStatus } from './aiStatus';
 import type { MergeSuggestion } from './mergeSuggestion';
+import type { SuggestMergesResultDecision } from './suggestMergesResultDecision';
 
 export interface SuggestMergesResult {
   suggestions: MergeSuggestion[];
@@ -17,4 +19,6 @@ export interface SuggestMergesResult {
   aiStatus: AiStatus;
   /** Optional brief overall comment from the model */
   note?: string;
+  decision: SuggestMergesResultDecision;
+  modelStatus?: AiModelStatus;
 }

@@ -5,11 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiModelStatus } from './aiModelStatus';
 import type { AiStatus } from './aiStatus';
 import type { MatchImportBrandMatch } from './matchImportBrandMatch';
 import type { MatchImportFlavorMatch } from './matchImportFlavorMatch';
 import type { MatchImportIngredientMatch } from './matchImportIngredientMatch';
 import type { MatchImportNameMatch } from './matchImportNameMatch';
+import type { MatchImportResultDecision } from './matchImportResultDecision';
 
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
@@ -26,4 +28,6 @@ export interface MatchImportResult {
   aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+  decision: MatchImportResultDecision;
+  modelStatus?: AiModelStatus;
 }

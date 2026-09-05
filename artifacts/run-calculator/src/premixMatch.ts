@@ -12,6 +12,7 @@
 // artifacts/run-calculator-mobile/context/premixMatch.ts (replit.md parity).
 
 import type { PremixMatch } from "@workspace/premix-import";
+import type { AiStatus } from "./aiStatus";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
@@ -25,6 +26,10 @@ export type MatchPremixResult = {
   matches: PremixMatch[];
   generatedAt: number;
   note?: string;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  decision: "suggestion";
+  modelStatus?: "completed" | "provider-unavailable" | "rate-limited" | "malformed";
 };
 
 export async function requestMatchPremix(input: MatchPremixInput, signal?: AbortSignal): Promise<MatchPremixResult> {

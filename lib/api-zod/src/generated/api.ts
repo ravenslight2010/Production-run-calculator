@@ -870,7 +870,11 @@ export const ParseSpecImagesBody = zod.object({
 export const ParseSpecImagesResponse = zod.object({
   "workbookText": zod.string().describe('Bounded workbook-style transcription suitable for the existing spec parser'),
   "generatedAt": zod.number(),
-  "note": zod.string().optional()
+  "note": zod.string().optional(),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -1962,7 +1966,11 @@ export const AiFillMissingResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when no suggestions could be made')
+  "note": zod.string().optional().describe('Optional message when no suggestions could be made'),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2035,7 +2043,9 @@ export const AiMatchImportResponse = zod.object({
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional message when no matches could be made')
+  "note": zod.string().optional().describe('Optional message when no matches could be made'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2062,7 +2072,9 @@ export const AiMatchPremixResponse = zod.object({
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional message when no matches could be made')
+  "note": zod.string().optional().describe('Optional message when no matches could be made'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2147,7 +2159,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "flavor": zod.string().describe('Final (post-correction) flavor of the profile the warning concerns'),
   "message": zod.string().describe('Human-readable explanation of the correction\/flag')
 })).optional().describe('Flavor-grounding corrections\/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row.'),
-  "generatedAt": zod.number()
+  "generatedAt": zod.number(),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2178,7 +2194,9 @@ export const AiSuggestMergesResponse = zod.object({
   "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
   "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional brief overall comment from the model')
+  "note": zod.string().optional().describe('Optional brief overall comment from the model'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 

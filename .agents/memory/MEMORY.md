@@ -5,7 +5,6 @@
 - [Dough families and variants](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) — one family recipe; specific-flavor matching must beat catch-all and may override a wrong stored weight.
 - [Near-exact link profile propagation](near-exact-link-profile-propagation.md) — linkSpecImportNamedRecipesToExisting profile field pass uses matchCleaned (layer-1 only); near-exact auto-renames need a separate nearExactApplied map or profile doughName/sauceName stays stale.
 - [SSE meta stamp source](sse-meta-stamp-source.md) — SSE LWW must use overlayRunMetaStamps(prev.runs) not raw React state; saveDayState stamps localStorage only, React state keeps old stamp, so startRun's startedAt gets erased by a stale SSE echo.
-- [LiveRunContext clock isolation](live-run-context-clock-isolation.md) — Home must not hold nowTime; clock + calc + auto-track live in LiveRunProvider; 11 sub-components call useLiveRun(); transform_home.py gotchas inside.
 - [Packaging speed feedback scope](packaging-speed-feedback.md) — correction evidence is provider-owned so Packaging, Dough, and Sauce quick checks share one lifecycle across tab switches.
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [Dough and line timers](dough-inline-timers.md) + [line-speed rebase](live-line-speed-timer-rebase.md) — measured mixer/hopper timings anchor countdowns; resume resets due refs and PPM changes rebase line demand.
@@ -17,7 +16,6 @@
 - [Profile/autosave clobber guards](autosave-edit-attribution.md) + [Open form clobbers profiles](open-form-profile-clobber.md) — save only attributed data and reload open forms after out-of-band profile rewrites.
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
-- [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
 - [Post-merge setup](post-merge-setup.md) — post-merge.sh must use `db push-force` (plain push hangs on TTY rename prompt) + generous timeout (~70s real runtime).
@@ -28,9 +26,7 @@
 - [Password reset relay](password-reset-relay.md) + [session invalidation](password-change-session-invalidation.md) — manager-relayed one-time code, enumeration-safe, /auth/* exempt from 401 bounce; tokens fenced by iat vs passwordChangedAt; approver boundary via canManagePasswordResetFor.
 - [Isolated DB predates migrations](isolated-db-may-predate-migrations.md) — task env Postgres may lag Drizzle schema (no users table, Clerk-era user_roles); verify \d before building.
 - [Integration test DB binding](integration-test-db-binding.md) — in *.integration.test.ts, never statically import a module that pulls @workspace/db; the pool binds to DATABASE_URL at import, before beforeAll repoints it.
-- [Workspace declaration staleness](workspace-declaration-staleness.md) — composite package declarations can lag source and make valid workspace exports appear missing to artifact typechecks.
 - [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.
-- [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) + [home.tsx render TDZ](home-render-tdz.md) — `<Comp<T>/>` white-screens Vite dev (drop the type arg); render-time helpers must not read refs declared later in the file — only real-browser e2e catches it.
 - [Fill-missing assistant](fill-missing-assistant.md) + [shared lib](fill-missing-shared-lib.md) — source priority learned→profile→spec→default→AI; never auto-apply; record must carry subTab; pure logic in @workspace/fill-missing.
 - [Browser test reliability](runtest-expo-web-quirks.md) + [Web test harness](web-test-harness.md) — use fallbacks for browser flakes and keep web Vitest serialized with generous timeouts.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
@@ -75,7 +71,6 @@
 - [Brand quote-typo fold](brand-quote-typo-fold.md) + [spec alias hygiene](spec-alias-hygiene.md) — AI can mint `Aldo"s`; loose keys fold quotes, sanitizer snaps to known brands; digit-mismatch/generic/cyclic aliases dropped at every apply path, fuzzy matches never learned.
 - [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
-- [HMR dual-context crash](hmr-context-split.md) — provider files must export ONLY components (Fast Refresh rule) or HMR splits the module into two contexts; auth context lives in a hook-only module + dev globalThis singleton.
 - [One-time data heals](one-time-data-heals.md) + [data reset](one-time-data-purge.md) + [first-load form heal](sync-first-load-form-heal.md) — marker-guarded boot heals (monotonic stamps or poison resurrects); factory reset = per-scope epoch via POST /sync/reset; fresh-device form heal keys on currentRunId w/ guards.
 - [Seeded placeholder runs](seeded-placeholder-runs.md) — auto-created blank day placeholder is `seeded` + local-only (never pushed, dropped on receive) or fresh devices pile blank runs onto peers; clients must never hold 0 runs.
 - [Cheese server master-data](cheese-server-master-data.md) + [catch-all flavors](cheese-catch-all-flavors.md) + [mirror applicators](cheese-mirror-applicators.md) + [link-to-existing](cheese-import-link-to-existing.md) — server pool (per-BATCH lbs, NOT in Mixes), pick-only cards; "All Varieties"=EMPTY flavors; one-to-one link guard.
@@ -90,7 +85,6 @@
 - [Stick pep types](stick-pep-types.md) — spec importer stick applicator = pepperoni AND cheese sticks (both are `pepperonis` pep types, not cheese recipes); recognized in BOTH the parse prompt and STICK_PEP_NAME_RE/isStickPepOnlyCheeseRecipe.
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time profile reconciliation in @workspace/profile-cleanup; "has real data" gates must exclude dough or dough-only profiles ghost.
-- [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
 - [Import gen guards](import-gen-guard.md) — slow import prepares need per-kind generation refs (stale parse clobbers next import); post-import merge scan is background + toast, never force-navigates.
 - [Sync reset boundary](sync-reset-boundary-hardening.md) + [reset isolation](sync-integration-reset-isolation.md) — writes carry epoch and handle stale responses; reset endpoints stay out of shared multi-device fixtures.
 - [Press-done model](press-done-model.md) — web live surfaces count cased+freezer as made: pressCasesLeft drives time-left, 2-stage switchover alerts, dough auto-stop, next-run pre-seed; planning math unchanged; carry-over removed.
@@ -138,7 +132,6 @@
 - [Release verifier](release-check-shard-budget.md) + [revision binding](revision-bound-release-evidence.md) + [full verifier](release-evidence-verifier-mode.md) + [browser contract](release-browser-coverage-contract.md) — release reports must be current, complete, and verified in the selected mode.
 - [Source-audit reports](large-source-audit-captures.md) + [versions](source-audit-report-versions.md) — keep hashed source captures shard-safe and dispatch persisted comparisons by supported read version.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
-- [Pinned pnpm after baseline refresh](pinned-pnpm-after-refresh.md) — a newer packageManager pin can make the installed pnpm shim recurse; use the exact pinned launcher with CI mode to reconcile modules.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
 - [Validation roots](skill-catalog-ci-roots.md) + [Shell lint](shell-lint-inventory.md) — missing platform roots warn; editable skills and maintained scripts shell utilities remain covered.
@@ -152,7 +145,9 @@
 - [Field verification boundary](field-verification.md) — passive field evidence must stay best-effort and advisory, never become a second source of truth for production state.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [Container image migration split](container-image-migration.md) — Render pre-deploy runs inside the pulled image; slim runtimes need a scoped migration payload while full migration stays a separate target.
-- [Inline skill path references](inline-skill-path-references.md) — validate only whitespace-free file-like inline paths; resolve skill resources locally and explicit project prefixes from the repository root.
 - [Dough correction browser fixture](dough-correction-browser-fixture.md) — live-run tabs can rehydrate or mount lazily; assert active-tab UI and inspect actual `/api/sync/today` payloads.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake sync claim fence](wake-sync-claim-fence.md) — monotonic wake acknowledgment fences stale claims without deadlocking same-tick dough claim requests.
+- [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
+- [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
+- [Retained AI cache boundary](retained-ai-cache-boundary.md) — cache only unresolved model suggestions; recompute and merge deterministic matches per request.

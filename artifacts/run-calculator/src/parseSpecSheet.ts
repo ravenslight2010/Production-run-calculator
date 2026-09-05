@@ -84,6 +84,15 @@ import type {
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import type { AiStatus } from "./aiStatus";
+
+export type AiModelStatus = "completed" | "provider-unavailable" | "rate-limited" | "malformed";
+export type SuggestionResponseMetadata = {
+  decision: "suggestion";
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
+};
 
 export type SpecSheetKnown = {
   brands?: string[];
@@ -114,7 +123,7 @@ export type ParseSpecImagesInput = {
   images: Array<{ imageBase64: string; mimeType?: string }>;
 };
 
-export type ParseSpecImagesResult = {
+export type ParseSpecImagesResult = SuggestionResponseMetadata & {
   workbookText: string;
   generatedAt: number;
   note?: string;
@@ -123,7 +132,7 @@ export type ParseSpecImagesResult = {
 export type ReviewedProfile = ParsedProfile & { review?: ReviewVerdict };
 export type ReviewedRecipe = ParsedRecipe & { review?: ReviewVerdict };
 
-export type ParseSpecSheetResult = Omit<ParsedSpecImport, "profiles" | "recipes"> & {
+export type ParseSpecSheetResult = SuggestionResponseMetadata & Omit<ParsedSpecImport, "profiles" | "recipes"> & {
   profiles: ReviewedProfile[];
   recipes: ReviewedRecipe[];
   generatedAt: number;
