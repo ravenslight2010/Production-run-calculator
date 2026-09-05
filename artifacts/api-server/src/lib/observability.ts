@@ -15,6 +15,8 @@ type CacheMaintenanceLogger = {
   warn?: (obj: unknown, msg?: string) => void;
 };
 
+export { recordCostLimitEvent } from "./costLimitTelemetry";
+
 const MAX_CACHE_MAINTENANCE_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
 export const CACHE_MAINTENANCE_FAILURE_THRESHOLD = 3;
 export const CACHE_MAINTENANCE_FAILURE_WINDOW_MS = 5 * 60 * 1000;

@@ -8,6 +8,7 @@ import {
   isHealthProbePath,
   operationType,
   recordCacheMaintenance,
+  recordCostLimitEvent,
   recordStartupSlowWarning,
   safeErrorCode,
   safeQueueAgeMs,
@@ -22,6 +23,7 @@ describe("observability", () => {
   it("classifies operational routes without including identifiers", () => {
     expect(operationType("/api/sync/2026-08-22")).toBe("sync");
     expect(operationType("/api/inventory/items/123")).toBe("inventory");
+    expect(operationType("/api/ai/ask")).toBe("ai");
     expect(operationType("/api/ai/fill-missing")).toBe("ai");
     expect(operationType("/api/unknown")).toBe("request");
   });
@@ -44,6 +46,79 @@ describe("observability", () => {
     expect(safeQueueAgeMs(9_500, 10_000)).toBe(500);
     expect(safeQueueAgeMs(10_001, 10_000)).toBeUndefined();
     expect(safeQueueAgeMs(0, 8 * 24 * 60 * 60 * 1000)).toBeUndefined();
+  });
+
+  it("records bounded cost-limit signals without request payloads", () => {
+    const info = vi.fn();
+    const warn = vi.fn();
+
+    recordCostLimitEvent(
+      {
+        scope: "inventory_photo_analysis",
+        outcome: "near_limit",
+        actorHash: "actor-hash",
+        requestedCost: 20.4,
+        usedCost: 999_999_999_999,
+        limitCost: 300,
+        remainingCost: 4,
+      },
+      { info, warn },
+    );
+    recordCostLimitEvent(
+      {
+        scope: "inventory_photo_analysis",
+        outcome: "rejected",
+        actorHash: "actor-hash",
+        requestedCost: 20,
+        usedCost: 300,
+        limitCost: 300,
+        remainingCost: 0,
+      },
+      { info, warn },
+    );
+
+    expect(info).toHaveBeenCalledWith(
+      {
+        event: "cost_limit",
+        scope: "inventory_photo_analysis",
+        outcome: "near_limit",
+        actorHash: "actor-hash",
+        requestedCost: 20,
+        usedCost: 1_000_000_000,
+        limitCost: 300,
+        remainingCost: 4,
+        safeCounts: { nearLimitResponses: 1, rejections: 0 },
+      },
+      "cost limit nearing budget",
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "cost_limit",
+        scope: "inventory_photo_analysis",
+        outcome: "rejected",
+        safeCounts: { nearLimitResponses: 0, rejections: 1 },
+      }),
+      "cost limit rejected request",
+    );
+    const loggedFields = [...info.mock.calls, ...warn.mock.calls].map(([fields]) => fields);
+    expect(JSON.stringify(loggedFields)).not.toMatch(/prompt|image|candidate/i);
+  });
+
+  it("does not let cost-limit telemetry failures escape", () => {
+    expect(() =>
+      recordCostLimitEvent(
+        {
+          scope: "inventory_photo_analysis",
+          outcome: "rejected",
+          actorHash: "actor-hash",
+          requestedCost: 20,
+          usedCost: 300,
+          limitCost: 300,
+          remainingCost: 0,
+        },
+        { warn: () => { throw new Error("logger unavailable"); } },
+      ),
+    ).not.toThrow();
   });
 
   it("records only bounded, scope-aware cache maintenance fields", async () => {

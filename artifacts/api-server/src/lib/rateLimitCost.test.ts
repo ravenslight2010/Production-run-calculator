@@ -15,6 +15,12 @@ type CostLimitRun = {
     json: ReturnType<typeof vi.fn>;
   };
   headers: Record<string, string>;
+  log: {
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    debug: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
 };
 
 function runCostLimit(
@@ -23,9 +29,10 @@ function runCostLimit(
 ): Promise<CostLimitRun> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = {};
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() };
     let next!: CostLimitRun["next"];
     let res!: CostLimitRun["res"];
-    const result = (): CostLimitRun => ({ next, res, headers });
+    const result = (): CostLimitRun => ({ next, res, headers, log });
 
     res = {
       setHeader: vi.fn((name: string, value: string) => {
@@ -40,7 +47,7 @@ function runCostLimit(
       {
         ip: "203.0.113.5",
         path,
-        log: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        log,
       } as never,
       res as never,
       next,
@@ -153,5 +160,52 @@ describe("costLimitMiddleware", () => {
       "X-Cost-Reset": "60",
     });
     expect(afterReset.headers["Retry-After"]).toBeUndefined();
+  });
+
+  it("signals retained inventory photo near-limit and rejection outcomes safely", async () => {
+    const windowMs = 60_000;
+    const telemetry = vi.fn();
+    const middleware = costLimitMiddleware({
+      windowMs,
+      maxCost: 25,
+      store: new MemoryRateLimitStore(windowMs),
+      costFn: () => 20,
+      telemetryScope: () => "inventory_photo_analysis",
+      telemetry,
+    });
+
+    const nearLimit = await runCostLimit(middleware, "/api/inventory/count-observations");
+    const rejected = await runCostLimit(middleware, "/api/inventory/count-observations");
+
+    expect(nearLimit.next).toHaveBeenCalledOnce();
+    expect(telemetry).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        scope: "inventory_photo_analysis",
+        outcome: "near_limit",
+        requestedCost: 20,
+        usedCost: 20,
+        limitCost: 25,
+        remainingCost: 5,
+        actorHash: expect.stringMatching(/^[a-f0-9]{16}$/),
+      }),
+      nearLimit.log,
+    );
+    expect(rejected.next).not.toHaveBeenCalled();
+    expect(telemetry).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        scope: "inventory_photo_analysis",
+        outcome: "rejected",
+        requestedCost: 20,
+        usedCost: 25,
+        limitCost: 25,
+        remainingCost: 0,
+        actorHash: expect.stringMatching(/^[a-f0-9]{16}$/),
+      }),
+      rejected.log,
+    );
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("203.0.113.5");
+    expect(JSON.stringify(telemetry.mock.calls)).not.toMatch(/image|prompt|payload/i);
   });
 });

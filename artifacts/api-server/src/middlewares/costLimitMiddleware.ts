@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 import { checkCostLimit, costLimitMiddleware, AI_ENDPOINT_COSTS } from "../lib/rateLimitCost";
+import { recordCostLimitEvent } from "../lib/costLimitTelemetry";
+import type { CostLimitTelemetryScope } from "../lib/rateLimitCost";
 import { MemoryRateLimitStore, type RateLimitStore } from "./rateLimit";
 import { PostgresRateLimitStore } from "./rateLimitStore";
 
@@ -14,7 +16,7 @@ import { PostgresRateLimitStore } from "./rateLimitStore";
 export const AI_COST_LIMIT_WINDOW_MS = 60_000;
 export const AI_COST_LIMIT_MAX = 300;
 
-function publicAiPath(req: Request): string {
+export function publicAiPath(req: Request): string {
   // Express removes each mounted path segment from req.path. At the /ai
   // boundary in the production app this becomes:
   //   baseUrl="/api/ai", path="/optimize"
@@ -28,6 +30,12 @@ function publicAiPath(req: Request): string {
   // This fallback also keeps direct middleware tests, where baseUrl is absent,
   // aligned with the public route naming convention.
   return req.path ?? "";
+}
+
+export function costLimitTelemetryScope(req: Request): CostLimitTelemetryScope | undefined {
+  return publicAiPath(req) === "/api/inventory/count-observations"
+    ? "inventory_photo_analysis"
+    : undefined;
 }
 
 export function aiRequestCost(req: Request): number {
@@ -56,6 +64,8 @@ export function createAiCostLimit(
     maxCost: options.maxCost ?? AI_COST_LIMIT_MAX,
     store,
     costFn: aiRequestCost,
+    telemetryScope: costLimitTelemetryScope,
+    telemetry: recordCostLimitEvent,
   },
   );
 }
@@ -70,6 +80,8 @@ const aiCostLimitOptions = {
   maxCost: AI_COST_LIMIT_MAX,
   store: aiCostLimitStore,
   costFn: aiRequestCost,
+  telemetryScope: costLimitTelemetryScope,
+  telemetry: recordCostLimitEvent,
 };
 
 export const aiCostLimit = costLimitMiddleware(aiCostLimitOptions);

@@ -157,4 +157,3 @@
 - [Workspace declaration staleness](workspace-declaration-staleness.md) — composite package declarations can lag source and make valid workspace exports appear missing to artifact typechecks.
 - [Pinned pnpm after baseline refresh](pinned-pnpm-after-refresh.md) — a newer packageManager pin can make the installed pnpm shim recurse; use the exact pinned launcher with CI mode to reconcile modules.
 - [Inline skill path references](inline-skill-path-references.md) — validate only whitespace-free file-like inline paths; resolve skill resources locally and explicit project prefixes from the repository root.
-- [Browser request observers](browser-request-observer-query-strings.md) — passive Playwright request evidence should check pathname directly when production URLs carry query parameters.
