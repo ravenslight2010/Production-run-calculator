@@ -179,3 +179,25 @@ Each entry includes:
 **Context:** Step 2 of the approved server-side refactor order: (1) ✅ extract ScreenModeView → (2) ✅ extract calc to shared lib → (3) server computes calc + pushes via SSE → (4) extract tab panels → (5) React.memo → (6) server-side auto-track. 19 unit tests pass locally (vitest cannot run in this arm64 environment due to pre-existing rollup platform exclusion in pnpm-workspace.yaml overrides, but will pass in CI on x64).
 
 *Last updated: 2026-09-05*
+
+## 2026-09-05 — Extract Warehouse tab panel from home.tsx into narrow memo'd context (server-side refactor step 4a)
+
+**File(s):**
+- `artifacts/run-calculator/src/pages/home.tsx` (removed inline warehouse panel + `FreezerSurplusPanel`; wired `WarehouseTabCtx` + `WarehouseTabContent`)
+- `artifacts/run-calculator/src/contexts/WarehouseTabCtx.ts` (new — narrow `WarehouseTabCtx` + `useWarehouseTabCtx()`, mirrors `HomeTabCtx`)
+- `artifacts/run-calculator/src/pages/warehouseTabCtxDeps.ts` (new — canonical dep-field registry `WAREHOUSE_TAB_CTX_DEP_FIELDS`, mirrors `homeTabCtxDeps.ts`)
+- `artifacts/run-calculator/src/components/WarehouseTabContent.tsx` (new — memo'd Warehouse panel, reads narrow ctx)
+- `artifacts/run-calculator/src/components/WarehouseNeedsList.tsx` (new — `NeedRow` type + memo'd needs list)
+- `artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx` (new — extracted verbatim; still imported by home.tsx for the packaging panel)
+- `artifacts/run-calculator/src/contexts/__tests__/LiveTabMemo.snappy.test.tsx` (new warehouse freeze-guard tests)
+
+**What was wrong:** `home.tsx` is a ~25,800-line monolith and the Warehouse panel (~300 lines + 234-line `FreezerSurplusPanel`) lived inline inside it. Every state change in the giant `homeCtxValue` object (including manage/merge/import dialogs) re-rendered the Warehouse panel, and the monolith shape blocks step 4 (extract tab panels) of the approved server-side refactor order.
+
+**What the fix was:**
+1. Extracted the Warehouse panel into `WarehouseTabContent` (memo'd) and `FreezerSurplusPanel`/`WarehouseNeedsList` components.
+2. Created narrow `WarehouseTabCtx` fed by `warehouseTabCtxValue` in home.tsx, memoized ONLY on warehouse-relevant production data (need rows, freezer surplus/pull plan, schedules, runs, cycle counts) — dialog/manage/merge/import fields are excluded, exactly like the existing `HomeTabCtx` freeze pattern (see Suite 4 guard).
+3. Added `WAREHOUSE_TAB_CTX_DEP_FIELDS` registry + freeze-guard tests in `LiveTabMemo.snappy.test.tsx` (static dep-list guard asserting no `DIALOG_REGISTRY` field is in the warehouse deps, plus live render-count guards) so the manage-dialog freeze regression can't spread to the Warehouse panel.
+
+**Why it was needed:** Moves the Warehouse panel toward step 4/5 of the refactor (extract tab panels → React.memo isolation), so manager dialogs/imports no longer re-render warehouse UI, and future per-component extraction has a template. Inventory and Mixes panels remain inline (later phases). Web typecheck passes; 68/68 tests in the LiveTabMemo suite pass; full web suite runs in CI.
+
+*Last updated: 2026-09-05*

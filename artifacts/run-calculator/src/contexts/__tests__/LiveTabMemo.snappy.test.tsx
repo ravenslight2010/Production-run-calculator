@@ -52,6 +52,8 @@ import * as LiveRunContextNS from "../../contexts/LiveRunContext";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
+import { WarehouseTabCtx, useWarehouseTabCtx } from "../../contexts/WarehouseTabCtx";
+import { WAREHOUSE_TAB_CTX_DEP_FIELDS } from "../../pages/warehouseTabCtxDeps";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
 import { useNotifications } from "../../hooks/useNotifications";
 import * as HomeTabCtxNS from "../../contexts/HomeTabCtx";
@@ -907,6 +909,197 @@ describe("LiveTabMemo — Suite 4 counter-proof: guard DOES catch the regression
       );
 
       unmount();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 — WarehouseTabCtx: narrow warehouse context ref is stable across
+// dialog-state changes (warehouse freeze regression guard)
+//
+// Mirrors Suite 4's homeTabCtxValue guard for the Warehouse panel. The memo'd
+// WarehouseTabContent subscribes to WarehouseTabCtx, whose value
+// (warehouseTabCtxValue in home.tsx) is memoized on warehouse production deps
+// ONLY — dialog/manage/merge/import fields must never appear in the dep list.
+// If one does, every dialog open/close cycle creates a new context ref → the
+// memo'd Warehouse panel re-renders → the manage-dialog freeze regression that
+// originally hit the live tabs returns.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Simulation of warehouseTabCtxValue isolation ──────────────────────────────
+// Mirrors the pattern in home.tsx:
+//   const warehouseTabCtxValue = useMemo(
+//     () => warehouseTabCtxRef.current,
+//     [activeRunNeedDetails, activeRunValues, activeRuns, …]  // dialog fields omitted
+//   );
+// The dep array is driven by WAREHOUSE_TAB_CTX_DEP_FIELDS so the simulator
+// stays in sync with the real dep list (and with the static guard below).
+function WarehouseTabGuardProvider({
+  warehouseExtras,
+  dialogExtras,
+  children,
+}: {
+  warehouseExtras: Record<string, unknown>;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  const ctxValue = useMemo(
+    () => ({ ...warehouseExtras, ...dialogExtras }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [...WAREHOUSE_TAB_CTX_DEP_FIELDS.map((field) => warehouseExtras[field])],
+  );
+  return <WarehouseTabCtx.Provider value={ctxValue}>{children}</WarehouseTabCtx.Provider>;
+}
+
+// Realistic baseline warehouse production data — referentially stable so the
+// simulator's useMemo deps never change unless a test explicitly swaps them.
+const BASE_WAREHOUSE_EXTRAS: Record<string, unknown> = {
+  activeRunNeedDetails: new Map(),
+  activeRunValues: new Map(),
+  activeRuns: [{ id: "r1" }],
+  activeWarehouseRows: [],
+  activePackagingRows: [],
+  cycleCountSchedules: [],
+  dayState: { runs: [], stagedItems: {} },
+  freezerPullPlan: [],
+  freezerSurplus: [],
+  freezerSurplusBusy: false,
+  freezerSurplusError: null,
+  freezerSurplusLoaded: true,
+  isSupervisor: true,
+  markCountedMutation: { isPending: false },
+  runValuesById: new Map(),
+  scheduledDays: [],
+  scheduledValues: {},
+  todayScheduledValues: {},
+};
+
+describe("LiveTabMemo — Suite 4: WarehouseTabCtx ref is stable across ALL dialog-state field changes (warehouse registry guard)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("render count stays at 1 when every DIALOG_REGISTRY field toggles open then closed", async () => {
+    // Same mechanism as the homeTabCtxValue guard: if a dialog field
+    // accidentally enters warehouseTabCtxValue's deps, toggling it produces a
+    // new context ref → memo'd WarehouseTabContent re-renders → renderCount
+    // increases → this test fails.
+    let renderCount = 0;
+
+    const WarehouseSim = memo(function WarehouseSimInner() {
+      renderCount++;
+      const ctx = useWarehouseTabCtx() as {
+        activeRuns: Array<{ id: string }>;
+        isSupervisor: boolean;
+      };
+      return <span data-testid="wh-live">{ctx.activeRuns.length}|{String(ctx.isSupervisor)}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <WarehouseTabGuardProvider warehouseExtras={BASE_WAREHOUSE_EXTRAS} dialogExtras={{}}>
+        <WarehouseSim />
+      </WarehouseTabGuardProvider>,
+    );
+
+    // Confirm warehouse data is correct after initial render.
+    expect(getByTestId("wh-live").textContent).toBe("1|true");
+    const initialRenderCount = renderCount;
+    expect(initialRenderCount).toBe(1);
+
+    // Cycle through every dialog field: open → closed.
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      await act(async () => {
+        rerender(
+          <WarehouseTabGuardProvider
+            warehouseExtras={BASE_WAREHOUSE_EXTRAS}
+            dialogExtras={{ [field]: openValue }}
+          >
+            <WarehouseSim />
+          </WarehouseTabGuardProvider>,
+        );
+      });
+      await act(async () => {
+        rerender(
+          <WarehouseTabGuardProvider warehouseExtras={BASE_WAREHOUSE_EXTRAS} dialogExtras={{}}>
+            <WarehouseSim />
+          </WarehouseTabGuardProvider>,
+        );
+      });
+    }
+
+    // Warehouse values must be unchanged throughout — no dialog field affected them.
+    expect(getByTestId("wh-live").textContent).toBe("1|true");
+
+    // renderCount must still be 1: stable context ref → React bails out context
+    // update → memo()-wrapped subscriber never re-renders. A failure here means
+    // a DIALOG_REGISTRY field was added to warehouseTabCtxValue's deps.
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
+  it("live data DOES update when actual warehouse state changes (not over-isolated)", async () => {
+    // Counter-proof: the isolation must not prevent genuine warehouse updates.
+    let renderCount = 0;
+
+    const WarehouseSim2 = memo(function WarehouseSim2Inner() {
+      renderCount++;
+      const { activeRuns } = useWarehouseTabCtx() as { activeRuns: Array<{ id: string }> };
+      return <span data-testid="wh-live2">{String(activeRuns.length)}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <WarehouseTabGuardProvider warehouseExtras={BASE_WAREHOUSE_EXTRAS} dialogExtras={{}}>
+        <WarehouseSim2 />
+      </WarehouseTabGuardProvider>,
+    );
+
+    expect(getByTestId("wh-live2").textContent).toBe("1");
+    const countAfterMount = renderCount;
+
+    // Change a warehouse field (activeRuns) → warehouseTabCtxValue useMemo must
+    // invalidate → memo'd subscriber re-renders.
+    await act(async () => {
+      rerender(
+        <WarehouseTabGuardProvider
+          warehouseExtras={{ ...BASE_WAREHOUSE_EXTRAS, activeRuns: [{ id: "r1" }, { id: "r2" }] }}
+          dialogExtras={{}}
+        >
+          <WarehouseSim2 />
+        </WarehouseTabGuardProvider>,
+      );
+    });
+
+    expect(getByTestId("wh-live2").textContent).toBe("2");
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+
+  it("WAREHOUSE_TAB_CTX_DEP_FIELDS entries are distinct (no duplicates)", () => {
+    const unique = new Set(WAREHOUSE_TAB_CTX_DEP_FIELDS);
+    expect(unique.size).toBe(WAREHOUSE_TAB_CTX_DEP_FIELDS.length);
+  });
+
+  it("no DIALOG_REGISTRY field appears in WAREHOUSE_TAB_CTX_DEP_FIELDS (static dep-list guard)", () => {
+    // !! THIS IS THE PRIMARY REGRESSION GUARD FOR THE WAREHOUSE PANEL !!
+    //
+    // WAREHOUSE_TAB_CTX_DEP_FIELDS (from warehouseTabCtxDeps.ts) mirrors the
+    // warehouseTabCtxValue useMemo dep array in home.tsx. The two files carry a
+    // "KEEP IN SYNC" contract: when a developer adds a dep to
+    // warehouseTabCtxValue, they must also add it to warehouseTabCtxDeps.ts.
+    //
+    // Failure here means: a dialog/manage/import field has entered the
+    // warehouseTabCtxValue dep list, which will re-render the memo'd Warehouse
+    // panel on every dialog open/close cycle (the manage-dialog freeze
+    // regression spreading to the Warehouse tab).
+    const whDepSet = new Set<string>(WAREHOUSE_TAB_CTX_DEP_FIELDS);
+    const violations: string[] = [];
+    for (const { field } of DIALOG_REGISTRY) {
+      if (whDepSet.has(field)) {
+        violations.push(field);
+      }
+    }
+    if (violations.length > 0) {
+      throw new Error(
+        `The following dialog-state fields were found in WAREHOUSE_TAB_CTX_DEP_FIELDS ` +
+        `(warehouseTabCtxDeps.ts) — they must be removed from warehouseTabCtxValue's ` +
+        `dep list to prevent the warehouse freeze regression:\n  ${violations.join(", ")}`,
+      );
     }
   });
 });

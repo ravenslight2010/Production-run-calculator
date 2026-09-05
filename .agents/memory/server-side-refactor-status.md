@@ -1,9 +1,17 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands after Codex 2026-09-05 session — Steps 1-3 done, 4-6 blocked or not started.
+description: Where the server-side refactor stands after Codex 2026-09-05 session — Steps 1-3 done, 4a in PR, 4b/5/6 not started.
 ---
 
 # Server-side refactor — current status (2026-09-05)
+
+## In review (branch `refactor/extract-warehouse-tab`, PR #20)
+
+**Step 4a: Warehouse panel extracted with narrow context** — the earlier Warehouse extraction attempt was reverted because the panel referenced ~20 Home-scope variables. This time it succeeded by doing exactly what the "next agent" note suggested: split off a **narrow `WarehouseTabCtx`** instead of reusing `HomeTabCtx`.
+- `WarehouseTabContent.tsx` (memo'd) + `WarehouseNeedsList.tsx` + `FreezerSurplusPanel.tsx` extracted from home.tsx.
+- `warehouseTabCtxValue` in home.tsx memoizes on warehouse production deps ONLY — dialog/manage/merge/import fields excluded (freeze pattern, same as `HomeTabCtx`).
+- `warehouseTabCtxDeps.ts` (`WAREHOUSE_TAB_CTX_DEP_FIELDS`) + Suite 4 freeze-guard tests in `LiveTabMemo.snappy.test.tsx` prevent dialog fields from leaking back into the warehouse dep list.
+- Inventory and Mixes panels remain inline (later phases).
 
 ## Done (on branch `refactor/extract-screen-mode-view`, PR #19)
 
@@ -25,15 +33,15 @@ description: Where the server-side refactor stands after Codex 2026-09-05 sessio
 
 **Other: Replit handoff updated** (commit d8ddd2bc).
 
-## Attempted and reverted
+## Attempted, reverted, then succeeded (Step 4a above)
 
-**Step 4: Warehouse panel extraction** — tried to extract the ~300-line inline warehouse panel into a memo component using `useHomeTabCtx()`. Failed because the panel references ~20 Home-scope variables not in the context (`markCountedMutation`, `activeRunNeedDetails`, `activePackagingRows`, `cycleCountSchedules`, `runValuesById`, `fmtTime`, `runLabel`, `computeSummaryStats`, `WarehouseNeedsList`, `DEFAULT_VALUES`, etc.). Threading them through would widen re-render scope, defeating the React.memo benefit. Reverted cleanly.
-
-**Root cause:** The 8 panels that ARE extracted (LiveRun, LivePackaging, LiveSauce, LiveFrontline, LiveDough, LiveSetupRecipes, LiveStoppages, LiveSummary) only need the narrow production data from `useHomeTabCtx()`. The remaining panels (Warehouse, Setup non-recipe, AI/Manager) are management-heavy with deep dialog/mutation/computed-state dependencies.
+**First attempt (Step 4): Warehouse panel via `useHomeTabCtx()`** — failed because the panel references ~20 Home-scope variables not in the context (`markCountedMutation`, `activeRunNeedDetails`, `activePackagingRows`, `cycleCountSchedules`, `runValuesById`, `fmtTime`, `runLabel`, `computeSummaryStats`, `WarehouseNeedsList`, `DEFAULT_VALUES`, etc.). Threading them through would widen re-render scope. **Lesson:** management-heavy panels need their OWN narrow context (per concern), not the live-tab context — that is what `WarehouseTabCtx` provides.
 
 ## Not started
 
-**Step 5: React.memo on remaining panels** — blocked by Step 4. The already-extracted panels already use `memo()`.
+**Step 4b: Inventory/Mixes/Schedule panels** — same narrow-context pattern as Step 4a; Inventory and Mixes panels are still inline in home.tsx.
+
+**Step 5: React.memo on remaining panels** — mostly done implicitly by Step 4a (WarehouseTabContent is memo'd). Remaining panels still inline.
 
 **Step 6: Server-side auto-track** — `useAutoTrack` is 1,645 lines, deeply coupled to React refs, timers, form values, and state. Moving tick detection server-side is a multi-day architectural change. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
 
@@ -46,8 +54,6 @@ description: Where the server-side refactor stands after Codex 2026-09-05 sessio
 
 ## What the next agent should do
 
-1. Verify the branch is merged to main (PR #19).
-2. For Steps 4-6: the deep coupling in home.tsx is the blocker. Consider:
-   - Splitting `HomeCtx` into smaller, narrower contexts per concern (warehouse context, management context, etc.)
-   - Or: moving the management-heavy data to the server (server-computed warehouse need rows, server-computed reorder suggestions) so the client doesn't need to hold it all.
-   - The battery win from Step 6 (server-side auto-track) is the biggest remaining prize but requires understanding the full 1,645-line useAutoTrack hook first.
+1. Verify PR #20 (Warehouse extraction) is merged to main.
+2. Steps 4b-6: apply the `WarehouseTabCtx` recipe to Inventory and Mixes panels (each gets its own narrow ctx + dep registry + freeze-guard test). Keep dialog/manage/merge/import fields out of the dep lists.
+3. The battery win from Step 6 (server-side auto-track) is the biggest remaining prize but requires understanding the full 1,645-line useAutoTrack hook first.

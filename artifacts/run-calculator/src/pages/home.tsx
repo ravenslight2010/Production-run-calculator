@@ -1,6 +1,10 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
+import { WarehouseTabCtx } from "../contexts/WarehouseTabCtx";
+import WarehouseTabContent from "../components/WarehouseTabContent";
+import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
+import { type NeedRow } from "../components/WarehouseNeedsList";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
@@ -291,7 +295,7 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
-import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
+import { type WarehouseArea } from "../warehouseGrouping";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
@@ -714,8 +718,6 @@ applyMixCheeseOverlapDedupeIfNeeded();
 // writes (manage-profiles capability) — they run in a capability-gated effect
 // inside Home instead of at module init (see the profile-heal effect there).
 
-type NeedRow = { label: string; value: string; sub?: string; area?: WarehouseArea };
-
 function recordHomeCommit(
   _id: string,
   phase: "mount" | "update" | "nested-update",
@@ -784,42 +786,6 @@ function buildNeedRows(vals: FormValues): {
   }
   return { dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] };
 }
-
-function NeedsList({ rows }: { rows: NeedRow[] }) {
-  if (rows.length === 0)
-    return <p className="text-xs text-muted-foreground italic">No data</p>;
-  return (
-    <div className="space-y-1.5">
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-baseline justify-between gap-2 text-sm">
-          <span className="text-muted-foreground truncate">{row.label}</span>
-          <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
-            {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const WarehouseNeedsList = memo(function WarehouseNeedsList({ rows }: { rows: NeedRow[] }) {
-  const groups = groupWarehouseNeedRows(rows);
-  if (groups.length === 0) {
-    return <p className="text-xs text-muted-foreground italic">No data</p>;
-  }
-  return (
-    <div className="space-y-4">
-      {groups.map((group) => (
-        <section key={group.area} aria-label={`${group.area} needs`}>
-          <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {group.area}
-          </h3>
-          <NeedsList rows={group.rows} />
-        </section>
-      ))}
-    </div>
-  );
-});
 
 // opts.warehouse tailors the rows for warehouse staff: sauce rows are omitted
 // (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
@@ -14632,6 +14598,50 @@ export default function Home() {
           } as FormValues)),
       );
   }, [needsWarehouseSnapshot, scheduledDays, effectiveValuesForRun]);
+  // ── Warehouse tab context (narrow, like HomeTabCtx) ────────────────────────
+  // Memoized on warehouse-relevant production data only. Dialog/manage/merge
+  // state changes do NOT invalidate this value → WarehouseTabContent (memo'd)
+  // skips re-renders when only dialogs/imports/AI/merge change.
+  //
+  // !! KEEP IN SYNC: warehouseTabCtxDeps.ts mirrors this dep list for the
+  // freeze-guard test (LiveTabMemo.snappy.test.tsx Suite 4). Update BOTH when
+  // adding/removing a dep.  Dialog/manage/merge/import fields must NOT appear.
+  const warehouseTabCtxValueRaw = useMemo(
+    () => ({
+      activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
+      cycleCountSchedules, dayState, freezerPullPlan,
+      freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
+      isSupervisor, markCountedMutation,
+      refreshFreezerSurplus, replaceRunSurplus, runValuesById,
+      scheduledDays, scheduledValues, setPinError, setPinInput, setScheduleDeleteConfirm,
+      setScheduledDays, setScheduleView, setShowPinDialog, setShowScheduleDialog,
+      todayScheduledValues, toggleStagedItem,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      activeRunNeedDetails, activeRunValues, activeRuns,
+      activeWarehouseRows, activePackagingRows,
+      cycleCountSchedules, dayState,
+      freezerPullPlan,
+      freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
+      isSupervisor, markCountedMutation,
+      runValuesById,
+      scheduledDays, scheduledValues, todayScheduledValues,
+    ],
+  );
+  const warehouseTabCtxRef = useRef(warehouseTabCtxValueRaw);
+  warehouseTabCtxRef.current = warehouseTabCtxValueRaw;
+  const warehouseTabCtxValue = useMemo(() => warehouseTabCtxRef.current, [
+    // Keep in sync with WAREHOUSE_TAB_CTX_DEP_FIELDS
+    activeRunNeedDetails, activeRunValues, activeRuns,
+    activeWarehouseRows, activePackagingRows,
+    cycleCountSchedules, dayState,
+    freezerPullPlan,
+    freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
+    isSupervisor, markCountedMutation,
+    runValuesById,
+    scheduledDays, scheduledValues, todayScheduledValues,
+  ]);
   const inventoryRunValues = useMemo(
     () => needsInventorySnapshot
       ? dayState.runs.map((run) =>
@@ -16995,309 +17005,9 @@ export default function Home() {
               />
 
               {/* ─── WAREHOUSE ─── */}
-              <WarehouseInventoryDepartment warehouse={<>
-                <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="warehouse-attention-header">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-                    <h2 className="text-sm font-bold">Warehouse attention</h2>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
-                  </p>
-                </div>
-                <FreezerSurplusPanel
-                  mode="warehouse"
-                  ledger={freezerSurplus}
-                  loaded={freezerSurplusLoaded}
-                  busy={freezerSurplusBusy}
-                  error={freezerSurplusError}
-                  pendingRuns={[
-                    ...dayState.runs.filter((run) => !run.startedAt && !run.endedAt && !!run.brand),
-                    ...scheduledDays.flatMap((day) =>
-                      day.date === todayStr()
-                        ? []
-                        : (day.runs ?? [])
-                          .filter((run) => !!run.brand)
-                          .map((run, index) => ({
-                            ...run,
-                            id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}:${index}`,
-                            brand: run.brand,
-                            flavor: run.flavor,
-                            runDate: day.date,
-                          } as RunMeta & { runDate: string; casesNeeded?: number })),
-                    ),
-                  ]}
-                  getOriginalTarget={(run) =>
-                    Number((run as RunMeta & { casesNeeded?: number }).casesNeeded) ||
-                    Number(loadRunValues(run.id).casesNeeded) || 0}
-                  onConfirm={async () => {}}
-                  onAllocate={async (run, allocations) => {
-                    await replaceRunSurplus(run, allocations);
-                    await refreshFreezerSurplus();
-                  }}
-                />
-                {/* Pull Out Freezer: for each upcoming scheduled run within an
-                    item's days-early window whose recipe uses a tagged
-                    freezer-pull ingredient, show what to pull now, grouped by
-                    run date. Scheduled runs carry no recipe rows, so resolve
-                    each via its profile -> FormValues -> need rows, exactly like
-                    the schedule editor / per-run breakdown. */}
-                {(() => {
-                  const plan = freezerPullPlan;
-                  if (plan.length === 0) return null;
-                  return (
-                    <div className="space-y-3 mb-4">
-                      {plan.map((group) => (
-                        <Card
-                          key={group.date}
-                          className="border-border/50 bg-card/60 shadow-md"
-                          data-testid={`freezer-pull-${group.date}`}
-                        >
-                          <CardHeader className="pb-2 pt-4 px-5">
-                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                              <Snowflake className="w-4 h-4" /> Pull Out Freezer for {group.date}
-                              <span className="ml-1 font-normal normal-case text-xs text-muted-foreground/70">
-                                ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
-                              </span>
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="px-4 pb-4 space-y-3">
-                            {group.runs.map((run, ri) => (
-                              <div key={ri} className="rounded-xl border border-border/50 bg-background/50 p-3">
-                                <div className="font-semibold text-sm text-foreground mb-1.5 truncate">
-                                  {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
-                                </div>
-                                <div className="space-y-1">
-                                  {run.items.map((it, ii) => (
-                                    <div key={ii} className="flex items-baseline justify-between gap-2 text-sm">
-                                      <span className="text-muted-foreground min-w-0 truncate">
-                                        {it.name}
-                                        <span className="ml-1.5 text-[11px] text-amber-500/70">pull {it.daysEarly}d early</span>
-                                      </span>
-                                      <span className="font-bold tabular-nums whitespace-nowrap text-foreground">
-                                        {it.quantity} <span className="font-normal text-muted-foreground/70">{it.unit}</span>
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  );
-                })()}
-                {/* Time to Count: warehouse sections now due for a cycle count
-                    (never counted, or last counted longer ago than their
-                    cadence). Config is factory-wide manager master-data; any
-                    signed-in user can mark a section counted, which stamps it
-                    and clears it until the cadence elapses again. */}
-                {(() => {
-                  const due = buildCycleCountDueList({
-                    schedules: cycleCountSchedules,
-                    today: todayStr(),
-                  });
-                  if (due.length === 0) return null;
-                  return (
-                    <Card
-                      className="border-border/50 border-l-4 border-l-amber-500 bg-card/60 shadow-md mb-4"
-                      data-testid="cycle-count-due"
-                    >
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <ClipboardCheck className="w-4 h-4" /> Time to Count
-                          <span className="ml-1 font-normal normal-case text-xs text-amber-500/80">
-                            ({due.length} section{due.length !== 1 ? "s" : ""} due)
-                          </span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4 space-y-2">
-                        {due.map((d) => (
-                          <div
-                            key={d.id}
-                            className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-background/50 p-3"
-                          >
-                            <div className="min-w-0">
-                              <div className="font-semibold text-sm text-foreground truncate">
-                                {d.section}
-                              </div>
-                              <div className="text-[11px] text-muted-foreground">
-                                {d.daysSince === null
-                                  ? `Never counted · every ${d.cadenceDays}d`
-                                  : `Last counted ${d.lastCountedAt} · ${d.daysSince}d ago${d.overdueDays > 0 ? ` (${d.overdueDays}d over)` : ""}`}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => markCountedMutation.mutate(d.id)}
-                              disabled={markCountedMutation.isPending}
-                              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold disabled:opacity-50"
-                            >
-                              <ClipboardCheck className="w-3.5 h-3.5" /> Mark counted
-                            </button>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-                {/* Reorder Now: cross-location on-hand at/below reorder threshold
-                    once upcoming scheduled-run demand is subtracted. Scheduled
-                    runs carry no recipe rows, so resolve each via its profile ->
-                    FormValues (same pattern as the freezer-pull / per-run blocks)
-                    and feed them as the demand basis. Advisory only. */}
-                <ReorderCard scheduledValsList={scheduledValues} />
-                {/* Use First: stock lots expiring within the configured window
-                    (plus any already past), ordered first-expired-first-out, with
-                    the lots used by today's runs surfaced to the top. Today's runs
-                    = active runs + runs scheduled for today, resolved to their
-                    FormValues. Deterministic counterpart to the AI waste insight;
-                    advisory only. */}
-                <UseFirstCard todayValsList={[...activeRunValues, ...todayScheduledValues]} />
-                {(() => {
-                  const agg = activeWarehouseRows;
-                  const pkg = activePackagingRows;
-                  return (
-                    <>
-                      <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                        <CardHeader className="pb-2 pt-4 px-5">
-                          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                            <Warehouse className="w-4 h-4" /> Total Ingredient Needs — All Runs
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="px-4 pb-4">
-                          <WarehouseNeedsList rows={agg} />
-                        </CardContent>
-                      </Card>
-                      {pkg.length > 0 && (
-                        <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                          <CardHeader className="pb-2 pt-4 px-5">
-                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                              <Package className="w-4 h-4" /> Packaging Needs — All Runs
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="px-4 pb-4">
-                            <WarehouseNeedsList rows={pkg} />
-                          </CardContent>
-                        </Card>
-                      )}
-                    </>
-                  );
-                })()}
-                {/* Per-run breakdown: what each active run needs and roughly how
-                    long it runs, so warehouse staff can stage materials run by
-                    run instead of reading off one combined total. Reuses the
-                    same need/packaging math as the roll-up above. */}
-                {(() => {
-                  if (activeRuns.length === 0) return null;
-                  return (
-                    <details className="group mb-4 rounded-xl border border-border/50 bg-card/60 shadow-md" data-testid="warehouse-run-details">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 select-none">
-                        <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          <ListChecks className="h-4 w-4 shrink-0" /> What Each Run Needs
-                          <span className="normal-case tracking-normal text-xs font-normal">({activeRuns.length} active)</span>
-                        </span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                      </summary>
-                      <div className="border-t border-border/40 px-4 pb-4 pt-4 space-y-3">
-                        {activeRuns.map((r) => {
-                          const detail = activeRunNeedDetails.get(r.id);
-                          const vals = runValuesById.get(r.id) ?? DEFAULT_VALUES;
-                          const s = detail?.summary ?? computeSummaryStats(vals);
-                          const rows = detail?.rows ?? [];
-                          const estSec = s.estimatedTimeSec;
-                          const staged = dayState.stagedItems ?? {};
-                          const stagedCount = rows.filter((row: NeedRow) => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;
-                          return (
-                            <div key={r.id} className="rounded-md border border-border/40 bg-muted/10 p-3" data-testid={`warehouse-run-${r.id}`}>
-                              <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                                <span className="font-semibold text-sm truncate">{runLabel(r)}</span>
-                                <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                                  {rows.length > 0 ? `${stagedCount}/${rows.length} staged · ` : ""}{s.totalCases} case{s.totalCases !== 1 ? "s" : ""}{estSec > 0 ? ` · ~${fmtTime(estSec)}` : ""}
-                                </span>
-                              </div>
-                              {rows.length === 0 ? (
-                                <p className="text-xs text-muted-foreground italic">No materials configured yet.</p>
-                              ) : (
-                                <div className="space-y-4">
-                                  {groupWarehouseNeedRows(rows).map((group) => (
-                                    <section key={group.area} aria-label={`${group.area} needs`}>
-                                      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                        {group.area}
-                                      </h3>
-                                      <div className="space-y-1">
-                                  {group.rows.map((row) => {
-                                    const rowKey = `${row.label}__${row.sub ?? ""}`;
-                                    const checked = !!staged[`${r.id}::${rowKey}`];
-                                    return (
-                                      <button
-                                        key={`${group.area}::${rowKey}`}
-                                        type="button"
-                                        onClick={() => toggleStagedItem(r.id, rowKey)}
-                                        aria-pressed={checked}
-                                        data-testid={`stage-${r.id}-${rowKey}`}
-                                        className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-muted/40 transition-colors"
-                                      >
-                                        {checked ? (
-                                          <CheckSquare className="w-4 h-4 shrink-0 text-primary" />
-                                        ) : (
-                                          <Square className="w-4 h-4 shrink-0 text-muted-foreground/60" />
-                                        )}
-                                        <span className={`flex-1 truncate ${checked ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>{row.label}</span>
-                                        <span className={`font-bold tabular-nums whitespace-nowrap ${checked ? "text-muted-foreground" : "text-foreground"}`}>
-                                          {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                      </div>
-                                    </section>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  );
-                })()}
-                <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                  <CardHeader className="pb-2 pt-4 px-5">
-                    <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <CalendarDays className="w-4 h-4" /> Production Schedule
-                      </CardTitle>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
-                        }}
-                        title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
-                      >
-                        {isSupervisor ? <CalendarPlus className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} Manage
-                      </button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    {scheduledDays.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-3">No upcoming days scheduled. Tap Manage to plan future production.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {scheduledDays.map(day => (
-                          <div key={day.date} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/20 border border-border/30 text-sm">
-                            <span className="font-medium">{day.date}</span>
-                            <span className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-                </>} />
+              <WarehouseTabCtx.Provider value={warehouseTabCtxValue}>
+                <WarehouseInventoryDepartment warehouse={<WarehouseTabContent />} />
+              </WarehouseTabCtx.Provider>
 
               <WarehouseInventoryDepartment inventory={<>
                   <InventoryTab
@@ -21283,240 +20993,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   );
 });
 
-function FreezerSurplusPanel({
-  mode,
-  ledger,
-  loaded,
-  busy,
-  error,
-  completedRun,
-  freezerTimeMin,
-  nowMs,
-  pendingRuns,
-  getOriginalTarget,
-  onConfirm,
-  onAllocate,
-}: {
-  mode: "packaging" | "warehouse";
-  ledger: FreezerSurplusLedger;
-  loaded: boolean;
-  busy: boolean;
-  error: string | null;
-  completedRun?: RunMeta | null;
-  freezerTimeMin?: number;
-  nowMs?: number;
-  pendingRuns?: RunMeta[];
-  getOriginalTarget: (run: RunMeta) => number;
-  onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
-  onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
-}) {
-  const [cases, setCases] = useState("");
-  const [productionDate, setProductionDate] = useState(todayStr());
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
-  const [localMessage, setLocalMessage] = useState<string | null>(null);
-  const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
-  const runs = pendingRuns ?? [];
 
-  async function confirmLot() {
-    const count = Number(cases);
-    if (!completedRun || !Number.isSafeInteger(count) || count <= 0) {
-      setLocalMessage("Enter a positive whole number of excess cases.");
-      return;
-    }
-    if (!productionDate) {
-      setLocalMessage("Choose the production date for this freezer lot.");
-      return;
-    }
-    try {
-      await onConfirm(completedRun, count, productionDate);
-      setCases("");
-      setConfirmedRunId(completedRun.id);
-      setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
-    } catch {
-      // The parent exposes the server's actionable error.
-    }
-  }
-
-  async function saveSelection(run: RunMeta) {
-    const byLot = selections[run.id] ?? {};
-    const allocations = Object.entries(byLot)
-      .filter(([, count]) => count > 0)
-      .map(([lotId, count]) => ({ lotId, cases: count }));
-    try {
-      await onAllocate(run, allocations);
-      setSelectedRunId(null);
-      setLocalMessage(
-        allocations.length > 0
-          ? `Applied ${allocations.reduce((sum, item) => sum + item.cases, 0)} carried-in cases to ${run.brand}${run.flavor ? ` — ${run.flavor}` : ""}.`
-          : "Pull released. The run keeps its full original target.",
-      );
-    } catch {
-      // The parent exposes the server's actionable error.
-    }
-  }
-
-  if (mode === "packaging") {
-    if (!completedRun?.brand && !completedRun?.flavor) return null;
-    const remainingMs = getFreezerSurplusRemainingMs({
-      endedAt: completedRun.endedAt,
-      freezerTimeMin: freezerTimeMin ?? 0,
-      nowMs: nowMs ?? 0,
-    });
-    if (confirmedRunId === completedRun.id || remainingMs <= 0) return null;
-    return (
-      <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
-        <div className="flex items-start gap-3">
-          <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-bold">Confirm finished-case freezer surplus</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Record excess cases from the completed run as a separate dated lot. This does not change any future run until Warehouse explicitly pulls it.
-            </p>
-            <p className="mt-2 text-sm font-semibold">
-              {completedRun.brand}{completedRun.flavor ? ` — ${completedRun.flavor}` : ""}
-            </p>
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[8rem_10rem_auto]">
-              <label className="text-xs font-semibold text-muted-foreground">
-                Excess cases
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputMode="numeric"
-                  value={cases}
-                  onChange={(event) => setCases(event.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                  aria-label="Excess finished cases"
-                />
-              </label>
-              <label className="text-xs font-semibold text-muted-foreground">
-                Production date
-                <input
-                  type="date"
-                  value={productionDate}
-                  onChange={(event) => setProductionDate(event.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                  aria-label="Freezer lot production date"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void confirmLot()}
-                disabled={busy}
-                className="self-end rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-              >
-                {busy ? "Saving…" : "Confirm surplus"}
-              </button>
-            </div>
-            {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
-            {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  const lots = ledger.lots.filter((lot) => lot.remainingCases > 0);
-  return (
-    <section className="mb-4 rounded-xl border border-sky-500/30 bg-sky-500/5 p-4" data-testid="freezer-surplus-warehouse">
-      <div className="flex items-start gap-3">
-        <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-bold">Dated freezer surplus</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Select a dated lot and case count before the matching run starts. Unselected lots stay available; no selection means the full target is produced.
-          </p>
-          {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
-          {!loaded && <p className="mt-3 text-xs text-muted-foreground">Loading server-confirmed lots…</p>}
-          {loaded && runs.length === 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">No unstarted matching runs are waiting for a freezer pull.</p>
-          )}
-          <div className="mt-3 space-y-3">
-            {runs.map((run) => {
-              const summary = summarizeSurplusForRun({
-                runId: run.id,
-                brand: run.brand,
-                flavor: run.flavor,
-                originalTarget: getOriginalTarget(run),
-                lots: ledger.lots,
-                allocations: ledger.allocations,
-              });
-              const productLots = lots.filter((lot) => isMatchingSurplusProduct(lot, run));
-              const current = selections[run.id] ?? Object.fromEntries(
-                summary.selected.map((allocation) => [allocation.lotId, allocation.cases]),
-              );
-              const isEditing = selectedRunId === run.id;
-              return (
-                <div
-                  key={run.id}
-                  className="rounded-lg border border-border/50 bg-background/60 p-3"
-                  data-testid={`freezer-surplus-run-${run.id}`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold">{run.brand}{run.flavor ? ` — ${run.flavor}` : ""}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Original target <strong className="text-foreground">{summary.originalTarget}</strong>
-                        {" · "}Carried in <strong className="text-sky-300">{summary.carriedInCases}</strong>
-                        {" · "}Still to produce <strong className="text-foreground">{summary.productionCases}</strong>
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedRunId(isEditing ? null : run.id)}
-                      className="rounded-md border border-sky-500/40 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/10"
-                    >
-                      {isEditing ? "Close pull" : summary.carriedInCases > 0 ? "Revise pull" : "Choose pull"}
-                    </button>
-                  </div>
-                  {isEditing && (
-                    <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
-                      {productLots.length === 0 ? (
-                        <p className="text-xs italic text-muted-foreground">No available dated lot matches this brand and flavor.</p>
-                      ) : productLots.map((lot) => (
-                        <label key={lot.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span>
-                            {lot.productionDate} · {lot.remainingCases} available
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            max={lot.remainingCases + (current[lot.id] ?? 0)}
-                            step="1"
-                            value={current[lot.id] ?? 0}
-                            onChange={(event) => {
-                              const next = Math.max(0, Math.floor(Number(event.target.value) || 0));
-                              setSelections((prev) => ({
-                                ...prev,
-                                [run.id]: { ...(prev[run.id] ?? current), [lot.id]: next },
-                              }));
-                            }}
-                            className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right font-mono text-sm"
-                            aria-label={`Cases from freezer lot dated ${lot.productionDate}`}
-                          />
-                        </label>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => void saveSelection(run)}
-                        disabled={busy}
-                        className="mt-2 rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                      >
-                        {busy ? "Saving…" : "Confirm pull"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {localMessage && <p className="mt-2 text-xs font-medium text-sky-300" role="status">{localMessage}</p>}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
