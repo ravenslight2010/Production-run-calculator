@@ -15,13 +15,9 @@
 //
 // Strategy: stand up the real router against a disposable Postgres DB and sign
 // a fresh operator user (no use-ai-tools capability). The cost limiter counts
-// every request, but the route then 403s on the missing capability — so cost is
-// consumed without ever calling the AI provider. With a 300/min budget,
-// 10 optimize (cost 12) + 9 forecast (cost 20) = 300 stay allowed; the 10th
-// forecast (cost 20) tips the aggregate to 320 → 429 with X-Cost-* headers.
-// Each endpoint individually stays under its own 10/min cap (and capability
-// 403s never even reach the per-endpoint rate limiter), so the 429 can only
-// come from the AGGREGATE cost limiter.
+// every retained fill-missing request, but the route then 403s on the missing
+// capability, so budget is consumed without calling the provider. Three hundred
+// base-cost requests fill the budget and request 301 receives 429.
 //
 // Each test signs a NEW user so the in-memory cost bucket (a module singleton
 // in the test NODE_ENV) is fresh for every budget-exhaustion scenario.
@@ -158,24 +154,17 @@ function aiCall(userId: string, pathName: string): Promise<Response> {
   });
 }
 
-// Drive one user's aggregate AI budget to exhaustion: 10 optimize (120) + 9
-// forecast (180) = 300 all allowed, then the 10th forecast (20 → 320) crosses
-// the cap and returns 429. Each endpoint individually stays under its own
-// 10/min cap — both because we stop at 10, and because capability 403s never
-// reach the per-endpoint limiter — so the 429 can only come from the
-// multi-endpoint cost limiter. Returns the 429 response plus the user id.
+// Drive one user's aggregate AI budget to exhaustion with a retained,
+// capability-gated route. Capability 403s never reach the endpoint limiter, so
+// the 429 can only come from the shared cost limiter.
 async function exhaustBudget(): Promise<{ blocked: Response; userId: string }> {
   const userId = freshUser();
   await insertUser(userId);
-  for (let i = 0; i < 10; i++) {
-    const res = await aiCall(userId, "/ai/optimize");
-    expect(res.status, `optimize #${i + 1} should pass cost limit and 403`).toBe(403);
+  for (let i = 0; i < 300; i++) {
+    const res = await aiCall(userId, "/ai/fill-missing");
+    expect(res.status, `fill-missing #${i + 1} should pass cost limit and 403`).toBe(403);
   }
-  for (let i = 0; i < 9; i++) {
-    const res = await aiCall(userId, "/ai/forecast");
-    expect(res.status, `forecast #${i + 1} should pass cost limit and 403`).toBe(403);
-  }
-  return { blocked: await aiCall(userId, "/ai/forecast"), userId };
+  return { blocked: await aiCall(userId, "/ai/fill-missing"), userId };
 }
 
 describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
@@ -188,11 +177,11 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
       const headers = blocked.headers;
       expect(headers.get("X-Cost-Limit")).toBe("300");
       expect(headers.get("X-Cost-Used")).toBe("300");
-      expect(headers.get("X-Cost-Requested")).toBe("20");
+      expect(headers.get("X-Cost-Requested")).toBe("1");
       expect(Number(headers.get("Retry-After"))).toBeGreaterThan(0);
 
       const body = (await blocked.json()) as { error: string };
-      expect(body.error).toContain("Cost limit exceeded. Budget: 300, used: 300, requested: 20");
+      expect(body.error).toContain("Cost limit exceeded. Budget: 300, used: 300, requested: 1");
     },
     30_000,
   );
@@ -215,7 +204,7 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
     // (403 = passed the cost limiter, refused only by their missing capability).
     const other = freshUser();
     await insertUser(other);
-    const res = await aiCall(other, "/ai/forecast");
+    const res = await aiCall(other, "/ai/fill-missing");
     expect(res.status).toBe(403);
   });
 });

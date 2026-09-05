@@ -75,7 +75,7 @@ Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 | Stoppages | All signed-in users | Always | Review or manage logged stoppages | Header menu → hidden panel |
 | Summary | All signed-in users | Always | Review run/day summary | Header menu → hidden panel |
 | Inventory | All signed-in users | Always | Review stock and maintain inventory records | Header menu → `inventory` panel |
-| AI Assistant | All signed-in users | Always | Ask operational questions or use available AI assistance | Header menu → `ai` panel |
+| Operations Insights | All signed-in users | Always | Review deterministic recaps, anomalies, schedule order, and imports | Header menu → `ai` panel |
 | Mix Plan | All signed-in users | Always | View operational mix plan and make-day needs | Header menu → `mixes` panel |
 | Report an issue | All signed-in users | Always | Submit a product/operational issue | Header menu → issue dialog |
 | Reported issues | Managers (`manage-staff`) | Always for eligible role | Review and act on reported issues | Header menu → `incidents` panel |

@@ -19,7 +19,7 @@ type CostLimitRun = {
 
 function runCostLimit(
   middleware: ReturnType<typeof costLimitMiddleware>,
-  path = "/api/ai/ask",
+  path = "/api/ai/fill-missing",
 ): Promise<CostLimitRun> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = {};
@@ -58,7 +58,7 @@ describe("costLimitMiddleware", () => {
     vi.useRealTimers();
   });
 
-  it("charges regular and higher-cost AI tools through the shared store contract", async () => {
+  it("charges retained AI tools through the shared store contract", async () => {
     const windowMs = 60_000;
     const memoryStore = new MemoryRateLimitStore(windowMs);
     const hit = vi.fn(
@@ -74,38 +74,30 @@ describe("costLimitMiddleware", () => {
       windowMs,
       maxCost: 100,
       store,
-      costFn: (req) => {
-        if (req.path === "/api/ai/forecast") {
-          return AI_ENDPOINT_COSTS["/api/ai/forecast"]!;
-        }
-        if (req.path === "/api/ai/optimize") {
-          return AI_ENDPOINT_COSTS["/api/ai/optimize"]!;
-        }
-        return 1;
-      },
+      costFn: (req) => AI_ENDPOINT_COSTS[req.path] ?? 1,
     });
 
     const normal = await runCostLimit(middleware);
-    const forecast = await runCostLimit(middleware, "/api/ai/forecast");
-    const optimize = await runCostLimit(middleware, "/api/ai/optimize");
+    const count = await runCostLimit(middleware, "/api/ai/fill-missing");
+    const anotherNormal = await runCostLimit(middleware);
 
     expect(normal.next).toHaveBeenCalledOnce();
-    expect(forecast.next).toHaveBeenCalledOnce();
-    expect(optimize.next).toHaveBeenCalledOnce();
-    expect(forecast.headers).toMatchObject({
-      "X-Cost-Used": "21",
-      "X-Cost-Remaining": "79",
-      "X-Cost-Requested": "20",
+    expect(count.next).toHaveBeenCalledOnce();
+    expect(anotherNormal.next).toHaveBeenCalledOnce();
+    expect(count.headers).toMatchObject({
+      "X-Cost-Used": "2",
+      "X-Cost-Remaining": "98",
+      "X-Cost-Requested": "1",
     });
-    expect(optimize.headers).toMatchObject({
-      "X-Cost-Used": "33",
-      "X-Cost-Remaining": "67",
-      "X-Cost-Requested": "12",
+    expect(anotherNormal.headers).toMatchObject({
+      "X-Cost-Used": "3",
+      "X-Cost-Remaining": "97",
+      "X-Cost-Requested": "1",
     });
     expect(hit.mock.calls).toEqual([
       ["cost-limit:203.0.113.5", windowMs, 1_000, 1],
-      ["cost-limit:203.0.113.5", windowMs, 1_000, 20],
-      ["cost-limit:203.0.113.5", windowMs, 1_000, 12],
+      ["cost-limit:203.0.113.5", windowMs, 1_000, 1],
+      ["cost-limit:203.0.113.5", windowMs, 1_000, 1],
     ]);
   });
 
@@ -113,47 +105,42 @@ describe("costLimitMiddleware", () => {
     const windowMs = 60_000;
     const middleware = costLimitMiddleware({
       windowMs,
-      maxCost: 25,
+      maxCost: 2,
       store: new MemoryRateLimitStore(windowMs),
-      costFn: (req) =>
-        req.path === "/api/ai/forecast"
-          ? AI_ENDPOINT_COSTS["/api/ai/forecast"]!
-          : req.path === "/api/ai/optimize"
-            ? AI_ENDPOINT_COSTS["/api/ai/optimize"]!
-            : 1,
+      costFn: (req) => AI_ENDPOINT_COSTS[req.path] ?? 1,
     });
 
     const normal = await runCostLimit(middleware);
-    const forecast = await runCostLimit(middleware, "/api/ai/forecast");
-    const blocked = await runCostLimit(middleware, "/api/ai/optimize");
+    const count = await runCostLimit(middleware, "/api/ai/fill-missing");
+    const blocked = await runCostLimit(middleware, "/api/ai/match-import");
 
     expect(normal.headers).toMatchObject({
-      "X-Cost-Limit": "25",
+      "X-Cost-Limit": "2",
       "X-Cost-Used": "1",
-      "X-Cost-Remaining": "24",
+      "X-Cost-Remaining": "1",
       "X-Cost-Requested": "1",
       "X-Cost-Reset": "60",
     });
     expect(normal.headers["Retry-After"]).toBeUndefined();
-    expect(forecast.headers).toMatchObject({
-      "X-Cost-Used": "21",
-      "X-Cost-Remaining": "4",
-      "X-Cost-Requested": "20",
+    expect(count.headers).toMatchObject({
+      "X-Cost-Used": "2",
+      "X-Cost-Remaining": "0",
+      "X-Cost-Requested": "1",
     });
 
     expect(blocked.next).not.toHaveBeenCalled();
     expect(blocked.res.status).toHaveBeenCalledWith(429);
     expect(blocked.headers).toMatchObject({
-      "X-Cost-Limit": "25",
-      "X-Cost-Used": "25",
+      "X-Cost-Limit": "2",
+      "X-Cost-Used": "2",
       "X-Cost-Remaining": "0",
-      "X-Cost-Requested": "12",
+      "X-Cost-Requested": "1",
       "X-Cost-Reset": "60",
       "Retry-After": "60",
     });
     expect(blocked.res.json).toHaveBeenCalledWith({
       error:
-        "Cost limit exceeded. Budget: 25, used: 25, requested: 12. Retry after 60s.",
+        "Cost limit exceeded. Budget: 2, used: 2, requested: 1. Retry after 60s.",
     });
 
     vi.advanceTimersByTime(windowMs + 1);
@@ -162,7 +149,7 @@ describe("costLimitMiddleware", () => {
     expect(afterReset.next).toHaveBeenCalledOnce();
     expect(afterReset.headers).toMatchObject({
       "X-Cost-Used": "1",
-      "X-Cost-Remaining": "24",
+      "X-Cost-Remaining": "1",
       "X-Cost-Reset": "60",
     });
     expect(afterReset.headers["Retry-After"]).toBeUndefined();

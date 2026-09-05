@@ -43,7 +43,6 @@
     "@workspace/schedule-optimize": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/spec-reconcile": "workspace:*",
-    "@workspace/voice-commands": "workspace:*",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "drizzle-orm": "catalog:",

@@ -1,5 +1,5 @@
 // Integration tests proving scope isolation for the newly scoped tables:
-// factory_kv, production_runs, quality_checks, and proactive_alert_settings.
+// factory_kv, production_runs, and quality_checks.
 //
 // Each test DB is created fresh, schema pushed via drizzle-kit push-force, and
 // dropped on teardown — nothing here touches real data.
@@ -29,7 +29,6 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
     pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
   };
 });
-
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
@@ -39,7 +38,6 @@ let rolesTable: DbModule["rolesTable"];
 let factoryKvTable: DbModule["factoryKvTable"];
 let productionRunsTable: DbModule["productionRunsTable"];
 let qualityChecksTable: DbModule["qualityChecksTable"];
-let proactiveAlertSettingsTable: DbModule["proactiveAlertSettingsTable"];
 
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
@@ -94,7 +92,6 @@ beforeAll(async () => {
   factoryKvTable = dbMod.factoryKvTable;
   productionRunsTable = dbMod.productionRunsTable;
   qualityChecksTable = dbMod.qualityChecksTable;
-  proactiveAlertSettingsTable = dbMod.proactiveAlertSettingsTable;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   seedRoles = (await import("../lib/roles")).seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
@@ -143,7 +140,6 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM ${factoryKvTable}`);
   await db.execute(sql`DELETE FROM ${productionRunsTable}`);
   await db.execute(sql`DELETE FROM ${qualityChecksTable}`);
-  await db.execute(sql`DELETE FROM ${proactiveAlertSettingsTable}`);
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -193,19 +189,6 @@ async function deleteRun(userId: string, id: number): Promise<Response> {
     method: "DELETE",
     headers: authHeader(userId),
   });
-}
-
-async function putProactiveSettings(userId: string, enabled: boolean): Promise<Response> {
-  return fetch(`${baseUrl}/api/ai/proactive-settings`, {
-    method: "PUT",
-    headers: { "content-type": "application/json", ...authHeader(userId) },
-    body: JSON.stringify({ enabled, pollSeconds: 120, cooldownSeconds: 900 }),
-  });
-}
-
-async function getProactiveSettings(userId: string): Promise<{ enabled: boolean }> {
-  const res = await fetch(`${baseUrl}/api/ai/proactive-settings`, { headers: authHeader(userId) });
-  return res.json() as Promise<{ enabled: boolean }>;
 }
 
 // ── factory KV scope isolation ────────────────────────────────────────────────
@@ -260,7 +243,6 @@ describe("factory KV — live/sandbox scope isolation", () => {
     expect(res.status).toBe(403);
   });
 });
-
 // ── production runs scope isolation ──────────────────────────────────────────
 
 describe("production runs — live/sandbox scope isolation", () => {
@@ -304,33 +286,5 @@ describe("production runs — live/sandbox scope isolation", () => {
 
     expect(liveRuns.map((r) => r.label).sort()).toEqual(["live-a", "live-b"]);
     expect(sandboxRuns.map((r) => r.label)).toEqual(["sandbox-a"]);
-  });
-});
-
-// ── proactive alert settings scope isolation ──────────────────────────────────
-
-describe("proactive alert settings — live/sandbox scope isolation", () => {
-  it("sandbox changes to alert settings do not affect live settings", async () => {
-    // Set live to enabled=true
-    await putProactiveSettings(LIVE_MANAGER, true);
-    // Set sandbox to enabled=false
-    await putProactiveSettings(sandboxUserId, false);
-
-    const liveSettings = await getProactiveSettings(LIVE_MANAGER);
-    const sandboxSettings = await getProactiveSettings(sandboxUserId);
-
-    expect(liveSettings.enabled).toBe(true);
-    expect(sandboxSettings.enabled).toBe(false);
-  });
-
-  it("live changes to alert settings do not affect sandbox settings", async () => {
-    await putProactiveSettings(sandboxUserId, true);
-    await putProactiveSettings(LIVE_MANAGER, false);
-
-    const liveSettings = await getProactiveSettings(LIVE_MANAGER);
-    const sandboxSettings = await getProactiveSettings(sandboxUserId);
-
-    expect(liveSettings.enabled).toBe(false);
-    expect(sandboxSettings.enabled).toBe(true);
   });
 });

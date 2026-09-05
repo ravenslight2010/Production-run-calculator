@@ -1016,302 +1016,8 @@ export const WasteInsightResponse = zod.object({
 
 
 /**
- * Analyzes the current day's runs, scheduled runs, and recent history and returns grouped/ranked recommendation cards. Read-only — never applies any change.
- * @summary AI optimization recommendations for runs and break timing
- */
-export const AiOptimizeBody = zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-
-export const AiOptimizeResponse = zod.object({
-  "recommendations": zod.array(zod.object({
-  "category": zod.enum(['run', 'break', 'efficiency']),
-  "title": zod.string(),
-  "detail": zod.string(),
-  "impact": zod.enum(['high', 'medium', 'low']),
-  "appliesTo": zod.string().nullable().describe('Run label or scope this applies to, or null for shift-wide'),
-  "action": zod.union([zod.object({
-  "kind": zod.enum(['set_target_time', 'set_run_target', 'reorder_run']),
-  "label": zod.string().describe('Short imperative button caption'),
-  "time": zod.string().optional().describe('Target finish time HH:MM (set_target_time)'),
-  "runId": zod.string().optional().describe('Target run id (set_run_target, reorder_run)'),
-  "casesNeeded": zod.number().optional().describe('New case target (set_run_target)'),
-  "beforeRunId": zod.string().nullish().describe('reorder_run: move runId immediately before this run id, or null to move it last')
-}).describe('Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today\'s run ids.'),zod.null()]).optional().describe('Optional one-tap action, or null when nothing is safely applicable'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
-})),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when data is insufficient for analysis')
-})
-
-
-/**
- * Answers a plain-language question grounded strictly in the day's real run data, the shared facility memory, and the asking user's recent conversation turns. Keeps per-user follow-up context, never invents data (says so when it can't answer), and records the exchange back into that user's conversation memory. Read-only — never applies any change.
- * @summary Ask the AI a free-form question about the day
- */
-export const AiAskBody = zod.object({
-  "question": zod.string().describe('The user\'s plain-language question about the day'),
-  "dayState": zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-}).describe('A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.')
-
-export const AiAskResponse = zod.object({
-  "answer": zod.string().describe('The grounded plain-language answer'),
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The asking user\'s recent conversation window (oldest first) after this exchange was recorded, so the client can render the thread from server truth.'),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when the question could not be answered from data')
-})
-
-
-/**
- * Takes a single spoken utterance plus the live day-state and classifies it as either a QUESTION (the client routes it to /ai/ask, unchanged) or a COMMAND. For a command, returns one or more structured actions drawn from a fixed vocabulary, with every fuzzy reference already resolved against the grounding (a run by brand/flavor → run id, an inventory item by name → item key/id) and a friendly label attached. Returns an explicit "none" when nothing actionable was understood. This endpoint never mutates anything itself — the client runs the actions through its existing handlers (with role gating and Undo).
- * @summary Classify a spoken phrase as a question or an executable command
- */
-export const AiCommandBody = zod.object({
-  "utterance": zod.string().describe('The user\'s spoken phrase (a question or an action command)'),
-  "dayState": zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-}).describe('A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data \/ai\/ask uses), letting the server resolve fuzzy run references to concrete run ids.')
-
-export const AiCommandResponse = zod.unknown()
-
-
-/**
- * Answers a plain-language question about the current run's recipes and ingredients — scaling a recipe, suggesting a substitution, or explaining a formula — grounded strictly in the supplied recipe rows, the known ingredient pool, the shared name-corrections, and the facility memory. Advisory only: never edits or commits a recipe, never invents ingredients or quantities (says so plainly when the data is insufficient). Read-only.
- * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
- */
-export const AiRecipeAssistantBody = zod.object({
-  "question": zod.string().describe('The user\'s plain-language recipe\/ingredient question'),
-  "recipes": zod.array(zod.object({
-  "id": zod.string().optional().describe('Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an \"apply\" suggestion target this exact recipe deterministically.'),
-  "kind": zod.string().describe('What the recipe is for (dough, sauce, cheese, other)'),
-  "name": zod.string().describe('The recipe\'s name (may be empty if unnamed)'),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number().describe('Pounds of this ingredient in the recipe\/batch')
-}).describe('One ingredient line of a recipe (ingredient name + pounds).'))
-}).describe('One of the current run\'s recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).')).describe('The current run\'s recipes (dough\/sauce\/cheese), may be empty'),
-  "ingredientNames": zod.array(zod.string()).optional().describe('Known ingredient names, so substitutions stay within the app\'s pool'),
-  "context": zod.object({
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "casesNeeded": zod.number().optional(),
-  "pizzasPerCase": zod.number().optional(),
-  "doughballWeightOz": zod.number().optional().describe('Target weight of one doughball in ounces')
-}).optional().describe('Optional run numbers the model may use to ground scaling math so its answer is consistent with what the app computes.')
-}).describe('A plain-language recipe\/ingredient question plus the real recipe rows, the known ingredient pool, and optional run context the answer must be grounded in. Both clients send identically-shaped data.')
-
-export const AiRecipeAssistantResponse = zod.object({
-  "answer": zod.string().describe('The grounded plain-language answer'),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when the question could not be answered from data'),
-  "suggestion": zod.object({
-  "kind": zod.enum(['scale', 'substitute']).describe('Whether this resizes a recipe (scale) or swaps an ingredient (substitute)'),
-  "recipeId": zod.string().describe('The id of the recipe to apply this to, copied from the matching RecipeAssistRecipe.id sent in the request.'),
-  "recipeName": zod.string().optional().describe('The target recipe\'s display name (for the confirmation UI)'),
-  "summary": zod.string().optional().describe('A short button\/label describing the change (e.g. \"Apply scaled dough 1.5x\")'),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number().describe('Pounds of this ingredient in the recipe\/batch')
-}).describe('One ingredient line of a recipe (ingredient name + pounds).')).describe('The COMPLETE new set of ingredient rows for that recipe after the change')
-}).optional().describe('An optional structured, confirm-first edit the worker can apply in one tap — the exact resulting ingredient rows of a scaled or substituted recipe. Present only for SCALE\/SUBSTITUTE questions where the model could produce exact rows; absent for EXPLAIN questions or when it is unsure. Advisory: nothing is applied until the worker confirms.')
-})
-
-
-/**
- * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), then asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: the deterministic discrepancy list is always returned even if the AI summary is unavailable. Available to any signed-in user.
- * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+ * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), and returns the authoritative deterministic discrepancy list. Available to any signed-in user.
+ * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
 export const AiSpecReconcileBody = zod.object({
   "specSheetId": zod.number().int().describe('The id of the saved spec sheet to check against'),
@@ -1359,8 +1065,8 @@ export const AiSpecReconcileResponse = zod.object({
 
 
 /**
- * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint takes that exact discrepancy list and asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: an AI error simply yields an empty summary, never an error. It never invents or applies anything. Available to any signed-in user.
- * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint validates and returns that exact deterministic discrepancy list. It never invents or applies anything. Available to any signed-in user.
+ * @summary Return already-computed mix discrepancies; read-only
  */
 export const AiMixReconcileBody = zod.object({
   "label": zod.string().optional().describe('Optional label for what was compared (e.g. the sheet name)'),
@@ -1386,209 +1092,8 @@ export const AiMixReconcileResponse = zod.object({
 
 
 /**
- * Answers a plain-language question grounded strictly in the current mix definitions and the facility memory. Advisory only: it explains and computes but never edits a mix or applies anything (no structured suggestion). Available to any signed-in user.
- * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
- */
-export const AiMixAssistantBody = zod.object({
-  "question": zod.string(),
-  "mixes": zod.array(zod.object({
-  "name": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "batchSize": zod.number().optional(),
-  "daysEarly": zod.number().optional(),
-  "amountAlreadyMade": zod.number().optional(),
-  "enabled": zod.boolean().optional(),
-  "components": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
-  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
-}))
-}))
-})
-
-export const AiMixAssistantResponse = zod.object({
-  "answer": zod.string(),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional()
-})
-
-
-/**
- * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
- * @summary At-most-one proactive shift alert (AI); read-only
- */
-export const AiProactiveAlertBody = zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-
-export const AiProactiveAlertResponse = zod.object({
-  "alert": zod.union([zod.object({
-  "key": zod.string().describe('Stable de-dup slug for the kind of nudge'),
-  "category": zod.enum(['run', 'break', 'efficiency']),
-  "title": zod.string().describe('Short glanceable headline'),
-  "detail": zod.string().describe('One or two plain-language sentences a manager can act on'),
-  "impact": zod.enum(['high', 'medium', 'low'])
-}).describe('A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. \"behind-plan\", \"break-window\") so repeats of the same situation can be de-duped\/cooled down client-side; it is never run-instance or timestamp specific.'),zod.null()]).describe('The single nudge to surface now, or null when nothing applies'),
-  "generatedAt": zod.number(),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional message when no alert could be produced')
-})
-
-
-/**
- * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
- */
-export const GetProactiveAlertSettingsResponse = zod.object({
-  "enabled": zod.boolean(),
-  "pollSeconds": zod.number().int(),
-  "cooldownSeconds": zod.number().int()
-})
-
-
-/**
- * @summary Update global proactive-alert settings (manager only)
- */
-export const UpdateProactiveAlertSettingsBody = zod.object({
-  "enabled": zod.boolean(),
-  "pollSeconds": zod.number().int(),
-  "cooldownSeconds": zod.number().int()
-})
-
-export const UpdateProactiveAlertSettingsResponse = zod.object({
-  "enabled": zod.boolean(),
-  "pollSeconds": zod.number().int(),
-  "cooldownSeconds": zod.number().int()
-})
-
-
-/**
- * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
- * @summary Predict an upcoming day's run plan (AI); read-only
- */
-export const aiForecastBodyHorizonDaysMax = 7;
-
-
-
-export const AiForecastBody = zod.object({
-  "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the first upcoming day to forecast'),
-  "horizonDays": zod.number().int().min(1).max(aiForecastBodyHorizonDaysMax).optional().describe('How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday\'s history.'),
-  "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
-  "history": zod.array(zod.object({
-  "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when unknown'),
-  "cases": zod.number().describe('Cases actually produced for this run'),
-  "netRunMin": zod.number().describe('Net run minutes (excludes downtime); a throughput signal')
-}).describe('A finished run from a past day, used to learn demand patterns.'))
-}).describe('One past production day with its finished runs.')).describe('Recent finished production days, most useful when several weeks deep'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Runs already planned for future days (incl. any existing plan for the target day)')
-})
-
-export const AiForecastResponse = zod.object({
-  "forecast": zod.union([zod.object({
-  "targetDate": zod.string(),
-  "confidence": zod.enum(['high', 'medium', 'low']).describe('Honest confidence given how much history supports the prediction'),
-  "summary": zod.string().describe('Plain-language rationale for the whole plan, incl. caveats'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when the model is unsure'),
-  "casesNeeded": zod.number().describe('Rough suggested case target'),
-  "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
-}).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
-}),zod.null()]).describe('The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present.'),
-  "forecasts": zod.array(zod.object({
-  "targetDate": zod.string(),
-  "confidence": zod.enum(['high', 'medium', 'low']).describe('Honest confidence given how much history supports the prediction'),
-  "summary": zod.string().describe('Plain-language rationale for the whole plan, incl. caveats'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when the model is unsure'),
-  "casesNeeded": zod.number().describe('Rough suggested case target'),
-  "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
-}).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
-})).optional().describe('One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon.'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI produced a forecast; false when no forecast was produced'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Explanation when no forecast could responsibly be produced')
-})
-
-
-/**
- * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, plain-language recap for floor staff and managers. The numeric stats are computed deterministically server-side; the AI only narrates them and never invents figures. Read-only — never writes or commits run data. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic plain-language summary built from the same stats is returned instead, so the caller always gets a usable recap.
- * @summary Plain-language end-of-day / weekly production recap (AI); read-only
+ * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, deterministic plain-language recap for floor staff and managers. Read-only — never writes or commits run data.
+ * @summary Plain-language end-of-day / weekly production recap; read-only
  */
 export const AiSummaryBody = zod.object({
   "scope": zod.enum(['day', 'week']).describe('Whether to recap a single day or a rolling week'),
@@ -1608,7 +1113,7 @@ export const AiSummaryBody = zod.object({
 })
 
 export const AiSummaryResponse = zod.object({
-  "summary": zod.string().describe('Plain-language recap (AI narration, or deterministic fallback)'),
+  "summary": zod.string().describe('Deterministic plain-language recap'),
   "stats": zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string(),
@@ -1629,7 +1134,7 @@ export const AiSummaryResponse = zod.object({
   "hasData": zod.boolean()
 }).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used'),
+  "aiGenerated": zod.boolean().describe('Compatibility field; deterministic responses return false'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
@@ -1765,59 +1270,6 @@ export const GetShiftHandoffDigestResponse = zod.object({
 
 
 /**
- * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
- * @summary Review how accurate past forecasts were vs. what actually ran; read-only
- */
-export const AiForecastAccuracyBody = zod.object({
-  "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
-  "history": zod.array(zod.object({
-  "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when unknown'),
-  "cases": zod.number().describe('Cases actually produced for this run'),
-  "netRunMin": zod.number().describe('Net run minutes (excludes downtime); a throughput signal')
-}).describe('A finished run from a past day, used to learn demand patterns.'))
-}).describe('One past production day with its finished runs.')).describe('Recent finished production days (the actual results to compare forecasts to)')
-}).describe('Actual finished production history to grade past forecasts against.')
-
-export const AiForecastAccuracyResponse = zod.object({
-  "reviews": zod.array(zod.object({
-  "date": zod.string().describe('ISO date (YYYY-MM-DD) the forecast was for'),
-  "confidence": zod.enum(['high', 'medium', 'low']).describe('Confidence the forecast was issued with'),
-  "predictedTotalCases": zod.number(),
-  "actualTotalCases": zod.number(),
-  "caseAccuracyPct": zod.number().describe('0–100 closeness of predicted total cases to actual total cases'),
-  "products": zod.array(zod.object({
-  "label": zod.string().describe('Product label (brand + flavor) as recorded\/run'),
-  "predictedCases": zod.number().describe('Cases the forecast predicted (0 if it was not predicted)'),
-  "actualCases": zod.number().describe('Cases actually produced (0 if it did not run)'),
-  "status": zod.enum(['hit', 'over', 'under', 'missed', 'unexpected']).describe('hit = predicted ≈ actual; over\/under = predicted more\/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted')
-}).describe('One product\'s predicted vs. actual cases for a reviewed day.'))
-}).describe('One past forecast graded against the day\'s actual finished runs.')).describe('Per-date reviews, most recent first'),
-  "trend": zod.object({
-  "daysScored": zod.number().describe('Number of reviewed (forecast + finished) days included'),
-  "averageCaseAccuracyPct": zod.number().describe('Mean case-accuracy across the reviewed days (0–100)'),
-  "chronicOver": zod.array(zod.object({
-  "label": zod.string().describe('Product label (brand + flavor)'),
-  "daysOver": zod.number().describe('Reviewed days this product was over-predicted'),
-  "daysUnder": zod.number().describe('Reviewed days this product was under-predicted'),
-  "daysScored": zod.number().describe('Reviewed days this product appeared in at all')
-}).describe('A product the forecast consistently mis-predicts across reviewed days.')).describe('Products repeatedly over-predicted, most frequent first'),
-  "chronicUnder": zod.array(zod.object({
-  "label": zod.string().describe('Product label (brand + flavor)'),
-  "daysOver": zod.number().describe('Reviewed days this product was over-predicted'),
-  "daysUnder": zod.number().describe('Reviewed days this product was under-predicted'),
-  "daysScored": zod.number().describe('Reviewed days this product appeared in at all')
-}).describe('A product the forecast consistently mis-predicts across reviewed days.')).describe('Products repeatedly under-predicted, most frequent first')
-}).describe('Cross-day calibration summary rolled up from the per-day reviews.'),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Explanation when there is nothing to review yet')
-})
-
-
-/**
  * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
  * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
  */
@@ -1842,8 +1294,8 @@ export const AiIncidentClustersResponse = zod.object({
 
 
 /**
- * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. The drift detection is computed server-side and is fully deterministic; the AI is only asked to NARRATE a short plain-language summary, and only when at least one anomaly is flagged (no flags → no AI call). Read-only and advisory — never edits or commits run data. Fail-safe: if the AI is unavailable, the deterministic anomaly list is still returned with an empty narration.
- * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. Detection and descriptions are fully deterministic. Read-only — never edits or commits run data.
+ * @summary Flag production runs that drifted from their historical norm; read-only
  */
 export const AiAnomaliesBody = zod.object({
   "today": zod.array(zod.object({
@@ -1878,17 +1330,17 @@ export const AiAnomaliesResponse = zod.object({
 })),
   "checkedRuns": zod.number(),
   "baselineRuns": zod.number(),
-  "summary": zod.string().describe('Plain-language narration (AI), or empty when nothing was flagged \/ AI unavailable'),
+  "summary": zod.string().describe('Deterministic summary, or empty when nothing was flagged'),
   "note": zod.string().optional().describe('Optional explanation (e.g. not enough history to judge)'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
+  "aiGenerated": zod.boolean().describe('Compatibility field; deterministic responses return false'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
 /**
- * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side and are fully deterministic (shared @workspace/schedule-optimize lib); the AI is only asked to NARRATE a short plain-language explanation, and only when a better order exists (no improvement → no AI call). Read-only and advisory — never edits or commits the schedule. Fail-safe: if the AI is unavailable, the deterministic suggested order is still returned with an empty narration.
- * @summary Suggest an optimal run order for the day (AI narration); read-only
+ * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side by the shared @workspace/schedule-optimize library. Read-only — never edits or commits the schedule.
+ * @summary Suggest a deterministic run order for the day; read-only
  */
 export const AiScheduleOptimizeBody = zod.object({
   "runs": zod.array(zod.object({
@@ -1925,10 +1377,10 @@ export const AiScheduleOptimizeResponse = zod.object({
   "ruleViolations": zod.number(),
   "changeovers": zod.number()
 }),
-  "summary": zod.string().describe('Plain-language narration (AI), or empty when no improvement \/ AI unavailable'),
+  "summary": zod.string().describe('Deterministic summary, or empty when no improvement is available'),
   "note": zod.string().optional().describe('Optional explanation (e.g. already optimally ordered)'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
+  "aiGenerated": zod.boolean().describe('Compatibility field; deterministic responses return false'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
@@ -4043,37 +3495,6 @@ export const SaveFacilityKnowledgeResponse = zod.object({
   "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
   "fact": zod.string().describe('The durable observation in plain language')
 }).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.'))
-})
-
-
-/**
- * Returns the signed-in user's most recent AI conversation turns (oldest first), a rolling per-user window so follow-up questions keep context. Scoped to the caller only — never another user's history.
- * @summary Get the current user's recent AI conversation turns
- */
-export const GetConversationHistoryResponse = zod.object({
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The user\'s recent conversation turns, oldest first')
-})
-
-
-/**
- * Appends one or more turns (user and/or assistant messages) to the signed-in user's conversation memory, then trims to the rolling window so the log never grows without bound. Scoped to the caller only.
- * @summary Append turns to the current user's AI conversation memory
- */
-export const AppendConversationBody = zod.object({
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('One or more turns to append to the current user\'s conversation memory')
-})
-
-export const AppendConversationResponse = zod.object({
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The user\'s recent conversation turns, oldest first')
 })
 
 

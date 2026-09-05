@@ -753,16 +753,6 @@ const ROUTES: GatedRoute[] = [
     path: () => "/api/ai-memory/health-check",
     okStatus: 200,
   },
-  // AI diagnostics/tools deliberately use a cheap request that does not require
-  // an external model call; it still proves the capability guard runs first.
-  {
-    name: "PUT /ai/proactive-settings",
-    capability: "use-ai-tools",
-    method: "PUT",
-    path: () => "/api/ai/proactive-settings",
-    body: { enabled: false, pollSeconds: 60, cooldownSeconds: 300 },
-    okStatus: 200,
-  },
 ];
 
 const USER_BY_ROLE: Record<string, string> = {

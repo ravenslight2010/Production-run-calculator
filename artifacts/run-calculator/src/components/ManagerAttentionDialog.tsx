@@ -1,7 +1,6 @@
 import {
   AlertTriangle,
   ArrowRight,
-  BellRing,
   CheckCircle2,
   KeyRound,
   LifeBuoy,
@@ -15,13 +14,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ProactiveAlert } from "../aiProactive";
 
 export type ManagerAttentionKind =
   | "password-resets"
   | "incidents"
-  | "recipe-setup"
-  | "proactive-alert";
+  | "recipe-setup";
 
 export type ManagerAttentionItem = {
   kind: ManagerAttentionKind;
@@ -39,8 +36,6 @@ export type ManagerAttentionInput = {
   canReviewIncidents: boolean;
   scheduledRecipeIssueCount: number;
   canManageProfiles: boolean;
-  proactiveAlert: ProactiveAlert | null;
-  isManager: boolean;
 };
 
 const pluralize = (count: number, singular: string, plural = `${singular}s`) =>
@@ -87,17 +82,6 @@ export function buildManagerAttentionItems(
     });
   }
 
-  if (input.isManager && input.proactiveAlert) {
-    items.push({
-      kind: "proactive-alert",
-      priority: 4,
-      count: 1,
-      title: input.proactiveAlert.title,
-      detail: input.proactiveAlert.detail,
-      actionLabel: "Review alert",
-    });
-  }
-
   return items.sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title));
 }
 
@@ -114,8 +98,6 @@ function AttentionIcon({ kind }: { kind: ManagerAttentionKind }) {
       return <LifeBuoy className={`${className} text-amber-400`} />;
     case "recipe-setup":
       return <Settings2 className={`${className} text-sky-400`} />;
-    case "proactive-alert":
-      return <BellRing className={`${className} text-primary`} />;
   }
 }
 

@@ -289,8 +289,8 @@ function toReorderInput(it: InventoryItem): ReorderInput {
 
 // Roll a list of resolved scheduled runs up into a per-item-key demand map (the
 // SAME aggregation the reorder card uses). Shared so the warehouse "Reorder Now"
-// card and the proactive reorder nudge subtract identical demand and can never
-// disagree (replit.md parity). The proactive nudge sends this map to the server.
+// card and other inventory views subtract identical demand and can never
+// disagree (replit.md parity).
 export function buildReorderDemandByKey(
   scheduledValsList: FormValues[],
 ): Record<string, number> {

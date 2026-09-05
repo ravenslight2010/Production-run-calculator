@@ -105,7 +105,6 @@ import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 import SubstitutionsManager from "./SubstitutionsManager";
 import SubstitutionLog from "./SubstitutionLog";
-import ProactiveAlertSettingsCard from "./ProactiveAlertSettingsCard";
 import { BarcodeScanner, CameraFilePicker } from "./CameraFilePicker";
 import PhotoCountCard from "./PhotoCountCard";
 
@@ -494,8 +493,6 @@ export default function InventoryTab({
         </Card>
       )}
 
-      {/* Proactive-alert tuning (use-ai-tools: AI nudge settings) */}
-      {canUseAiTools && <ProactiveAlertSettingsCard />}
     </div>
   );
 }

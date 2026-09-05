@@ -12,12 +12,12 @@ export interface AnomalyResult {
   anomalies: Anomaly[];
   checkedRuns: number;
   baselineRuns: number;
-  /** Plain-language narration (AI), or empty when nothing was flagged / AI unavailable */
+  /** Deterministic summary, or empty when nothing was flagged */
   summary: string;
   /** Optional explanation (e.g. not enough history to judge) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
+  /** Compatibility field; deterministic responses return false */
   aiGenerated: boolean;
   aiStatus: AiStatus;
 }

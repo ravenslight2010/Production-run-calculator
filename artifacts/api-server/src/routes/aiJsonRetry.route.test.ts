@@ -1,10 +1,7 @@
 // Integration-style tests for the shared bounded-retry glue
 // (lib/aiJsonRetry.ts) on the ai.ts routes where a malformed model reply used
-// to silently become an empty result: /ai/forecast, /ai/fill-missing,
-// /ai/match-import, /ai/match-premix and /ai/suggest-merges — plus the
-// conversational/command routes where a cut-off reply surfaced as a garbled
-// half-JSON answer or a spoken-command no-op: /ai/ask, /ai/command,
-// /ai/recipe-assistant and /ai/mix-assistant. The /ai/parse-spec-sheet route
+// to silently become an empty result: /ai/fill-missing, /ai/match-import,
+// /ai/match-premix and /ai/suggest-merges. The /ai/parse-spec-sheet route
 // (which established the pattern) is pinned in aiParseSpecSheet.route.test.ts.
 //
 // For each route this file pins "first malformed, second good": a
@@ -134,41 +131,6 @@ async function post(path: string, body: unknown): Promise<Response> {
 const TRUNCATED_REPLY = '{"suggestions":[{"tar';
 
 describe("bounded retry on malformed model output (first malformed, second good)", () => {
-  it("/ai/forecast retries once and returns the good second forecast", async () => {
-    const good = JSON.stringify({
-      forecasts: [
-        {
-          targetDate: "2099-01-02",
-          confidence: "high",
-          summary: "Typical day.",
-          runs: [
-            { brand: "Lowes", flavor: "Pepperoni", dieType: "7in", casesNeeded: 100, rationale: "Matches history." },
-          ],
-        },
-      ],
-    });
-    mock.queue = [TRUNCATED_REPLY, good];
-    const res = await post("/ai/forecast", {
-      targetDate: "2099-01-02",
-      nowMs: Date.now(),
-      history: [
-        {
-          date: "2099-01-01",
-          runs: [{ brand: "Lowes", flavor: "Pepperoni", dieType: "7in", cases: 100, netRunMin: 120 }],
-        },
-        {
-          date: "2098-12-31",
-          runs: [{ brand: "Lowes", flavor: "Pepperoni", dieType: "7in", cases: 90, netRunMin: 110 }],
-        },
-      ],
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { forecast: { runs: unknown[] } | null };
-    expect(body.forecast).not.toBeNull();
-    expect(body.forecast?.runs).toHaveLength(1);
-    expect(mock.mainCalls).toBe(2);
-  });
-
   it("/ai/fill-missing retries once and returns the good second suggestions", async () => {
     const good = JSON.stringify({
       suggestions: [{ key: "temp", value: "350", rationale: "Standard oven temp." }],
@@ -232,129 +194,6 @@ describe("bounded retry on malformed model output (first malformed, second good)
     const body = (await res.json()) as { suggestions: Array<{ target: string }> };
     expect(body.suggestions).toHaveLength(1);
     expect(body.suggestions[0].target).toBe("Mozzarella");
-    expect(mock.mainCalls).toBe(2);
-  });
-});
-
-// A minimal day-state (OptimizeInput shape) accepted by the ask/command
-// validators, mirroring aiAsk.test.ts / aiCommand.test.ts.
-function makeDayState() {
-  return {
-    date: "2026-07-13",
-    nowMs: 1_780_000_000_000,
-    runs: [
-      {
-        id: "run-1",
-        label: "Run run-1",
-        brand: "Brand",
-        flavor: "Cheese",
-        dieType: "12in",
-        status: "running",
-        casesNeeded: 100,
-        casesMade: 10,
-        casesLeft: 90,
-        plannedPpm: 60,
-        actualPpm: 55,
-        minutesRemaining: 30,
-        netElapsedSec: 600,
-        downtimeSec: 0,
-        stoppages: [],
-      },
-    ],
-  };
-}
-
-describe("bounded retry on conversational routes (first malformed, second good)", () => {
-  it("/ai/ask retries once and returns the good second answer", async () => {
-    mock.queue = [TRUNCATED_REPLY, JSON.stringify({ answer: "Yes, by 1:45pm.", note: "" })];
-    const res = await post("/ai/ask", {
-      question: "Can we finish by 2pm?",
-      dayState: makeDayState(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { answer: string };
-    expect(body.answer).toBe("Yes, by 1:45pm.");
-    expect(mock.mainCalls).toBe(2);
-  });
-
-  it("/ai/ask keeps the raw-text fallback when both attempts are malformed", async () => {
-    mock.queue = [TRUNCATED_REPLY, TRUNCATED_REPLY, '{"answer":"never used"}'];
-    const res = await post("/ai/ask", {
-      question: "Can we finish by 2pm?",
-      dayState: makeDayState(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { answer: string };
-    // Existing give-up behavior: the raw (truncated) content becomes the answer
-    // rather than an empty reply.
-    expect(body.answer).toBe(TRUNCATED_REPLY);
-    expect(mock.mainCalls).toBe(2);
-    expect(mock.queue).toHaveLength(1);
-  });
-
-  it("/ai/command is fail-closed while voice commands are disabled", async () => {
-    mock.queue = [JSON.stringify({ type: "command", actions: [{ kind: "switch_run", runId: "run-1" }] })];
-    const res = await post("/ai/command", {
-      utterance: "switch to the cheese run",
-      dayState: makeDayState(),
-    });
-    expect(res.status).toBe(410);
-    await expect(res.json()).resolves.toMatchObject({
-      error: expect.stringContaining("Voice commands are disabled"),
-    });
-    expect(mock.mainCalls).toBe(0);
-    expect(mock.queue).toHaveLength(1);
-  });
-
-  it("/ai/recipe-assistant retries once and returns the good second answer", async () => {
-    mock.queue = [TRUNCATED_REPLY, JSON.stringify({ answer: "Use 1.5x flour.", note: "" })];
-    const res = await post("/ai/recipe-assistant", {
-      question: "Scale the dough recipe to 1.5x",
-      recipes: [],
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { answer: string };
-    expect(body.answer).toBe("Use 1.5x flour.");
-    expect(mock.mainCalls).toBe(2);
-  });
-
-  it("/ai/recipe-assistant keeps the raw-text fallback when both attempts are malformed", async () => {
-    mock.queue = [TRUNCATED_REPLY, TRUNCATED_REPLY, '{"answer":"never used"}'];
-    const res = await post("/ai/recipe-assistant", {
-      question: "Scale the dough recipe to 1.5x",
-      recipes: [],
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { answer: string };
-    // Existing give-up behavior: the raw (truncated) content becomes the answer.
-    expect(body.answer).toBe(TRUNCATED_REPLY);
-    expect(mock.mainCalls).toBe(2);
-    expect(mock.queue).toHaveLength(1);
-  });
-
-  it("/ai/mix-assistant keeps the raw-text fallback when both attempts are malformed", async () => {
-    mock.queue = [TRUNCATED_REPLY, TRUNCATED_REPLY, '{"answer":"never used"}'];
-    const res = await post("/ai/mix-assistant", {
-      question: "How much cheese per pizza?",
-      mixes: [],
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { answer: string };
-    // Existing give-up behavior: the raw (truncated) content becomes the answer.
-    expect(body.answer).toBe(TRUNCATED_REPLY);
-    expect(mock.mainCalls).toBe(2);
-    expect(mock.queue).toHaveLength(1);
-  });
-
-  it("/ai/mix-assistant retries once and returns the good second answer", async () => {
-    mock.queue = [TRUNCATED_REPLY, JSON.stringify({ answer: "About 4 oz per pizza.", note: "" })];
-    const res = await post("/ai/mix-assistant", {
-      question: "How much cheese per pizza?",
-      mixes: [],
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { answer: string };
-    expect(body.answer).toBe("About 4 oz per pizza.");
     expect(mock.mainCalls).toBe(2);
   });
 });

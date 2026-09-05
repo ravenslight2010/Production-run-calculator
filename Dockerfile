@@ -56,7 +56,6 @@ COPY lib/shipping-import/package.json ./lib/shipping-import/package.json
 COPY lib/spec-export/package.json ./lib/spec-export/package.json
 COPY lib/spec-import/package.json ./lib/spec-import/package.json
 COPY lib/spec-reconcile/package.json ./lib/spec-reconcile/package.json
-COPY lib/voice-commands/package.json ./lib/voice-commands/package.json
 COPY scripts/package.json ./scripts/package.json
 RUN pnpm install --frozen-lockfile
 

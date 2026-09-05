@@ -202,8 +202,6 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     // not silently skipped. These are the historical bypass writes.
     const byName = (n: string) => homeSites.filter((s) => s.enclosingName === n);
     expect(byName("applyCaseUpdateChoices").length, "re-import case-update accept").toBeGreaterThan(0);
-    expect(byName("writeCases").length, "voice/optimize set_run_target").toBeGreaterThan(0);
-    expect(byName("writeProgress").length, "voice setRunProgress").toBeGreaterThan(0);
     expect(byName("renameDoughIngredient").length, "master-data rename write").toBeGreaterThan(0);
     expect(byName("updateDrainingRunValues").length, "draining-run write").toBeGreaterThan(0);
     // Rollover pull-up + sync receive adopt REMOTE stamps rather than local ones.

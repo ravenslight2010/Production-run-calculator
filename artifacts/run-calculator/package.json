@@ -141,7 +141,6 @@
     "@workspace/shipping-import": "workspace:*",
     "@workspace/spec-export": "workspace:*",
     "@workspace/spec-import": "workspace:*",
-    "@workspace/spec-reconcile": "workspace:*",
-    "@workspace/voice-commands": "workspace:*"
+    "@workspace/spec-reconcile": "workspace:*"
   }
 }

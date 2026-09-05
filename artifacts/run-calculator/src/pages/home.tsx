@@ -380,11 +380,7 @@ import { describeSubstitution } from "../components/SubstitutionsManager";
 import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
-import MixAssistChat from "../components/MixAssistChat";
-import {
-  type VoiceCommandHandlers,
-} from "@workspace/voice-commands";
-import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
+import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
   saveIngredientBatchWeights,
@@ -404,22 +400,16 @@ import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
-import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
-import {
-  buildRecipeAssistContext,
-  type RecipeAssistSuggestion,
-  type RecipeFieldId,
-} from "../aiRecipe";
-import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
-import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
+import {
+  applyRecipeSuggestion as applyRecipeSuggestionShared,
+  type RecipeFieldId,
+  type RecipeSuggestionLike,
+} from "@workspace/recipe-apply";
 import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
-import { useProactiveAlert } from "../aiProactive";
-import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
-import AiStatusNotice from "../components/AiStatusNotice";
 import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
@@ -428,7 +418,6 @@ import {
   deriveCandidateItems,
   consumeRun,
   scoreNameMatch,
-  buildReorderDemandByKey,
 } from "../inventoryShared";
 import {
   applyRecipeSubstitutions,
@@ -705,12 +694,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const LazyDeferredManagementAiSurface = lazy(() => {
+const LazyDeferredManagementSurface = lazy(() => {
   const startedAt = typeof performance === "undefined" ? null : performance.now();
-  return import("../components/DeferredManagementAiSurface").then((module) => {
-    if (startedAt !== null && typeof performance !== "undefined") {
-      recordPerformance("management:ai-review-chunk-load", performance.now() - startedAt, "load");
-    }
+  return import("../components/DeferredManagementSurface").then((module) => {
+    if (startedAt !== null && typeof performance !== "undefined") recordPerformance("management:review-chunk-load", performance.now() - startedAt, "load");
     return module;
   });
 });
@@ -733,7 +720,6 @@ applyMixCheeseOverlapDedupeIfNeeded();
 // inside Home instead of at module init (see the profile-heal effect there).
 
 type NeedRow = { label: string; value: string; sub?: string; area?: WarehouseArea };
-
 function recordHomeCommit(
   _id: string,
   phase: "mount" | "update" | "nested-update",
@@ -7742,61 +7728,6 @@ export default function Home() {
   // substitutionState.ts. Runs synchronously enough for the next render's calc.
   useEffect(() => { setActiveSubstitutions(dayState.substitutions ?? []); }, [dayState.substitutions]);
 
-  // ── Proactive shift alerts ────────────────────────────────────────────────
-  // Poll the server on a cadence for at most one timely, dismissible nudge.
-  // Manager-only; runs even on an idle day so an expiring-stock heads-up can
-  // surface before any run begins (the server gates behind-plan/break nudges to
-  // an active day and skips the AI call when idle with no at-risk stock). The
-  // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
-  // provider in (tabs)/_layout.tsx (replit.md parity).
-  const {
-    alert: proactiveAlert,
-    dismiss: dismissProactiveAlert,
-    aiStatus: proactiveAiStatus,
-  } = useProactiveAlert({
-    enabled: isManager,
-    buildInput: () => {
-      // Resolve upcoming scheduled runs to their FormValues (scheduled runs carry
-      // no recipe rows) exactly like the warehouse "Reorder Now" card does, then
-      // aggregate to a per-item demand map. Sent to the server so the proactive
-      // reorder nudge subtracts the SAME projected demand as the card and the two
-      // can never disagree (the server can't resolve this itself — profiles are
-      // client-side). scheduledDays is already today-or-later (server-filtered).
-      const scheduledValsList: FormValues[] = scheduledDays.flatMap((day) =>
-        (day.runs ?? [])
-          .filter((r) => r.brand)
-          .map((r) => {
-            const profile = loadProfile(r.brand, r.flavor);
-            return {
-              ...(profile ?? DEFAULT_VALUES),
-              casesNeeded: r.casesNeeded,
-              ...(r.dieType ? { dieType: r.dieType } : {}),
-            } as FormValues;
-          }),
-      );
-      return {
-        ...buildOptimizeInput({
-          date: todayStr(),
-          nowMs: Date.now(),
-          runToTime,
-          runs: dayState.runs,
-          runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
-          history,
-          scheduledDays: scheduledDays.map((d) => ({
-            date: d.date,
-            runs: (d.runs ?? []).map((r) => ({
-              brand: r.brand,
-              flavor: r.flavor,
-              casesNeeded: r.casesNeeded,
-              dieType: r.dieType,
-            })),
-          })),
-        }),
-        reorderDemandByKey: buildReorderDemandByKey(scheduledValsList),
-      };
-    },
-  });
-
   // This is the same shared check shown in Schedule. It supplies the durable
   // configuration count for Manager attention, so the two surfaces cannot
   // disagree about which scheduled recipes still need setup.
@@ -7826,8 +7757,6 @@ export default function Home() {
         canReviewIncidents,
         scheduledRecipeIssueCount: scheduledRecipeIssues.length,
         canManageProfiles,
-        proactiveAlert,
-        isManager,
       }),
     [
       pendingResetCount,
@@ -7836,8 +7765,6 @@ export default function Home() {
       canReviewIncidents,
       scheduledRecipeIssues.length,
       canManageProfiles,
-      proactiveAlert,
-      isManager,
     ],
   );
   const managerAttentionTotal = managerAttentionCount(managerAttentionItems);
@@ -7859,10 +7786,6 @@ export default function Home() {
       if (next) openSetupEditor(next.brand, next.flavor);
       return;
     }
-    // The existing banner owns proactive alert state and Apply/Dismiss behavior.
-    // Returning to Run keeps this inbox from becoming a second alert lifecycle.
-    setActiveTab("run");
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   // Update the apply-sync callback so it always captures fresh form/state refs
@@ -11705,423 +11628,6 @@ export default function Home() {
     };
   }
 
-  // Apply a one-tap AI recommendation action by routing it to the existing
-  // run/schedule mutations. Returns a result the AssistantTab renders inline;
-  // nothing is applied without the manager's explicit tap.
-  function applyOptimizeAction(action: OptimizeAction): { ok: boolean; message: string; undo?: () => void } {
-    if (action.kind === "set_target_time") {
-      const time = (action.time ?? "").trim();
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, message: "Invalid time" };
-      const prevTime = runToTime;
-      setRunToTime(time);
-      return {
-        ok: true,
-        message: `Finish time set to ${time}`,
-        undo: () => setRunToTime(prevTime),
-      };
-    }
-
-    if (action.kind === "set_run_target") {
-      const runId = action.runId ?? "";
-      const cases = Math.round(action.casesNeeded ?? NaN);
-      if (!Number.isFinite(cases) || cases <= 0) return { ok: false, message: "Invalid target" };
-      const idx = dayState.runs.findIndex((r) => r.id === runId);
-      if (idx < 0) return { ok: false, message: "Run no longer exists" };
-      const prevCases =
-        runId === currentRunId
-          ? (form.getValues("casesNeeded") as number)
-          : loadRunValues(runId).casesNeeded;
-      const writeCases = (value: number) => {
-        const now = Date.now();
-        if (runId === currentRunId) {
-          form.setValue("casesNeeded", value, { shouldDirty: true });
-          saveRunValues(currentRunId, form.getValues());
-        } else {
-          const vals = loadRunValues(runId);
-          saveRunValues(runId, { ...vals, casesNeeded: value });
-        }
-        // Stamp the edit: this bypasses the form-watch autosave (saveRunValues
-        // above makes its loadRunValues===v guard skip), and an unstamped value
-        // loses the per-run LWW merge to a peer's stale stamped copy.
-        markRunValuesUpdated(runId, now);
-        lastLocalEditRef.current = now;
-        schedulePush(dayStateRef.current, 0);
-      };
-      writeCases(cases);
-      return {
-        ok: true,
-        message: `Target set to ${cases} cases`,
-        undo: () => writeCases(prevCases),
-      };
-    }
-
-    if (action.kind === "adjust_line_speed") {
-      const newValue = action.newValue;
-      if (!newValue || !Number.isFinite(newValue) || newValue <= 0) {
-        return { ok: false, message: "Invalid speed value" };
-      }
-      const isCrust = action.isCrustMode ?? false;
-      const field = isCrust ? "approxLineSpeed" : "speedAdjustment";
-      const prevValue = form.getValues(field) as number;
-      const writeSpeed = (val: number) => {
-        const now = Date.now();
-        form.setValue(field, val, { shouldDirty: true });
-        saveRunValues(currentRunId, form.getValues());
-        markRunValuesUpdated(currentRunId, now);
-        lastLocalEditRef.current = now;
-        schedulePush(dayStateRef.current, 0);
-      };
-      writeSpeed(newValue);
-      return {
-        ok: true,
-        message: isCrust
-          ? `Approximate Line Speed set to ${newValue}`
-          : `Speed Adjustment set to ${newValue}`,
-        undo: () => writeSpeed(prevValue),
-      };
-    }
-
-    // reorder_run
-    const runId = action.runId ?? "";
-    const fromIdx = dayState.runs.findIndex((r) => r.id === runId);
-    if (fromIdx < 0) return { ok: false, message: "Run no longer exists" };
-    const beforeId = action.beforeRunId ?? null;
-    let toIdx: number;
-    if (beforeId === null) {
-      toIdx = dayState.runs.length - 1;
-    } else {
-      const remaining = dayState.runs.filter((r) => r.id !== runId);
-      const beforePos = remaining.findIndex((r) => r.id === beforeId);
-      if (beforePos < 0) return { ok: false, message: "Target run no longer exists" };
-      toIdx = beforePos;
-    }
-    if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
-    const prevRuns = dayState.runs;
-    const prevIndex = dayState.currentIndex;
-    moveRun(fromIdx, toIdx);
-    return {
-      ok: true,
-      message: "Run order updated",
-      undo: () => {
-        const restored = { ...dayStateRef.current, runs: prevRuns, currentIndex: prevIndex };
-        setDayState(restored);
-        saveDayState(restored);
-        schedulePush(restored);
-      },
-    };
-  }
-
-  // Voice commands: build the platform handler set that the shared dispatcher
-  // calls. Every handler forwards to an EXISTING run/inventory mutation (no new
-  // write surface) and returns an undo so a misheard command can be reverted
-  // within the AssistantTab's short window. Server-resolved ids are validated
-  // again here (the run may have changed since classification). Mobile mirrors
-  // this exactly via RunContext in artifacts/run-calculator-mobile (replit.md
-  // parity) — same kinds, same arguments through dispatchVoiceCommand.
-  function buildVoiceHandlers(): VoiceCommandHandlers {
-    // Function declarations are hoisted, so capture the page-level mutations
-    // whose names collide with handler methods to call them unambiguously.
-    const pageAddRun = addRun;
-    const pageRemoveRun = removeRun;
-    const pageUpdateRunMeta = updateRunMeta;
-    const findIdx = (runId: string) => dayStateRef.current.runs.findIndex((r) => r.id === runId);
-
-    return {
-      setTargetTime(time) {
-        return applyOptimizeAction({ kind: "set_target_time", label: "", time });
-      },
-      clearTargetTime() {
-        const prev = runToTime;
-        setRunToTime("");
-        return {
-          ok: true,
-          message: "Finish time cleared",
-          undo: () => setRunToTime(prev),
-        };
-      },
-      setRunTarget(runId, casesNeeded) {
-        return applyOptimizeAction({ kind: "set_run_target", label: "", runId, casesNeeded });
-      },
-      reorderRun(runId, beforeRunId) {
-        return applyOptimizeAction({ kind: "reorder_run", label: "", runId, beforeRunId });
-      },
-      addRun(brand, flavor) {
-        if (dayStateRef.current.runs.length >= MAX_RUNS) {
-          return { ok: false, message: "Maximum runs reached" };
-        }
-        const prevDs = dayStateRef.current;
-        const prevIndex = prevDs.currentIndex;
-        pageAddRun();
-        setRunBrandFlavor(brand, flavor);
-        const name = `${brand} ${flavor}`.trim() || "run";
-        return {
-          ok: true,
-          message: `Added ${name}`,
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            const vals = loadRunValues(prevDs.runs[prevIndex].id);
-            form.reset(vals);
-            resetFieldArrays(vals);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      removeRun(runId) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const run = dayStateRef.current.runs[idx];
-        if (run.startedAt || run.endedAt) {
-          return { ok: false, message: "Can't remove a started or finished run" };
-        }
-        if (dayStateRef.current.runs.length <= 1) {
-          return { ok: false, message: "Can't remove the only run" };
-        }
-        const prevDs = dayStateRef.current;
-        const prevIndex = prevDs.currentIndex;
-        if (idx !== prevIndex) switchToRun(idx);
-        pageRemoveRun();
-        return {
-          ok: true,
-          message: "Run removed",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            const vals = loadRunValues(prevDs.runs[prevIndex].id);
-            form.reset(vals);
-            resetFieldArrays(vals);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      switchRun(runId) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prevIndex = dayStateRef.current.currentIndex;
-        if (idx === prevIndex) return { ok: true, message: "Already on that run" };
-        switchToRun(idx);
-        return {
-          ok: true,
-          message: "Switched run",
-          undo: () => switchToRun(prevIndex),
-        };
-      },
-      updateRunMeta(runId, brand, flavor) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const run = dayStateRef.current.runs[idx];
-        const newBrand = brand ?? run.brand;
-        const newFlavor = flavor ?? run.flavor;
-        const prevBrand = run.brand;
-        const prevFlavor = run.flavor;
-        const name = `${newBrand} ${newFlavor}`.trim() || "run";
-        if (idx === dayStateRef.current.currentIndex) {
-          setRunBrandFlavor(newBrand, newFlavor);
-          return {
-            ok: true,
-            message: `Renamed to ${name}`,
-            undo: () => setRunBrandFlavor(prevBrand, prevFlavor),
-          };
-        }
-        pageUpdateRunMeta(runId, { brand: newBrand, flavor: newFlavor });
-        return {
-          ok: true,
-          message: `Renamed to ${name}`,
-          undo: () => pageUpdateRunMeta(runId, { brand: prevBrand, flavor: prevFlavor }),
-        };
-      },
-      finishRun(runId) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const run = dayStateRef.current.runs[idx];
-        if (run.endedAt) return { ok: false, message: "Run already finished" };
-        if (!run.startedAt) return { ok: false, message: "Run hasn't started yet" };
-        const prevDs = dayStateRef.current;
-        const prevIndex = prevDs.currentIndex;
-        if (idx !== prevIndex) switchToRun(idx);
-        endRun();
-        return {
-          ok: true,
-          message: "Run finished",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            const vals = loadRunValues(prevDs.runs[prevIndex].id);
-            form.reset(vals);
-            resetFieldArrays(vals);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      startStoppage(runId, reason) {
-        const targetIdx = runId ? findIdx(runId) : dayStateRef.current.currentIndex;
-        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
-        const prevDs = dayStateRef.current;
-        const prevActive = activeStopId;
-        if (runId && targetIdx !== dayStateRef.current.currentIndex) switchToRun(targetIdx);
-        logStop(reason, "");
-        return {
-          ok: true,
-          message: reason ? `Stoppage started: ${reason}` : "Stoppage started",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            setActiveStopId(prevActive);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      endStoppage(runId) {
-        const targetIdx = runId ? findIdx(runId) : dayStateRef.current.currentIndex;
-        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
-        if (runId && targetIdx !== dayStateRef.current.currentIndex) switchToRun(targetIdx);
-        if (!activeStopId) return { ok: false, message: "No active stoppage" };
-        const prevDs = dayStateRef.current;
-        const prevActive = activeStopId;
-        endStop();
-        return {
-          ok: true,
-          message: "Stoppage ended",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            setActiveStopId(prevActive);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      setRunProgress(runId, progress) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const isCurrent = idx === dayStateRef.current.currentIndex;
-        const before = isCurrent ? form.getValues() : loadRunValues(runId);
-        const prev = {
-          skidsCompleted: before.skidsCompleted,
-          casesOnCurrentSkid: before.casesOnCurrentSkid,
-          casesPerSkid: before.casesPerSkid,
-        };
-        const writeProgress = (p: {
-          skidsCompleted?: number;
-          casesOnCurrentSkid?: number;
-          casesPerSkid?: number;
-        }) => {
-          const nextSkids = p.skidsCompleted ?? before.skidsCompleted;
-          const nextCases = p.casesOnCurrentSkid ?? before.casesOnCurrentSkid;
-          if (p.skidsCompleted != null || p.casesOnCurrentSkid != null) {
-            persistManualPackagingProgress(runId, nextSkids, nextCases);
-          }
-          if (isCurrent) {
-            if (p.skidsCompleted != null)
-              form.setValue("skidsCompleted", p.skidsCompleted, { shouldDirty: true });
-            if (p.casesOnCurrentSkid != null)
-              form.setValue("casesOnCurrentSkid", p.casesOnCurrentSkid, { shouldDirty: true });
-            if (p.casesPerSkid != null)
-              form.setValue("casesPerSkid", p.casesPerSkid, { shouldDirty: true });
-            saveRunValues(currentRunId, form.getValues());
-          } else {
-            const cur = loadRunValues(runId);
-            saveRunValues(runId, {
-              ...cur,
-              ...(p.skidsCompleted != null ? { skidsCompleted: p.skidsCompleted } : {}),
-              ...(p.casesOnCurrentSkid != null ? { casesOnCurrentSkid: p.casesOnCurrentSkid } : {}),
-              ...(p.casesPerSkid != null ? { casesPerSkid: p.casesPerSkid } : {}),
-            });
-          }
-          // Stamp: bypasses the form-watch autosave; unstamped values lose the
-          // per-run LWW merge to a peer's stale stamped copy.
-          const now = Date.now();
-          markRunValuesUpdated(isCurrent ? currentRunId : runId, now);
-          lastLocalEditRef.current = now;
-          schedulePush(dayStateRef.current, 0);
-        };
-        writeProgress(progress);
-        return {
-          ok: true,
-          message: "Progress updated",
-          undo: () => writeProgress(prev),
-        };
-      },
-      logActualCases(runId, actualCases) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prev = dayStateRef.current.runs[idx].actualCases;
-        pageUpdateRunMeta(runId, { actualCases });
-        return {
-          ok: true,
-          message: `Logged ${actualCases} cases`,
-          undo: () => pageUpdateRunMeta(runId, { actualCases: prev }),
-        };
-      },
-      logWaste(runId, wasteLbs) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prev = dayStateRef.current.runs[idx].wasteLbs;
-        pageUpdateRunMeta(runId, { wasteLbs });
-        return {
-          ok: true,
-          message: `Logged ${wasteLbs} lbs waste`,
-          undo: () => pageUpdateRunMeta(runId, { wasteLbs: prev }),
-        };
-      },
-      async restockItem(body) {
-        await restockInventory({
-          itemKey: body.itemKey,
-          category: body.category,
-          name: body.name,
-          unit: body.unit,
-          qty: body.qty,
-        });
-        return { ok: true, message: `Restocked ${body.qty} ${body.unit} of ${body.name}` };
-      },
-      async adjustItem(body) {
-        await adjustInventory({ itemId: body.itemId, qtyDelta: body.qtyDelta, note: body.note });
-        const sign = body.qtyDelta >= 0 ? "+" : "";
-        return {
-          ok: true,
-          message: `Adjusted stock ${sign}${body.qtyDelta}`,
-          undo: async () => {
-            await adjustInventory({
-              itemId: body.itemId,
-              qtyDelta: -body.qtyDelta,
-              note: "Undo voice adjustment",
-            });
-          },
-        };
-      },
-      rollover() {
-        // Manually trigger the same day close-out the midnight reset performs:
-        // auto-deduct inventory for open runs, freeze them at now, archive the
-        // day to history, then reset to a fresh day and push it. Irreversible by
-        // design (no undo) — gated to managers in VOICE_COMMAND_ROLES.
-        const cur = dayStateRef.current;
-        for (const r of cur.runs) {
-          if (r.startedAt && !r.endedAt) {
-            const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-            void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
-          }
-        }
-        const now = Date.now();
-        const finalDs: DayState = {
-          ...cur,
-          runs: cur.runs.map((r) =>
-            r.startedAt && !r.endedAt ? { ...r, endedAt: now, pausedAt: undefined } : r,
-          ),
-        };
-        archiveDayToHistory(finalDs, cur.date ?? todayStr());
-        const fresh = { ...freshDayState(), resetAt: now };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        setDayState(fresh);
-        saveDayState(fresh);
-        setRunToTime("19:15");
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        schedulePush(fresh, 0);
-        return { ok: true, message: "Day rolled over" };
-      },
-    };
-  }
-
   // Apply a confirm-first recipe suggestion (a scaled recipe or substitution) to
   // a CHOSEN run's matching recipe rows. The target defaults to the current run
   // but the worker may pick any of the day's runs from the SuggestionCard. The
@@ -12131,7 +11637,7 @@ export default function Home() {
   // per-run write paths, no new write surface. Undo restores the chosen run's
   // previous rows. Mirrored verbatim on mobile (replit.md parity).
   function applyRecipeSuggestion(
-    s: RecipeAssistSuggestion,
+    s: RecipeSuggestionLike,
     runId?: string,
   ): { ok: boolean; message: string; undo?: () => void } {
     // Field-array writers for the current run's live form.
@@ -12316,34 +11822,6 @@ export default function Home() {
     saveDayState(newDs);
     if (activeStopId === stopId) setActiveStopId(null);
     schedulePush(newDs, 0);
-  }
-
-  // ── AI demand forecast → editable schedule ────────────────────────────────
-  // Non-destructive: the forecast plan only pre-fills the schedule editor for the
-  // target date. The manager reviews/adjusts and explicitly saves; nothing is
-  // committed by accepting the forecast.
-  function applyForecast(plan: ForecastPlan) {
-    const rows: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
-    const values: Record<string, FormValues> = {};
-    for (const r of plan.runs) {
-      const id = genId();
-      const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
-      const base: FormValues = profile ?? { ...DEFAULT_VALUES };
-      const cases = Number.isFinite(r.casesNeeded) && r.casesNeeded > 0 ? Math.round(r.casesNeeded) : 0;
-      rows.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: cases });
-      values[id] = { ...base, casesNeeded: cases, ...(r.dieType ? { dieType: r.dieType } : {}) };
-    }
-    if (rows.length === 0) {
-      const id = genId();
-      rows.push({ id, brand: "", flavor: "", casesNeeded: 0 });
-      values[id] = { ...DEFAULT_VALUES };
-    }
-    setScheduleAdvancedRunId(null);
-    setScheduleEditorDate(plan.targetDate || todayStr());
-    setScheduleEditorRunValues(values);
-    setScheduleEditorRuns(rows);
-    setScheduleView("editor");
-    setShowScheduleDialog(true);
   }
 
   function updateRunMeta(id: string, patch: Partial<RunMeta>) {
@@ -14825,11 +14303,11 @@ export default function Home() {
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
     appendCheese1, appendCheese2, appendCheese3, appendCheese4, appendDough, appendFrontline,
-    applyCaseUpdateChoices, applyForecast, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange, applyOptimizeAction,
-    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
+    applyCaseUpdateChoices, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange,
+    applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightCandidatesSig, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
-    buildSyncPayload, buildVoiceHandlers, canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
     checklistSatisfied, cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields, cheeseImportApplying,
     cheeseImportError, cheeseImportGenRef, cheeseImportInputRef, cheeseImportLoading, cheeseImportPrepared, cheeseImportProgress,
@@ -14839,7 +14317,7 @@ export default function Home() {
     confirmDeleteFlavorRef, confirmDeleteStopId, confirmRemoveBlanks, confirmRemoveRun, copiedSummary,
     currentMixPresets, currentRun, currentRunId, currentRunIdRef, customAllergens, cycleCountQc,
     cycleCountSchedules, dayState, dayStateRef, dedupSorted, deleteCatalogEntryByName, deleteScheduledDay,
-    deleteStop, dieLineDefaultOverrides, dieTypes, dismissGetStarted, dismissProactiveAlert,
+    deleteStop, dieLineDefaultOverrides, dieTypes, dismissGetStarted,
     doFetch, doughFields, doughIngredients, doughPoolDrift, doughRecipeNameOptions, doughRecipeNames,
     doughRecipesList, doughSauceMigratedRef, doughSubTab, doughVariantPick, downtimeDays, editingStop,
     enabledCheeseRecipes, endRun, endStop, existingImportRecipeNames, expandedHistoryDay, expandedScheduleDay,
@@ -14870,7 +14348,7 @@ export default function Home() {
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
-    premixImportProgress, printSummary, proactiveAlert, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
+    premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
     persistManualPackagingProgress,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
@@ -14974,7 +14452,7 @@ export default function Home() {
     noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingResetCount, pepTypes,
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
-    premixImportPrepared, premixImportProgress, proactiveAlert, productionRules,
+    premixImportPrepared, premixImportProgress, productionRules,
     promotingRecipeKind, resolvedPin, pauseDecisionRunId, role, ruleViolations,
     runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
@@ -15047,7 +14525,7 @@ export default function Home() {
       lastEndedRun, lastRunRecall, learnedBatchWeightRows, learnedBatchWeights,
       me, mixIngredients, mixMakeDay, mixNameBrandTags, mixRecipeNames, mixes,
       newReasonInput, nextRunDieType,
-      pep1ShowB, pep2ShowB, pepTypes, proactiveAlert, productionRules,
+      pep1ShowB, pep2ShowB, pepTypes, productionRules,
       promotingRecipeKind, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
       saucePoolDrift, sauceRecipesList, sauceWeightsOpen, scheduledDays,
       screenMode, serverCheeseByName, serverCheeseNames, serverCheeseRowsByName,
@@ -16464,7 +15942,6 @@ export default function Home() {
                       ingredientSuggestions={unifiedIngredientUniverse}
                     />
                     <MixReconcilePanel isManager={isManager} canManageInventory={canManageInventory} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
-                    <MixAssistChat />
                   </div>
                 )}
 
@@ -16793,7 +16270,7 @@ export default function Home() {
                   <ClipboardList className="w-4 h-4 mr-2" /> Inventory
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
-                  <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
+                  <Sparkles className="w-4 h-4 mr-2" /> Operations Insights
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("mixes")}>
                   <Blend className="w-4 h-4 mr-2" /> Mix Plan
@@ -16949,35 +16426,6 @@ export default function Home() {
                 )}
               </div>
             )}
-            <AiStatusNotice status={proactiveAiStatus ?? undefined} feature="AI proactive alerts" />
-            <ProactiveAlertBanner
-              alert={proactiveAlert}
-              onDismiss={dismissProactiveAlert}
-              onApply={(() => {
-                const action = proactiveAlert?.suggestedAction;
-                if (!action) return undefined;
-                const runningRun = dayState.runs.find((r) => !!r.startedAt && !r.endedAt);
-                if (!runningRun) return undefined;
-                // Validate action values against the run's actual capacity so a
-                // badly-calibrated model response can't silently overwrite progress
-                // with nonsense (e.g. more cases-on-skid than skid capacity, or a
-                // total that far exceeds the run target).
-                const runVals = runningRun.id === currentRunId ? form.getValues() : loadRunValues(runningRun.id);
-                const casesPerSkid = runVals.casesPerSkid ?? 0;
-                const casesNeeded = runVals.casesNeeded ?? 0;
-                // casesOnCurrentSkid must be < casesPerSkid (can't overfill a skid).
-                if (casesPerSkid > 0 && action.casesOnCurrentSkid >= casesPerSkid) return undefined;
-                // Implied total must not exceed casesNeeded by more than 20%.
-                const impliedTotal = action.skidsCompleted * (casesPerSkid || 1) + action.casesOnCurrentSkid;
-                if (casesNeeded > 0 && impliedTotal > casesNeeded * 1.2) return undefined;
-                return () => {
-                  buildVoiceHandlers().setRunProgress(runningRun.id, {
-                    skidsCompleted: action.skidsCompleted,
-                    casesOnCurrentSkid: action.casesOnCurrentSkid,
-                  });
-                };
-              })()}
-            />
             <HomeStationTabs activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as HomeTab)}>
               {/* ─── RUN ─── */}
               <ProductionLineDepartment run={<LiveRunTabContent />} />
@@ -17868,45 +17316,8 @@ export default function Home() {
                 </>} />
 
               <ManagementDepartment ai={
-                <LazyDeferredManagementAiSurface
-                    assistant={{
-                      buildInput: () =>
-                        buildOptimizeInput({
-                          date: todayStr(),
-                          nowMs: Date.now(),
-                          runToTime,
-                          runs: dayState.runs,
-                          runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
-                          history,
-                          scheduledDays: scheduledDays.map((d) => ({
-                            date: d.date,
-                            runs: (d.runs ?? []).map((r) => ({
-                              brand: r.brand,
-                              flavor: r.flavor,
-                              casesNeeded: r.casesNeeded,
-                              dieType: r.dieType,
-                            })),
-                          })),
-                        }),
-                      buildRecipeContext: () =>
-                        buildRecipeAssistContext(
-                          form.getValues(),
-                          [...cheeseIngredients, ...doughIngredients, ...frontlineIngredients],
-                          {
-                            brand: currentRun?.brand,
-                            flavor: currentRun?.flavor,
-                            casesNeeded: v.casesNeeded,
-                            pizzasPerCase: v.pizzasPerCase,
-                            doughballWeightOz: v.targetDoughballWeight,
-                          },
-                        ),
-                      onApplyRecipeSuggestion: applyRecipeSuggestion,
-                      recipeApplyTargets: dayState.runs.map((r, i) => ({
-                        id: r.id,
-                        label: `Run ${i + 1} · ${runLabel(r)}`,
-                      })),
-                      recipeDefaultTargetId: currentRunId,
-                      onApplyAction: applyOptimizeAction,
+                <LazyDeferredManagementSurface
+                    operationsInsights={{
                       buildSummary: (scope) =>
                         scope === "week"
                           ? buildWeekSummaryInput({
@@ -17940,30 +17351,6 @@ export default function Home() {
                             run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
                         }),
                       onApplySchedule: applyScheduleOrder,
-                      buildForecast: (targetDate, horizonDays) =>
-                        buildForecastInput({
-                          targetDate: targetDate || tomorrowStr(),
-                          horizonDays,
-                          nowMs: Date.now(),
-                          history,
-                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                          scheduledDays: scheduledDays.map((d) => ({
-                            date: d.date,
-                            runs: (d.runs ?? []).map((r) => ({
-                              brand: r.brand,
-                              flavor: r.flavor,
-                              casesNeeded: r.casesNeeded,
-                              dieType: r.dieType,
-                            })),
-                          })),
-                        }),
-                      onApplyForecast: applyForecast,
-                      buildAccuracy: () =>
-                        buildForecastAccuracyInput({
-                          nowMs: Date.now(),
-                          history,
-                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                        }),
                     }}
                     specReconcile={{
                       autoCheckSignal: specReconcileSignal,

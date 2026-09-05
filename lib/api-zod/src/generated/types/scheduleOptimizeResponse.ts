@@ -17,12 +17,12 @@ export interface ScheduleOptimizeResponse {
   improved: boolean;
   before: ScheduleMetrics;
   after: ScheduleMetrics;
-  /** Plain-language narration (AI), or empty when no improvement / AI unavailable */
+  /** Deterministic summary, or empty when no improvement is available */
   summary: string;
   /** Optional explanation (e.g. already optimally ordered) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
+  /** Compatibility field; deterministic responses return false */
   aiGenerated: boolean;
   aiStatus: AiStatus;
 }

@@ -22,7 +22,7 @@ describe("observability", () => {
   it("classifies operational routes without including identifiers", () => {
     expect(operationType("/api/sync/2026-08-22")).toBe("sync");
     expect(operationType("/api/inventory/items/123")).toBe("inventory");
-    expect(operationType("/api/ai/ask")).toBe("ai");
+    expect(operationType("/api/ai/fill-missing")).toBe("ai");
     expect(operationType("/api/unknown")).toBe("request");
   });
 

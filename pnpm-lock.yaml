@@ -242,9 +242,6 @@ importers:
       '@workspace/spec-reconcile':
         specifier: workspace:*
         version: link:../../lib/spec-reconcile
-      '@workspace/voice-commands':
-        specifier: workspace:*
-        version: link:../../lib/voice-commands
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -585,9 +582,6 @@ importers:
       '@workspace/spec-reconcile':
         specifier: workspace:*
         version: link:../../lib/spec-reconcile
-      '@workspace/voice-commands':
-        specifier: workspace:*
-        version: link:../../lib/voice-commands
     devDependencies:
       '@axe-core/playwright':
         specifier: ^4.13.0
@@ -1193,8 +1187,6 @@ importers:
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0)
-
-  lib/voice-commands: {}
 
   scripts:
     dependencies:

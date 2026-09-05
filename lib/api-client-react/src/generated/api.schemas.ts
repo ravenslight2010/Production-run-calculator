@@ -430,18 +430,6 @@ export interface UpdateInventorySettingsInput {
   expirySoonDays: number;
 }
 
-export interface ProactiveAlertSettings {
-  enabled: boolean;
-  pollSeconds: number;
-  cooldownSeconds: number;
-}
-
-export interface UpdateProactiveAlertSettingsInput {
-  enabled: boolean;
-  pollSeconds: number;
-  cooldownSeconds: number;
-}
-
 /**
  * Known inventory/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can't inflate the model prompt for cost/DoS purposes.
  */
@@ -1018,314 +1006,6 @@ export interface ApprovePasswordResetResult {
   expiresAt: string;
 }
 
-export interface OptimizeStoppage {
-  reason: string;
-  durationSec: number;
-  /** True if the stoppage is still in progress (no end time) */
-  open: boolean;
-}
-
-export type OptimizeRunStatus = typeof OptimizeRunStatus[keyof typeof OptimizeRunStatus];
-
-
-export const OptimizeRunStatus = {
-  running: 'running',
-  upcoming: 'upcoming',
-  finished: 'finished',
-} as const;
-
-export interface OptimizeRun {
-  id: string;
-  label: string;
-  brand: string;
-  flavor: string;
-  dieType: string;
-  status: OptimizeRunStatus;
-  casesNeeded: number;
-  /** Recorded/cased output only; excludes work still in the freezer or on the line */
-  casesMade: number;
-  /** Lifecycle-aware cases pressed but not yet cased (freezer/on-line work in progress); optional for older clients */
-  casesOnLine?: number;
-  casesLeft: number;
-  /** Planned pizzas-per-minute from line config */
-  plannedPpm: number;
-  /**
-     * Observed pizzas-per-minute, or null if not yet measurable
-     * @nullable
-     */
-  actualPpm: number | null;
-  /** @nullable */
-  minutesRemaining: number | null;
-  netElapsedSec: number;
-  downtimeSec: number;
-  stoppages: OptimizeStoppage[];
-  /** How many pizzas make one case (unit-conversion denominator for PPM→cases) */
-  pizzasPerCase?: number;
-  /** How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid) */
-  casesPerSkid?: number;
-}
-
-export interface OptimizeScheduledRun {
-  date: string;
-  brand: string;
-  flavor: string;
-  dieType: string;
-  casesNeeded: number;
-}
-
-/**
- * Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted.
- */
-export type OptimizeInputReorderDemandByKey = {[key: string]: number};
-
-export interface OptimizeInput {
-  date: string;
-  /** Client clock (ms epoch) so the model can reason about timing */
-  nowMs: number;
-  /** Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts */
-  tzOffsetMinutes?: number;
-  /** Target completion time of day (HH:MM), or empty if unset */
-  runToTime?: string;
-  /** Today's aggregate pizzas-per-minute so far */
-  todayPpm?: number;
-  /**
-     * Historical average pizzas-per-minute, or null if no history
-     * @nullable
-     */
-  benchmarkPpm?: number | null;
-  /** Today's runs (running, upcoming, and finished) */
-  runs: OptimizeRun[];
-  /** Future planned runs */
-  scheduledRuns?: OptimizeScheduledRun[];
-  /** Recent finished runs from prior days */
-  historyRuns?: OptimizeRun[];
-  /** Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted. */
-  reorderDemandByKey?: OptimizeInputReorderDemandByKey;
-}
-
-export type OptimizeActionKind = typeof OptimizeActionKind[keyof typeof OptimizeActionKind];
-
-
-export const OptimizeActionKind = {
-  set_target_time: 'set_target_time',
-  set_run_target: 'set_run_target',
-  reorder_run: 'reorder_run',
-} as const;
-
-/**
- * Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today's run ids.
- */
-export interface OptimizeAction {
-  kind: OptimizeActionKind;
-  /** Short imperative button caption */
-  label: string;
-  /** Target finish time HH:MM (set_target_time) */
-  time?: string;
-  /** Target run id (set_run_target, reorder_run) */
-  runId?: string;
-  /** New case target (set_run_target) */
-  casesNeeded?: number;
-  /**
-     * reorder_run: move runId immediately before this run id, or null to move it last
-     * @nullable
-     */
-  beforeRunId?: string | null;
-}
-
-export type OptimizeRecommendationCategory = typeof OptimizeRecommendationCategory[keyof typeof OptimizeRecommendationCategory];
-
-
-export const OptimizeRecommendationCategory = {
-  run: 'run',
-  break: 'break',
-  efficiency: 'efficiency',
-} as const;
-
-export type OptimizeRecommendationImpact = typeof OptimizeRecommendationImpact[keyof typeof OptimizeRecommendationImpact];
-
-
-export const OptimizeRecommendationImpact = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-/**
- * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
- */
-export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
-
-
-export const ReviewVerdictStatus = {
-  ok: 'ok',
-  warn: 'warn',
-  reject: 'reject',
-} as const;
-
-/**
- * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
- */
-export interface ReviewVerdict {
-  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
-  status: ReviewVerdictStatus;
-  /** Short reason for a warn/reject verdict */
-  reason?: string;
-}
-
-export interface OptimizeRecommendation {
-  category: OptimizeRecommendationCategory;
-  title: string;
-  detail: string;
-  impact: OptimizeRecommendationImpact;
-  /**
-     * Run label or scope this applies to, or null for shift-wide
-     * @nullable
-     */
-  appliesTo: string | null;
-  /** Optional one-tap action, or null when nothing is safely applicable */
-  action?: OptimizeAction | null;
-  review?: ReviewVerdict;
-}
-
-export interface OptimizeResult {
-  recommendations: OptimizeRecommendation[];
-  generatedAt: number;
-  /** Optional message when data is insufficient for analysis */
-  note?: string;
-}
-
-/**
- * A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.
- */
-export interface AskInput {
-  /** The user's plain-language question about the day */
-  question: string;
-  dayState: OptimizeInput;
-}
-
-/**
- * Who produced this turn
- */
-export type ConversationTurnRole = typeof ConversationTurnRole[keyof typeof ConversationTurnRole];
-
-
-export const ConversationTurnRole = {
-  user: 'user',
-  assistant: 'assistant',
-} as const;
-
-/**
- * One turn in a user's AI conversation memory — a single message either from the user or the assistant.
- */
-export interface ConversationTurn {
-  /** Who produced this turn */
-  role: ConversationTurnRole;
-  /** The message text */
-  text: string;
-}
-
-export interface AskResult {
-  /** The grounded plain-language answer */
-  answer: string;
-  /** The asking user's recent conversation window (oldest first) after this exchange was recorded, so the client can render the thread from server truth. */
-  turns: ConversationTurn[];
-  generatedAt: number;
-  /** Optional message when the question could not be answered from data */
-  note?: string;
-}
-
-/**
- * A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data /ai/ask uses), letting the server resolve fuzzy run references to concrete run ids.
- */
-export interface CommandInput {
-  /** The user's spoken phrase (a question or an action command) */
-  utterance: string;
-  dayState: OptimizeInput;
-}
-
-/**
- * One ingredient line of a recipe (ingredient name + pounds).
- */
-export interface RecipeAssistRow {
-  ingredient: string;
-  /** Pounds of this ingredient in the recipe/batch */
-  lbs: number;
-}
-
-/**
- * One of the current run's recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).
- */
-export interface RecipeAssistRecipe {
-  /** Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an "apply" suggestion target this exact recipe deterministically. */
-  id?: string;
-  /** What the recipe is for (dough, sauce, cheese, other) */
-  kind: string;
-  /** The recipe's name (may be empty if unnamed) */
-  name: string;
-  rows: RecipeAssistRow[];
-}
-
-/**
- * Optional run numbers the model may use to ground scaling math so its answer is consistent with what the app computes.
- */
-export interface RecipeAssistContext {
-  brand?: string;
-  flavor?: string;
-  casesNeeded?: number;
-  pizzasPerCase?: number;
-  /** Target weight of one doughball in ounces */
-  doughballWeightOz?: number;
-}
-
-/**
- * A plain-language recipe/ingredient question plus the real recipe rows, the known ingredient pool, and optional run context the answer must be grounded in. Both clients send identically-shaped data.
- */
-export interface RecipeAssistInput {
-  /** The user's plain-language recipe/ingredient question */
-  question: string;
-  /** The current run's recipes (dough/sauce/cheese), may be empty */
-  recipes: RecipeAssistRecipe[];
-  /** Known ingredient names, so substitutions stay within the app's pool */
-  ingredientNames?: string[];
-  context?: RecipeAssistContext;
-}
-
-/**
- * Whether this resizes a recipe (scale) or swaps an ingredient (substitute)
- */
-export type RecipeAssistSuggestionKind = typeof RecipeAssistSuggestionKind[keyof typeof RecipeAssistSuggestionKind];
-
-
-export const RecipeAssistSuggestionKind = {
-  scale: 'scale',
-  substitute: 'substitute',
-} as const;
-
-/**
- * An optional structured, confirm-first edit the worker can apply in one tap — the exact resulting ingredient rows of a scaled or substituted recipe. Present only for SCALE/SUBSTITUTE questions where the model could produce exact rows; absent for EXPLAIN questions or when it is unsure. Advisory: nothing is applied until the worker confirms.
- */
-export interface RecipeAssistSuggestion {
-  /** Whether this resizes a recipe (scale) or swaps an ingredient (substitute) */
-  kind: RecipeAssistSuggestionKind;
-  /** The id of the recipe to apply this to, copied from the matching RecipeAssistRecipe.id sent in the request. */
-  recipeId: string;
-  /** The target recipe's display name (for the confirmation UI) */
-  recipeName?: string;
-  /** A short button/label describing the change (e.g. "Apply scaled dough 1.5x") */
-  summary?: string;
-  /** The COMPLETE new set of ingredient rows for that recipe after the change */
-  rows: RecipeAssistRow[];
-}
-
-export interface RecipeAssistResult {
-  /** The grounded plain-language answer */
-  answer: string;
-  generatedAt: number;
-  /** Optional message when the question could not be answered from data */
-  note?: string;
-  suggestion?: RecipeAssistSuggestion;
-}
-
 export interface SpecReconcileRow {
   ingredient: string;
   lbs: number;
@@ -1658,158 +1338,6 @@ export interface MixReconcileResult {
   aiStatus: AiStatus;
 }
 
-export interface MixAssistMix {
-  name: string;
-  brand: string;
-  flavor: string;
-  batchSize?: number;
-  daysEarly?: number;
-  amountAlreadyMade?: number;
-  enabled?: boolean;
-  components: MixComponentSpec[];
-}
-
-export interface MixAssistInput {
-  question: string;
-  mixes: MixAssistMix[];
-}
-
-export interface MixAssistResult {
-  answer: string;
-  generatedAt: number;
-  note?: string;
-}
-
-export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
-
-
-export const ProactiveAlertCategory = {
-  run: 'run',
-  break: 'break',
-  efficiency: 'efficiency',
-} as const;
-
-export type ProactiveAlertImpact = typeof ProactiveAlertImpact[keyof typeof ProactiveAlertImpact];
-
-
-export const ProactiveAlertImpact = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-/**
- * A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. "behind-plan", "break-window") so repeats of the same situation can be de-duped/cooled down client-side; it is never run-instance or timestamp specific.
- */
-export interface ProactiveAlert {
-  /** Stable de-dup slug for the kind of nudge */
-  key: string;
-  category: ProactiveAlertCategory;
-  /** Short glanceable headline */
-  title: string;
-  /** One or two plain-language sentences a manager can act on */
-  detail: string;
-  impact: ProactiveAlertImpact;
-}
-
-export interface ProactiveAlertResult {
-  /** The single nudge to surface now, or null when nothing applies */
-  alert: ProactiveAlert | null;
-  generatedAt: number;
-  aiStatus: AiStatus;
-  /** Optional message when no alert could be produced */
-  note?: string;
-}
-
-/**
- * A finished run from a past day, used to learn demand patterns.
- */
-export interface ForecastHistoryRun {
-  brand: string;
-  flavor: string;
-  /** May be empty when unknown */
-  dieType: string;
-  /** Cases actually produced for this run */
-  cases: number;
-  /** Net run minutes (excludes downtime); a throughput signal */
-  netRunMin: number;
-}
-
-/**
- * One past production day with its finished runs.
- */
-export interface ForecastHistoryDay {
-  /** ISO date (YYYY-MM-DD) of the production day */
-  date: string;
-  runs: ForecastHistoryRun[];
-}
-
-export interface ForecastInput {
-  /** ISO date (YYYY-MM-DD) of the first upcoming day to forecast */
-  targetDate: string;
-  /**
-     * How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday's history.
-     * @minimum 1
-     * @maximum 7
-     */
-  horizonDays?: number;
-  /** Client clock in epoch ms (for relative reasoning) */
-  nowMs: number;
-  /** Recent finished production days, most useful when several weeks deep */
-  history: ForecastHistoryDay[];
-  /** Runs already planned for future days (incl. any existing plan for the target day) */
-  scheduledRuns?: OptimizeScheduledRun[];
-}
-
-/**
- * One suggested run in the predicted plan (advisory; not committed).
- */
-export interface ForecastRun {
-  brand: string;
-  flavor: string;
-  /** May be empty when the model is unsure */
-  dieType: string;
-  /** Rough suggested case target */
-  casesNeeded: number;
-  /** Short reason this run is suggested (grounded in history) */
-  rationale: string;
-}
-
-/**
- * Honest confidence given how much history supports the prediction
- */
-export type ForecastPlanConfidence = typeof ForecastPlanConfidence[keyof typeof ForecastPlanConfidence];
-
-
-export const ForecastPlanConfidence = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-export interface ForecastPlan {
-  targetDate: string;
-  /** Honest confidence given how much history supports the prediction */
-  confidence: ForecastPlanConfidence;
-  /** Plain-language rationale for the whole plan, incl. caveats */
-  summary: string;
-  /** Suggested runs in a sensible production sequence */
-  runs: ForecastRun[];
-}
-
-export interface ForecastResult {
-  /** The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present. */
-  forecast: ForecastPlan | null;
-  /** One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon. */
-  forecasts?: ForecastPlan[];
-  generatedAt: number;
-  /** True when the AI produced a forecast; false when no forecast was produced */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
-  /** Explanation when no forecast could responsibly be produced */
-  note?: string;
-}
-
 /**
  * One run as shaped by the client for the production summary.
  */
@@ -1892,11 +1420,11 @@ export interface SummaryStats {
 }
 
 export interface SummaryResult {
-  /** Plain-language recap (AI narration, or deterministic fallback) */
+  /** Deterministic plain-language recap */
   summary: string;
   stats: SummaryStats;
   generatedAt: number;
-  /** True when the AI narrated; false when the deterministic fallback was used */
+  /** Compatibility field; deterministic responses return false */
   aiGenerated: boolean;
   aiStatus: AiStatus;
 }
@@ -2167,12 +1695,12 @@ export interface AnomalyResult {
   anomalies: Anomaly[];
   checkedRuns: number;
   baselineRuns: number;
-  /** Plain-language narration (AI), or empty when nothing was flagged / AI unavailable */
+  /** Deterministic summary, or empty when nothing was flagged */
   summary: string;
   /** Optional explanation (e.g. not enough history to judge) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
+  /** Compatibility field; deterministic responses return false */
   aiGenerated: boolean;
   aiStatus: AiStatus;
 }
@@ -2245,116 +1773,14 @@ export interface ScheduleOptimizeResponse {
   improved: boolean;
   before: ScheduleMetrics;
   after: ScheduleMetrics;
-  /** Plain-language narration (AI), or empty when no improvement / AI unavailable */
+  /** Deterministic summary, or empty when no improvement is available */
   summary: string;
   /** Optional explanation (e.g. already optimally ordered) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
+  /** Compatibility field; deterministic responses return false */
   aiGenerated: boolean;
   aiStatus: AiStatus;
-}
-
-/**
- * Actual finished production history to grade past forecasts against.
- */
-export interface ForecastAccuracyInput {
-  /** Client clock in epoch ms (for relative reasoning) */
-  nowMs: number;
-  /** Recent finished production days (the actual results to compare forecasts to) */
-  history: ForecastHistoryDay[];
-}
-
-/**
- * hit = predicted ≈ actual; over/under = predicted more/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted
- */
-export type ForecastAccuracyProductStatus = typeof ForecastAccuracyProductStatus[keyof typeof ForecastAccuracyProductStatus];
-
-
-export const ForecastAccuracyProductStatus = {
-  hit: 'hit',
-  over: 'over',
-  under: 'under',
-  missed: 'missed',
-  unexpected: 'unexpected',
-} as const;
-
-/**
- * One product's predicted vs. actual cases for a reviewed day.
- */
-export interface ForecastAccuracyProduct {
-  /** Product label (brand + flavor) as recorded/run */
-  label: string;
-  /** Cases the forecast predicted (0 if it was not predicted) */
-  predictedCases: number;
-  /** Cases actually produced (0 if it did not run) */
-  actualCases: number;
-  /** hit = predicted ≈ actual; over/under = predicted more/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted */
-  status: ForecastAccuracyProductStatus;
-}
-
-/**
- * Confidence the forecast was issued with
- */
-export type ForecastAccuracyReviewConfidence = typeof ForecastAccuracyReviewConfidence[keyof typeof ForecastAccuracyReviewConfidence];
-
-
-export const ForecastAccuracyReviewConfidence = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-/**
- * One past forecast graded against the day's actual finished runs.
- */
-export interface ForecastAccuracyReview {
-  /** ISO date (YYYY-MM-DD) the forecast was for */
-  date: string;
-  /** Confidence the forecast was issued with */
-  confidence: ForecastAccuracyReviewConfidence;
-  predictedTotalCases: number;
-  actualTotalCases: number;
-  /** 0–100 closeness of predicted total cases to actual total cases */
-  caseAccuracyPct: number;
-  products: ForecastAccuracyProduct[];
-}
-
-/**
- * A product the forecast consistently mis-predicts across reviewed days.
- */
-export interface ForecastAccuracyTrendProduct {
-  /** Product label (brand + flavor) */
-  label: string;
-  /** Reviewed days this product was over-predicted */
-  daysOver: number;
-  /** Reviewed days this product was under-predicted */
-  daysUnder: number;
-  /** Reviewed days this product appeared in at all */
-  daysScored: number;
-}
-
-/**
- * Cross-day calibration summary rolled up from the per-day reviews.
- */
-export interface ForecastAccuracyTrend {
-  /** Number of reviewed (forecast + finished) days included */
-  daysScored: number;
-  /** Mean case-accuracy across the reviewed days (0–100) */
-  averageCaseAccuracyPct: number;
-  /** Products repeatedly over-predicted, most frequent first */
-  chronicOver: ForecastAccuracyTrendProduct[];
-  /** Products repeatedly under-predicted, most frequent first */
-  chronicUnder: ForecastAccuracyTrendProduct[];
-}
-
-export interface ForecastAccuracyResult {
-  /** Per-date reviews, most recent first */
-  reviews: ForecastAccuracyReview[];
-  trend: ForecastAccuracyTrend;
-  generatedAt: number;
-  /** Explanation when there is nothing to review yet */
-  note?: string;
 }
 
 export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
@@ -2411,6 +1837,28 @@ export interface FillMissingInput {
   context?: FillMissingContextItem[];
   /** The blank fields needing a suggested value */
   fields: FillMissingField[];
+}
+
+/**
+ * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
+ */
+export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
+
+
+export const ReviewVerdictStatus = {
+  ok: 'ok',
+  warn: 'warn',
+  reject: 'reject',
+} as const;
+
+/**
+ * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
+ */
+export interface ReviewVerdict {
+  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
+  status: ReviewVerdictStatus;
+  /** Short reason for a warn/reject verdict */
+  reason?: string;
 }
 
 export interface FillMissingSuggestion {
@@ -2900,20 +2348,6 @@ export interface ProfileDataHealthApplyResult {
   summary: ProfileDataHealthApplyResultSummary;
 }
 
-export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
-
-export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown } | null;
-
-export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
-
-export interface ProfileDataHealthWorkspace {
-  findings: ProfileDataHealthFinding[];
-  safeRepairs: ProfileDataHealthRepair[];
-  summary: ProfileDataHealthWorkspaceSummary;
-  cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
-  repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
-}
-
 export type ProfileNameLinkCleanupSummaryRemovedStubs = {
   dough: number;
   sauce: number;
@@ -2941,16 +2375,6 @@ export interface FacilityKnowledgeList {
 export interface SaveFacilityKnowledgeInput {
   /** The batch of facility-knowledge facts to upsert into the shared pool */
   knowledge: FacilityKnowledge[];
-}
-
-export interface ConversationHistory {
-  /** The user's recent conversation turns, oldest first */
-  turns: ConversationTurn[];
-}
-
-export interface AppendConversationInput {
-  /** One or more turns to append to the current user's conversation memory */
-  turns: ConversationTurn[];
 }
 
 /**

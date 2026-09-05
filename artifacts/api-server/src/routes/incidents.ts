@@ -123,7 +123,7 @@ router.post(
     // focused one. This route is open to EVERY signed-in user (no capability
     // required to report a problem), so privileged domains (e.g. "forecast",
     // "proactive-alerts") must be excluded from the general block the same way
-    // /ai/ask and /ai/summary are — otherwise reporting an issue becomes a
+    // other staff-facing summary routes are — otherwise reporting an issue becomes a
     // side-channel for reading manager-gated facility knowledge.
     const knowledge = await loadFacilityKnowledge(req.log);
     const history = analyzeIncidentHistory(knowledge, {

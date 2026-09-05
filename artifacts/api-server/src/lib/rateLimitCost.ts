@@ -24,14 +24,7 @@ const DEFAULT_COST_FN = (_req: Request) => 1;
  * AI endpoint cost multipliers (relative to cost=1 for a regular endpoint).
  * Adjust based on actual API spend.
  */
-export const AI_ENDPOINT_COSTS: Record<string, number> = {
-  "/api/ai/diagnose-issue": 10,
-  "/api/ai/cluster-incidents": 15,
-  "/api/ai/proactive-alert": 5,
-  "/api/ai/forecast": 20,
-  "/api/ai/optimize": 12,
-  "/api/inventory/count-observations": 20,
-};
+export const AI_ENDPOINT_COSTS: Record<string, number> = {};
 
 export async function checkCostLimit(
   _req: Request,

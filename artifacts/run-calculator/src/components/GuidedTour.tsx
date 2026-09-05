@@ -77,8 +77,8 @@ function buildSteps(isManager: boolean): TourStep[] {
       icon: MoreHorizontal,
       title: "More in the menu",
       body: isManager
-        ? "Open the top-right menu for Stoppages & Summary, Inventory, the AI Assistant, Schedule, Setup & Settings, Reported issues, and Report an issue."
-        : "Open the top-right menu for Stoppages & Summary, Inventory, the AI Assistant, Schedule, Setup & Settings, and Report an issue.",
+        ? "Open the top-right menu for Stoppages & Summary, Inventory, Operations Insights, Schedule, Setup & Settings, Reported issues, and Report an issue."
+        : "Open the top-right menu for Stoppages & Summary, Inventory, Operations Insights, Schedule, Setup & Settings, and Report an issue.",
     },
   ];
   return steps;

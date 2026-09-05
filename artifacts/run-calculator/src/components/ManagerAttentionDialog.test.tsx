@@ -16,14 +16,6 @@ const fullInput = {
   canReviewIncidents: true,
   scheduledRecipeIssueCount: 4,
   canManageProfiles: true,
-  proactiveAlert: {
-    key: "behind-plan",
-    category: "run" as const,
-    impact: "high" as const,
-    title: "Falling behind",
-    detail: "Line is slower than planned.",
-  },
-  isManager: true,
 };
 
 describe("ManagerAttentionDialog", () => {
@@ -33,9 +25,8 @@ describe("ManagerAttentionDialog", () => {
       "password-resets",
       "incidents",
       "recipe-setup",
-      "proactive-alert",
     ]);
-    expect(managerAttentionCount(items)).toBe(10);
+    expect(managerAttentionCount(items)).toBe(9);
   });
 
   it("does not expose work the current role cannot resolve", () => {
@@ -44,7 +35,6 @@ describe("ManagerAttentionDialog", () => {
       canApproveResets: false,
       canReviewIncidents: false,
       canManageProfiles: false,
-      isManager: false,
     });
     expect(items).toEqual([]);
   });

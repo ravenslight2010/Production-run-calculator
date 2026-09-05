@@ -184,13 +184,12 @@ async function req(
   });
 }
 
-// A syntactically valid proactive-alert dismissal (the only facility-memory
-// entry an ordinary operator is allowed to write).
-function dismissal(slug: string) {
+// A syntactically valid retained quality-check confirmation.
+function qualityCheck(date: string, status: "pass" | "warn" | "fail" = "pass") {
   return {
-    domain: "proactive-alerts",
-    key: `dismissed:${slug}`,
-    fact: `A manager dismissed a proactive alert (key: ${slug}) around 12:34.`,
+    domain: "quality",
+    key: `check:pizza:${date}`,
+    fact: `On ${date}, a pizza quality check was reviewed and confirmed as "${status}" (95% confidence).`,
   };
 }
 
@@ -214,25 +213,21 @@ async function seedSecretRow(): Promise<void> {
 type KnowledgeResponse = { knowledge: Array<{ domain: string; key: string; fact: string }> };
 
 describe("POST /ai-memory/facility — response scoping (read-bypass fix)", () => {
-  it("does NOT return the rest of the pool to a caller without use-ai-tools", async () => {
+  it("rejects retired proactive-alert memory writes without exposing the pool", async () => {
     const operator = await freshUser("operator");
     await seedSecretRow();
 
     const res = await req(operator, "POST", "/api/ai-memory/facility", {
-      knowledge: [dismissal("test-alert")],
+      knowledge: [{
+        domain: "proactive-alerts",
+        key: "dismissed:test-alert",
+        fact: "A manager dismissed a proactive alert (key: test-alert) around 12:34.",
+      }],
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as KnowledgeResponse;
-
-    // Only the caller's own entry comes back — never the seeded secret row.
-    expect(body.knowledge).toHaveLength(1);
-    expect(body.knowledge[0].domain).toBe("proactive-alerts");
-    expect(body.knowledge[0].key).toBe("dismissed:test-alert");
-    expect(JSON.stringify(body)).not.toContain("Confidential");
-
-    // The write itself still landed alongside the secret row.
+    expect(res.status).toBe(403);
     const rows = await db.select().from(facilityKnowledgeTable);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fact).toBe(SECRET_FACT.fact);
   });
 
   it("still returns the full pool to a caller WITH use-ai-tools", async () => {
@@ -240,7 +235,7 @@ describe("POST /ai-memory/facility — response scoping (read-bypass fix)", () =
     await seedSecretRow();
 
     const res = await req(manager, "POST", "/api/ai-memory/facility", {
-      knowledge: [dismissal("mgr-alert")],
+      knowledge: [qualityCheck("2026-09-01")],
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as KnowledgeResponse;
@@ -266,37 +261,54 @@ describe("POST /ai-memory/facility — response scoping (read-bypass fix)", () =
 
 describe("POST /ai-memory/facility — flood resistance (eviction fix)", () => {
   it("accepts at most ONE entry per request (extras silently dropped)", async () => {
-    const operator = await freshUser("operator");
+    const manager = await freshUser("manager");
 
-    const res = await req(operator, "POST", "/api/ai-memory/facility", {
-      knowledge: [dismissal("first"), dismissal("second"), dismissal("third")],
+    const res = await req(manager, "POST", "/api/ai-memory/facility", {
+      knowledge: [
+        qualityCheck("2026-09-01"),
+        qualityCheck("2026-09-02", "warn"),
+        qualityCheck("2026-09-03", "fail"),
+      ],
     });
     expect(res.status).toBe(200);
 
     const rows = await db.select().from(facilityKnowledgeTable);
     expect(rows).toHaveLength(1);
-    expect(rows[0].key).toBe("dismissed:first");
+    expect(rows[0].key).toBe("check:pizza:2026-09-01");
   });
 
   it("rate-limits a single user's writes (429 after the per-minute budget)", async () => {
-    const operator = await freshUser("operator");
+    const manager = await freshUser("manager");
 
     // Budget is 5/min per user; the 6th request in the window must be rejected
     // WITHOUT being written.
     for (let i = 0; i < 5; i++) {
-      const ok = await req(operator, "POST", "/api/ai-memory/facility", {
-        knowledge: [dismissal(`alert-${i}`)],
+      const ok = await req(manager, "POST", "/api/ai-memory/facility", {
+        knowledge: [qualityCheck(`2026-09-0${i + 1}`)],
       });
       expect(ok.status).toBe(200);
     }
-    const blocked = await req(operator, "POST", "/api/ai-memory/facility", {
-      knowledge: [dismissal("alert-overflow")],
+    const blocked = await req(manager, "POST", "/api/ai-memory/facility", {
+      knowledge: [qualityCheck("2026-09-06")],
     });
     expect(blocked.status).toBe(429);
 
     const rows = await db.select().from(facilityKnowledgeTable);
     expect(rows).toHaveLength(5);
-    expect(rows.every((r) => r.key !== "dismissed:alert-overflow")).toBe(true);
+    expect(rows.every((r) => r.key !== "check:pizza:2026-09-06")).toBe(true);
+  });
+});
+
+describe("retired conversation-memory routes", () => {
+  it("does not expose read or write endpoints", async () => {
+    const manager = await freshUser("manager");
+    const read = await req(manager, "GET", "/api/ai-memory/conversation");
+    const write = await req(manager, "POST", "/api/ai-memory/conversation", {
+      turns: [{ role: "user", text: "retired" }],
+    });
+
+    expect(read.status).toBe(404);
+    expect(write.status).toBe(404);
   });
 });
 
