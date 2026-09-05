@@ -26,6 +26,7 @@ import {
   releaseGateLabelsForMode,
   runStep,
   resolveReleaseEvidenceDir,
+  sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
   validateReleaseReport,
   validateSourceLibraryReconciliationEvidence,
@@ -115,6 +116,39 @@ async function run(): Promise<void> {
       "source-library reconciliation verification",
     ),
     "standard release checks must include source-library reconciliation verification",
+  );
+  assert.equal(
+    sourceLibraryReconciliationRequired({
+      CI: "true",
+      NODE_ENV: "test",
+      E2E_TEST_DB: "1",
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
+    }),
+    false,
+    "a fresh disposable CI database may test the reconciliation gate without claiming production history",
+  );
+  assert.throws(
+    () =>
+      sourceLibraryReconciliationRequired({
+        RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
+      }),
+    /restricted to a disposable CI test database/,
+    "production evidence must fail closed when the CI-only reconciliation bypass is requested",
+  );
+  assert.match(
+    formatReleaseReport(
+      [],
+      "standard",
+      new Set(),
+      {
+        revision: "ci-fixture",
+        decision: "NO-GO",
+        environment: "disposable CI gate test (not production reconciliation evidence)",
+        expectedLabels: [],
+      },
+    ),
+    /Environment: disposable CI gate test \(not production reconciliation evidence\)[\s\S]*Decision: NO-GO/,
+    "disposable CI validation must never be rendered as production-ready evidence",
   );
   assert.deepEqual(
     SOURCE_LIBRARY_RECONCILIATION_STEP.args.slice(0, 5),

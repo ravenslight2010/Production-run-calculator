@@ -5,8 +5,6 @@ import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
-import { spawnSync } from "node:child_process";
-import path from "node:path";
 
 const rawPort = process.env["PORT"];
 
@@ -17,37 +15,6 @@ if (!rawPort) {
 }
 
 const port = Number(rawPort);
-
-function applyDatabaseSchema(): void {
-  if (
-    process.env.NODE_ENV !== "production" ||
-    process.env.RUN_DB_MIGRATION !== "true"
-  ) {
-    return;
-  }
-
-  logger.info("Applying database schema (drizzle push-force)…");
-  const result = spawnSync(
-    process.execPath,
-    [
-      path.join(process.cwd(), "migration", "node_modules", "drizzle-kit", "bin.cjs"),
-      "push",
-      "--force",
-      "--config",
-      path.join(process.cwd(), "migration", "drizzle.config.ts"),
-    ],
-    { stdio: "inherit", env: process.env, cwd: process.cwd() },
-  );
-  if (result.error) {
-    logger.error({ err: result.error }, "Failed to run database schema push");
-    process.exit(1);
-  }
-  if (result.status !== 0) {
-    logger.error({ status: result.status }, "Database schema push failed");
-    process.exit(1);
-  }
-  logger.info("Database schema is up to date");
-}
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -150,10 +117,10 @@ async function startServer(): Promise<void> {
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
-// This opt-in path is useful for deployments that cannot configure a
-// pre-deploy command. Compose and Render use their explicit migration paths
-// instead, so the long-lived API process does not repeat the schema push.
-applyDatabaseSchema();
+// Schema changes are exclusively owned by the matching one-shot migration
+// image (or Render's pre-deploy command). In particular, a long-lived runtime
+// must never infer a migration from its environment: replacing it with an
+// earlier runtime is an application rollback, not a schema rollback.
 startServer().catch((err) => {
   logger.error({ err }, "Failed to start server");
   process.exit(1);

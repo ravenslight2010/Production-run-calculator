@@ -17,7 +17,7 @@
     "test:source-heal-plan": "tsx ./src/generate-source-library-heal-plan.mts --check",
     "test:skill-catalog": "tsx ./src/skill-catalog.test.mts",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
-    "test": "bash ./src/check-shell-inventory.sh && bash ./src/check-shell-inventory.test.sh && bash ./src/check-scripts-test-command.test.sh && bash ./src/check-model-version-bump.test.sh && bash ./src/check-workflows.test.sh && bash ./src/check-github-signed-commit-policy.test.sh && bash ./src/check-retired-db-pool.test.sh && pnpm run check:shell && bash ./src/push-main.test.sh && pnpm run test:source-compare && pnpm run test:source-manifest && pnpm run test:source-reconcile && pnpm run test:source-heal-verify && pnpm run test:source-heal-plan && pnpm run check:skill-catalog && pnpm run test:skill-catalog && python3 -S ../.agents/skills/skill-creator/scripts/test_quick_validate.py",
+    "test": "bash ./src/check-shell-inventory.sh && bash ./src/check-shell-inventory.test.sh && bash ./src/check-scripts-test-command.test.sh && bash ./src/check-model-version-bump.test.sh && bash ./src/check-workflows.test.sh && bash ./src/check-github-signed-commit-policy.test.sh && bash ./src/check-retired-db-pool.test.sh && pnpm run check:shell && bash ./src/push-main.test.sh && pnpm run test:source-compare && pnpm run test:source-manifest && pnpm run test:source-reconcile && pnpm run test:source-heal-verify && pnpm run test:source-heal-plan && pnpm run test:schema-safe-rollback && pnpm run check:skill-catalog && pnpm run test:skill-catalog && python3 -S ../.agents/skills/skill-creator/scripts/test_quick_validate.py",
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
     "test:release-evidence": "tsx ./src/release-evidence.test.mts && tsx ../artifacts/run-calculator/e2e/release-duration-reporter.unit.mts",
     "test:release-resume": "tsx ./src/release-resume.integration.test.mts",
@@ -38,6 +38,7 @@
     "check:clean-start": "tsx ./src/verify-clean-start.mts",
     "check:render-image": "tsx ./src/verify-render-image.mts",
     "check:schema-safe-rollback": "tsx ./src/rehearse-schema-safe-rollback.mts",
+    "test:schema-safe-rollback": "tsx ./src/rehearse-schema-safe-rollback.test.mts",
     "push:main": "bash ./src/push-main.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

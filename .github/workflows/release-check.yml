@@ -41,6 +41,10 @@ jobs:
       NODE_ENV: test
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+      # A fresh service database cannot prove the retained production repair
+      # history. The focused verifier test below exercises the gate instead;
+      # release-check refuses this switch outside this disposable CI contract.
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
       RELEASE_EVIDENCE_DIR: release-evidence
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
@@ -68,6 +72,9 @@ jobs:
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
+      - name: Test source-library reconciliation gate
+        run: pnpm --filter @workspace/scripts run test:source-heal-verify
+
       - name: Run release check
         run: pnpm run release:check
 
@@ -94,6 +101,7 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           RELEASE_MODE: standard
@@ -134,6 +142,9 @@ jobs:
       NODE_ENV: test
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+      # See the standard job: this is a test-only exclusion of production
+      # history proof, not synthetic production reconciliation evidence.
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
       RELEASE_EVIDENCE_DIR: release-evidence-full
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
@@ -161,6 +172,9 @@ jobs:
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
+      - name: Test source-library reconciliation gate
+        run: pnpm --filter @workspace/scripts run test:source-heal-verify
+
       - name: Run full release check
         run: pnpm run release:check:full
 
@@ -187,6 +201,7 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           RELEASE_MODE: full

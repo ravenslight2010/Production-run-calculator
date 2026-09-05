@@ -20,6 +20,7 @@ const database = `${resourcePrefix}-db`;
 const runtime = `${resourcePrefix}-runtime`;
 const parentContext = mkdtempSync(join(tmpdir(), `${resourcePrefix}-parent-`));
 const currentContext = mkdtempSync(join(tmpdir(), `${resourcePrefix}-current-`));
+const schemaContext = mkdtempSync(join(tmpdir(), `${resourcePrefix}-schema-`));
 const currentTag = `runcalc-rollback-api:${currentRevision.slice(0, 12)}-${suffix}`;
 const parentTag = `runcalc-rollback-api:${parentRevision.slice(0, 12)}-${suffix}`;
 const migrationTag = `runcalc-rollback-migrate:${currentRevision.slice(0, 12)}-${suffix}`;
@@ -34,7 +35,9 @@ let migrationResult = "not run";
 let currentChecks = "not run";
 let rollbackChecks = "not run";
 let beforeSchema = "not captured";
+let currentSchema = "not captured";
 let afterSchema = "not captured";
+let schemaDifference = "";
 let failure = "";
 let cleaned = false;
 let parentWorktreeAdded = false;
@@ -80,6 +83,7 @@ function cleanup(): string[] {
   }
   ignore(() => rmSync(parentContext, { recursive: true, force: true }));
   ignore(() => rmSync(currentContext, { recursive: true, force: true }));
+  ignore(() => rmSync(schemaContext, { recursive: true, force: true }));
 
   const remaining: string[] = [];
   try {
@@ -122,9 +126,10 @@ function report(): void {
 - Current checks (/, /api/healthz): ${currentChecks}
 - Parent checks (/, /api/healthz): ${rollbackChecks}
 - Public schema hash after migration: ${beforeSchema}
+- Public schema hash after current runtime: ${currentSchema}
 - Public schema hash after rollback: ${afterSchema}
 - Forward-only schema statement: The schema was applied once by the current matching migration image and was not rolled back; replacing the runtime never runs a parent migration.
-${failure ? `\n## Failure\n\n\`\`\`\n${failure}\n\`\`\`\n` : ""}`;
+${schemaDifference ? `\n## Public Schema Difference\n\n\`\`\`diff\n${schemaDifference}\n\`\`\`\n` : ""}${failure ? `\n## Failure\n\n\`\`\`\n${failure}\n\`\`\`\n` : ""}`;
   writeFileSync(reportPath, markdown);
   console.log(`Rollback rehearsal evidence: ${reportPath}`);
 }
@@ -164,17 +169,37 @@ function pgReady(): boolean {
     return false;
   }
 }
-function schemaFingerprint(): string {
+function schemaSnapshot(name: string): string {
   // Use a one-shot client container instead of docker exec. Some nested Docker
   // environments can start sibling containers but cannot setns into one that is
   // already running.
-  return docker([
+  const snapshot = docker([
     "run", "--rm", "--network", network,
     "--env", `PGPASSWORD=${dbPassword}`,
     "postgres:16-alpine",
     "sh", "-c",
-    `set -eu; set -o pipefail; pg_dump --schema-only --schema=public -h ${database} -U ${dbUser} ${dbName} | sed '/^\\\\restrict /d;/^\\\\unrestrict /d' | sha256sum | awk '{print $1}'`,
+    `set -eu; set -o pipefail; pg_dump --schema-only --schema=public -h ${database} -U ${dbUser} ${dbName} | sed '/^\\\\restrict /d;/^\\\\unrestrict /d'`,
   ]);
+  writeFileSync(join(schemaContext, `${name}.sql`), `${snapshot}\n`);
+  return snapshot;
+}
+function schemaFingerprint(snapshot: string): string {
+  return execFileSync("sha256sum", [], {
+    cwd: rootDir,
+    input: snapshot,
+    encoding: "utf8",
+  }).split(/\s+/, 1)[0]!;
+}
+function captureSchemaDifference(beforeName: string, afterName: string): string {
+  try {
+    return execFileSync("diff", ["-u", `${beforeName}.sql`, `${afterName}.sql`], {
+      cwd: schemaContext,
+      encoding: "utf8",
+    }).trim();
+  } catch (error) {
+    const output = error as { stdout?: string };
+    return output.stdout?.trim() || `Could not produce diff for ${beforeName} -> ${afterName}`;
+  }
 }
 async function check(url: string, kind: "web" | "api"): Promise<void> {
   await waitFor(url, async () => {
@@ -233,14 +258,25 @@ async function main(): Promise<void> {
     docker(["run", "--rm", "--network", network, "--env", `DATABASE_URL=postgres://${dbUser}:${dbPassword}@${database}:5432/${dbName}`, migrationTag], "inherit");
     migrationResult = "exit 0";
   } catch (error) { migrationResult = "non-zero exit"; throw error; }
-  beforeSchema = schemaFingerprint();
+  const migrationSnapshot = schemaSnapshot("after-migration");
+  beforeSchema = schemaFingerprint(migrationSnapshot);
   await verifyRuntime(currentTag);
   currentChecks = "PASS";
+  const currentSnapshot = schemaSnapshot("after-current-runtime");
+  currentSchema = schemaFingerprint(currentSnapshot);
+  if (beforeSchema !== currentSchema) {
+    schemaDifference = captureSchemaDifference("after-migration", "after-current-runtime");
+    throw new Error(`public schema changed while starting the current runtime (${beforeSchema} -> ${currentSchema})`);
+  }
   docker(["rm", "--force", runtime], "inherit");
   await verifyRuntime(parentTag);
   rollbackChecks = "PASS";
-  afterSchema = schemaFingerprint();
-  if (beforeSchema !== afterSchema) throw new Error(`public schema changed during runtime replacement (${beforeSchema} -> ${afterSchema})`);
+  const parentSnapshot = schemaSnapshot("after-parent-runtime");
+  afterSchema = schemaFingerprint(parentSnapshot);
+  if (currentSchema !== afterSchema) {
+    schemaDifference = captureSchemaDifference("after-current-runtime", "after-parent-runtime");
+    throw new Error(`public schema changed during runtime replacement (${currentSchema} -> ${afterSchema})`);
+  }
 }
 
 for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {

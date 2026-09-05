@@ -14,3 +14,14 @@ Browser reporters and the release orchestrator must share the same evidence root
 **Why:** The browser gate can pass all cases while the release gate rejects the report solely because the reporter defaulted to a different root, or because standard-mode verification expected one fewer full-run gate.
 
 **How to apply:** Pass the resolved full report path into full browser runs and invoke the verifier with full mode for full evidence; treat path or mode mismatches as infrastructure defects, not browser failures.
+
+Disposable CI databases may exercise data-dependent release verifiers without
+claiming that synthetic or absent production history is release proof.
+
+**Why:** A fresh CI Postgres cannot contain an audited one-time repair's
+production marker, source rows, aliases, and historical references. Treating a
+focused verifier test as equivalent evidence would allow a false GO.
+
+**How to apply:** Clearly label disposable CI validation and force its release
+decision to NO-GO when production-state evidence is omitted. Keep the omission
+guarded to CI test databases; real release runs remain fail-closed.

@@ -435,9 +435,39 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
+/**
+ * The reconciliation verifier proves a specific production repair, including
+ * its historical rows. A newly-created CI database intentionally has none of
+ * that history, so it cannot produce that proof. CI may omit this production
+ * prerequisite only after running the verifier's focused test suite; the
+ * escape hatch is deliberately unavailable outside the disposable CI contract.
+ */
+export function sourceLibraryReconciliationRequired(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (environment.RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION !== "1") {
+    return true;
+  }
+  if (
+    environment.CI !== "true" ||
+    environment.NODE_ENV !== "test" ||
+    environment.E2E_TEST_DB !== "1"
+  ) {
+    throw new Error(
+      "RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION is restricted to a disposable CI test database; production reconciliation evidence remains required.",
+    );
+  }
+  return false;
+}
+
+const requiresProductionSourceLibraryReconciliation =
+  sourceLibraryReconciliationRequired();
+
 const steps: ReleaseStep[] = [
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
-  SOURCE_LIBRARY_RECONCILIATION_STEP,
+  ...(requiresProductionSourceLibraryReconciliation
+    ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
+    : []),
   {
     label: "shell lint inventory",
     args: ["run", "check:shell-inventory"],
@@ -1629,7 +1659,11 @@ async function writeReleaseReport(
       availableEvidenceFiles,
       {
         ...metadata,
-        environment: process.env.CI ? "CI release validation" : "local release validation",
+        environment: process.env.CI
+          ? requiresProductionSourceLibraryReconciliation
+            ? "CI release validation"
+            : "disposable CI gate test (not production reconciliation evidence)"
+          : "local release validation",
         browserDurationRegressions,
         timing: metadata.timing,
       },
@@ -2057,10 +2091,13 @@ async function main(): Promise<void> {
     results.length === steps.length &&
     results.every((result) => result.passed)
   ) {
+    const releaseDecision = requiresProductionSourceLibraryReconciliation
+      ? "GO"
+      : "NO-GO";
     try {
       const reportPath = await writeReleaseReport(results, {
         revision,
-        decision: "GO",
+        decision: releaseDecision,
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
         timing: {
           totalElapsedMs: stageTimings.reduce(
@@ -2086,7 +2123,11 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
-    console.log("\nRelease check passed. Ready for final publish review.");
+    console.log(
+      requiresProductionSourceLibraryReconciliation
+        ? "\nRelease check passed. Ready for final publish review."
+        : "\nDisposable CI gate test passed. Report remains NO-GO until production source-library reconciliation evidence is supplied.",
+    );
     process.exit(0);
   }
 
