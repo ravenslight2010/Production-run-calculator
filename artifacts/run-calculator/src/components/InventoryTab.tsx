@@ -419,15 +419,11 @@ export default function InventoryTab({
 
       {/* Photo stock intake (use-ai-tools: paid AI action) */}
       {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} locations={locations} onCommitted={load} />}
-      {canManageInventory && <PhotoCountCard candidates={matchCandidates} onCommitted={load} />}
-
-      {canUseAiTools && <QualityCheckCard />}
+      {canManageInventory && <PhotoCountCard onCommitted={load} />}
 
       {canUseAiTools && <ProductionSheetCard />}
 
-      {canUseAiTools && <LabelVerifyCard />}
-
-      <WasteInsightCard />
+      {canUseAiTools && <WasteInsightCard />}
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -2163,9 +2159,9 @@ function LabelVerifyCard() {
   );
 }
 
-// ── Expiry and use-first stock view ──────────────────────────────────────────
-// The server flags expired/expiring-soon stock in urgency order. Advisory only —
-// nothing is changed.
+// ── AI expiry & waste insight ────────────────────────────────────────────────
+// The server flags expired/expiring-soon stock and (when anything is at risk)
+// suggests a run order to consume it first. Advisory only — nothing is changed.
 function WasteInsightCard() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -2222,8 +2218,8 @@ function WasteInsightCard() {
       {open && (
         <CardContent className="px-4 pb-4 space-y-3">
           <p className="text-xs text-muted-foreground">
-            Flag stock that's expired or expiring soon. Use expired stock first,
-            then the items with the soonest expiration. Advisory only — nothing is rescheduled.
+            Flag stock that's expired or expiring soon and get an AI suggestion for which runs to
+            prioritize so it gets used first. Advisory only — nothing is rescheduled.
           </p>
           <Button
             size="sm"
@@ -2288,6 +2284,17 @@ function WasteInsightCard() {
                       </div>
                     ))}
                   </div>
+                  {result.suggestion && (
+                    <div className="rounded-md border border-primary/30 bg-primary/5 p-2.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-1 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Suggested run order
+                      </p>
+                      <p className="text-xs text-foreground/90 whitespace-pre-wrap">
+                        {result.suggestion}
+                      </p>
+                    </div>
+                  )}
+                  {result.note && <p className="text-[11px] text-amber-500">{result.note}</p>}
                 </>
               )}
             </div>

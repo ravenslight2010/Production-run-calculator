@@ -678,6 +678,11 @@ router.post(
 // is enforced client-side, mirroring the manual UI).
 router.post(
   "/ai/command",
+  (_req, res) => {
+    res.status(410).json({
+      error: "Voice commands are disabled. Use the explicit controls or type your question.",
+    });
+  },
   rateLimit({
     windowMs: COMMAND_RATE_WINDOW_MS,
     max: COMMAND_RATE_MAX,

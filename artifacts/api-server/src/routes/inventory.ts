@@ -602,6 +602,11 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 // abandoned observation has no inventory side effects.
 router.post(
   "/inventory/count-observations",
+  (_req, res) => {
+    res.status(410).json({
+      error: "Photo inventory counts are disabled. Use typed or barcode inventory controls.",
+    });
+  },
   requireCapability("manage-inventory"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
@@ -834,6 +839,11 @@ router.post(
 // the vision provider.
 router.post(
   "/inventory/quality-photo",
+  (_req, res) => {
+    res.status(410).json({
+      error: "AI quality checks are disabled. Use the human quality procedure and history.",
+    });
+  },
   requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
@@ -971,6 +981,11 @@ router.post(
 // sanitizing live in ./labelVerify for unit testing.
 router.post(
   "/inventory/label-verify",
+  (_req, res) => {
+    res.status(410).json({
+      error: "AI label verification is disabled. Use the manual label procedure or barcode flow.",
+    });
+  },
   requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,

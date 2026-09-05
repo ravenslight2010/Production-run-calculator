@@ -387,10 +387,7 @@ import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
 import MixAssistChat from "../components/MixAssistChat";
 import {
-  dispatchVoiceCommand,
-  type VoiceCommandAction,
   type VoiceCommandHandlers,
-  type VoiceCommandResult,
 } from "@workspace/voice-commands";
 import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
@@ -12123,11 +12120,6 @@ export default function Home() {
     };
   }
 
-  // Entry point passed to AssistantTab: dispatch the server-resolved actions
-  // through the shared, parity-critical mapping with this user's role.
-  const applyVoiceCommand = (actions: VoiceCommandAction[]): Promise<VoiceCommandResult[]> =>
-    dispatchVoiceCommand(actions, buildVoiceHandlers(), isManager);
-
   // Apply a confirm-first recipe suggestion (a scaled recipe or substitution) to
   // a CHOSEN run's matching recipe rows. The target defaults to the current run
   // but the worker may pick any of the day's runs from the SuggestionCard. The
@@ -14832,7 +14824,7 @@ export default function Home() {
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
     appendCheese1, appendCheese2, appendCheese3, appendCheese4, appendDough, appendFrontline,
     applyCaseUpdateChoices, applyForecast, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange, applyOptimizeAction,
-    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef, applyVoiceCommand,
+    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightCandidatesSig, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
     buildSyncPayload, buildVoiceHandlers, canApproveResets, canEditRules, canManageInventory, canManageStaff,
@@ -17901,7 +17893,6 @@ export default function Home() {
                       })),
                       recipeDefaultTargetId: currentRunId,
                       onApplyAction: applyOptimizeAction,
-                      onApplyVoiceCommand: applyVoiceCommand,
                       buildSummary: (scope) =>
                         scope === "week"
                           ? buildWeekSummaryInput({

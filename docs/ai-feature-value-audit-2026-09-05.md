@@ -3,7 +3,18 @@
 **Audit date:** 2026-09-05  
 **Scope:** Production Run Calculator and API Server  
 **Decision standard:** Skeptical review of operational necessity, unique value, overlap, cost, risk, maintenance burden, and removal independence  
-**Change status:** Phase 1 deterministic-workflow cleanup implemented. Production recap, anomaly, schedule ordering, reconciliation, expiry/use-first, incident grouping, and Run Insights no longer depend on model-written narration; compatibility fields remain where clients still read them.
+**Change status:** Phase 1 deterministic-workflow cleanup is implemented alongside the disable-first boundary for risky voice/photo entry points. Production recap, anomaly, schedule ordering, reconciliation, expiry/use-first, incident grouping, and Run Insights no longer depend on model-written narration; compatibility fields remain where clients still read them. Shared extraction infrastructure and existing records remain in place.
+
+## Disable-first retention decision
+
+The following entry points are disabled without deleting generated or human-reviewed data:
+
+- Voice command classification returns a fail-closed disabled response; manual controls and typed assistant questions remain available.
+- Count-from-photos creation is disabled, while existing open count drafts remain available for manual correction, Apply, or Cancel. Applied count observations, lots, ledger entries, and product references remain reviewable.
+- AI quality-photo and label-verification analysis are disabled. Human quality procedures, quality history, and barcode/typed label workflows remain available.
+- Shared image compression, retry, photo-intake, and spec-photo/document extraction code is retained for the workflows that remain supported.
+
+No persisted generated data is deleted in this change. Any future cleanup of conversation, quality-memory, observation, or other AI-generated records requires a separate retention review with export/restore criteria and an explicit migration.
 
 ## Executive decision
 

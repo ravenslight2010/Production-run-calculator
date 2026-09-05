@@ -264,7 +264,7 @@ function makeDayState() {
   };
 }
 
-describe("bounded retry on conversational/command routes (first malformed, second good)", () => {
+describe("bounded retry on conversational routes (first malformed, second good)", () => {
   it("/ai/ask retries once and returns the good second answer", async () => {
     mock.queue = [TRUNCATED_REPLY, JSON.stringify({ answer: "Yes, by 1:45pm.", note: "" })];
     const res = await post("/ai/ask", {
@@ -292,34 +292,17 @@ describe("bounded retry on conversational/command routes (first malformed, secon
     expect(mock.queue).toHaveLength(1);
   });
 
-  it("/ai/command retries once and returns the good second classification", async () => {
-    mock.queue = [
-      TRUNCATED_REPLY,
-      JSON.stringify({ type: "command", actions: [{ kind: "switch_run", runId: "run-1" }] }),
-    ];
+  it("/ai/command is fail-closed while voice commands are disabled", async () => {
+    mock.queue = [JSON.stringify({ type: "command", actions: [{ kind: "switch_run", runId: "run-1" }] })];
     const res = await post("/ai/command", {
       utterance: "switch to the cheese run",
       dayState: makeDayState(),
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { type: string; actions: Array<{ kind: string; runId: string }> };
-    expect(body.type).toBe("command");
-    expect(body.actions).toHaveLength(1);
-    expect(body.actions[0]).toMatchObject({ kind: "switch_run", runId: "run-1" });
-    expect(mock.mainCalls).toBe(2);
-  });
-
-  it("/ai/command keeps the safe 'none' fallback when both attempts are malformed", async () => {
-    mock.queue = [TRUNCATED_REPLY, TRUNCATED_REPLY, '{"type":"question"}'];
-    const res = await post("/ai/command", {
-      utterance: "switch to the cheese run",
-      dayState: makeDayState(),
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Voice commands are disabled"),
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { type: string; note?: string };
-    expect(body.type).toBe("none");
-    expect(body.note).toBe("I didn't catch that.");
-    expect(mock.mainCalls).toBe(2);
+    expect(mock.mainCalls).toBe(0);
     expect(mock.queue).toHaveLength(1);
   });
 
