@@ -1,8 +1,10 @@
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import { withTempOverrides, type FormValues, type RunMeta, type HistoryDay } from "./types";
+import { computeEffectiveLineSpeed } from "./lineSpeed";
 import { computeSummaryStats, runLabel } from "./utils";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
+import type { AiStatus } from "./aiStatus";
 
 // ── Types (mirror the OpenAPI /ai/optimize contract) ─────────────────────────
 export type OptimizeCategory = "run" | "break" | "efficiency";
@@ -99,6 +101,7 @@ export type OptimizeResult = {
   recommendations: OptimizeRecommendation[];
   generatedAt: number;
   note?: string;
+  aiStatus?: AiStatus;
 };
 
 // ── Per-run shaping ──────────────────────────────────────────────────────────
@@ -106,11 +109,13 @@ export type OptimizeResult = {
 // pauses) and the live calc's planned PPM (configured cycle speed for dough,
 // approximate line speed for crusts). Kept in lockstep with the live calculator.
 function plannedPpmOf(run: RunMeta, vals: FormValues): number {
-  const ppm =
-    run.subTab === "crusts"
-      ? vals.approxLineSpeed
-      : vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
-  return Math.max(0, Math.round(ppm * 100) / 100);
+  return computeEffectiveLineSpeed({
+    mode: run.subTab === "crusts" ? "crusts" : "dough",
+    approxLineSpeed: vals.approxLineSpeed,
+    crustsPerCycle: vals.crustsPerCycle,
+    cycleSpeed: vals.cycleSpeed,
+    speedAdjustment: vals.speedAdjustment,
+  });
 }
 
 function statusOf(run: RunMeta): RunStatus {

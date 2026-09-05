@@ -1,6 +1,7 @@
 import type { FormValues, RunMeta, HistoryDay } from "./types";
 import { buildOptimizeRun, type OptimizeScheduledRun } from "./aiOptimize";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
+import type { AiStatus } from "./aiStatus";
 
 // AI demand-forecast client (raw fetch, matches aiOptimize.ts). Shapes recent
 // FINISHED history grouped by day plus any scheduled future runs, sends them to
@@ -52,6 +53,7 @@ export type ForecastResult = {
   forecasts?: ForecastPlan[];
   generatedAt: number;
   note?: string;
+  aiStatus?: AiStatus;
 };
 
 export type ForecastScheduledDayInput = {
@@ -102,6 +104,7 @@ export type ForecastAccuracyResult = {
   trend: ForecastAccuracyTrend;
   generatedAt: number;
   note?: string;
+  aiStatus?: AiStatus;
 };
 
 // Shape only the FINISHED history into the compact forecast-history shape — the

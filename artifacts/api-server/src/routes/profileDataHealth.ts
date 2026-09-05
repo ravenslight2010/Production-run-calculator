@@ -111,6 +111,24 @@ function record(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+function snapshotFields(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const fields = value.filter((field): field is string => typeof field === "string" && field.trim().length > 0);
+  if (fields.length !== value.length || new Set(fields).size !== fields.length) return null;
+  return fields;
+}
+
+function hasSnapshotValues(value: unknown, fields: string[]): boolean {
+  const values = record(value);
+  return fields.every((field) => Object.prototype.hasOwnProperty.call(values, field));
+}
+
+function finiteSnapshotStamp(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const stamp = Number(value);
+  return Number.isFinite(stamp) ? stamp : null;
+}
+
 function nameKey(value: unknown): string {
   return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
@@ -473,8 +491,9 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
           : []),
       ]);
       const repairedByProfile = new Map<string, { values: JsonRecord; fields: string[] }>();
-      const appliedByProfileKey = new Map<string, ProfileDataHealthRepair & { afterStamp: number; runs?: unknown[] }>();
+      const appliedByProfileKey = new Map<string, ProfileDataHealthRepair & { afterStamp: number }>();
       const applied: Array<Record<string, unknown>> = [];
+      const runRecords: Array<Record<string, unknown>> = [];
       let skipped = [...requested].filter((id) => !supportedIds.has(id)).length;
       const now = Date.now();
 
@@ -497,7 +516,7 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
         );
         repair.previousValues = previousValues;
         (repair as ProfileDataHealthRepair & { afterStamp: number }).afterStamp = stamp;
-        appliedByProfileKey.set(profileKey(profile.brand, profile.flavor), repair as ProfileDataHealthRepair & { afterStamp: number; runs?: unknown[] });
+        appliedByProfileKey.set(profileKey(profile.brand, profile.flavor), repair as ProfileDataHealthRepair & { afterStamp: number });
         applied.push({ ...repair, repairType: "profile-link" });
       }
 
@@ -531,8 +550,9 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
             nextStamps[id] = afterStamp;
             const appliedRepair = appliedByProfileKey.get(profileKey(run.brand, run.flavor));
             if (appliedRepair) {
-              appliedRepair.runs ??= [];
-              appliedRepair.runs.push({
+               runRecords.push({
+                 repairType: "run-values",
+                 profileKey: appliedRepair.profileKey,
                 runId: id, date: day.date, fields: changedProfile.fields,
                 beforeValues: Object.fromEntries(changedProfile.fields.map((field) => [field, runValues[field]])),
                 afterValues: Object.fromEntries(changedProfile.fields.map((field) => [field, nextRunValues[field]])),
@@ -582,7 +602,7 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
       if (applied.length > 0) {
         batchId = `profile-data-health:${now}:${Math.random().toString(36).slice(2, 10)}`;
         await tx.insert(dataHealthRepairBatchesTable).values({
-          id: batchId, scope, actor: req.userId ?? "unknown", records: applied,
+           id: batchId, scope, actor: req.userId ?? "unknown", records: [...applied, ...runRecords],
           summary: { applied: applied.length, skipped, failed: 0, repairedRuns },
         });
         await tx.insert(auditLogsTable).values({
@@ -690,6 +710,40 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
           applied++;
           continue;
         }
+        if (item.repairType === "run-values") {
+          const date = String(item.date ?? "");
+          const runId = String(item.runId ?? "");
+          const fields = snapshotFields(item.fields);
+          const beforeStamp = finiteSnapshotStamp(item.beforeStamp);
+          const afterStamp = finiteSnapshotStamp(item.afterStamp);
+          const [day] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
+          if (!day || !runId || !fields || beforeStamp == null || afterStamp == null
+            || !hasSnapshotValues(item.beforeValues, fields)
+            || !hasSnapshotValues(item.afterValues, fields)) { skipped++; continue; }
+          const data = record(day.data);
+          const state = record(data.dayState);
+          const found = (Array.isArray(state.runs) ? state.runs : []).map(record).find((value) => value.id === runId);
+          const stamps = record(data.runValuesUpdatedAt);
+          const values = record(record(data.runValues)[runId]);
+          if (!found || found.startedAt != null || found.endedAt != null
+            || Number(stamps[runId]) !== afterStamp
+            || !fields.every((field) => JSON.stringify(values[field]) === JSON.stringify(record(item.afterValues)[field]))) {
+            skipped++;
+            continue;
+          }
+          const restoredRuns = { ...record(data.runValues), [runId]: { ...values, ...record(item.beforeValues) } };
+          const restoredStamps = {
+            ...stamps,
+            [runId]: Math.max(Number(stamps[runId]) || 0, Date.now()) + 1,
+          };
+          await tx.update(dailySyncTable).set({
+            data: { ...data, runValues: restoredRuns, runValuesUpdatedAt: restoredStamps },
+            updatedAt: new Date(),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date)));
+          repairedRuns++;
+          continue;
+        }
         const key = String(item.profileKey ?? "");
         const [profile] = await tx.select().from(brandProfilesTable)
           .where(and(eq(brandProfilesTable.key, key), eq(brandProfilesTable.scope, scope))).for("update");
@@ -705,21 +759,28 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
         })
           .where(and(eq(brandProfilesTable.key, key), eq(brandProfilesTable.scope, scope)));
         applied++;
+        // Older batches nested run snapshots under the profile record. Keep
+        // honoring that legacy shape, while new batches use independent
+        // run-values records above so profile undo cannot gate run undo.
         const runs = Array.isArray(item.runs) ? item.runs.map(record) : [];
         for (const run of runs) {
           const date = String(run.date ?? "");
           const runId = String(run.runId ?? "");
+          const fields = snapshotFields(run.fields);
+          const beforeStamp = finiteSnapshotStamp(run.beforeStamp);
+          const afterStamp = finiteSnapshotStamp(run.afterStamp);
           const [day] = await tx.select().from(dailySyncTable)
             .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
-          if (!day || !runId) { skipped++; continue; }
+          if (!day || !runId || !fields || beforeStamp == null || afterStamp == null
+            || !hasSnapshotValues(run.beforeValues, fields)
+            || !hasSnapshotValues(run.afterValues, fields)) { skipped++; continue; }
           const data = record(day.data);
           const state = record(data.dayState);
           const found = (Array.isArray(state.runs) ? state.runs : []).map(record).find((value) => value.id === runId);
           const stamps = record(data.runValuesUpdatedAt);
           const values = record(record(data.runValues)[runId]);
-          const fields = Array.isArray(run.fields) ? run.fields.map(String) : [];
           if (!found || found.startedAt != null || found.endedAt != null
-            || Number(stamps[runId]) !== Number(run.afterStamp)
+            || Number(stamps[runId]) !== afterStamp
             || !fields.every((field) => JSON.stringify(values[field]) === JSON.stringify(record(run.afterValues)[field]))) {
             skipped++;
             continue;

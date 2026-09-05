@@ -1,0 +1,96 @@
+name: Stable branch protection check
+
+on:
+  schedule:
+    # Run weekly away from the top of the hour so settings drift is noticed
+    # without competing with the repository's heavier scheduled workflows.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    name: Verify main branch protection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check live main branch protection
+        id: protection-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          check_log="$RUNNER_TEMP/stable-branch-protection-check.txt"
+
+          set +e
+          bash scripts/src/check-github-signed-commit-policy.sh 2>&1 |
+            tee "$check_log"
+          check_status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "## Stable branch protection check"
+            echo
+            echo '```text'
+            cat "$check_log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$check_status"
+
+      - name: Retain protection check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-branch-protection-check
+          path: ${{ runner.temp }}/stable-branch-protection-check.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Notify maintainers of scheduled protection drift
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '[Alert] Stable branch protection drift detected';
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            const message =
+              `The scheduled stable branch protection check failed. ` +
+              `[Review the workflow run](${runUrl}) for the retained details.`;
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                ...context.repo,
+                state: 'open',
+                per_page: 100,
+              },
+            );
+            const existing = issues.find(
+              (issue) => !issue.pull_request && issue.title === title,
+            );
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body: message,
+              });
+            } else {
+              await github.rest.issues.create({
+                ...context.repo,
+                title,
+                body:
+                  `${message}\n\nThis issue stays open so future scheduled ` +
+                  `failures remain in one durable maintainer alert.`,
+              });
+            }

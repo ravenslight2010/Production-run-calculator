@@ -88,6 +88,34 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.traysOnLine).toBe(49);
   });
 
+  it("keeps dough timers running before packaging is ready without writing cases", () => {
+    const { form, values } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 50,
+      batchesReady: 10,
+    });
+    const t0 = 1_700_000_000_000;
+
+    renderHook(() =>
+      useAutoTrack({
+        runId: "run-before-packaging",
+        runStatus: "running",
+        packagingAutoTrackActive: false,
+        nowTime: new Date(t0),
+        elapsedBatchSec: 10 * 60,
+        calc: baseCalc,
+        v: makeV(),
+        form,
+      }),
+    );
+
+    expect(values.traysOnLine).toBe(49);
+    expect(values.batchesReady).toBe(9.75);
+    expect(values.skidsCompleted).toBe(0);
+    expect(values.casesOnCurrentSkid).toBe(0);
+  });
+
   it("only counts down once staged dough covers the rest of the run AND no batches remain", () => {
     // Deficit closed (traysNeeded=0) AND no ready batches: production must stop
     // entirely, so the counter only drains down.
@@ -166,6 +194,62 @@ describe("auto-track tray/batch up/down tracking", () => {
     v = makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady });
     rerender({ nowTime: now, elapsedBatchSec: elapsed + 36, v });
     expect(values.traysOnLine).toBe(49);
+  });
+
+  it("keeps auto-producing trays past the three-section advisory total", () => {
+    const { form, values } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 74,
+      batchesReady: 10,
+    });
+    const t0 = 1_700_000_000_000;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc,
+          v: props.v,
+          form,
+        }),
+      {
+        initialProps: {
+          nowTime: new Date(t0),
+          elapsedBatchSec: 10 * 60,
+          v: makeV({ traysOnLine: 74, batchesReady: 10 }),
+        },
+      },
+    );
+
+    // The first consumption tick moves 74 → 73. Half a tray period later,
+    // production must add the tray back even though the aggregate is above the
+    // physical 3 × 20 advisory guide and at the old hardcoded ceiling.
+    expect(values.traysOnLine).toBe(73);
+    rerender({
+      nowTime: new Date(t0 + 18 * 1000),
+      elapsedBatchSec: 10 * 60 + 18,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+    expect(values.traysOnLine).toBe(74);
+
+    // A second production tick after an intervening consume proves 74 is no
+    // longer a ceiling: 74 → 73 → 74 is not enough, so manually preserve 74
+    // through the consumption tick and let the next production tick add to 75.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000),
+      elapsedBatchSec: 10 * 60 + 36,
+      v: makeV({ traysOnLine: 75, batchesReady: values.batchesReady }),
+    });
+    rerender({
+      nowTime: new Date(t0 + 54 * 1000),
+      elapsedBatchSec: 10 * 60 + 54,
+      v: makeV({ traysOnLine: 74, batchesReady: values.batchesReady }),
+    });
+    expect(values.traysOnLine).toBe(75);
   });
 
   it("bumps the batch count when the mixer finishes a batch", () => {
@@ -338,7 +422,7 @@ describe("auto-track tray/batch up/down tracking", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
     const t0 = 1_700_000_000_000;
     // The stop is COUNT-based, not time-based: calc.pressDone flips true when
-    // the real cased count plus live freezer contents reach casesNeeded. From
+    // the real cased count plus live Freeze tunnel contents reach casesNeeded. From
     // that moment the dough counters must freeze — the dough crew is on the
     // NEXT run's dough.
     const v = makeV({ casesNeeded: 100 });

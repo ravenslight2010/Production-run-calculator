@@ -88,4 +88,29 @@ describe("backfillMixFromMergedSources", () => {
     });
     expect(backfillMixFromMergedSources(target, [source])).toBeNull();
   });
+
+  it("collapses equivalent target/source rows and remains a no-op when repeated", () => {
+    const target = mix({
+      name: "Veg",
+      components: [
+        { ingredient: "Green Pepper", perPizza: 0, perBatchLbs: 4 },
+        { ingredient: "Pepper, Green", perPizza: 0.5, perBatchLbs: 9 },
+      ],
+    });
+    const source = mix({
+      name: "Old Veg",
+      components: [
+        { ingredient: "Green Peppers", perPizza: 1, perBatchLbs: 10 },
+        { ingredient: "Onion's Diced", perPizza: 0.25 },
+        { ingredient: "Diced Onions", perPizza: 0.75 },
+      ],
+    });
+
+    const out = backfillMixFromMergedSources(target, [source]);
+    expect(out!.components).toEqual([
+      { ingredient: "Green Pepper", perPizza: 0.5, perBatchLbs: 4 },
+      { ingredient: "Onion's Diced", perPizza: 0.25 },
+    ]);
+    expect(backfillMixFromMergedSources(out!, [source])).toBeNull();
+  });
 });

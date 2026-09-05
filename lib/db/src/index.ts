@@ -10,7 +10,16 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Keep pool acquisition bounded so callers that already have their own
+// fallback deadline do not wait forever behind a saturated checkout queue.
+// This is intentionally shorter than cache-maintenance's one-second
+// diagnostics deadline, allowing its local fallback to run after acquisition
+// fails without leaving a waiter in node-postgres' pending queue.
+const POOL_CONNECTION_TIMEOUT_MS = 900;
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: POOL_CONNECTION_TIMEOUT_MS,
+});
 
 // node-postgres emits an `error` event on idle pooled clients when the backend
 // connection is dropped server-side (e.g. Postgres terminating a connection due

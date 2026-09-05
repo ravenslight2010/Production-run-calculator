@@ -80,6 +80,7 @@ let proactiveAlertSettingsTable: DbModule["proactiveAlertSettingsTable"];
 let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
+let aiResultCacheTable: DbModule["aiResultCacheTable"];
 
 let clearUserValidityCache: () => void;
 
@@ -132,6 +133,7 @@ beforeAll(async () => {
   inventoryItemsTable = dbMod.inventoryItemsTable;
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
+  aiResultCacheTable = dbMod.aiResultCacheTable;
 
   // Dropping the throwaway DB WITH (FORCE) on teardown can terminate a connection
   // still closing just after pool.end() resolved, surfacing as an unhandled pool
@@ -182,7 +184,7 @@ beforeEach(async () => {
   mock.calls = 0;
   mock.lastUserPrompt = "";
   await db.execute(
-    sql`TRUNCATE ${inventoryLotsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${proactiveAlertSettingsTable}, ${facilityKnowledgeTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${aiResultCacheTable}, ${inventoryLotsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${proactiveAlertSettingsTable}, ${facilityKnowledgeTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog so requireCapability can resolve each user's role to a
   // capability set (a manager with no seeded roles would resolve to zero caps).
@@ -582,11 +584,15 @@ describe("POST /ai/proactive-alert — decision branches", () => {
     expect(body.alert).toBeNull();
   });
 
-  it("returns 502 when the AI provider fails", async () => {
+  it("returns a clear no-AI state when the provider fails", async () => {
     const mgr = await freshManager();
     mock.shouldThrow = true;
     const res = await req(mgr, "POST", "/api/ai/proactive-alert", liveDayBody());
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { alert: unknown; aiStatus: string; note?: string };
+    expect(body.alert).toBeNull();
+    expect(body.aiStatus).toBe("unavailable");
+    expect(body.note).toContain("AI is unavailable");
   });
 
   it("feeds expired / expiring-soon stock into the watcher prompt", async () => {
@@ -646,7 +652,9 @@ describe("POST /ai/proactive-alert — cost-cap rate limit", () => {
     }
     expect(lastOk?.headers.get("RateLimit-Limit")).toBe("20");
     const callsAfterBudget = mock.calls;
-    expect(callsAfterBudget).toBe(20);
+    // The unchanged deterministic risk snapshot is served from the AI-result
+    // cache after the first request, so only one provider call is needed.
+    expect(callsAfterBudget).toBe(1);
 
     // The 21st request in the window is rejected without reaching the model.
     const blocked = await req(mgr, "POST", "/api/ai/proactive-alert", liveDayBody());

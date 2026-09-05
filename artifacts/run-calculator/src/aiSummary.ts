@@ -1,6 +1,7 @@
 import type { FormValues, RunMeta, HistoryDay } from "./types";
 import { buildOptimizeRun } from "./aiOptimize";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
+import type { AiStatus } from "./aiStatus";
 
 // AI end-of-day / weekly production-recap client (raw fetch, matches
 // aiForecast.ts). Shapes the day's (or a rolling week's) runs through the shared
@@ -56,6 +57,7 @@ export type SummaryResult = {
   stats: SummaryStats;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 
 // Map one run (via the shared buildOptimizeRun, keeping cases/downtime/stoppage

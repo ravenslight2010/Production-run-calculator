@@ -1,5 +1,5 @@
-import type { Request } from "express";
-import { costLimitMiddleware, AI_ENDPOINT_COSTS } from "../lib/rateLimitCost";
+import type { Request, Response } from "express";
+import { checkCostLimit, costLimitMiddleware, AI_ENDPOINT_COSTS } from "../lib/rateLimitCost";
 import { MemoryRateLimitStore, type RateLimitStore } from "./rateLimit";
 import { PostgresRateLimitStore } from "./rateLimitStore";
 
@@ -58,4 +58,22 @@ export function createAiCostLimit(
   );
 }
 
-export const aiCostLimit = createAiCostLimit();
+const aiCostLimitStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(AI_COST_LIMIT_WINDOW_MS)
+    : new MemoryRateLimitStore(AI_COST_LIMIT_WINDOW_MS);
+
+const aiCostLimitOptions = {
+  windowMs: AI_COST_LIMIT_WINDOW_MS,
+  maxCost: AI_COST_LIMIT_MAX,
+  store: aiCostLimitStore,
+  costFn: aiRequestCost,
+};
+
+export const aiCostLimit = costLimitMiddleware(aiCostLimitOptions);
+
+// Cacheable routes call this only inside the single in-flight miss owner, after
+// validation and prompt grounding. Cache hits never reach this function.
+export async function chargeAiCost(req: Request, res: Response): Promise<boolean> {
+  return (await checkCostLimit(req, res, aiCostLimitOptions)).allowed;
+}

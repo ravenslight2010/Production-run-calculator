@@ -29,6 +29,10 @@ import {
 import { useCheeseRecipes } from "../hooks/useCheeseRecipes";
 import { saveCheeseRecipes, deleteCheeseRecipes } from "../cheeseRecipes";
 import { fetchMixes, saveMixes } from "../mixes";
+import {
+  invalidateMasterDataSlice,
+  setMasterDataSlice,
+} from "../masterData";
 import { relinkCheeseSlotsToMixInProfiles } from "../storage";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
@@ -172,7 +176,7 @@ export default function CheeseRecipesManager({
   const saveMutation = useMutation({
     mutationFn: (next: CheeseRecipe[]) => saveCheeseRecipes(next),
     onSuccess: (saved) => {
-      qc.setQueryData(["cheeseRecipes"], saved);
+      setMasterDataSlice(qc, "cheeseRecipes", saved);
       setError(null);
       onSaved?.(saved);
     },
@@ -183,7 +187,7 @@ export default function CheeseRecipesManager({
   const deleteMutation = useMutation({
     mutationFn: (ids: string[]) => deleteCheeseRecipes(ids),
     onSuccess: (saved) => {
-      qc.setQueryData(["cheeseRecipes"], saved);
+      setMasterDataSlice(qc, "cheeseRecipes", saved);
       setError(null);
     },
     onError: () =>
@@ -213,8 +217,8 @@ export default function CheeseRecipesManager({
       return remaining;
     },
     onSuccess: (remaining) => {
-      qc.setQueryData(["cheeseRecipes"], remaining);
-      qc.invalidateQueries({ queryKey: ["mixes"] });
+      setMasterDataSlice(qc, "cheeseRecipes", remaining);
+      void invalidateMasterDataSlice(qc, "mixes");
       setError(null);
     },
     onError: () =>

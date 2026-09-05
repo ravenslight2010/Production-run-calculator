@@ -322,6 +322,61 @@ describe("runProfileNameLinkStubPurge", () => {
       .where(eq(dataHealsTable.id, HEAL_ID));
     expect(markerAfterSecondRun.result).toEqual(claimedResult);
   });
+
+  it("(g) waits for a concurrent day-state reference before deciding a stub is orphaned", async () => {
+    await db.delete(dataHealsTable).where(eq(dataHealsTable.id, HEAL_ID));
+    await db.insert(cheeseRecipesTable).values({
+      id: "concurrent-reference-cheese",
+      scope: "live",
+      name: "Concurrent Reference Cheese",
+      components: [],
+    });
+    await db.insert(dailySyncTable).values({
+      date: "2026-08-30",
+      scope: "live",
+      data: { dayState: { runs: [{ id: "race-run" }] }, runValues: {} },
+    });
+
+    const writer = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await writer.connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query(
+        `UPDATE daily_sync
+         SET data = $1::jsonb
+         WHERE date = $2 AND scope = 'live'`,
+        [
+          JSON.stringify({
+            dayState: { runs: [{ id: "race-run" }] },
+            runValues: {
+              "race-run": { app1CheeseRecipeName: "Concurrent Reference Cheese" },
+            },
+          }),
+          "2026-08-30",
+        ],
+      );
+
+      let healSettled = false;
+      const heal = runProfileNameLinkStubPurge().finally(() => {
+        healSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(healSettled).toBe(false);
+
+      await writer.query("COMMIT");
+      await heal;
+    } finally {
+      await writer.query("ROLLBACK").catch(() => {});
+      await writer.end();
+    }
+
+    expect(
+      await db
+        .select()
+        .from(cheeseRecipesTable)
+        .where(eq(cheeseRecipesTable.id, "concurrent-reference-cheese")),
+    ).toHaveLength(1);
+  });
 });
 
 describe("runWorkbookImportStubPurge", () => {

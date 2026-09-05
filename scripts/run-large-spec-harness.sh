@@ -101,6 +101,8 @@ echo "════════════════════════�
 
 API_SERVER_PID=""
 
+# cleanup is invoked indirectly by the EXIT trap below.
+# shellcheck disable=SC2317
 cleanup() {
   if [ -n "$API_SERVER_PID" ]; then
     echo "Stopping API server (PID $API_SERVER_PID)…"

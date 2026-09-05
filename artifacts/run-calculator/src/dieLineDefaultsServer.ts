@@ -1,7 +1,7 @@
 // Per-die line-setting defaults — server master-data glue (web).
 //
 // Managers can override the built-in die-size defaults (crusts/cycle, cycle
-// speed, speed adjustment, freezer time, extra case buffer) per die type under
+// speed, speed adjustment, Freeze tunnel time, extra case buffer) per die type under
 // Manage Lists → Die Defaults. Stored factory-wide on the server (NOT part of
 // the per-day sync payload) so overrides survive resets and fresh devices.
 // The run form / setup editor resolve defaults through these overrides first,

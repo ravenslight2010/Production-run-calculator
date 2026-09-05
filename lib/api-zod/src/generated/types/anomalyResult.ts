@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { Anomaly } from './anomaly';
 
 export interface AnomalyResult {
@@ -18,4 +19,5 @@ export interface AnomalyResult {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
+  aiStatus: AiStatus;
 }

@@ -22,6 +22,17 @@
         {"name": "protects production", "description": "Rejects destructive tests against production or shared operational databases."}
       ],
       "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "We changed automatic Frontline applicator batches, Sauce barrel claims, and how a selected pending run shows progress. Prepare the release recommendation. Unit tests pass, but there is no live-station switch/reload result and the only responsive screenshot is from the previous commit.",
+      "expected_output": "Routes to state-accuracy, sync-invariant, and operational browser checks; requires focused API/client, desktop and 390x844 responsive, switch/reload, and exact-revision evidence; returns NO-GO for the missing/stale live-run evidence.",
+      "assertions": [
+        {"name": "routes specialist checks", "description": "Requires both state-accuracy and sync-invariant evidence for Frontline, Sauce, and pending-run progress."},
+        {"name": "requires live handoff evidence", "description": "Requires the bounded authenticated live-station switch/reload journey rather than accepting unit tests alone."},
+        {"name": "binds responsive evidence to revision", "description": "Rejects stale responsive evidence and requires desktop plus 390x844 evidence for the assessed revision."}
+      ],
+      "files": []
     }
   ]
 }

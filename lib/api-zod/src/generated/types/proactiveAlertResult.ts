@@ -5,12 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { ProactiveAlert } from './proactiveAlert';
 
 export interface ProactiveAlertResult {
   /** The single nudge to surface now, or null when nothing applies */
   alert: ProactiveAlert | null;
   generatedAt: number;
+  aiStatus: AiStatus;
   /** Optional message when no alert could be produced */
   note?: string;
 }

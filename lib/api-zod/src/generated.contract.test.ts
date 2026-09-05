@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  AiAnomaliesResponse,
+  AiForecastResponse,
+  AiMatchImportResponse,
+  AiMatchPremixResponse,
+  AiMixReconcileResponse,
+  AiProactiveAlertResponse,
+  AiScheduleOptimizeResponse,
+  AiSummaryResponse,
+  AiSpecReconcileResponse,
+  AiSuggestMergesResponse,
   CheckUsernameAvailableQueryParams,
   ListPasswordResetRequestsResponseItem,
   ListRunsResponseItem,
@@ -54,6 +64,186 @@ describe("generated Zod schema runtime contracts", () => {
         batchesNeeded: "3",
         inputs: {},
         createdAt: "2026-08-26T12:34:56.000Z",
+      }),
+    ).toThrow(z.ZodError);
+  });
+
+  it("validates the shared AI status values on AI responses", () => {
+    const statuses = ["deterministic", "enriched", "unavailable"] as const;
+
+    for (const aiStatus of statuses) {
+      const summary = AiSummaryResponse.parse({
+        summary: "Production recap",
+        stats: {
+          scope: "day",
+          date: "2026-08-26",
+          runsPlanned: 1,
+          runsFinished: 1,
+          casesPlanned: 12,
+          casesProduced: 12,
+          attainmentPct: 100,
+          totalDowntimeMinutes: 0,
+          totalStoppages: 0,
+          unfinishedRuns: [],
+          incidentCount: 0,
+          wasteFlaggedCount: 0,
+          hasData: true,
+        },
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(summary.aiStatus).toBe(aiStatus);
+
+      const schedule = AiScheduleOptimizeResponse.parse({
+        order: ["run-1"],
+        changed: false,
+        improved: false,
+        before: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        after: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(schedule.aiStatus).toBe(aiStatus);
+
+      const anomalies = AiAnomaliesResponse.parse({
+        anomalies: [],
+        checkedRuns: 0,
+        baselineRuns: 0,
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(anomalies.aiStatus).toBe(aiStatus);
+
+      const forecast = AiForecastResponse.parse({
+        forecast: null,
+        forecasts: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(forecast.aiStatus).toBe(aiStatus);
+
+      const specReconcile = AiSpecReconcileResponse.parse({
+        specSheetId: 1,
+        discrepancies: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(specReconcile.aiStatus).toBe(aiStatus);
+
+      const mixReconcile = AiMixReconcileResponse.parse({
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(mixReconcile.aiStatus).toBe(aiStatus);
+
+      const proactive = AiProactiveAlertResponse.parse({
+        alert: null,
+        generatedAt: 1_750_000_000_000,
+        aiStatus,
+      });
+      expect(proactive.aiStatus).toBe(aiStatus);
+
+      const matchImport = AiMatchImportResponse.parse({
+        brandMatches: [],
+        flavorMatches: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(matchImport.aiStatus).toBe(aiStatus);
+
+      const matchPremix = AiMatchPremixResponse.parse({
+        matches: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(matchPremix.aiStatus).toBe(aiStatus);
+
+      const suggestMerges = AiSuggestMergesResponse.parse({
+        suggestions: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: aiStatus === "enriched",
+        aiStatus,
+      });
+      expect(suggestMerges.aiStatus).toBe(aiStatus);
+    }
+
+    expect(() =>
+      AiSummaryResponse.parse({
+        summary: "Production recap",
+        stats: {
+          scope: "day",
+          date: "2026-08-26",
+          runsPlanned: 0,
+          runsFinished: 0,
+          casesPlanned: 0,
+          casesProduced: 0,
+          attainmentPct: 0,
+          totalDowntimeMinutes: 0,
+          totalStoppages: 0,
+          unfinishedRuns: [],
+          incidentCount: 0,
+          wasteFlaggedCount: 0,
+          hasData: false,
+        },
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiAnomaliesResponse.parse({
+        anomalies: [],
+        checkedRuns: 0,
+        baselineRuns: 0,
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiScheduleOptimizeResponse.parse({
+        order: ["run-1"],
+        changed: false,
+        improved: false,
+        before: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        after: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
+        summary: "",
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiForecastResponse.parse({
+        forecast: null,
+        forecasts: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "unknown",
+      }),
+    ).toThrow(z.ZodError);
+
+    expect(() =>
+      AiMatchImportResponse.parse({
+        brandMatches: [],
+        flavorMatches: [],
+        generatedAt: 1_750_000_000_000,
+        aiGenerated: false,
+        aiStatus: "cached",
       }),
     ).toThrow(z.ZodError);
   });

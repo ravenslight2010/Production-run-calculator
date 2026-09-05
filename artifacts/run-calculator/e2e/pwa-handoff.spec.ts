@@ -6,8 +6,9 @@
  *  2. the same origin starts serving a changed worker;
  *  3. foregrounding activates the new worker without claiming or reloading the
  *     active tab;
- *  4. the single persistent update prompt runs the worker update path and
- *     reloads only after staff choose Reload now.
+ *  4. the single persistent update prompt remains while unsafe work blocks;
+ *  5. after the calculator becomes safe and stays inactive, the worker update
+ *     path automatically reloads into the new build.
  *
  * The fixture intentionally serves real `vite build` output. It does not use
  * the main Playwright configuration because that suite prepares database-backed
@@ -88,7 +89,9 @@ async function stampBuild(buildDir: string, version: Version) {
 async function buildTwoVersionFixture() {
   await execFileAsync("pnpm", ["run", "build"], {
     cwd: packageRoot,
-    env: process.env,
+    // Production uses one minute. Keep the exact policy path while making this
+    // two-build browser fixture finish promptly.
+    env: { ...process.env, VITE_UPDATE_RELOAD_IDLE_MS: "1000" },
     maxBuffer: 10 * 1024 * 1024,
   });
 
@@ -112,13 +115,26 @@ async function startVersionedServer(versionDirs: Record<Version, string>) {
         return;
       }
 
-      // AppUpdatePrompt mounts before authentication. Answer its one startup
-      // probe as signed out, so the real production app can render its landing
-      // page without a database or an account.
-      if (requestPath === "api/auth/me") {
+      // Mount the real Home calculator without a database. The remaining API
+      // requests deliberately fall through to the static document and fail
+      // non-destructively inside the app's existing best-effort loaders.
+      if (requestPath === "api/me") {
         response
-          .writeHead(401, { "content-type": "application/json; charset=utf-8" })
-          .end(JSON.stringify({ error: "Not signed in" }));
+          .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+          .end(JSON.stringify({
+            userId: "pwa-smoke-user",
+            role: "operator",
+            capabilities: [],
+            email: null,
+            name: "PWA Smoke",
+            onboardingSeen: true,
+            tourCompleted: true,
+            floorModeEnabled: false,
+            notificationPrefs: {},
+            sandbox: false,
+            sandboxCopiedAt: null,
+            sandboxStale: false,
+          }));
         return;
       }
 
@@ -172,16 +188,58 @@ async function startVersionedServer(versionDirs: Record<Version, string>) {
 }
 
 test.describe("PWA update handoff", () => {
-  test("shows one prompt and reloads only after staff choose Reload now", async ({
+  let fixture: Awaited<ReturnType<typeof buildTwoVersionFixture>>;
+
+  test.beforeAll(async () => {
+    fixture = await buildTwoVersionFixture();
+  });
+
+  test.afterAll(async () => {
+    await rm(fixture.root, { recursive: true, force: true });
+  });
+
+  test("preserves unsafe work, then auto-reloads after safe inactivity", async ({
     page,
   }) => {
-    const fixture = await buildTwoVersionFixture();
     const server = await startVersionedServer({
       old: fixture.oldDir,
       new: fixture.newDir,
     });
 
     try {
+      await page.addInitScript(() => {
+        if (sessionStorage.getItem("__pwaSmokeRunSeeded") === "1") return;
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-smoke-active-run",
+            brand: "",
+            flavor: "",
+            startedAt: Date.now(),
+          }, {
+            id: "pwa-smoke-next-run",
+            brand: "",
+            flavor: "",
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+          prepPhase: {
+            prepStartedAt: null,
+            prepBatchesDough: 0,
+            prepBatchesSauce: 0,
+            prepCarriedOver: false,
+          },
+        }));
+        sessionStorage.setItem("__pwaSmokeRunSeeded", "1");
+      });
       await page.goto(server.baseUrl, { waitUntil: "networkidle" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(async () => {
@@ -197,16 +255,15 @@ test.describe("PWA update handoff", () => {
       await page.goto(server.baseUrl, { waitUntil: "networkidle" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
-
-      // This in-memory value stands in for a live run in the mounted document:
-      // it would disappear on any automatic reload. It must survive discovery.
-      await page.evaluate(() => {
-        (window as Window & { __pwaSmokeActiveRun?: string }).__pwaSmokeActiveRun =
-          "running";
-      });
+      const stopRun = page.getByRole("button", { name: "STOP RUN" });
+      await expect(stopRun).toBeVisible();
 
       server.publish("new");
-      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (!registration) throw new Error("Expected a service-worker registration");
+        await registration.update();
+      });
 
       const updateMessage = page.getByText("Update available", { exact: true });
       const reloadAction = page.getByRole("button", { name: "Reload now" });
@@ -216,16 +273,9 @@ test.describe("PWA update handoff", () => {
         timeout: 20_000,
       });
       await expect(reloadAction).toBeVisible();
+      await page.waitForTimeout(1500);
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              (window as Window & { __pwaSmokeActiveRun?: string })
-                .__pwaSmokeActiveRun,
-          ),
-        )
-        .toBe("running");
+      await expect(stopRun).toBeVisible();
       // The updated worker has activated so an older, generic Reload button
       // can recover into the new bundle. Browser controller bookkeeping varies,
       // but the user-visible invariant is strict: no navigation has happened
@@ -239,9 +289,8 @@ test.describe("PWA update handoff", () => {
         )
         .toBe(true);
 
-      // Count only the user-action update check. The button must go through the
-      // service-worker handoff path before it reloads, even when skipWaiting
-      // has already activated the discovered worker.
+      // Count the automatic handoff's update check. It must still use the same
+      // worker recovery path as Reload now.
       await page.evaluate(async () => {
         const registration = await navigator.serviceWorker.getRegistration();
         if (!registration) throw new Error("Expected an active service worker");
@@ -258,28 +307,66 @@ test.describe("PWA update handoff", () => {
         });
       });
 
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "networkidle" }),
-        reloadAction.click(),
-      ]);
+      // Use Home's real run lifecycle. Stopping the run makes the calculator
+      // safe, and the click starts a fresh uninterrupted inactivity window.
+      await stopRun.click();
+      await page.waitForTimeout(500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(reloadAction).toBeVisible();
+      await page.waitForFunction(
+        () => document.body.dataset.pwaSmokeBuild === "new",
+        undefined,
+        { timeout: 20_000 },
+      );
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
         timeout: 20_000,
       });
       await expect
         .poll(() => page.evaluate(() => sessionStorage.getItem("__pwaSmokeUpdateCalls")))
         .toBe("1");
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              (window as Window & { __pwaSmokeActiveRun?: string })
-                .__pwaSmokeActiveRun,
-          ),
-        )
-        .toBeUndefined();
+      await expect(updateMessage).toHaveCount(0);
     } finally {
       await server.close();
-      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("auto-reloads when Home was already safe before update discovery", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer({
+      old: fixture.oldDir,
+      new: fixture.newDir,
+    });
+
+    try {
+      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+      await expect(page.getByTestId("button-start-run")).toBeVisible();
+
+      server.publish("new");
+      await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (!registration) throw new Error("Expected a service-worker registration");
+        await registration.update();
+      });
+      await expect(page.getByText("Update available", { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
+
+      await page.waitForFunction(
+        () => document.body.dataset.pwaSmokeBuild === "new",
+        undefined,
+        { timeout: 20_000 },
+      );
+    } finally {
+      await server.close();
     }
   });
 });

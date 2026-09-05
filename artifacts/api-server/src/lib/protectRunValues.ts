@@ -212,6 +212,21 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
+  sauceBarrelsMade: 0,
+  sauceBarrelAnchorNetSec: 0,
+  sauceBarrelCorrectionGeneration: 0,
+  app1BatchesMade: 0,
+  app1BatchAnchorNetSec: 0,
+  app1BatchCorrectionGeneration: 0,
+  app2BatchesMade: 0,
+  app2BatchAnchorNetSec: 0,
+  app2BatchCorrectionGeneration: 0,
+  app3BatchesMade: 0,
+  app3BatchAnchorNetSec: 0,
+  app3BatchCorrectionGeneration: 0,
+  app4BatchesMade: 0,
+  app4BatchAnchorNetSec: 0,
+  app4BatchCorrectionGeneration: 0,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
   app2OzPerPizza: 0,
@@ -306,6 +321,29 @@ function isBlankRunValue(v: unknown): boolean {
   if (!isPlainObject(v)) return false;
   if (deepEqualValue(v, LEGACY_BLANK_RUN_VALUE)) return true;
   const withMachineDefaults: Record<string, unknown> = { ...v };
+  // Older clients legitimately omit canonical Sauce progress because those
+  // fields did not exist yet. Missing is equivalent to the zero default for
+  // blank-run detection, preserving the empty-over-populated safety guard
+  // during a rolling client upgrade.
+  for (const field of [
+    "sauceBarrelsMade",
+    "sauceBarrelAnchorNetSec",
+    "sauceBarrelCorrectionGeneration",
+    "app1BatchesMade",
+    "app1BatchAnchorNetSec",
+    "app1BatchCorrectionGeneration",
+    "app2BatchesMade",
+    "app2BatchAnchorNetSec",
+    "app2BatchCorrectionGeneration",
+    "app3BatchesMade",
+    "app3BatchAnchorNetSec",
+    "app3BatchCorrectionGeneration",
+    "app4BatchesMade",
+    "app4BatchAnchorNetSec",
+    "app4BatchCorrectionGeneration",
+  ]) {
+    if (!(field in withMachineDefaults)) withMachineDefaults[field] = 0;
+  }
   for (const [k, def] of Object.entries(MACHINE_TIME_DEFAULTS)) {
     if (withMachineDefaults[k] === 0) withMachineDefaults[k] = def;
   }
@@ -412,6 +450,21 @@ function preserveAndInvalidateAutoTrackCoordination(
       changedChannels.add("batch-consume");
       changedChannels.add("batch-produce");
     }
+    if (
+      asNumber(rawNext.sauceBarrelsMade) !== asNumber(rawPrior.sauceBarrelsMade)
+      || asNumber(rawNext.sauceBarrelAnchorNetSec) !== asNumber(rawPrior.sauceBarrelAnchorNetSec)
+      || asNumber(rawNext.sauceBarrelCorrectionGeneration) !== asNumber(rawPrior.sauceBarrelCorrectionGeneration)
+    ) {
+      changedChannels.add("sauce-barrel");
+    }
+    for (const slot of [1, 2, 3, 4]) {
+      const prefix = `app${slot}Batch`;
+      if (
+        asNumber(rawNext[`${prefix}esMade`]) !== asNumber(rawPrior[`${prefix}esMade`])
+        || asNumber(rawNext[`${prefix}AnchorNetSec`]) !== asNumber(rawPrior[`${prefix}AnchorNetSec`])
+        || asNumber(rawNext[`${prefix}CorrectionGeneration`]) !== asNumber(rawPrior[`${prefix}CorrectionGeneration`])
+      ) changedChannels.add(`app${slot}-batch`);
+    }
     if (changedChannels.size === 0) continue;
     const stamp = asNumber(
       isPlainObject(protectedPayload.runValuesUpdatedAt)
@@ -423,7 +476,10 @@ function preserveAndInvalidateAutoTrackCoordination(
       runCoordination[channel] = {
         generation: `manual:${stamp}`,
         sequence: 0,
-        nextDueAt: now,
+        // Sauce and applicator coordination use pause-aware net-production
+        // seconds, not epoch milliseconds. Zero tells clients to rebuild the
+        // next identity from the corrected canonical anchor and current cadence.
+        nextDueAt: channel === "sauce-barrel" || /^app[1-4]-batch$/.test(channel) ? 0 : now,
         updatedAt: now,
       };
     }

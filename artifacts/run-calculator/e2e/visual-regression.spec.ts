@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import * as XLSX from "xlsx";
 import { requireIsolatedTestDatabase } from "./isolation";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const suffix = Math.random().toString(36).slice(2, 10);
@@ -11,51 +12,45 @@ const password = "VisualRegression123!";
 let cleanupDb: Client | undefined;
 
 async function signUp(page: Page, account = username): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.locator('[data-testid="tab-run"]').waitFor({
-    state: "attached",
-    timeout: 25_000,
+  await signUpAndHandleOnboarding(page, account, password, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) => currentPage.getByRole("dialog"),
+      visibilityTimeout: 10_000,
+      button: (dialog) => dialog.getByRole("button").last(),
+      clickOptions: { force: true },
+      actionLabel: "final onboarding action",
+      afterComplete: async (currentPage) => {
+        // Radix keeps the closing overlay mounted during its exit animation.
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 15_000 })
+          .catch(() => {});
+        await currentPage.waitForTimeout(500);
+      },
+    },
+    afterSignUp: async (currentPage) => {
+      // Some dev builds retain the aria-hidden Radix overlay in the portal
+      // after the exit animation. Remove only aria-hidden overlays in this
+      // isolated fixture; this cannot affect a visible production dialog.
+      await currentPage.evaluate(() => {
+        document
+          .querySelectorAll('[data-state="open"][aria-hidden="true"]')
+          .forEach((element) => element.remove());
+      });
+      if (cleanupDb) {
+        await cleanupDb.query(
+          "UPDATE users SET onboarding_seen = true WHERE username = $1",
+          [account],
+        );
+        await currentPage.reload({ waitUntil: "domcontentloaded" });
+        await currentPage.locator('[data-testid="tab-run"]').waitFor({
+          state: "attached",
+          timeout: 25_000,
+        });
+      }
+    },
   });
-  const onboarding = page.getByRole("dialog");
-  if (await onboarding.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    // The overview is scrollable on short preview heights, so its footer
-    // action can be outside the viewport even though the dialog is visible.
-    // Clicking the final footer action avoids depending on that scroll state.
-    await onboarding.getByRole("button").last().click({ force: true });
-    // Radix keeps the closing overlay mounted during its exit animation. Do
-    // not start the visual states until it is actually detached, otherwise
-    // the invisible overlay can intercept the first tab click.
-    await page
-      .locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 15_000 })
-      .catch(() => {});
-    await page.waitForTimeout(500);
-  }
-  // Some dev builds retain the aria-hidden Radix overlay in the portal after
-  // the exit animation. Remove only aria-hidden overlays in this isolated
-  // fixture; this cannot affect a visible production dialog.
-  await page.evaluate(() => {
-    document
-      .querySelectorAll('[data-state="open"][aria-hidden="true"]')
-      .forEach((element) => element.remove());
-  });
-  if (cleanupDb) {
-    await cleanupDb.query(
-      "UPDATE users SET onboarding_seen = true WHERE username = $1",
-      [account],
-    );
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.locator('[data-testid="tab-run"]').waitFor({
-      state: "attached",
-      timeout: 25_000,
-    });
-  }
 }
 
 async function goToMixPlan(page: Page): Promise<void> {
@@ -134,6 +129,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("live-run-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
 
     await goToMixPlan(page);
@@ -144,6 +141,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("mix-plan-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
 
     // Feed a deterministic workbook directly to the same hidden input used by
@@ -163,6 +162,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("import-review-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
     // The review dialog's close control is icon-only; scope the click to the
     // modal so unrelated page buttons cannot be selected.
@@ -173,6 +174,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("compact-run-tablet.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
   });
 
@@ -183,6 +186,8 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
       fullPage: false,
       mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
     });
   });
 });

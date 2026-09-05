@@ -31,7 +31,11 @@ import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
 import { recordPerformance } from "../performanceDiagnostics";
 import { calcRef } from "../liveRunCalc";
-import { computeLinePhases, lineHasProduct } from "../linePhases";
+import {
+  computeLinePhases,
+  computePackagingDrainElapsedSec,
+  lineHasPackagingDrain,
+} from "../linePhases";
 import { pauseStopsTunnel } from "../pausePolicy";
 import {
   acceptPackagingSpeedNudge,
@@ -43,8 +47,11 @@ import {
   type PackagingSpeedNudge,
   type PackagingSpeedNudgeFeedbackStatus,
 } from "../packagingSpeedNudge";
+import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
+import { computeEffectiveLineSpeed } from "../lineSpeed";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
+type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
 
 // ── Calc output type ─────────────────────────────────────────────────────────
 export type Calc = {
@@ -120,6 +127,7 @@ export interface LiveRunContextValue {
   setAutoTrackProgress: React.Dispatch<React.SetStateAction<boolean>>;
   autoTrackSuggestion: ReturnType<typeof useAutoTrack>["autoTrackSuggestion"];
   autoSuppressUntilRef: React.MutableRefObject<number>;
+  doughAutoSuppressUntilRef: React.MutableRefObject<number>;
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
   coordinationStatus: ReturnType<typeof useAutoTrack>["coordinationStatus"];
@@ -129,7 +137,7 @@ export interface LiveRunContextValue {
   acceptPackagingSpeedNudge: (nowMs?: number) => void;
   dismissPackagingSpeedNudge: () => void;
   isDoughTimerPaused: boolean;
-  pauseDoughTimers: () => void;
+  pauseDoughTimers: (durationMs?: number) => void;
   resumeDoughTimers: () => void;
   stallPrompt: boolean;
   setStallPrompt: React.Dispatch<React.SetStateAction<boolean>>;
@@ -169,6 +177,7 @@ export interface LiveRunProviderProps {
   screenMode: string | null;
   machine: { spinSec: number; hopperSec: number };
   externalAutoSuppressRef?: React.MutableRefObject<number>;
+  externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
   onPackagingProgressAutoAdvance?: (
     skidsCompleted: number,
     casesOnCurrentSkid: number,
@@ -194,7 +203,7 @@ export function LiveRunProvider({
   runStatus,
   currentRun,
   currentRunId,
-  v,
+  v: liveValues,
   ve,
   form,
   dayState,
@@ -204,6 +213,7 @@ export function LiveRunProvider({
   screenMode,
   machine,
   externalAutoSuppressRef,
+  externalDoughAutoSuppressRef,
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
@@ -211,6 +221,11 @@ export function LiveRunProvider({
   claimAutoTrackEvent,
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus);
+  // A selected pending run must never inherit Packaging, Sauce, or Frontline
+  // applicator completion from the previously viewed/active run while
+  // react-hook-form settles a run switch. Staged Dough values remain intact
+  // because they may be intentionally seeded before Start.
+  const v = isolatePendingRunPackagingProgress(currentRun, liveValues);
 
   // Freezer-fill ramp: rises over elapsed run time, capped to freezerTime.
   // Pausing freezes the ramp at the paused-at moment.
@@ -225,12 +240,13 @@ export function LiveRunProvider({
   // ── Core production calc ─────────────────────────────────────────────────
   const calc = useMemo((): Calc => {
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
-    const ppm =
-      Math.round(
-        (doughSubTab === "crusts"
-          ? v.approxLineSpeed
-          : ve.crustsPerCycle * ve.cycleSpeed * v.speedAdjustment) * 100,
-      ) / 100;
+    const ppm = computeEffectiveLineSpeed({
+      mode: doughSubTab === "crusts" ? "crusts" : "dough",
+      approxLineSpeed: v.approxLineSpeed,
+      crustsPerCycle: ve.crustsPerCycle,
+      cycleSpeed: ve.cycleSpeed,
+      speedAdjustment: v.speedAdjustment,
+    });
 
     const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
 
@@ -286,7 +302,10 @@ export function LiveRunProvider({
 
     const casesOnLastSkid = Math.ceil(Math.max(0, v.casesPerSkid - casesOnLine));
 
-    const timePressHzSec = ppm > 0 ? (60 / ve.cycleSpeed) / v.speedAdjustment : 0;
+    const timePressHzSec =
+      doughSubTab !== "crusts" && ppm > 0 && ve.crustsPerCycle > 0
+        ? (ve.crustsPerCycle / ppm) * 60
+        : 0;
     const timePerTraySec = ppm > 0 ? (perTray / ppm) * 60 : 0;
     const timePerBatchSec = ppm > 0 ? (perBatch / ppm) * 60 : 0;
     const timePerSkidSec = ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
@@ -451,25 +470,36 @@ export function LiveRunProvider({
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
 
-  const packagingDrainActive = useMemo(() => {
-    if (runStatus !== "paused" || !currentRun?.pausedAt || Number(ve.freezerTime) <= 0) return false;
-    const openPause = (currentRun.stoppages ?? [])
-      .filter((s: any) => s.type === "pause" && !s.endedAt)
-      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
-    const phases = computeLinePhases({
+  const linePhases = useMemo(() => {
+    const pauses = (currentRun?.stoppages ?? []).filter((s) => s.type === "pause");
+    const openPause = pauses
+      .filter((s) => !s.endedAt)
+      .reduce<typeof pauses[number] | undefined>(
+        (latest, s) => (!latest || s.startedAt > latest.startedAt ? s : latest),
+        undefined,
+      );
+    const lastClosedPause = pauses
+      .filter((s) => !!s.endedAt)
+      .reduce<typeof pauses[number] | undefined>(
+        (latest, s) => (!latest || (s.endedAt ?? 0) > (latest.endedAt ?? 0) ? s : latest),
+        undefined,
+      );
+    return computeLinePhases({
       elapsedBatchSec,
-      pausedAt: currentRun.pausedAt,
-      lastResumeWallMs: 0,
-      lastPauseStartWallMs: 0,
+      pausedAt: currentRun?.pausedAt,
+      lastResumeWallMs: lastClosedPause?.endedAt ?? 0,
+      lastPauseStartWallMs: lastClosedPause?.startedAt ?? 0,
       pauseStopsTunnel: pauseStopsTunnel(openPause),
+      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
       runStatus,
       preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
       postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
       freezerTime: Number(ve.freezerTime),
       nowMs: nowTime.getTime(),
+      endedAt: currentRun?.endedAt,
     });
-    return phases.stage3.state === "draining" && lineHasProduct(phases);
   }, [
+    currentRun?.endedAt,
     currentRun?.pausedAt,
     currentRun?.stoppages,
     elapsedBatchSec,
@@ -479,6 +509,30 @@ export function LiveRunProvider({
     ve.preTunnelMin,
     ve.postTunnelMin,
   ]);
+  const packagingDrainActive =
+    runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const packagingAutoTrackActive =
+    runStatus !== "running" || linePhases.stage3.state === "active";
+  const packagingDrainElapsedSec = computePackagingDrainElapsedSec({
+    elapsedBatchSec,
+    pausedAt: currentRun?.pausedAt,
+    lastResumeWallMs: 0,
+    lastPauseStartWallMs: 0,
+    pauseStopsTunnel: (() => {
+      const openPause = (currentRun?.stoppages ?? [])
+        .filter((s) => s.type === "pause" && !s.endedAt)
+        .reduce<RunStoppage | undefined>(
+          (latest, s) => (!latest || s.startedAt > latest.startedAt ? s : latest),
+          undefined,
+        );
+      return pauseStopsTunnel(openPause);
+    })(),
+    runStatus,
+    preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
+    postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
+    freezerTime: Number(ve.freezerTime),
+    nowMs: nowTime.getTime(),
+  });
 
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
   const casesFreezerPct =
@@ -567,16 +621,15 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
     useAutoTrack({
       runId: currentRunId,
       runGeneration: String(currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0),
       runStatus,
       endedAt: currentRun?.endedAt ?? null,
       packagingDrainActive,
-      packagingDrainElapsedSec: currentRun?.pausedAt
-        ? Math.max(0, (nowTime.getTime() - currentRun.pausedAt) / 1000)
-        : 0,
+      packagingDrainElapsedSec,
+      packagingAutoTrackActive,
       nowTime,
       elapsedBatchSec,
       calc,
@@ -587,11 +640,13 @@ export function LiveRunProvider({
       // Pass Home's ref so the hook's own suppression check reads from it —
       // manual-edit latches written by UI consumers are honoured by the write loop.
       externalAutoSuppressRef,
+      externalDoughAutoSuppressRef,
       onPackagingProgressAutoAdvance,
       autoTrackBlocked,
       autoTrackBlockedRef,
       autoTrackRebaseAfterBlock,
       claimAutoTrackEvent,
+      nextRunPrepActive,
     });
 
   // Packaging speed feedback is shared by the Packaging tab and the quick
@@ -725,7 +780,7 @@ export function LiveRunProvider({
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptPackagingSpeedNudge: acceptSharedPackagingSpeedNudge,
@@ -742,7 +797,7 @@ export function LiveRunProvider({
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptSharedPackagingSpeedNudge, dismissSharedPackagingSpeedNudge,

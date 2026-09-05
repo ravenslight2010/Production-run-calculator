@@ -10,6 +10,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+  DEFAULT_FROM_DATE,
+  DEFAULT_HEAL_ID,
+  DEFAULT_REPORT,
+} from "./verify-source-library-reconciliation.mts";
 
 export type ReleaseStep = {
   label: string;
@@ -19,9 +24,17 @@ export type ReleaseStep = {
   timeoutMs?: number;
   warningMs?: number;
   group?: string;
+  /**
+   * Steps in the same stage share a dependency barrier. Steps without an
+   * explicit stage retain the historical one-step-at-a-time behavior; this is
+   * also useful for the small fixture used by the resume integration test.
+   */
+  stage?: string;
+  /** Optional per-stage limit, used to keep stateful browser work serial. */
+  concurrencyLimit?: number;
 };
 
-type StepStatus =
+export type StepStatus =
   | "PASS"
   | "FAIL"
   | "INFRASTRUCTURE TIMEOUT"
@@ -34,10 +47,21 @@ export type ReleaseStepResult = {
   elapsedMs: number;
 };
 
+export type ReleaseStageTiming = {
+  stage: string;
+  elapsedMs: number;
+};
+
+export type ReleaseTiming = {
+  totalElapsedMs: number;
+  stages: readonly ReleaseStageTiming[];
+};
+
 export type ReleaseEvidenceOptions = {
   currentRevision?: string;
   expectedMode?: "standard" | "full";
   expectedLabels?: readonly string[];
+  allowIncompleteCheckpoint?: boolean;
 };
 
 export type BrowserDurationRegression = {
@@ -48,21 +72,23 @@ export type BrowserDurationRegression = {
   increasePercent: number;
 };
 
-// The third integration shard contains the capability matrix and the
-// remaining integration fixtures. It is intentionally serialized by the API
-// Vitest config, so it can exceed four minutes on the release environment even
-// when every test is healthy.
-const API_SHARD_TIMEOUT_MS = 8 * 60_000;
-const API_SHARD_WARNING_MS = 6 * 60_000;
+// API integration files create and migrate disposable databases. Keep each
+// deterministic shard bounded, and isolate the startup-heavy capability suite
+// so its healthy runtime cannot push unrelated integration coverage past the
+// release window.
+export const API_SHARD_TIMEOUT_MS = 8 * 60_000;
+export const API_SHARD_WARNING_MS = 6 * 60_000;
+export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
+export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 112 cases can exceed
+// reset or observe shared disposable live-day state. Its 117 cases can exceed
 // the API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
 // retries.
-const FULL_BROWSER_TIMEOUT_MS = 30 * 60_000;
-const FULL_BROWSER_WARNING_MS = 25 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 112;
+const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
+const FULL_BROWSER_WARNING_MS = 40 * 60_000;
+const FULL_BROWSER_EXPECTED_CASES = 117;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
 const rootDir = new URL("../../", import.meta.url).pathname;
 const STATEFUL_RELEASE_LOCK_DIR =
@@ -147,8 +173,11 @@ const fullBrowserReportPath = resolve(
   releaseEvidenceDir,
   "browser-full/FINAL-REPORT.md",
 );
+export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
+  "source-library-reconciliation.json";
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
+  "release-check-checkpoint.md",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
   "clean-start/preview-home.png",
@@ -156,42 +185,298 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
 ] as const;
+export const RELEASE_CHECKPOINT_REPORT = "release-check-checkpoint.md";
+
+export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
+  general: [
+    "test:release:integration:1",
+    "test:release:integration:2",
+    "test:release:integration:3",
+  ],
+  dedicated: {
+    roles: ["test:release:roles"],
+    sync: ["test:release:sync", "test:release:sync-sse"],
+  },
+} as const;
+
+type ApiReleaseScripts = Record<string, string | undefined>;
+
+const API_INTEGRATION_TEST_PATH_RE =
+  /src\/[A-Za-z0-9_./-]+\.integration\.test\.ts/g;
+
+function referencedApiIntegrationTestPaths(command: string | undefined): Set<string> {
+  return new Set(command?.match(API_INTEGRATION_TEST_PATH_RE) ?? []);
+}
+
+export function apiIntegrationTestShardInventoryErrors(
+  integrationTestPaths: readonly string[],
+  scripts: ApiReleaseScripts,
+): string[] {
+  const sortedPaths = [...integrationTestPaths].sort();
+  const generalAssignments = API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.map(
+    (scriptName) => {
+      const command = scripts[scriptName];
+      if (!command) {
+        throw new Error(`Missing API release script: ${scriptName}`);
+      }
+      const exclusions = referencedApiIntegrationTestPaths(command);
+      return new Set(sortedPaths.filter((path) => !exclusions.has(path)));
+    },
+  );
+  const generalMembershipMismatch = sortedPaths.filter((path) => {
+    const memberships = generalAssignments.map((assignment) =>
+      assignment.has(path),
+    );
+    return memberships.some((membership) => membership !== memberships[0]);
+  });
+
+  const logicalAssignments = new Map<string, string[]>(
+    sortedPaths.map((path) => [path, []]),
+  );
+  for (const path of generalAssignments[0]) {
+    logicalAssignments.get(path)?.push("general");
+  }
+  for (const [shardName, scriptNames] of Object.entries(
+    API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated,
+  )) {
+    const dedicatedPaths = new Set<string>();
+    for (const scriptName of scriptNames) {
+      const command = scripts[scriptName];
+      if (!command) {
+        throw new Error(`Missing API release script: ${scriptName}`);
+      }
+      for (const path of referencedApiIntegrationTestPaths(command)) {
+        dedicatedPaths.add(path);
+      }
+    }
+    for (const path of dedicatedPaths) {
+      logicalAssignments.get(path)?.push(shardName);
+    }
+  }
+
+  const missing = sortedPaths.filter(
+    (path) => logicalAssignments.get(path)?.length === 0,
+  );
+  const duplicates = sortedPaths.filter(
+    (path) => (logicalAssignments.get(path)?.length ?? 0) > 1,
+  );
+  const errors: string[] = [];
+  if (generalMembershipMismatch.length > 0) {
+    errors.push(
+      `General API integration shard membership differs for:\n${generalMembershipMismatch.join("\n")}`,
+    );
+  }
+  if (missing.length > 0) {
+    errors.push(
+      `API integration tests missing from release shards:\n${missing.join("\n")}`,
+    );
+  }
+  if (duplicates.length > 0) {
+    errors.push(
+      `API integration tests assigned to multiple release shards:\n${duplicates
+        .map(
+          (path) =>
+            `${path} (${logicalAssignments.get(path)?.join(", ") ?? ""})`,
+        )
+        .join("\n")}`,
+    );
+  }
+  return errors;
+}
+
+export async function assertApiIntegrationTestShardInventory(
+  projectRoot = rootDir,
+): Promise<void> {
+  const apiRoot = resolve(projectRoot, "artifacts/api-server");
+  const apiPackageJson = JSON.parse(
+    await readFile(resolve(apiRoot, "package.json"), "utf8"),
+  ) as { scripts?: ApiReleaseScripts };
+  const integrationTestPaths = (
+    await readdir(resolve(apiRoot, "src"), { recursive: true })
+  )
+    .filter((path) => path.endsWith(".integration.test.ts"))
+    .map((path) => `src/${path.replaceAll("\\", "/")}`)
+    .sort();
+  const errors = apiIntegrationTestShardInventoryErrors(
+    integrationTestPaths,
+    apiPackageJson.scripts ?? {},
+  );
+  if (errors.length > 0) {
+    throw new Error(
+      `API release shard inventory is invalid:\n${errors.join("\n")}`,
+    );
+  }
+}
+
+export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
+  {
+    label: "API unit tests (release shard 1/7)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 2/7)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:1",
+    ],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 3/7)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:2",
+    ],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 4/7)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:3",
+    ],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API role/capability tests (release shard 5/7)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:roles"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync tests (release shard 6/7)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync SSE tests (release shard 7/7)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+] as const;
+
+export const PRODUCTION_AUDIT_TIMEOUT_MS = 5 * 60_000;
+export const PRODUCTION_AUDIT_WARNING_MS = 4 * 60_000;
+
+export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
+  label: "production dependency audit",
+  args: ["run", "audit:prod"],
+  timeoutMs: PRODUCTION_AUDIT_TIMEOUT_MS,
+  warningMs: PRODUCTION_AUDIT_WARNING_MS,
+  stage: "prerequisites",
+};
+
+const sourceLibraryReport =
+  resolve(
+    rootDir,
+    cliOptionValue("--source-library-report") ??
+      process.env.SOURCE_LIBRARY_RECONCILIATION_REPORT ??
+      DEFAULT_REPORT,
+  );
+const sourceLibraryHealId =
+  cliOptionValue("--source-library-heal-id") ??
+  process.env.SOURCE_LIBRARY_RECONCILIATION_HEAL_ID ??
+  DEFAULT_HEAL_ID;
+const sourceLibraryHealDate =
+  sourceLibraryHealId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/u)?.[1];
+const sourceLibraryFromDate =
+  cliOptionValue("--source-library-from-date") ??
+  process.env.SOURCE_LIBRARY_RECONCILIATION_FROM_DATE ??
+  sourceLibraryHealDate ??
+  DEFAULT_FROM_DATE;
+export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
+  label: "source-library reconciliation verification",
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "exec",
+    "tsx",
+    "./src/verify-source-library-reconciliation.mts",
+    "--report",
+    sourceLibraryReport,
+    "--heal-id",
+    sourceLibraryHealId,
+    "--from-date",
+    sourceLibraryFromDate,
+    "--output",
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
+  ],
+  stage: "prerequisites",
+};
 
 const steps: ReleaseStep[] = [
+  PRODUCTION_DEPENDENCY_AUDIT_STEP,
+  SOURCE_LIBRARY_RECONCILIATION_STEP,
   {
-    label: "production dependency audit",
-    args: ["run", "audit:prod"],
+    label: "shell lint inventory",
+    args: ["run", "check:shell-inventory"],
+    stage: "prerequisites",
   },
   {
     label: "generated API client freshness",
     args: ["run", "check:api-generated"],
+    stage: "prerequisites",
   },
   {
     label: "shared library typechecks",
     args: ["run", "typecheck:libs"],
+    stage: "shared-output",
   },
   {
     label: "API server typecheck",
     args: ["--filter", "@workspace/api-server", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "run calculator typecheck",
     args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "mockup sandbox typecheck",
     args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "scripts typecheck",
     args: ["--filter", "@workspace/scripts", "run", "typecheck"],
+    stage: "consumer-typechecks",
   },
   {
     label: "recovery evidence audit",
     args: ["run", "audit:recovery"],
+    stage: "prerequisites",
   },
   {
     label: "clean-start smoke",
@@ -202,79 +487,42 @@ const steps: ReleaseStep[] = [
       CLEAN_START_MOCKUP_PORT: "18180",
       CLEAN_START_EVIDENCE_DIR: cleanStartEvidenceDir,
     },
+    stage: "clean-start",
+    concurrencyLimit: 1,
   },
   {
-    label: "API unit tests (release shard 1/6)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
-    group: "api-test-shards",
+    label: "Render image smoke",
+    args: ["run", "check:render-image"],
+    timeoutMs: 15 * 60_000,
+    warningMs: 10 * 60_000,
+    stage: "container-smoke",
+    concurrencyLimit: 1,
   },
-  {
-    label: "API integration tests (release shard 2/6)",
-    args: [
-      "--filter",
-      "@workspace/api-server",
-      "run",
-      "test:release:integration:1",
-    ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
-    group: "api-test-shards",
-  },
-  {
-    label: "API integration tests (release shard 3/6)",
-    args: [
-      "--filter",
-      "@workspace/api-server",
-      "run",
-      "test:release:integration:2",
-    ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
-    group: "api-test-shards",
-  },
-  {
-    label: "API integration tests (release shard 4/6)",
-    args: [
-      "--filter",
-      "@workspace/api-server",
-      "run",
-      "test:release:integration:3",
-    ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
-    group: "api-test-shards",
-  },
-  {
-    label: "API sync tests (release shard 5/6)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
-    group: "api-test-shards",
-  },
-  {
-    label: "API sync SSE tests (release shard 6/6)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
-    group: "api-test-shards",
-  },
+  ...RELEASE_CHECK_API_SHARD_STEPS,
   {
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "production rules tests",
     args: ["--filter", "@workspace/production-rules", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "inventory math tests",
     args: ["--filter", "@workspace/inventory-math", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "spec reconcile tests",
     args: ["--filter", "@workspace/spec-reconcile", "run", "test"],
+    stage: "release-tests",
+  },
+  {
+    label: "spec import tests",
+    args: ["--filter", "@workspace/spec-import", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "spec import tests",
@@ -283,18 +531,22 @@ const steps: ReleaseStep[] = [
   {
     label: "scheduled recipe check tests",
     args: ["--filter", "@workspace/scheduled-recipe-check", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "spec export tests",
     args: ["--filter", "@workspace/spec-export", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "corpus tests",
     args: ["--filter", "@workspace/corpus-harness", "run", "test"],
+    stage: "release-tests",
   },
   {
     label: "model-bump check",
     args: ["--filter", "@workspace/scripts", "run", "check-model-bump"],
+    stage: "release-tests",
   },
   {
     label: "operational evidence check",
@@ -304,6 +556,17 @@ const steps: ReleaseStep[] = [
       "run",
       "check-operational-skill-evidence",
     ],
+    stage: "release-tests",
+  },
+  {
+    label: "onboarding bypass guard",
+    args: [
+      "--filter",
+      "@workspace/run-calculator",
+      "run",
+      "check:e2e:onboarding",
+    ],
+    stage: "browser-guard",
   },
   {
     label: "browser smoke tests",
@@ -313,6 +576,8 @@ const steps: ReleaseStep[] = [
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
+    stage: "browser-smoke",
+    concurrencyLimit: 1,
   },
   {
     label: "browser accessibility tests",
@@ -322,6 +587,8 @@ const steps: ReleaseStep[] = [
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
+    stage: "browser-accessibility",
+    concurrencyLimit: 1,
   },
 ];
 
@@ -336,6 +603,8 @@ if (fullRun) {
     },
     timeoutMs: FULL_BROWSER_TIMEOUT_MS,
     warningMs: FULL_BROWSER_WARNING_MS,
+    stage: "browser-full",
+    concurrencyLimit: 1,
   });
 }
 
@@ -390,6 +659,37 @@ if (fixtureSteps !== undefined) {
   }
 }
 
+export function releaseStepStage(step: ReleaseStep, index: number): string {
+  return step.stage ?? `serial-${index}`;
+}
+
+export function releaseConcurrencyLimit(
+  step: ReleaseStep,
+  configuredLimit = RELEASE_CHECK_DEFAULT_CONCURRENCY,
+): number {
+  if (step.concurrencyLimit !== undefined) {
+    return Math.max(1, Math.floor(step.concurrencyLimit));
+  }
+  if (step.group === "api-test-shards") {
+    return Math.min(configuredLimit, RELEASE_CHECK_API_CONCURRENCY);
+  }
+  return configuredLimit;
+}
+
+function configuredReleaseConcurrency(): number {
+  const configured = process.env.RELEASE_CHECK_MAX_CONCURRENCY;
+  if (configured === undefined || configured.trim() === "") {
+    return RELEASE_CHECK_DEFAULT_CONCURRENCY;
+  }
+  const value = Number(configured);
+  if (!Number.isInteger(value) || value < 1 || value > 16) {
+    throw new Error(
+      `RELEASE_CHECK_MAX_CONCURRENCY must be an integer from 1 to 16 (received ${configured}).`,
+    );
+  }
+  return value;
+}
+
 function printHelp(): void {
   console.log("Usage:");
   console.log("  pnpm run release:check       Safe standard release gates");
@@ -416,7 +716,10 @@ function printHelp(): void {
     "The full browser suite requires a disposable isolated test database.",
   );
   console.log(
-    "The API test gate runs six bounded shards; sync SSE tests run separately.",
+    "The API test gate runs seven bounded shards; role/capability and sync SSE tests run separately.",
+  );
+  console.log(
+    `Parallel release stages use at most ${RELEASE_CHECK_DEFAULT_CONCURRENCY} children by default; API/database shards are capped at ${RELEASE_CHECK_API_CONCURRENCY}. Set RELEASE_CHECK_MAX_CONCURRENCY=1 for constrained local environments.`,
   );
 }
 
@@ -479,6 +782,33 @@ export async function verifyReleaseEvidence(
   }
   const reportPath = resolve(evidenceRoot, "release-check-report.md");
   const report = await readFile(reportPath, "utf8");
+  let checkpointReport = "";
+  try {
+    checkpointReport = await readFile(
+      resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT),
+      "utf8",
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(
+        `Could not read release checkpoint ${RELEASE_CHECKPOINT_REPORT}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  if (
+    checkpointReport.trim() !== "" &&
+    !options.allowIncompleteCheckpoint
+  ) {
+    throw new Error(
+      [
+        `Release check has an incomplete checkpoint at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence.`,
+        "The retained release-check-report.md was left unchanged.",
+        "Resume with `pnpm run release:check -- --resume` (or the full-mode equivalent), or rerun the release check without --resume before verifying retained evidence.",
+      ].join(" "),
+    );
+  }
   const reportMode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
     | "standard"
     | "full"
@@ -497,10 +827,18 @@ export async function verifyReleaseEvidence(
     );
   }
   const evidenceMode = reportMode;
+  const expectedGateLabels =
+    options.expectedLabels ?? releaseGateLabelsForMode(evidenceMode);
+  const requiresSourceLibraryEvidence = expectedGateLabels.includes(
+    "source-library reconciliation verification",
+  );
   const requiredEvidence = [
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
+    ...(requiresSourceLibraryEvidence
+      ? [SOURCE_LIBRARY_RECONCILIATION_EVIDENCE]
+      : []),
     ...(evidenceMode === "full"
       ? ["browser-full/FINAL-REPORT.md" as const]
       : []),
@@ -532,6 +870,12 @@ export async function verifyReleaseEvidence(
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
   });
+  if (requiresSourceLibraryEvidence) {
+    const sourceLibraryEvidence = await readFile(
+      resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
+    );
+    validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence);
+  }
   if (evidenceMode === "full") {
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
@@ -548,6 +892,70 @@ export async function verifyReleaseEvidence(
       files.length === 1 ? "" : "s"
     }.`,
   );
+}
+
+export function validateSourceLibraryReconciliationEvidence(
+  evidenceBytes: Uint8Array,
+): void {
+  const MAX_EVIDENCE_BYTES = 64 * 1024;
+  if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
+    throw new Error(
+      `Source-library reconciliation evidence exceeds the ${MAX_EVIDENCE_BYTES}-byte bound.`,
+    );
+  }
+  let evidence: unknown;
+  try {
+    evidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
+  } catch {
+    throw new Error(
+      `Source-library reconciliation evidence is not valid JSON: ${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.`,
+    );
+  }
+  if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error(
+      "Source-library reconciliation evidence must be a JSON object.",
+    );
+  }
+  const output = evidence as Record<string, unknown>;
+  if (output.verifier !== "source-library-reconciliation") {
+    throw new Error(
+      "Source-library reconciliation evidence has the wrong verifier identity.",
+    );
+  }
+  if (output.ok !== true) {
+    const failures = Array.isArray(output.failures)
+      ? output.failures
+          .filter(
+            (failure): failure is Record<string, unknown> =>
+              Boolean(failure) &&
+              typeof failure === "object" &&
+              !Array.isArray(failure),
+          )
+          .map((failure) => `${String(failure.check ?? "unknown")} (${String(failure.count ?? "?")})`)
+      : [];
+    throw new Error(
+      `Source-library reconciliation verification failed${
+        failures.length > 0 ? `: ${failures.join(", ")}` : "."
+      }`,
+    );
+  }
+  if (!Array.isArray(output.failures) || output.failures.length !== 0) {
+    throw new Error(
+      "Source-library reconciliation evidence is marked ok but contains failures.",
+    );
+  }
+  const fingerprint = output.idempotencyFingerprint;
+  if (
+    fingerprint === null ||
+    typeof fingerprint !== "object" ||
+    Array.isArray(fingerprint) ||
+    (fingerprint as Record<string, unknown>).algorithm !== "sha256" ||
+    !/^[a-f0-9]{64}$/u.test(String((fingerprint as Record<string, unknown>).value ?? ""))
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence is missing its bounded idempotency fingerprint.",
+    );
+  }
 }
 
 export function validateFullBrowserReport(
@@ -795,20 +1203,34 @@ export function validateReleaseReport(
 
 export function runStep(
   step: ReleaseStep,
-  options: { logPath?: string } = {},
-): Promise<{ exitCode: number; elapsedMs: number; status: StepStatus }> {
+  options: {
+    logPath?: string;
+    signal?: AbortSignal;
+    deferLog?: boolean;
+    onOutput?: (text: string) => void;
+  } = {},
+): Promise<{
+  exitCode: number;
+  elapsedMs: number;
+  status: StepStatus;
+  output?: string;
+}> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn(step.command ?? "pnpm", step.args, {
       cwd: rootDir,
       env: { ...process.env, ...step.env },
+      detached: process.platform !== "win32",
       stdio: options.logPath ? ["ignore", "pipe", "pipe"] : "inherit",
     });
     let logWrite = Promise.resolve();
+    let capturedOutput = "";
     const capture = (chunk: Buffer): void => {
       const text = chunk.toString();
+      capturedOutput += text;
       process.stdout.write(text);
-      if (options.logPath) {
+      options.onOutput?.(text);
+      if (options.logPath && !options.deferLog) {
         logWrite = logWrite.then(() => appendFile(options.logPath!, text));
       }
     };
@@ -818,11 +1240,42 @@ export function runStep(
     }
     let settled = false;
     let warningTimer: ReturnType<typeof setTimeout> | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortHandler: (() => void) | undefined;
+    let forcedResult:
+      | { exitCode: number; status: StepStatus }
+      | undefined;
+    const killTree = (signal: NodeJS.Signals): void => {
+      if (child.pid && process.platform !== "win32") {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // The process group may already be gone. Fall back to the direct
+          // child so callers still wait for its close event before continuing.
+        }
+      }
+      child.kill(signal);
+    };
+    const stopTree = (
+      exitCode: number,
+      status: StepStatus,
+    ): void => {
+      if (forcedResult) return;
+      forcedResult = { exitCode, status };
+      killTree("SIGTERM");
+      killTimer = setTimeout(() => killTree("SIGKILL"), 5_000);
+      killTimer.unref();
+    };
     const finish = (code: number, status?: StepStatus): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       if (warningTimer) clearTimeout(warningTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (abortHandler) {
+        options.signal?.removeEventListener("abort", abortHandler);
+      }
       const elapsedMs = Date.now() - startedAt;
       console.log(`${step.label} elapsed ${Math.round(elapsedMs / 1000)}s`);
       void logWrite.then(() =>
@@ -830,6 +1283,7 @@ export function runStep(
           exitCode: code,
           elapsedMs,
           status: status ?? (code === 0 ? "PASS" : "FAIL"),
+          output: capturedOutput,
         }),
       );
     };
@@ -857,16 +1311,28 @@ export function runStep(
                 step.timeoutMs! / 60_000,
               )} minute timeout`,
             );
-            child.kill("SIGTERM");
-            setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
-            finish(124, "INFRASTRUCTURE TIMEOUT");
+            stopTree(124, "INFRASTRUCTURE TIMEOUT");
           }, step.timeoutMs);
+
+    abortHandler = () => {
+      console.error(`${step.label} interrupted by the release runner`);
+      stopTree(1, "INFRASTRUCTURE ERROR");
+    };
+    if (options.signal?.aborted) {
+      abortHandler();
+    } else {
+      options.signal?.addEventListener("abort", abortHandler, { once: true });
+    }
 
     child.once("error", (error) => {
       console.error(`Could not start ${step.label}: ${error.message}`);
       finish(1, "INFRASTRUCTURE ERROR");
     });
     child.once("close", (code, signal) => {
+      if (forcedResult) {
+        finish(forcedResult.exitCode, forcedResult.status);
+        return;
+      }
       if (signal) {
         console.error(`${step.label} stopped by ${signal}`);
         // A signal means the runner or operating environment stopped the
@@ -892,8 +1358,11 @@ export function formatReleaseReport(
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
+    timing?: ReleaseTiming;
+    reportKind?: "retained" | "checkpoint";
   } = {},
 ): string {
+  const isCheckpoint = metadata.reportKind === "checkpoint";
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
@@ -941,12 +1410,35 @@ export function formatReleaseReport(
     results.every((result) => result.status === "PASS")
       ? "GO"
       : "NO-GO");
+  const timing = metadata.timing;
+  const timingLines =
+    timing === undefined
+      ? ["Timing: unavailable", ""]
+      : [
+          `Total wall-clock: ${Math.round(timing.totalElapsedMs / 1000)}s`,
+          "",
+          "| Stage | Wall-clock |",
+          "| --- | ---: |",
+          ...timing.stages.map(
+            (stage) =>
+              `| ${stage.stage} | ${Math.round(stage.elapsedMs / 1000)}s |`,
+          ),
+          "",
+        ];
   const lines = [
-    "# Release Check Report",
+    isCheckpoint
+      ? "# Release Check Checkpoint — INCOMPLETE / NO-GO"
+      : "# Release Check Report",
     "",
     `Generated: ${new Date().toISOString()}`,
     `Revision: ${revision}`,
     `Mode: ${mode}`,
+    ...(isCheckpoint
+      ? [
+          "Report status: INCOMPLETE CHECKPOINT",
+          "Retained evidence: NOT UPDATED",
+        ]
+      : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
@@ -962,6 +1454,9 @@ export function formatReleaseReport(
         )}s | \`${commandFor(result.label)}\` |`,
     ),
     "",
+    "## Timing",
+    "",
+    ...timingLines,
     "## Preview evidence",
     "",
     cleanStartResult === undefined || cleanStartResult.status === "NOT REACHED"
@@ -979,6 +1474,10 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-web.log", "Web startup log"),
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
+    evidenceLink(
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+      "Source-library reconciliation evidence",
+    ),
     "",
     "## Browser duration review",
     "",
@@ -1015,6 +1514,26 @@ export function formatReleaseReport(
     `Interrupted gates: ${summarize(interrupted)}`,
     `Not-reached gates: ${summarize(notReached)}`,
     "Accepted exceptions: none",
+    ...(isCheckpoint
+      ? [
+          "",
+          "## Checkpoint recovery",
+          "",
+          "This is an incomplete checkpoint, not a current retained release report.",
+          `Gates not reached: ${summarize(notReached)}`,
+          `Resume: ${
+            mode === "full"
+              ? "pnpm run release:check:full -- --resume"
+              : "pnpm run release:check -- --resume"
+          }`,
+          `Regenerate: ${
+            mode === "full"
+              ? "pnpm run release:check:full"
+              : "pnpm run release:check"
+          }`,
+          "Retained report: release-check-report.md (left unchanged by this checkpoint).",
+        ]
+      : []),
     "",
     `Decision: ${decision}`,
     "",
@@ -1028,12 +1547,18 @@ async function writeReleaseReport(
     revision: string;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
+    timing?: ReleaseTiming;
+    reportKind?: "retained" | "checkpoint";
   },
 ): Promise<string> {
+  const reportFile =
+    metadata.reportKind === "checkpoint"
+      ? RELEASE_CHECKPOINT_REPORT
+      : "release-check-report.md";
   const reportPath = resolve(
     rootDir,
     releaseEvidenceDir,
-    "release-check-report.md",
+    reportFile,
   );
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
@@ -1056,6 +1581,19 @@ async function writeReleaseReport(
         file !== undefined,
     ),
   );
+  try {
+    await access(
+      resolve(
+        rootDir,
+        releaseEvidenceDir,
+        SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+      ),
+    );
+    availableEvidenceFiles.add(SOURCE_LIBRARY_RECONCILIATION_EVIDENCE);
+  } catch {
+    // The source-library release gate reports a missing artifact when the
+    // complete release decision requires it.
+  }
   try {
     await access(
       resolve(rootDir, releaseEvidenceDir, "browser-full/FINAL-REPORT.md"),
@@ -1093,17 +1631,19 @@ async function writeReleaseReport(
         ...metadata,
         environment: process.env.CI ? "CI release validation" : "local release validation",
         browserDurationRegressions,
+        timing: metadata.timing,
       },
     ),
     "utf8",
   );
-  return `${releaseEvidenceDir}/release-check-report.md`;
+  return `${releaseEvidenceDir}/${reportFile}`;
 }
 
 type ReleaseCheckpoint = {
   revision: string;
   mode: "standard" | "full";
   results: Array<ReleaseStepResult & { passed: boolean }>;
+  timing?: ReleaseTiming;
 };
 
 const STALE_CHECKPOINT_MESSAGE =
@@ -1124,6 +1664,30 @@ async function writeCheckpoint(
     )}\n`,
     "utf8",
   );
+}
+
+function upsertReleaseResult(
+  results: Array<ReleaseStepResult & { passed: boolean }>,
+  result: ReleaseStepResult & { passed: boolean },
+): Array<ReleaseStepResult & { passed: boolean }> {
+  const next = new Map(results.map((item) => [item.label, item] as const));
+  next.set(result.label, result);
+  return steps
+    .map((step) => next.get(step.label))
+    .filter(
+      (item): item is ReleaseStepResult & { passed: boolean } =>
+        item !== undefined,
+    );
+}
+
+function upsertStageTiming(
+  timings: readonly ReleaseStageTiming[],
+  timing: ReleaseStageTiming,
+): ReleaseStageTiming[] {
+  return [
+    ...timings.filter((existing) => existing.stage !== timing.stage),
+    timing,
+  ];
 }
 
 async function readCheckpoint(
@@ -1202,6 +1766,7 @@ async function main(): Promise<void> {
     }
   }
 
+  await assertApiIntegrationTestShardInventory();
   console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
   let revision: string;
   try {
@@ -1216,10 +1781,22 @@ async function main(): Promise<void> {
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
   const checkpointPath = resolve(evidenceRoot, "release-check-state.json");
+  const checkpointReportPath = resolve(
+    evidenceRoot,
+    RELEASE_CHECKPOINT_REPORT,
+  );
   const logPath = resolve(evidenceRoot, "release-check.log");
   await mkdir(evidenceRoot, { recursive: true });
   const resume = process.argv.includes("--resume");
+  let concurrencyLimit: number;
+  try {
+    concurrencyLimit = configuredReleaseConcurrency();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
   let results: Array<ReleaseStepResult & { passed: boolean }> = [];
+  let stageTimings: ReleaseStageTiming[] = [];
   if (resume) {
     let checkpoint: ReleaseCheckpoint | undefined;
     try {
@@ -1233,13 +1810,20 @@ async function main(): Promise<void> {
       console.error("No incomplete release checkpoint exists for this revision.");
       process.exit(1);
     }
-    const firstUnpassed = checkpoint.results.findIndex((result) => !result.passed);
-    results =
-      firstUnpassed === -1
-        ? checkpoint.results
-        : checkpoint.results.slice(0, firstUnpassed);
-    console.log(`Resuming after ${results.length} completed gate(s).`);
+    results = checkpoint.results.reduce(
+      (current, result) => upsertReleaseResult(current, result),
+      [],
+    );
+    stageTimings = checkpoint.timing?.stages
+      ? [...checkpoint.timing.stages]
+      : [];
+    console.log(
+      `Resuming after ${
+        results.filter((result) => result.passed).length
+      } completed gate(s).`,
+    );
   } else {
+    await rm(checkpointReportPath, { force: true });
     await writeFile(
       logPath,
       `Release check ${new Date().toISOString()} revision ${revision} mode ${
@@ -1248,50 +1832,204 @@ async function main(): Promise<void> {
       "utf8",
     );
   }
-  let failedGroup: string | undefined;
   let releaseStatefulLock: (() => Promise<void>) | undefined;
-
-  try {
-    for (const [index, step] of steps.entries()) {
-      if (results.some((result) => result.label === step.label)) continue;
-      if (failedGroup !== undefined && step.group !== failedGroup) {
-        break;
-      }
-      if (step.label === "clean-start smoke" && !releaseStatefulLock) {
-        releaseStatefulLock = await acquireStatefulReleaseLock();
-      }
-      console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-      const effectiveStep =
-        step.label === FULL_BROWSER_GATE_LABEL
-          ? {
-              ...step,
-              env: { ...step.env, RELEASE_REVISION: revision },
-            }
-          : step;
-      const { exitCode, elapsedMs, status } = await runStep(effectiveStep, {
-        logPath,
-      });
-      const passed = exitCode === 0;
-      results.push({ label: step.label, passed, status, elapsedMs });
-      await writeCheckpoint(checkpointPath, {
+  let checkpointWrite = Promise.resolve();
+  const persistCheckpoint = (): Promise<void> => {
+    checkpointWrite = checkpointWrite.then(() =>
+      writeCheckpoint(checkpointPath, {
         revision,
         mode: fullRun ? "full" : "standard",
         results,
-      });
-      console.log(`${status} ${step.label}`);
-      if (!passed) {
-        if (step.group !== undefined) {
-          failedGroup = step.group;
-          console.error(
-            `\n${step.group} has a failed shard; running the remaining shards.`,
+        timing: {
+          totalElapsedMs: stageTimings.reduce(
+            (total, stage) => total + stage.elapsedMs,
+            0,
+          ),
+          stages: stageTimings,
+        },
+      }),
+    );
+    return checkpointWrite;
+  };
+  const interruptionController = new AbortController();
+  let interruptedBySignal = false;
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    if (interruptedBySignal) return;
+    interruptedBySignal = true;
+    console.error(`\nRelease check interrupted by ${signal}; saving checkpoint.`);
+    interruptionController.abort();
+  };
+  process.once("SIGINT", handleSignal);
+  process.once("SIGTERM", handleSignal);
+
+  try {
+    const stages = new Map<string, Array<{ step: ReleaseStep; index: number }>>();
+    for (const [index, step] of steps.entries()) {
+      const stage = releaseStepStage(step, index);
+      const stageSteps = stages.get(stage) ?? [];
+      stageSteps.push({ step, index });
+      stages.set(stage, stageSteps);
+    }
+
+    for (const [stage, stageSteps] of stages) {
+      if (interruptedBySignal) break;
+      const completed = new Set(
+        results.filter((result) => result.passed).map((result) => result.label),
+      );
+      const pending = stageSteps.filter(({ step }) => !completed.has(step.label));
+      if (pending.length === 0) continue;
+
+      if (
+        stageSteps.some(
+          ({ step }) =>
+            step.label === "clean-start smoke" ||
+            step.label.startsWith("browser "),
+        ) &&
+        !releaseStatefulLock
+      ) {
+        releaseStatefulLock = await acquireStatefulReleaseLock();
+      }
+
+      const stageStartedAt = Date.now();
+      const stageHasApiShards = stageSteps.some(
+        ({ step }) => step.group === "api-test-shards",
+      );
+      const stageLimit = Math.min(
+        concurrencyLimit,
+        ...stageSteps.map(
+          ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
+        ),
+      );
+      const apiLimit = Math.min(
+        concurrencyLimit,
+        RELEASE_CHECK_API_CONCURRENCY,
+        ...stageSteps
+          .filter(({ step }) => step.group === "api-test-shards")
+          .map(({ step }) =>
+            releaseConcurrencyLimit(step, concurrencyLimit),
+          ),
+      );
+      console.log(
+        `\nStage ${stage}: ${pending.length} gate${
+          pending.length === 1 ? "" : "s"
+        } (max ${stageLimit} concurrent${
+          stageHasApiShards ? `; API/database max ${apiLimit}` : ""
+        }).`,
+      );
+      const active = new Set<Promise<void>>();
+      const waiting = [...pending];
+      const stageLogs = new Map<string, string>();
+      let apiActive = 0;
+      const launchAvailable = (): void => {
+        if (interruptedBySignal) return;
+        while (waiting.length > 0 && active.size < stageLimit) {
+          const nextIndex = waiting.findIndex(
+            ({ step }) =>
+              step.group !== "api-test-shards" ||
+              apiActive < apiLimit,
           );
-          continue;
+          if (nextIndex === -1) return;
+          const [{ step, index }] = waiting.splice(nextIndex, 1);
+          if (step.group === "api-test-shards") apiActive += 1;
+          console.log(`[${index + 1}/${steps.length}] ${step.label}`);
+          let task: Promise<void>;
+          task = (async () => {
+            const effectiveStep =
+              step.label === FULL_BROWSER_GATE_LABEL
+                ? {
+                    ...step,
+                    env: { ...step.env, RELEASE_REVISION: revision },
+                  }
+                : step;
+            let result: ReleaseStepResult & { passed: boolean };
+            try {
+              const { exitCode, elapsedMs, status, output } = await runStep(
+                effectiveStep,
+                {
+                  logPath,
+                  signal: interruptionController.signal,
+                  deferLog: true,
+                },
+              );
+              stageLogs.set(step.label, output ?? "");
+              result = {
+                label: step.label,
+                passed: exitCode === 0,
+                status,
+                elapsedMs,
+              };
+            } catch (error) {
+              console.error(
+                `Could not complete ${step.label}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+              result = {
+                label: step.label,
+                passed: false,
+                status: "INFRASTRUCTURE ERROR",
+                elapsedMs: 0,
+              };
+              stageLogs.set(step.label, "");
+            }
+            results = upsertReleaseResult(results, result);
+            await persistCheckpoint();
+            console.log(`${result.status} ${step.label}`);
+          })().finally(() => {
+            active.delete(task);
+            if (step.group === "api-test-shards") apiActive -= 1;
+          });
+          active.add(task);
         }
-        console.error("\nRelease check stopped at the first failed gate.");
+      };
+
+      while (!interruptedBySignal && (waiting.length > 0 || active.size > 0)) {
+        launchAvailable();
+        if (active.size > 0) {
+          await Promise.race(active);
+        }
+      }
+      while (active.size > 0) {
+        await Promise.race(active);
+      }
+      for (const { step } of stageSteps) {
+        const output = stageLogs.get(step.label);
+        if (output !== undefined) {
+          await appendFile(logPath, `\n[${step.label}]\n${output}`);
+        }
+      }
+      if (interruptedBySignal) {
+        for (const { step } of waiting) {
+          const notReached: ReleaseStepResult & { passed: boolean } = {
+            label: step.label,
+            passed: false,
+            status: "NOT REACHED",
+            elapsedMs: 0,
+          };
+          results = upsertReleaseResult(results, notReached);
+          await persistCheckpoint();
+        }
+      }
+      await checkpointWrite;
+
+      stageTimings = upsertStageTiming(stageTimings, {
+        stage,
+        elapsedMs: Date.now() - stageStartedAt,
+      });
+      await persistCheckpoint();
+      const stageResults = results.filter(({ label }) =>
+        stageSteps.some(({ step }) => step.label === label),
+      );
+      if (stageResults.some((result) => !result.passed)) {
+        console.error(
+          `\n${stage} has a failed gate; later stages were not started.`,
+        );
         break;
       }
     }
   } finally {
+    process.removeListener("SIGINT", handleSignal);
+    process.removeListener("SIGTERM", handleSignal);
     await releaseStatefulLock?.();
   }
 
@@ -1324,11 +2062,20 @@ async function main(): Promise<void> {
         revision,
         decision: "GO",
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+        timing: {
+          totalElapsedMs: stageTimings.reduce(
+            (total, stage) => total + stage.elapsedMs,
+            0,
+          ),
+          stages: stageTimings,
+        },
       });
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
         expectedMode: fullRun ? "full" : "standard",
+        allowIncompleteCheckpoint: true,
       });
+      await rm(checkpointReportPath, { force: true });
       await writeFile(checkpointPath, "", "utf8");
       console.log(`\nRelease report: ${reportPath}`);
     } catch (error) {
@@ -1344,12 +2091,33 @@ async function main(): Promise<void> {
   }
 
   try {
-    console.log(
-      `\nRelease report: ${await writeReleaseReport(results, {
+    const checkpointReportPath = await writeReleaseReport(results, {
         revision,
         decision: "NO-GO",
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
-      })}`,
+        reportKind: "checkpoint",
+        timing: {
+          totalElapsedMs: stageTimings.reduce(
+            (total, stage) => total + stage.elapsedMs,
+            0,
+          ),
+          stages: stageTimings,
+        },
+      });
+    console.log(
+      `\nRelease checkpoint (INCOMPLETE / NO-GO; not retained evidence): ${checkpointReportPath}`,
+    );
+    console.log(
+      `Resume: ${
+        fullRun
+          ? "pnpm run release:check:full -- --resume"
+          : "pnpm run release:check -- --resume"
+      }`,
+    );
+    console.log(
+      `Regenerate: ${
+        fullRun ? "pnpm run release:check:full" : "pnpm run release:check"
+      }`,
     );
   } catch (error) {
     console.error(

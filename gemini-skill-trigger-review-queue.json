@@ -8,12 +8,49 @@
       "query": "The Excel parser linked a recipe to the wrong flavor; trace the bug and fix the poisoned records.",
       "expected": "do_not_trigger",
       "gemini": {
+        "decision": "uncertain",
+        "confidence": 0.5,
+        "rationale": "The user is reporting a bug with an Excel parser linking data incorrectly. While this could potentially be related to importing a new customer's spec workbook, the request does not explicitly mention a 'new customer' or a 'new-customer import'. The skill is specific to post-import audits for new customers, and this request lacks that specific context, making the connection ambiguous."
+      },
+      "error": null,
+      "reason": "uncertain",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "db-schema-change-near-miss-1",
+      "skill": "db-schema-change",
+      "query": "Add one nullable field to an existing populated table using the detailed new-column checklist.",
+      "expected": "do_not_trigger",
+      "gemini": {
         "decision": "trigger",
-        "confidence": 0.9,
-        "rationale": "The user is reporting an issue with data being linked incorrectly after an import process (implied by 'Excel parser'). This aligns with the skill description for 'customer-import-audit' which is used when 'reports something off after a new-customer import'."
+        "confidence": 1.0,
+        "rationale": "The user explicitly states the need to 'Add one nullable field to an existing populated table using the detailed new-column checklist'. The skill description states, 'For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.' This is a direct match, indicating the skill is highly relevant."
       },
       "error": null,
       "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "operational-browser-verification-near-miss-1",
+      "skill": "operational-browser-verification",
+      "query": "Add a Playwright unit test for a pure date formatter.",
+      "expected": "do_not_trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "operational-browser-verification-near-miss-2",
+      "skill": "operational-browser-verification",
+      "query": "Compare two screenshots visually and update the accessibility snapshots.",
+      "expected": "do_not_trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
       "manual_decision": null,
       "manual_reason": null
     },
@@ -25,7 +62,7 @@
       "gemini": {
         "decision": "trigger",
         "confidence": 0.9,
-        "rationale": "The user explicitly asks to 'run the pre-publish checklist'. The skill description states, 'Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.' This indicates that running such a checklist is a core part of this skill's process, even if the user isn't directly asking for the GO/NO-GO decision itself yet."
+        "rationale": "The user is explicitly asking to run a 'pre-publish checklist' before deciding to deploy, which directly aligns with the skill's purpose of running 'applicable release and shipping gates before recommending publish' and determining if an application is 'production-ready' or 'ready to publish'."
       },
       "error": null,
       "reason": "disagreement",
@@ -40,10 +77,21 @@
       "gemini": {
         "decision": "trigger",
         "confidence": 0.9,
-        "rationale": "The user is asking for a 'final production-ready GO or NO-GO decision', which directly aligns with the 'Pre-publish verification' and 'before suggesting a deploy/publish' functionality of the 'release-checklist' skill. The skill is designed to perform the checks necessary to inform such a decision."
+        "rationale": "The user is asking for a 'final production-ready GO or NO-GO decision', which directly aligns with the 'Pre-publish verification' function of the skill. The skill's description indicates it is used 'before suggesting a deploy/publish', implying it leads to such a decision."
       },
       "error": null,
       "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "rollback-recovery-near-miss-2",
+      "skill": "rollback-recovery",
+      "query": "Revert the last commit because the user wants a simple undo of their local edit.",
+      "expected": "do_not_trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
       "manual_decision": null,
       "manual_reason": null
     },
@@ -55,7 +103,7 @@
       "gemini": {
         "decision": "trigger",
         "confidence": 0.9,
-        "rationale": "The user wants to investigate a 'bad imported workbook' by 'tracing what landed in the database'. This directly implies debugging or understanding issues related to the 'spec import pipeline' and its output, which is precisely what the `spec-import-guard` skill is designed to cover, especially in areas like parse/sanitize logic, chunk/merge logic, import link passes, and ultimately what data results from the import."
+        "rationale": "The user wants to investigate a 'bad imported workbook' by 'tracing what landed in the database'. This directly relates to the outcome and process of the spec import pipeline, which is the domain of this skill. Understanding why an import was 'bad' or what 'landed in the database' necessitates understanding or debugging the spec import pipeline components, even if not directly 'touching' the code in a development sense."
       },
       "error": null,
       "reason": "disagreement",
@@ -70,7 +118,7 @@
       "gemini": {
         "decision": "trigger",
         "confidence": 0.9,
-        "rationale": "The user request to \"Audit SSE merge stamps and stale writes across multiple devices\" directly matches the skill's description of verifying that state remains accurate and consistent. Identifying stale writes is a core aspect of checking state accuracy and consistency."
+        "rationale": "The user request to 'Audit SSE merge stamps and stale writes across multiple devices' directly aligns with the skill's purpose of 'Verify that timers, counters, and live state remain accurate and consistent'. Stale writes are a form of inaccurate or inconsistent state, and merge stamps are used to maintain accuracy and consistency of state across devices. 'Audit' is synonymous with 'Verify'."
       },
       "error": null,
       "reason": "disagreement",
@@ -78,17 +126,39 @@
       "manual_reason": null
     },
     {
-      "id": "check-dependency-licenses-near-miss-1",
-      "skill": "check-dependency-licenses",
-      "query": "Add a new package and verify it is genuine before installing it.",
+      "id": "verify-before-commit-near-miss-1",
+      "skill": "verify-before-commit",
+      "query": "Run the full pre-publish release checklist and decide whether the application is ready to deploy.",
       "expected": "do_not_trigger",
       "gemini": {
-        "decision": "do_not_trigger",
-        "confidence": 0.7,
-        "rationale": "The user wants to 'add a new package' which aligns with the skill's purpose for 'adding dependencies'. However, the primary request is to 'verify it is genuine', which relates to authenticity or security, not license compliance. The skill 'check-dependency-licenses' is specifically for license-related checks (commercial use, open-source license, IP compliance), not genuineness."
+        "decision": "trigger",
+        "confidence": 0.95,
+        "rationale": "The user request explicitly asks to 'decide whether the application is ready to deploy', which directly matches the skill's trigger condition 'ready to deploy'. The skill is designed for verification before deployment."
       },
       "error": null,
-      "reason": "uncertain",
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "wrong-number-triage-near-miss-2",
+      "skill": "wrong-number-triage",
+      "query": "A database import created incorrect stored values across many profiles.",
+      "expected": "do_not_trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "handle-personal-and-sensitive-data-near-miss-1",
+      "skill": "handle-personal-and-sensitive-data",
+      "query": "Validate a public URL parameter against an allow-list.",
+      "expected": "do_not_trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
       "manual_decision": null,
       "manual_reason": null
     },
@@ -100,7 +170,7 @@
       "gemini": {
         "decision": "trigger",
         "confidence": 0.9,
-        "rationale": "A password reset flow deals with user authentication credentials, which are highly sensitive data. This process involves transmitting, and potentially temporarily storing or logging, personal user data to enable the reset. This directly aligns with the skill's description for handling anything that 'collects, stores, logs, or transmits user data'."
+        "rationale": "A password reset flow involves collecting, storing, and transmitting user data (e.g., new password, email for verification), and is directly related to authentication and user profiles. This aligns with the skill's description for handling user data and sign-up/profiles."
       },
       "error": null,
       "reason": "disagreement",
@@ -112,13 +182,9 @@
       "skill": "meet-an-accessibility-baseline",
       "query": "Make the layout responsive across phone and desktop widths.",
       "expected": "do_not_trigger",
-      "gemini": {
-        "decision": "trigger",
-        "confidence": 0.8,
-        "rationale": "The user request to make a layout responsive across phone and desktop widths directly relates to WCAG 2.1 Success Criterion 1.4.10 Reflow (AA), which is an accessibility requirement. Ensuring content reflows and is usable on different screen sizes is part of meeting a basic accessibility baseline to avoid excluding users, as described by the skill."
-      },
-      "error": null,
-      "reason": "disagreement",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
       "manual_decision": null,
       "manual_reason": null
     },
@@ -129,11 +195,33 @@
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 0.9,
-        "rationale": "The user explicitly mentions 'pre-publish release checklist', which directly indicates a readiness for publishing, aligning with the skill description 'before...publishing'."
+        "confidence": 1.0,
+        "rationale": "The user explicitly requests to run a 'pre-publish release checklist', which directly aligns with the skill's trigger condition for 'publishing'."
       },
       "error": null,
       "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "secure-ai-features-against-prompt-injection-trigger-1",
+      "skill": "secure-ai-features-against-prompt-injection",
+      "query": "Build an AI assistant that summarizes uploaded documents and can call tools; defend against prompt injection and excessive agency.",
+      "expected": "trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "secure-ai-features-against-prompt-injection-trigger-2",
+      "skill": "secure-ai-features-against-prompt-injection",
+      "query": "User text and web pages will be sent to an LLM\u2014secure the feature against instruction hijacking and unauthorized actions.",
+      "expected": "trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
       "manual_decision": null,
       "manual_reason": null
     },

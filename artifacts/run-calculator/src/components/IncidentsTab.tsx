@@ -18,6 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   fetchIncidents,
+  fetchFieldChecks,
+  confirmHardwareFieldCheck,
   markIncidentReviewed,
   markIncidentResolved,
   requestIncidentClusters,
@@ -26,6 +28,7 @@ import {
   type Incident,
   type IncidentCluster,
   type IncidentClustersResult,
+  type FieldCheckSummary,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
@@ -123,7 +126,7 @@ function ClustersPanel({ disabled }: { disabled: boolean }) {
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
 type PlatformFilter = "all" | "web" | "mobile";
-type SourceFilter = "all" | "user_report" | "auto_crash";
+type SourceFilter = "all" | "user_report" | "auto_crash" | "field_check";
 type WorkflowFilter = "all" | Incident["workflowState"];
 
 function timeAgo(iso: string): string {
@@ -342,11 +345,211 @@ function IncidentRow({
   );
 }
 
-// Manager-only review queue of reported issues and auto-captured crashes, each
-// with its stored AI diagnosis + workaround. Operators never see this tab.
+const FIELD_STATUS_LABEL: Record<FieldCheckSummary["status"], string> = {
+  healthy: "Healthy",
+  collecting: "Collecting evidence",
+  "needs-review": "Needs review",
+  unsupported: "Unsupported",
+};
+
+const FIELD_STATUS_CLASS: Record<FieldCheckSummary["status"], string> = {
+  healthy: "bg-emerald-500/15 text-emerald-400",
+  collecting: "bg-sky-500/15 text-sky-400",
+  "needs-review": "bg-amber-500/15 text-amber-400",
+  unsupported: "bg-muted text-muted-foreground",
+};
+
+function FieldChecksPanel({
+  report,
+  isLoading,
+  error,
+  canConfirmHardware,
+}: {
+  report: Awaited<ReturnType<typeof fetchFieldChecks>> | undefined;
+  isLoading: boolean;
+  error: unknown;
+  canConfirmHardware: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad">("android-phone");
+  const confirmation = useMutation({
+    mutationFn: (input: {
+      checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+      outcome: "success" | "failure" | "incomplete";
+    }) => confirmHardwareFieldCheck({
+      ...input,
+      checkVersion: "2026-09",
+      observedAt: new Date().toISOString(),
+      deviceCategory,
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["fieldChecks"] }),
+  });
+  const browserChecks = report?.checks.filter((check) => check.observedBy === "browser") ?? [];
+  const hardwareChecks = report?.checks.filter((check) => check.observedBy === "hardware") ?? [];
+  const actionable = report?.checks.filter((check) => check.actionable) ?? [];
+
+  return (
+    <section
+      aria-labelledby="field-checks-heading"
+      className="rounded-lg border border-border bg-muted/20 p-3 space-y-3"
+      data-testid="field-checks-panel"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 id="field-checks-heading" className="text-sm font-semibold text-foreground">
+            Field checks
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Passive evidence from normal staff use, scoped to this facility. No run data is collected.
+          </p>
+        </div>
+        {report && (
+          <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${FIELD_STATUS_CLASS[report.overallStatus]}`}>
+            {FIELD_STATUS_LABEL[report.overallStatus]}
+          </span>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground" role="status">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading field evidence…
+        </div>
+      ) : error ? (
+        <p className="text-sm text-red-400">Couldn’t load field-check evidence.</p>
+      ) : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {browserChecks.map((check) => (
+              <FieldCheckCard key={check.name} check={check} />
+            ))}
+          </div>
+          <div className="rounded-md border border-border bg-card/60 p-2.5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Hardware-only checks
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Browser evidence cannot confirm these. Follow the physical-device protocol without entering production data, then record only the device category, protocol version, outcome, and time.
+            </p>
+            {canConfirmHardware && (
+              <label className="mt-2 block text-xs text-muted-foreground">
+                Device category
+                <select
+                  className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+                  value={deviceCategory}
+                  onChange={(event) => setDeviceCategory(event.target.value as typeof deviceCategory)}
+                >
+                  <option value="android-phone">Android phone</option>
+                  <option value="android-tablet">Android tablet</option>
+                  <option value="ipad">iPad</option>
+                </select>
+              </label>
+            )}
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+              <li>Use a clean training or idle screen; do not start or edit a production run.</li>
+              <li>Check touch targets, keyboard clearance, or fully close and reopen the app as described in the protocol.</li>
+              <li>Record Pass, Fail, or Incomplete below immediately after the physical check.</li>
+            </ol>
+            <div className="mt-3 space-y-2">
+              {hardwareChecks.map((check) => (
+                <div key={check.name} className="rounded-md border border-border bg-background/50 p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-foreground">
+                      {check.label}: {check.status === "healthy" ? "Confirmed" : FIELD_STATUS_LABEL[check.status]}
+                    </span>
+                    {canConfirmHardware && (
+                      <div className="flex gap-1">
+                        {(["success", "failure", "incomplete"] as const).map((outcome) => (
+                          <Button
+                            key={outcome}
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[11px]"
+                            disabled={confirmation.isPending}
+                            onClick={() => confirmation.mutate({
+                              checkName: check.name as "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery",
+                              outcome,
+                            })}
+                          >
+                            {outcome === "success" ? "Pass" : outcome === "failure" ? "Fail" : "Incomplete"}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {check.lastObservedAt && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Last recorded {timeAgo(check.lastObservedAt)}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+            {confirmation.isError && (
+              <p className="mt-2 text-xs text-red-400">Couldn’t save the hardware confirmation.</p>
+            )}
+          </div>
+          {actionable.length > 0 && (
+            <div className="space-y-2" aria-label="Actionable field-check failures">
+              <p className="text-xs font-semibold text-amber-300 uppercase tracking-wide">
+                Recent field-check failures
+              </p>
+              {actionable.flatMap((check) =>
+                check.recentFailures.slice(0, 3).map((failure, index) => (
+                  <div key={`${check.name}-${failure.observedAt}-${index}`} className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-foreground">{check.label}</span>
+                      <span className="text-muted-foreground">{timeAgo(failure.observedAt)}</span>
+                    </div>
+                    <p className="mt-1 text-muted-foreground">
+                      {failure.outcome === "incomplete" ? "Repeatedly incomplete" : "Failed"} · build {failure.appBuild} · {failure.deviceCategory}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Browser-observed evidence only; measurements are bounded and contain no production payload.
+                    </p>
+                  </div>
+                )),
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
+  return (
+    <div className="rounded-md border border-border bg-card p-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium text-foreground">{check.label}</p>
+        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FIELD_STATUS_CLASS[check.status]}`}>
+          {FIELD_STATUS_LABEL[check.status]}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{check.evidence}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Last success: {check.lastSuccessfulAt ? timeAgo(check.lastSuccessfulAt) : "Not yet"}
+      </p>
+      {check.recentFailures.length > 0 && (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Recent failures: {check.recentFailures.length} · latest {timeAgo(check.recentFailures[0].observedAt)} · {check.recentFailures[0].deviceCategory}
+        </p>
+      )}
+      {check.status === "needs-review" && (
+        <p className="mt-1 text-[11px] text-amber-300">
+          {check.failureCount > 0 ? `${check.failureCount} failure${check.failureCount === 1 ? "" : "s"}` : "Repeated incomplete observations"} · review below
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Review queue of reported issues and auto-captured crashes, each with its
+// stored AI diagnosis + workaround. Access is capability-gated; operators
+// never see this tab.
 export default function IncidentsTab() {
-  const { hasCapability, isLoading: roleLoading } = useMe();
+  const { hasCapability, role, isLoading: roleLoading } = useMe();
   const canReview = hasCapability("review-incidents");
+  const canConfirmHardware = role === "manager";
   const isIdle = useIdle();
   const jitter = useMemo(() => Math.floor(Math.random() * 10_000), []);
   const [pollingReady, setPollingReady] = useState(false);
@@ -370,6 +573,12 @@ export default function IncidentsTab() {
     return match ? decodeURIComponent(match[1]) : null;
   });
   const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
+  const { data: fieldChecks, isLoading: fieldChecksLoading, error: fieldChecksError } = useQuery({
+    queryKey: ["fieldChecks"],
+    queryFn: fetchFieldChecks,
+    enabled: canReview,
+    refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
+  });
 
   const incidents = data ?? [];
   const filtered = useMemo(
@@ -378,7 +587,7 @@ export default function IncidentsTab() {
         (i) =>
           (status === "all" || i.status === status) &&
           (platform === "all" || i.appPlatform === platform) &&
-          (source === "all" || i.source === source) &&
+          (source === "all" || source === "field_check" || i.source === source) &&
           (workflowState === "all" || i.workflowState === workflowState),
       ).sort((a, b) => {
         const rank = { urgent: 0, high: 1, normal: 2, low: 3 } as Record<string, number>;
@@ -401,6 +610,8 @@ export default function IncidentsTab() {
   }
 
   const hasIncidents = incidents.length > 0;
+  const hasFieldFailures = (fieldChecks?.checks.some((check) => check.actionable) ?? false);
+  const hasAnyIssues = hasIncidents || hasFieldFailures;
 
   return (
     <Card>
@@ -410,8 +621,14 @@ export default function IncidentsTab() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {hasIncidents && <ClustersPanel disabled={isLoading} />}
-        {hasIncidents && (
+        <FieldChecksPanel
+          report={fieldChecks}
+          isLoading={fieldChecksLoading}
+          error={fieldChecksError}
+          canConfirmHardware={canConfirmHardware}
+        />
+        {hasIncidents && source !== "field_check" && <ClustersPanel disabled={isLoading} />}
+        {hasAnyIssues && (
           <div className="space-y-2 pb-1">
             <FilterRow
               label="Status"
@@ -444,6 +661,7 @@ export default function IncidentsTab() {
                 ["all", "All"],
                 ["user_report", "Reported"],
                 ["auto_crash", "Auto-crash"],
+                ["field_check", "Field checks"],
               ] as [SourceFilter, string][]}
             />
           </div>
@@ -456,6 +674,18 @@ export default function IncidentsTab() {
           <p className="flex items-center gap-2 text-sm text-red-400">
             <AlertTriangle className="w-4 h-4" /> Couldn't load reported issues.
           </p>
+        ) : source === "field_check" ? (
+          hasFieldFailures ? (
+            <div className="space-y-2">
+              {fieldChecks?.checks.filter((check) => check.actionable).map((check) => (
+                <FieldCheckCard key={check.name} check={check} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              No actionable field-check failures.
+            </p>
+          )
         ) : !hasIncidents ? (
           <p className="text-sm text-muted-foreground py-6 text-center">
             No issues reported yet. When staff report a problem or the app hits a

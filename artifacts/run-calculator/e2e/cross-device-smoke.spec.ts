@@ -10,6 +10,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -44,42 +48,13 @@ test.afterAll(async () => {
 });
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.locator('[data-testid="tab-run"]').waitFor({
-    state: "attached",
-    timeout: 25_000,
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
   });
-
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
-  }
 }
 
 async function dismissOnboarding(page: Page): Promise<void> {
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (!(await welcome.isVisible().catch(() => false))) return;
-  const seen = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/me/onboarding-seen") &&
-      response.request().method() === "POST",
-  );
-  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-  await expect((await seen).status()).toBe(200);
-  await expect(welcome).toBeHidden({ timeout: 10_000 });
+  await dismissOnboardingIfPresent(page);
 }
 
 async function seedPendingRun(page: Page): Promise<void> {

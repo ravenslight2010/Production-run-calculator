@@ -5,7 +5,7 @@
 //   • Resume propagation — long pause (Stage 2 + Stage 3 both show resuming)
 //   • Lifecycle-gated drains (only persisted pause / stop records can drain)
 //   • Ended run wall-clock drain (Stage 1 empties first, Stage 3 last)
-//   • Normalization (oversized stage times clamped to fit freezerTime)
+//   • Normalization (oversized stage times clamped to fit the stored tunnel time)
 
 import { describe, it, expect } from "vitest";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec } from "./linePhases";
@@ -13,7 +13,7 @@ import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec } fro
 const BASE = {
   preTunnelMin: 2.5,
   postTunnelMin: 2.5,
-  freezerTime: 20,        // tunnel = 20 - 2.5 - 2.5 = 15 min
+  freezerTime: 20,        // Freeze tunnel = 20 - 2.5 - 2.5 = 15 min
   pausedAt: null as number | null,
   lastResumeWallMs: 0,
   lastPauseStartWallMs: 0,
@@ -24,6 +24,38 @@ const T0 = 1_700_000_000_000; // fixed wall-clock anchor
 
 // ── Filling sequence ─────────────────────────────────────────────────────────
 describe("computeLinePhases — filling sequence", () => {
+  it("labels the physical middle phase as Freeze tunnel", () => {
+    const phases = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 5 * 60,
+      runStatus: "running",
+      nowMs: T0,
+    });
+
+    expect(phases.stage2.label).toBe("Freeze tunnel");
+  });
+
+  it("uses tunnel time changes for line phases while keeping the outer stages unchanged", () => {
+    const shorter = computeLinePhases({
+      ...BASE,
+      freezerTime: 12,
+      elapsedBatchSec: 8 * 60,
+      runStatus: "running",
+      nowMs: T0,
+    });
+    const longer = computeLinePhases({
+      ...BASE,
+      freezerTime: 24,
+      elapsedBatchSec: 8 * 60,
+      runStatus: "running",
+      nowMs: T0,
+    });
+
+    expect(shorter.stage1.state).toBe("active");
+    expect(longer.stage1.state).toBe("active");
+    expect(shorter.stage2.remainMs).toBeLessThan(longer.stage2.remainMs);
+  });
+
   it("Stage 1 filling, Stage 2 & 3 empty when elapsed < preTunnelMin", () => {
     const phases = computeLinePhases({
       ...BASE,
@@ -363,7 +395,7 @@ describe("computeLinePhases — pause propagation", () => {
 describe("computeLinePhases — resume propagation during filling phase (mid-fill pause)", () => {
   // Run paused at 10 min elapsed (Stage 2 still filling, 7.5 min remaining).
   // Pause lasted 3 min (> preTunnelMin=2.5) → Stage 2 was stopped.
-  it("Stage 2 shows resuming (not filling) after long pause mid-tunnel-fill", () => {
+  it("refills Stage 1 while the stopped full tunnel waits", () => {
     const pauseStart = T0 + 10 * 60000;
     const resumeAt = pauseStart + 3 * 60000;  // 3 min pause > preTunnelMin (2.5)
     const phases = computeLinePhases({
@@ -374,12 +406,12 @@ describe("computeLinePhases — resume propagation during filling phase (mid-fil
       lastPauseStartWallMs: pauseStart,
       nowMs: resumeAt + 30 * 1000,  // 30s after resume — restart-wave not arrived
     });
-    expect(phases.stage1.state).toBe("active");   // Stage 1 full & running
-    expect(phases.stage2.state).toBe("resuming"); // stopped during pause; product en route
-    expect(phases.stage2.remainMs).toBeGreaterThan(0);
+    expect(phases.stage1.state).toBe("resuming");
+    expect(phases.stage2.state).toBe("paused");
+    expect(phases.stage3.state).toBe("empty");
   });
 
-  it("Stage 2 returns to filling after resume propagation delay elapses", () => {
+  it("skips tunnel fill and refills Wrapper and Packaging after Stage 1", () => {
     const pauseStart = T0 + 10 * 60000;
     const resumeAt = pauseStart + 3 * 60000;
     const phases = computeLinePhases({
@@ -390,10 +422,11 @@ describe("computeLinePhases — resume propagation during filling phase (mid-fil
       lastPauseStartWallMs: pauseStart,
       nowMs: resumeAt + 4 * 60000,  // 4 min after resume — past preTunnelMin (2.5)
     });
-    expect(phases.stage2.state).toBe("filling");  // back to filling
+    expect(phases.stage2.state).toBe("active");
+    expect(phases.stage3.state).toBe("resuming");
   });
 
-  it("Stage 3 shows resuming after very long pause during Stage 2 filling (pause > preTunnelMin+tunnelMin)", () => {
+  it("preserves the same full-tunnel restart after a very long pause", () => {
     // Pause at 18 min (Stage 3 filling: 2 min into the 2.5-min Stage 3 window).
     // Pause for 20 min → Stage 2 & 3 were stopped.
     const pauseStart = T0 + 18 * 60000;
@@ -406,8 +439,9 @@ describe("computeLinePhases — resume propagation during filling phase (mid-fil
       lastPauseStartWallMs: pauseStart,
       nowMs: resumeAt + 30 * 1000,
     });
-    expect(phases.stage2.state).toBe("resuming");  // Stage 2 also stopped
-    expect(phases.stage3.state).toBe("resuming");  // stopped; resuming takes precedence over filling
+    expect(phases.stage1.state).toBe("resuming");
+    expect(phases.stage2.state).toBe("paused");
+    expect(phases.stage3.state).toBe("empty");
   });
 });
 
@@ -450,7 +484,7 @@ describe("computeLinePhases — resume propagation: LONG pause (> preTunnelMin +
   const pauseStart = T0 - 20 * 60000;
   const resumeTime = T0;
 
-  it("Stage 2 shows resuming for first preTunnelMin of wall time after long-pause resume", () => {
+  it("keeps the full tunnel stopped while the pre-tunnel line refills", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 25 * 60,
@@ -459,8 +493,9 @@ describe("computeLinePhases — resume propagation: LONG pause (> preTunnelMin +
       lastPauseStartWallMs: pauseStart,
       nowMs: T0 + 30 * 1000,    // 30s after resume — well within 2.5 min window
     });
-    expect(phases.stage2.state).toBe("resuming");
-    expect(phases.stage2.remainMs).toBeCloseTo(2 * 60000, -2); // ~2 min left of 2.5
+    expect(phases.stage1.state).toBe("resuming");
+    expect(phases.stage1.remainMs).toBeCloseTo(2 * 60000, -2);
+    expect(phases.stage2.state).toBe("paused");
   });
 
   it("Stage 2 returns to active once preTunnelMin has elapsed since resume", () => {
@@ -475,33 +510,32 @@ describe("computeLinePhases — resume propagation: LONG pause (> preTunnelMin +
     expect(phases.stage2.state).toBe("active");
   });
 
-  it("Stage 3 shows resuming for preTunnelMin + tunnelMin of wall time after long-pause resume", () => {
-    // Stage 3 restart travel time = preTunnelMin + tunnelMin = 2.5 + 15 = 17.5 min
+  it("refills Wrapper and Packaging after restarting the full tunnel", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 25 * 60,
       runStatus: "running",
       lastResumeWallMs: resumeTime,
       lastPauseStartWallMs: pauseStart,
-      nowMs: T0 + 5 * 60000,    // 5 min after resume — within 17.5 min Stage 3 window
+      nowMs: T0 + 4 * 60000,
     });
     expect(phases.stage3.state).toBe("resuming");
-    expect(phases.stage3.remainMs).toBeCloseTo(12.5 * 60000, -2); // 17.5-5 = 12.5 min left
+    expect(phases.stage3.remainMs).toBeCloseTo(1 * 60000, -2);
   });
 
-  it("Stage 3 returns to active once preTunnelMin + tunnelMin has elapsed since resume", () => {
+  it("Stage 3 returns to active once preTunnelMin + postTunnelMin has elapsed", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 25 * 60,
       runStatus: "running",
       lastResumeWallMs: resumeTime,
       lastPauseStartWallMs: pauseStart,
-      nowMs: T0 + 18 * 60000,  // 18 min — past 17.5 min Stage 3 restart window
+      nowMs: T0 + 5 * 60000,
     });
     expect(phases.stage3.state).toBe("active");
   });
 
-  it("Stage 1 is immediately active after resume with no propagation delay", () => {
+  it("Stage 1 refills from empty after resume", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 25 * 60,
@@ -510,7 +544,7 @@ describe("computeLinePhases — resume propagation: LONG pause (> preTunnelMin +
       lastPauseStartWallMs: pauseStart,
       nowMs: T0 + 10 * 1000,  // 10s after resume
     });
-    expect(phases.stage1.state).toBe("active");
+    expect(phases.stage1.state).toBe("resuming");
   });
 });
 
@@ -520,7 +554,7 @@ describe("computeLinePhases — resume propagation: MEDIUM pause (preTunnelMin <
   const pauseStart = T0 - 5 * 60000;
   const resumeTime = T0;
 
-  it("both downstream stages use the persisted stop-tunnel restart path", () => {
+  it("uses the persisted stop-tunnel restart path", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 25 * 60,
@@ -529,8 +563,48 @@ describe("computeLinePhases — resume propagation: MEDIUM pause (preTunnelMin <
       lastPauseStartWallMs: pauseStart,
       nowMs: T0 + 30 * 1000,   // 30s after resume
     });
-    expect(phases.stage2.state).toBe("resuming");
-    expect(phases.stage3.state).toBe("resuming");
+    expect(phases.stage1.state).toBe("resuming");
+    expect(phases.stage2.state).toBe("paused");
+    expect(phases.stage3.state).toBe("empty");
+  });
+});
+
+describe("computeLinePhases — resume after the tunnel was left running", () => {
+  it("replays the complete cold-start fill sequence", () => {
+    const pauseStart = T0 - 10 * 60000;
+    const atPreTunnel = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 25 * 60,
+      runStatus: "running",
+      lastResumeWallMs: T0,
+      lastPauseStartWallMs: pauseStart,
+      lastPauseStopsTunnel: false,
+      nowMs: T0 + 1 * 60000,
+    });
+    const inTunnel = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 25 * 60,
+      runStatus: "running",
+      lastResumeWallMs: T0,
+      lastPauseStartWallMs: pauseStart,
+      lastPauseStopsTunnel: false,
+      nowMs: T0 + 10 * 60000,
+    });
+    const atPackaging = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 25 * 60,
+      runStatus: "running",
+      lastResumeWallMs: T0,
+      lastPauseStartWallMs: pauseStart,
+      lastPauseStopsTunnel: false,
+      nowMs: T0 + 19 * 60000,
+    });
+
+    expect(atPreTunnel.stage1.state).toBe("resuming");
+    expect(atPreTunnel.stage2.state).toBe("empty");
+    expect(inTunnel.stage2.state).toBe("resuming");
+    expect(inTunnel.stage3.state).toBe("empty");
+    expect(atPackaging.stage3.state).toBe("resuming");
   });
 });
 
@@ -655,6 +729,28 @@ describe("computeLinePhases — normalization (oversized stage times)", () => {
 
 // ── Ended run wall-clock drain ───────────────────────────────────────────────
 describe("computeLinePhases — ended run wall-clock drain", () => {
+  it("uses the configured Freeze tunnel time for the physical drain window", () => {
+    const shorter = computeLinePhases({
+      ...BASE,
+      freezerTime: 12,
+      elapsedBatchSec: 5 * 60,
+      runStatus: "ended",
+      endedAt: T0,
+      nowMs: T0 + 10 * 60_000,
+    });
+    const longer = computeLinePhases({
+      ...BASE,
+      freezerTime: 24,
+      elapsedBatchSec: 5 * 60,
+      runStatus: "ended",
+      endedAt: T0,
+      nowMs: T0 + 10 * 60_000,
+    });
+
+    expect(shorter.stage3.state).toBe("draining");
+    expect(longer.stage2.state).toBe("draining");
+  });
+
   // For ended-run drain tests the run must have run long enough for all three
   // stages to have received product. Use elapsedBatchSec = 25 * 60 (past the
   // 20-min full fill) so the occupancy gates don't hide any stage.

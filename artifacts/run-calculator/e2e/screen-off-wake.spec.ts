@@ -51,9 +51,12 @@
  */
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
-import { Client as PgClient } from "pg";
-import { computeCasesOnLine } from "@workspace/inventory-math";
-import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
+import {
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
+  type E2ECapability,
+} from "./isolation";
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -62,67 +65,22 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const testUsernames = new Set<string>();
+const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+let authorizedFixtures: AuthorizedBrowserFixtures;
 
-test.afterAll(async () => {
-  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
-  const db = new PgClient({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    await cleanupTestUsers(db, testUsernames);
-  } finally {
-    await db.end().catch(() => {});
-  }
+test.beforeAll(async ({ playwright }) => {
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    API_BASE,
+    SIGNUP_CODE,
+  );
 });
 
-// ── auth helpers ──────────────────────────────────────────────────────────────
-
-/**
- * Sign up via the browser /sign-up page, then dismiss the "Get Started"
- * onboarding dialog that auto-opens on first login.
- *
- * Uses waitFor (not isVisible) so the 5-second patience window catches dialogs
- * that appear slightly after the app's startup effects complete.
- */
-async function signUpAndDismissDialog(
-  page: Page,
-  username: string,
-  password: string,
-): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-
-  // "Get Started" dialog always auto-opens on first login.
-  const getStartedBtn = page.getByRole("button", { name: /get.?started/i });
-  try {
-    await getStartedBtn.waitFor({ state: "visible", timeout: 8_000 });
-    await getStartedBtn.click();
-    await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 });
-    await page.waitForTimeout(300);
-  } catch {
-    // Dialog did not appear — page is already clear.
-  }
-}
-
-async function promoteCurrentPageUserToManager(page: Page): Promise<void> {
-  const identity = await page.evaluate(async () => {
-    const response = await fetch("/api/me");
-    return response.ok ? await response.json() as { userId?: string } : null;
+test.afterAll(async () => {
+  await authorizedFixtures?.cleanup({
+    syncDates: [new Date().toISOString().slice(0, 10)],
   });
-  const userId = identity?.userId;
-  expect(userId, "signed-in test user id").toBeTruthy();
-  const client = new PgClient({ connectionString: process.env.DATABASE_URL });
-  await client.connect();
-  await client.query("UPDATE user_roles SET role = 'manager' WHERE user_id = $1", [userId]);
-  await client.end();
-}
+});
 
 // ── form helpers ──────────────────────────────────────────────────────────────
 
@@ -427,20 +385,22 @@ async function waitForCaseCounterChange(
 }
 
 /** Set the measured machine times used by the live dough countdowns. */
-async function setMachineTimes(page: Page): Promise<void> {
-  const result = await page.evaluate(() => {
-    const values: Record<string, string> = {
+async function setMachineTimes(
+  page: Page,
+  values: Record<string, string> = {
       "input-mixerLowSec": "1",
       "input-mixerHighSec": "1",
       "input-hopperSec": "2",
-    };
+  },
+): Promise<void> {
+  const result = await page.evaluate((inputValues) => {
     const changed: string[] = [];
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value",
     )?.set;
     if (!setter) return changed;
-    for (const [testId, value] of Object.entries(values)) {
+    for (const [testId, value] of Object.entries(inputValues)) {
       const input = document.querySelector(
         `[data-testid="${testId}"]`,
       ) as HTMLInputElement | null;
@@ -451,7 +411,7 @@ async function setMachineTimes(page: Page): Promise<void> {
       changed.push(testId);
     }
     return changed;
-  });
+  }, values);
   expect(result, "machine timing inputs").toEqual([
     "input-mixerLowSec",
     "input-mixerHighSec",
@@ -470,6 +430,28 @@ async function readDoughCounters(page: Page): Promise<{
       trays: value("traysOnLine"),
       batches: value("batchesReady"),
     };
+  });
+}
+
+async function readLiveRunSnapshot(page: Page): Promise<{
+  runId: string;
+  values: Record<string, number | string | boolean | null | undefined>;
+}> {
+  return page.evaluate(async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`live run payload request failed: ${response.status}`);
+    }
+    const body = await response.json() as {
+      dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+      runValues?: Record<string, Record<string, number | string | boolean | null | undefined>>;
+    };
+    const runId = body.dayState?.currentRunId ?? body.dayState?.runs?.find((run) => run.id)?.id;
+    if (!runId || !body.runValues?.[runId]) {
+      throw new Error("current run is missing from the live run payload");
+    }
+    return { runId, values: body.runValues[runId] };
   });
 }
 
@@ -507,7 +489,7 @@ async function seedDoughCounters(
 
 /**
  * Full setup for one test:
- *   1. Sign up via browser and dismiss the onboarding dialog.
+ *   1. Create an isolated authorized account and open the app with its cookie.
  *   2. Navigate to the Run tab.
  *   3. Fill form values (cycleSpeed=30, crustsPerCycle=2, pizzasPerCase=6,
  *      casesPerSkid=10, freezerTime=5, casesNeeded=200).
@@ -522,10 +504,24 @@ async function seedDoughCounters(
  *   6. Wait for tile-cases-completed (confirms casesNeeded > 0 and run live).
  * Returns safeBaseMs, which is the exact startedAt the app stored.
  */
-async function setupAndStartRun(page: Page, casesPerSkid = "10"): Promise<number> {
+async function setupAndStartRun(
+  page: Page,
+  casesPerSkid = "10",
+  capabilities: readonly E2ECapability[] = [],
+): Promise<number> {
   const username = uid();
-  testUsernames.add(username);
-  await signUpAndDismissDialog(page, username, "TestPass123!");
+  const account = await authorizedFixtures.createAccount({
+    username,
+    password: "TestPass123!",
+    capabilities,
+  });
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: account.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
   await page.locator('[data-testid="tab-run"]').click();
   await fillFormValues(page, casesPerSkid);
@@ -594,15 +590,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
    * local/disposable database boundary as global-setup.ts.
    */
   test.beforeEach(async () => {
-    const url = requireIsolatedTestDatabase("screen-off-wake beforeEach");
-    const client = new PgClient({ connectionString: url });
-    try {
-      await client.connect();
-      const today = new Date().toISOString().slice(0, 10);
-      await client.query("DELETE FROM daily_sync WHERE date = $1", [today]);
-    } finally {
-      await client.end().catch(() => {});
-    }
+    await authorizedFixtures.removeTodaySync([
+      new Date().toISOString().slice(0, 10),
+    ]);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1074,6 +1064,213 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "speed adjustment during a dough run stays aligned across screen wake",
+    async ({ page }, testInfo) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
+
+      // Use the real Dough station controls to establish known on-hand stock,
+      // then return to Run for the operator's speed edit. The production
+      // fixture is intentionally simple: 60 PPM initially, 2 doughballs/tray,
+      // and 4 doughballs/batch.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await page.getByTestId("btn-resume-now").click();
+      await page.locator('[data-testid="tab-run"]').click();
+
+      const lineSetupDetails = page.locator("details").filter({
+        has: page.locator("summary", { hasText: /line.?setup/i }),
+      }).first();
+      if (!(await lineSetupDetails.evaluate((element) => (element as HTMLDetailsElement).open))) {
+        await lineSetupDetails.locator("summary").click();
+      }
+      const speedInput = page.locator('[data-testid="input-speedAdjustment"]:visible').first();
+      await expect(speedInput).toBeVisible();
+      expect(Number(await speedInput.inputValue()), "baseline speed adjustment").toBe(1);
+      await expect.poll(async () => {
+        const current = await readLiveRunSnapshot(page);
+        return {
+          speedAdjustment: current.values.speedAdjustment,
+          traysOnLine: current.values.traysOnLine,
+          batchesReady: current.values.batchesReady,
+        };
+      }, { timeout: 15_000 }).toEqual({
+        speedAdjustment: 1,
+        traysOnLine: 10,
+        batchesReady: 2,
+      });
+
+      // This is the operator action under test: slow the line while it is
+      // already running. A 12-second hidden interval is long enough to expose
+      // stale due timestamps at the new 30 PPM speed, but remains inside the
+      // five-minute freezer window so the case count stays at zero.
+      const speedEditedAt = safeBaseMs + 1_000;
+      await mockDateNow(page, speedEditedAt);
+      const speedPush = page.waitForRequest((request) => {
+        return request.method() === "PUT"
+          && new URL(request.url()).pathname.endsWith("/api/sync/today");
+      }, { timeout: 15_000 });
+      await speedInput.fill("0.5");
+      await speedPush;
+      await expect(speedInput).toHaveValue("0.5");
+      await expect.poll(async () => {
+        const snapshot = await readLiveRunSnapshot(page);
+        return snapshot.values.speedAdjustment;
+      }, { timeout: 15_000 }).toBe(0.5);
+
+      // Keep this journey focused on line-speed cadence. Zero measured machine
+      // times prevent a separate mixer completion from adding a full batch at
+      // the same visible boundary.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await setMachineTimes(page, {
+        "input-mixerLowSec": "0",
+        "input-mixerHighSec": "0",
+        "input-hopperSec": "0",
+      });
+      await seedDoughCounters(page, { trays: 0, batches: 0 });
+      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await page.getByTestId("btn-resume-now").click();
+      await page.locator('[data-testid="tab-run"]').click();
+
+      await page.screenshot({
+        path: testInfo.outputPath("speed-adjustment-before-wake.png"),
+        fullPage: true,
+      });
+
+      await simulateScreenOff(page);
+      const wakeAt = speedEditedAt + 12_000;
+      await mockDateNow(page, wakeAt);
+      await simulateWake(page);
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Production state recovered.", { timeout: 10_000 });
+
+      // Foreground reconciliation intentionally re-arms all live timers from
+      // the wake instant. Hidden time must not be replayed with either the old
+      // 60 PPM cadence or the new 30 PPM cadence, so the staged counters stay
+      // at their operator-entered values until a fresh visible interval.
+      await expect.poll(() => readDoughCounters(page), { timeout: 10_000 }).toEqual({
+        trays: 10,
+        batches: 2,
+      });
+
+      await expect.poll(async () => {
+        const current = await readLiveRunSnapshot(page);
+        return {
+          speedAdjustment: current.values.speedAdjustment,
+          traysOnLine: current.values.traysOnLine,
+          batchesReady: current.values.batchesReady,
+        };
+      }, { timeout: 10_000 }).toEqual({
+        speedAdjustment: 0.5,
+        traysOnLine: 10,
+        batchesReady: 2,
+      });
+
+      // Advance exactly one visible 2-second dough interval after the
+      // foreground rebase. At the edited 30 PPM cadence, tray production and
+      // quarter-batch consumption each fire once (the old 60 PPM cadence
+      // would fire both twice). Keep this after the unchanged-counter check so
+      // the test still proves hidden time was not replayed on wake.
+      const nextVisibleIntervalAt = wakeAt + 2_100;
+      await mockDateNow(page, nextVisibleIntervalAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Production state recovered.", { timeout: 10_000 });
+      await page.waitForTimeout(1_100);
+      await expect.poll(
+        () => readDoughCounters(page),
+        { timeout: 10_000, message: "post-wake dough cadence did not use the edited speed" },
+      ).toEqual({
+        trays: 11,
+        batches: 1.75,
+      });
+
+      const snapshot = await readLiveRunSnapshot(page);
+      const values = snapshot.values;
+      await page.locator('[data-testid="tab-run"]').click();
+      const casesCompleted =
+        Number(values.skidsCompleted ?? 0) * Number(values.casesPerSkid ?? 0)
+        + Number(values.casesOnCurrentSkid ?? 0);
+      expect(casesCompleted, "visible case count must match the live run payload").toBe(
+        await readCaseTotal(page),
+      );
+      expect(casesCompleted, "the new speed has not reached the freezer exit yet").toBe(0);
+      expect(values.speedAdjustment).toBe(0.5);
+      expect(values.traysOnLine).toBe(11);
+      expect(values.batchesReady).toBe(1.75);
+      const casesInFreezer = computeCasesInFreezer({
+        startedAt: safeBaseMs,
+        now: nextVisibleIntervalAt,
+        ppm: 30,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      });
+      const pressCasesLeft = Math.max(0, Number(values.casesNeeded ?? 200) - casesCompleted - casesInFreezer);
+
+      // Dough output cards must be derived from the same server-visible
+      // counters, not from a stale pre-wake React snapshot.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      const doughOnHand = Number(values.traysOnLine) * 2 + Number(values.batchesReady) * 4;
+      const casesOnLine = computeCasesOnLine({
+        startedAt: safeBaseMs,
+        now: nextVisibleIntervalAt,
+        ppm: 30,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      });
+      const casesLeftToRun =
+        Number(values.casesNeeded ?? 200)
+        - casesCompleted
+        - casesOnLine
+        + Number(values.casesPerLayer ?? 0);
+      const doughDeficit = Math.max(0, casesLeftToRun * 6 - doughOnHand);
+      await expect(page.getByTestId("output-batches-needed")).toHaveText(
+        (doughDeficit / 4).toFixed(2),
+      );
+      await expect(page.getByTestId("output-trays-needed")).toHaveText(
+        (doughDeficit / 2).toFixed(0),
+      );
+      await expect(page.locator('input[name="traysOnLine"]')).toHaveValue("11");
+      await expect(page.locator('input[name="batchesReady"]')).toHaveValue("1.75");
+
+      await page.locator('[data-testid="tab-run"]').click();
+      await expect(page.getByTestId("text-press-cases-left")).toContainText(`${pressCasesLeft} cases left`);
+
+      // Finish time must use the same live press-left value and adjusted 30 PPM
+      // cadence that the visible case count uses.
+      const adjustedFinishSec = (pressCasesLeft * 6 * 60) / 30;
+      const finishMinutes = Math.floor(adjustedFinishSec / 60);
+      const finishSeconds = Math.round(adjustedFinishSec % 60);
+      const expectedFinish = await page.evaluate((timestamp) =>
+        new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }),
+      nextVisibleIntervalAt + adjustedFinishSec * 1000);
+      const finishPanels = await page.getByText("Est. Finish", { exact: true }).evaluateAll(
+        (elements) => elements.map((element) => element.parentElement?.innerText ?? ""),
+      );
+      expect(
+        finishPanels.some((text) => text.includes(`${finishMinutes}m ${finishSeconds}s`)),
+        finishPanels.join(" | "),
+      ).toBe(true);
+      expect(finishPanels.some((text) => text.includes(expectedFinish)), finishPanels.join(" | ")).toBe(true);
+
+      await page.screenshot({
+        path: testInfo.outputPath("speed-adjustment-after-wake.png"),
+        fullPage: true,
+      });
+    },
+  );
+
+  test(
     "C. disconnected sleeping peer adopts remote Stop before stale recovery writes and after reload",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
       test.slow();
@@ -1107,7 +1304,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         expect(result).toEqual({ ok: true, status: 200 });
       };
 
-      const safeBaseMs = await setupAndStartRun(page);
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
       // setupAndStartRun deliberately exercises the same focus path used by a
       // returning PWA. Let that initial reconciliation settle before this
       // scenario starts the second device, so Device A's Stop is an ordinary
@@ -1127,7 +1328,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toContainText("Production state recovered.", { timeout: 20_000 });
       // This scenario exercises manager-only profile/factory APIs. Other
       // screen-wake cases intentionally run as floor staff.
-      await promoteCurrentPageUserToManager(page);
       // Browser time is deliberately fixed at 21:00 for this clock suite.
       // Keep profile LWW stamps ahead of real Node time so the peer's mocked
       // clock cannot make an older remote profile look stale.
@@ -1269,6 +1469,364 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       } finally {
         await peer.setOffline(false);
         await peer.close();
+      }
+    },
+  );
+
+  test(
+    "E. one device keeps a paired Packaging correction through wake and reload",
+    async ({ page }) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(page, "48");
+      // At +12:48.5 min, 7:48.5 min of product has exited the five-minute
+      // tunnel: floor(7.8083 × 60 / 6) = 78 cases = 1 skid + 30 cases.
+      const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt);
+      await simulateWake(page);
+      await waitForCaseCounterChange(page, 0, 8_000);
+      expect(await readCaseTotal(page)).toBe(78);
+
+      await page.locator('[data-testid="tab-packaging"]').click();
+      const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
+      const cases = page.locator('[data-testid="text-casesOnCurrentSkid"]').first();
+      await expect(skids).toContainText("1");
+      await expect(cases).toHaveText("30");
+
+      // Reproduce the operator's paired correction while auto tracking is live:
+      // subtract one completed skid, then add fifteen cases to that same skid.
+      // 1/30 -> 0/30 -> 0/45. The 48-case maximum permits the full correction.
+      await mockDateNow(page, Date.now());
+      await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
+      for (let i = 0; i < 15; i++) {
+        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+      }
+      await expect(skids).toContainText("0");
+      await expect(cases).toHaveText("45");
+
+      const canonical = await page.waitForFunction(async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          packagingProgress?: Record<string, {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+            correctionGeneration?: number;
+          }>;
+        };
+        const runId = body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id;
+        const values = runId ? body.runValues?.[runId] : undefined;
+        const progress = runId ? body.packagingProgress?.[runId] : undefined;
+        return runId && values?.skidsCompleted === 0
+          && values.casesOnCurrentSkid === 45
+          && progress?.skidsCompleted === 0
+          && progress.casesOnCurrentSkid === 45
+          && (progress.correctionGeneration ?? 0) > 0
+          ? { runId, values, progress }
+          : false;
+      }, undefined, { timeout: 15_000 });
+      const canonicalState = await canonical.jsonValue() as {
+        runId: string;
+        values: { skidsCompleted: number; casesOnCurrentSkid: number };
+        progress: { skidsCompleted: number; casesOnCurrentSkid: number; correctionGeneration: number };
+      };
+
+      // Let the active line run briefly, then put this only device to sleep.
+      // The server hold is intentionally still active, so wake cannot replace
+      // the acknowledged pair with an automatic baseline.
+      await page.waitForTimeout(1_500);
+      await simulateScreenOff(page);
+      await mockDateNow(page, Date.now() + 5_000);
+      await simulateWake(page);
+      await expect(cases).toHaveText("45", { timeout: 15_000 });
+      await expect(skids).toContainText("0");
+
+      const afterWake = await page.evaluate((serverRunId) => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          currentIndex?: number;
+          runs?: Array<{ id?: string }>;
+        };
+        const runIds = (day.runs ?? []).map((run) => run.id).filter(
+          (id): id is string => Boolean(id),
+        );
+        const runId = runIds.includes(serverRunId)
+          ? serverRunId
+          : runIds[day.currentIndex ?? 0] ?? runIds[0];
+        const values = JSON.parse(
+          localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
+        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
+        const progressMap = JSON.parse(
+          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+        ) as Record<string, {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+          correctionGeneration?: number;
+        }>;
+        return {
+          values,
+          progress: progressMap[runId],
+          runId,
+          serverRunId,
+          runIds,
+          keys: Object.keys(localStorage).filter((key) => key.startsWith("run-calc-run-")),
+        };
+      }, canonicalState.runId);
+      expect(
+        afterWake.runId,
+        `local run id must match canonical ${canonicalState.runId}; local keys=${afterWake.keys.join(",")}`,
+      ).toBe(canonicalState.runId);
+      expect(afterWake.values).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
+      });
+      expect(afterWake.progress).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
+        correctionGeneration: canonicalState.progress.correctionGeneration,
+      });
+
+      const serverHold = await page.evaluate(async (runId) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          packagingProgress?: Record<string, { manualOverrideUntil?: number }>;
+        };
+        return body.packagingProgress?.[runId]?.manualOverrideUntil ?? 0;
+      }, canonicalState.runId);
+      const holdRemaining = Math.max(0, serverHold - Date.now() + 150);
+      expect(holdRemaining, "canonical manual correction hold").toBeLessThanOrEqual(60_500);
+      await page.waitForTimeout(holdRemaining);
+
+      // One case period after the automatic baseline (78 -> 79 expected) must
+      // advance the corrected total (45 -> 46), not restore the old 1/30 pair.
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt + 6_001);
+      await simulateWake(page);
+      await expect(cases).toHaveText("46", { timeout: 15_000 });
+      await expect(skids).toContainText("0");
+
+      // Reload is a separate persistence boundary: form, durable run values,
+      // Packaging register, and canonical server state must still agree.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-packaging"]')
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
+        .toHaveText("46", { timeout: 20_000 });
+      await expect(page.locator('[data-testid="text-skidsCompleted"]').first())
+        .toContainText("0");
+
+      const persisted = await page.evaluate(async (runId) => {
+        const values = JSON.parse(
+          localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
+        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
+        const progressMap = JSON.parse(
+          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+        ) as Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        };
+        return {
+          values,
+          progress: progressMap[runId],
+          serverValues: body.runValues?.[runId],
+          serverProgress: body.packagingProgress?.[runId],
+        };
+      }, canonicalState.runId);
+      expect(persisted.values).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+      expect(persisted.progress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+      expect(persisted.serverValues).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+      expect(persisted.serverProgress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
+    },
+  );
+
+  test(
+    "F. a failed Packaging correction stays visible on phone until an explicit retry",
+    async ({ page }, testInfo) => {
+      test.slow();
+      await page.setViewportSize({ width: 390, height: 844 });
+      const safeBaseMs = await setupAndStartRun(page, "48");
+      const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt);
+      await simulateWake(page);
+      await waitForCaseCounterChange(page, 0, 8_000);
+      expect(await readCaseTotal(page)).toBe(78);
+
+      await page.locator('[data-testid="tab-packaging"]').click();
+      const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
+      const cases = page.locator('[data-testid="text-casesOnCurrentSkid"]').first();
+      await expect(skids).toContainText("1");
+      await expect(cases).toHaveText("30");
+
+      const runId = await page.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          currentRunId?: string;
+          currentIndex?: number;
+          runs?: Array<{ id?: string }>;
+        };
+        return day.currentRunId ?? day.runs?.[day.currentIndex ?? 0]?.id ?? day.runs?.[0]?.id ?? null;
+      });
+      expect(runId, "active run id").toBeTruthy();
+
+      const initial = await page.waitForFunction(async (id) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+        const body = await response.json() as {
+          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          packagingProgress?: Record<string, {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+            correctionGeneration?: number;
+          }>;
+        };
+        const values = body.runValues?.[id];
+        const progress = body.packagingProgress?.[id];
+        return values?.skidsCompleted === 1
+          && values.casesOnCurrentSkid === 30
+          && progress?.skidsCompleted === 1
+          && progress.casesOnCurrentSkid === 30
+          ? { correctionGeneration: progress.correctionGeneration ?? 0 }
+          : false;
+      }, runId, { timeout: 15_000 });
+      const initialState = await initial.jsonValue() as { correctionGeneration: number };
+
+      let blocked = true;
+      let blockedWrites = 0;
+      await page.route("**/api/sync/today**", async (route) => {
+        const request = route.request();
+        if (request.method() === "PUT") {
+          const requestBody = JSON.parse(request.postData() ?? "{}") as {
+            payload?: {
+              packagingProgress?: Record<string, { correctionGeneration?: number }>;
+            };
+          };
+          const progress = requestBody.payload?.packagingProgress?.[runId!];
+          if (
+            blocked
+            && progress
+            && (progress.correctionGeneration ?? 0) > initialState.correctionGeneration
+          ) {
+            blockedWrites += 1;
+            await route.fulfill({
+              status: 503,
+              contentType: "application/json",
+              body: JSON.stringify({ error: "controlled Packaging sync outage" }),
+            });
+            return;
+          }
+        }
+        await route.continue();
+      });
+
+      try {
+        // 1/30 -> 0/30 -> 0/45. The corrected pair must remain local while
+        // every PUT carrying the correction is rejected.
+        await mockDateNow(page, Date.now());
+        await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
+        for (let i = 0; i < 15; i++) {
+          await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+        }
+        await expect(skids).toContainText("0");
+        await expect(cases).toHaveText("45");
+        await expect(skids).toBeVisible();
+        await expect(cases).toBeVisible();
+        await expect.poll(() => blockedWrites, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+
+        const localPair = await page.evaluate((id) => {
+          const values = JSON.parse(
+            localStorage.getItem(`run-calc-run-${id}`) ?? "{}",
+          ) as { skidsCompleted?: number; casesOnCurrentSkid?: number };
+          const progress = JSON.parse(
+            localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+          ) as Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          return { values, progress: progress[id] };
+        }, runId);
+        expect(localPair.values).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 45 });
+        expect(localPair.progress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 45 });
+
+        const notAcknowledged =
+          "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.";
+        await expect(page.getByText(notAcknowledged, { exact: true })).toBeVisible({ timeout: 20_000 });
+
+        await page.locator('button[title="Sync connected"]').click();
+        await expect(page.getByText(
+          "Your local change is retained on this device. It is not shared until the server acknowledges it.",
+          { exact: true },
+        )).toBeVisible();
+        await expect(page.getByText(notAcknowledged, { exact: true })).toBeVisible();
+        await expect(page.getByText("Pending writes")).toBeVisible();
+        const retry = page.getByRole("button", {
+          name: "Retry latest retained change",
+          exact: true,
+        });
+        await expect(retry).toBeVisible();
+        await expect(retry).toBeEnabled();
+        const pendingGeometry = await page.evaluate(() => ({
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        }));
+        expect(pendingGeometry.documentScrollWidth).toBeLessThanOrEqual(
+          pendingGeometry.viewportWidth + 1,
+        );
+        expect(pendingGeometry.bodyScrollWidth).toBeLessThanOrEqual(
+          pendingGeometry.viewportWidth + 1,
+        );
+        await page.screenshot({
+          path: testInfo.outputPath("packaging-correction-pending.png"),
+          fullPage: true,
+        });
+
+        blocked = false;
+        await retry.click();
+        await expect.poll(async () => page.evaluate(async (id) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+          const body = await response.json() as {
+            runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+            packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+          };
+          const values = body.runValues?.[id];
+          const progress = body.packagingProgress?.[id];
+          return values?.skidsCompleted === 0
+            && values.casesOnCurrentSkid === 45
+            && progress?.skidsCompleted === 0
+            && progress.casesOnCurrentSkid === 45;
+        }, runId), { timeout: 15_000 }).toBe(true);
+        await expect(page.getByText(notAcknowledged, { exact: true })).toBeHidden();
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.locator('[data-testid="tab-packaging"]')
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await expect(page.locator('[data-testid="text-skidsCompleted"]').first())
+          .toContainText("0", { timeout: 20_000 });
+        await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
+          .toHaveText("45", { timeout: 20_000 });
+        const convergedGeometry = await page.evaluate(() => ({
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        }));
+        expect(convergedGeometry.documentScrollWidth).toBeLessThanOrEqual(
+          convergedGeometry.viewportWidth + 1,
+        );
+        expect(convergedGeometry.bodyScrollWidth).toBeLessThanOrEqual(
+          convergedGeometry.viewportWidth + 1,
+        );
+        await page.screenshot({
+          path: testInfo.outputPath("packaging-correction-converged.png"),
+          fullPage: true,
+        });
+      } finally {
+        blocked = false;
+        await page.unroute("**/api/sync/today**").catch(() => {});
       }
     },
   );

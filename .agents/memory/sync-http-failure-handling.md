@@ -7,4 +7,4 @@ The sync client must branch on the HTTP success status before treating a write r
 
 **Why:** A non-401 server failure was parsed successfully and then fell through the success path, clearing the retained-change warning and preventing the retry action from appearing.
 
-**How to apply:** When changing sync response parsing or retry behavior, test a controlled 5xx write at phone width and verify the failed status, retained-change guidance, and manual retry control.
+**How to apply:** When changing sync response parsing or retry behavior, test a controlled 5xx write at phone width and verify the terminal failed status, retained-change guidance, and manual retry control; wait for automatic retries to exhaust before asserting the final failure UI.

@@ -1,6 +1,7 @@
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import {
   buildReviewPrompt,
+  normalizeReviewItems,
   sanitizeReviewVerdicts,
   verdictsById,
   type ReviewItem,
@@ -24,6 +25,25 @@ type ReviewLogger = {
 // contract, so it is stripped before the verdict is attached to a suggestion.
 type PublicVerdict = Omit<ReviewVerdict, "id">;
 
+const REVIEW_CACHE_TTL_MS = 10 * 60 * 1000;
+const reviewCache = new Map<string, { expiresAt: number; verdicts: Map<string, PublicVerdict> }>();
+
+function reviewFingerprint(
+  featureLabel: string,
+  instructions: string,
+  items: ReadonlyArray<ReviewItem>,
+): string {
+  return JSON.stringify({
+    featureLabel: featureLabel.trim(),
+    instructions: instructions.trim(),
+    items: normalizeReviewItems(items),
+  });
+}
+
+export function clearReviewSuggestionCache(): void {
+  reviewCache.clear();
+}
+
 export async function reviewSuggestions(opts: {
   featureLabel: string;
   instructions: string;
@@ -34,7 +54,15 @@ export async function reviewSuggestions(opts: {
   // Nothing to review — skip the (paid) call entirely.
   if (items.length === 0) return new Map();
 
-  const { system, user } = buildReviewPrompt(featureLabel, instructions, items);
+  const normalizedItems = normalizeReviewItems(items);
+  const key = reviewFingerprint(featureLabel, instructions, normalizedItems);
+  const cached = reviewCache.get(key);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) return new Map(cached.verdicts);
+    reviewCache.delete(key);
+  }
+
+  const { system, user } = buildReviewPrompt(featureLabel, instructions, normalizedItems);
 
   let content = "";
   try {
@@ -71,5 +99,6 @@ export async function reviewSuggestions(opts: {
   for (const [id, v] of byId) {
     out.set(id, v.reason !== undefined ? { status: v.status, reason: v.reason } : { status: v.status });
   }
+  reviewCache.set(key, { expiresAt: Date.now() + REVIEW_CACHE_TTL_MS, verdicts: new Map(out) });
   return out;
 }

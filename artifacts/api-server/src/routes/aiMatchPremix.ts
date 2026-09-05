@@ -1,5 +1,11 @@
 import { AiMatchPremixBody } from "@workspace/api-zod";
-import { sanitizePremixMatches, type PremixMatch } from "@workspace/premix-import";
+import {
+  groundPremix,
+  sanitizePremixMatches,
+  type ParsedPremix,
+  type PremixMatch,
+  type PremixKnown,
+} from "@workspace/premix-import";
 import * as z from "zod";
 
 // Bounds so a single request can't blow up cost/latency or return junk. Mirrors
@@ -13,6 +19,11 @@ export type MatchPremixInput = z.infer<typeof AiMatchPremixBody>;
 export type MatchPremixValidationResult =
   | { ok: true; data: MatchPremixInput }
   | { ok: false; status: number; error: string };
+
+export type DeterministicMatchPremixResult = {
+  matches: PremixMatch[];
+  unresolvedNames: string[];
+};
 
 // Validate and bound-check the request body for POST /ai/match-premix.
 export function validateMatchPremixBody(body: unknown): MatchPremixValidationResult {
@@ -42,6 +53,47 @@ export function validateMatchPremixBody(body: unknown): MatchPremixValidationRes
     };
   }
   return { ok: true, data };
+}
+
+/**
+ * Run the same alias/exact/fuzzy product grounding used by the premix importer
+ * before a request reaches the model. This route-level pass protects the cost
+ * gate for older clients and keeps the model payload limited to genuinely
+ * unresolved product names.
+ */
+export function resolveDeterministicMatchPremix(
+  input: MatchPremixInput,
+): DeterministicMatchPremixResult {
+  const known: PremixKnown = {
+    brands: input.brands,
+    flavorsByBrand: input.brandFlavors,
+    ingredients: [],
+  };
+  const matches: PremixMatch[] = [];
+  const unresolvedNames: string[] = [];
+  for (const name of input.unmatchedNames) {
+    const parsed: ParsedPremix = {
+      name,
+      brand: "",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      pullIngredients: [],
+      components: [],
+      sheetName: "",
+    };
+    const grounded = groundPremix(parsed, known, []);
+    if (grounded.productResolved && grounded.mix.brand && grounded.mix.flavor) {
+      matches.push({
+        name,
+        brand: grounded.mix.brand,
+        flavor: grounded.mix.flavor,
+      });
+    } else {
+      unresolvedNames.push(name);
+    }
+  }
+  return { matches, unresolvedNames };
 }
 
 /**

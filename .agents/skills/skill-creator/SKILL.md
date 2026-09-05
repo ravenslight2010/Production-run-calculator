@@ -19,6 +19,9 @@ For maintenance-mode guidance, read `references/maintenance.md` when improving
 an existing skill. It covers identity preservation, bounded evaluation, safety,
 and completion checks without expanding the core workflow.
 
+Use `external-skill-import` before incorporating archive or GitHub material;
+finish its inventory, license, ownership, and compatibility review first.
+
 At a high level, the process of creating a skill goes like this:
 
 - Decide what you want the skill to do and roughly how it should do it
@@ -76,6 +79,10 @@ Check available MCPs - if useful for research (searching docs, finding similar s
 Based on the user interview, fill in these components:
 
 - **name**: Skill identifier
+- **name** must be the exact directory name: a lowercase-hyphen identifier
+  matching `^[a-z0-9]+(?:-[a-z0-9]+)*$`. For example, the directory
+  `inventory-audit/` must declare `name: inventory-audit`, not a human-readable
+  title such as `Inventory Audit`.
 - **description**: When to trigger, what it does. This is the primary triggering mechanism - include both what the skill does AND specific contexts for when to use it. All "when to use" info goes here, not in the body. Note: currently Claude has a tendency to "undertrigger" skills -- to not use them when they'd be useful. To combat this, please make the skill descriptions a little bit "pushy". So for instance, instead of "How to build a simple fast dashboard to display internal Anthropic data.", you might write "How to build a simple fast dashboard to display internal Anthropic data. Make sure to use this skill whenever the user mentions dashboards, data visualization, internal metrics, or wants to display any kind of company data, even if they don't explicitly ask for a 'dashboard.'"
 - **compatibility**: Required tools, dependencies (optional, rarely needed)
 - **the rest of the skill :)**
@@ -87,7 +94,7 @@ Based on the user interview, fill in these components:
 ```
 skill-name/
 ├── SKILL.md (required)
-│   ├── YAML frontmatter (name, description required)
+│   ├── YAML frontmatter (`name: skill-name`, description required)
 │   └── Markdown instructions
 └── Bundled Resources (optional)
     ├── scripts/    - Executable code for deterministic/repetitive tasks
@@ -334,11 +341,9 @@ Keep going until:
 
 ---
 
-## Advanced: Blind comparison
+## Advanced workflows
 
-For situations where you want a more rigorous comparison between two versions of a skill (e.g., the user asks "is the new version actually better?"), there's a blind comparison system. Read `agents/comparator.md` and `agents/analyzer.md` for the details. The basic idea is: give two outputs to an independent agent without telling it which is which, and let it judge quality. Then analyze why the winner won.
-
-This is optional, requires subagents, and most users won't need it. The human review loop is usually sufficient.
+For the optional advanced comparison, trigger-optimization, packaging, and environment-specific paths, read `references/advanced-workflows.md`.
 
 ---
 
@@ -443,7 +448,6 @@ In Claude.ai, the core workflow is the same (draft → test → review → impro
 
 **Description optimization**: This section requires the `claude` CLI tool (specifically `claude -p`) which is only available in Claude Code. Skip it if you're on Claude.ai.
 
-**Blind comparison**: Requires subagents. Skip it.
 
 **Packaging**: The `package_skill.py` script works anywhere with Python and a filesystem. On Claude.ai, you can run it and the user can download the resulting `.skill` file.
 
@@ -462,7 +466,6 @@ If you're in Cowork, the main things to know are:
 - You don't have a browser or display, so when generating the eval viewer, use `--static <output_path>` to write a standalone HTML file instead of starting a server. Then proffer a link that the user can click to open the HTML in their browser.
 - For whatever reason, the Cowork setup seems to disincline Claude from generating the eval viewer after running the tests, so just to reiterate: whether you're in Cowork or in Claude Code, after running tests, you should always generate the eval viewer for the human to look at examples before revising the skill yourself and trying to make corrections, using `generate_review.py` (not writing your own boutique html code). Sorry in advance but I'm gonna go all caps here: GENERATE THE EVAL VIEWER *BEFORE* evaluating inputs yourself. You want to get them in front of the human ASAP!
 - Feedback works differently: since there's no running server, the viewer's "Submit All Reviews" button will download `feedback.json` as a file. You can then read it from there (you may have to request access first).
-- Packaging works — `package_skill.py` just needs Python and a filesystem.
 - Description optimization (`run_loop.py` / `run_eval.py`) should work in Cowork just fine since it uses `claude -p` via subprocess, not a browser, but please save it until you've fully finished making the skill and the user agrees it's in good shape.
 - **Updating an existing skill**: The user might be asking you to update an existing skill, not create a new one. Follow the update guidance in the claude.ai section above.
 
@@ -478,6 +481,7 @@ The agents/ directory contains instructions for specialized subagents. Read them
 
 The references/ directory has additional documentation:
 - `references/schemas.md` — JSON structures for evals.json, grading.json, etc.
+- `references/advanced-workflows.md` — optional blind comparison, description optimization, packaging, and environment-specific guidance.
 
 ---
 
@@ -488,10 +492,6 @@ Repeating one more time the core loop here for emphasis:
 - Run claude-with-access-to-the-skill on test prompts
 - With the user, evaluate the outputs:
   - Create benchmark.json and run `eval-viewer/generate_review.py` to help the user review them
-  - Run quantitative evals
 - Repeat until you and the user are satisfied
-- Package the final skill and return it to the user.
 
 Please add steps to your TodoList, if you have such a thing, to make sure you don't forget. If you're in Cowork, please specifically put "Create evals JSON and run `eval-viewer/generate_review.py` so human can review test cases" in your TodoList to make sure it happens.
-
-Good luck!

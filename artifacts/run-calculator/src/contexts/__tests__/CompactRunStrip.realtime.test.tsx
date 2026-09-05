@@ -178,6 +178,49 @@ describe("CompactRunStrip — real-time LiveRunContext subscription", () => {
     // The non-subscriber must not have been re-rendered by the clock.
     expect(nonSubRenderCount).toBe(countAfterMount);
   });
+
+  it("reports zero completion for a selected pending run during a cross-run handoff", () => {
+    const pendingRun: RunMeta = {
+      id: "pending-run",
+      brand: "Pending Brand",
+      flavor: "Pending Flavor",
+    };
+    const contaminated = {
+      ...ACTIVE_VALUES,
+      casesNeeded: 144,
+      casesPerSkid: 72,
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 41,
+    };
+    let completion: { casesCompleted: number; casesPct: number } | null = null;
+
+    function PendingRunProgressProbe() {
+      const { calc, casesPct } = useLiveRun();
+      completion = { casesCompleted: calc.casesCompleted, casesPct };
+      return null;
+    }
+
+    render(
+      <LiveRunProvider
+        runStatus="pending"
+        currentRun={pendingRun}
+        currentRunId={pendingRun.id}
+        v={contaminated}
+        ve={contaminated}
+        form={{} as UseFormReturn<FormValues>}
+        dayState={{ runs: [pendingRun], currentIndex: 0 }}
+        doughSubTab="dough"
+        upcomingRunLabels={[]}
+        prefs={undefined}
+        screenMode={null}
+        machine={{ spinSec: 0, hopperSec: 0 }}
+      >
+        <PendingRunProgressProbe />
+      </LiveRunProvider>,
+    );
+
+    expect(completion).toEqual({ casesCompleted: 0, casesPct: 0 });
+  });
 });
 
 // ── Mock reference stability ──────────────────────────────────────────────────

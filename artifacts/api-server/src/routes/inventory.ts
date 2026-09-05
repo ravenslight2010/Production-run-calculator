@@ -101,6 +101,7 @@ function observationResponse(row: typeof inventoryObservationsTable.$inferSelect
 const ConsumeSauceBarrelBody = z.object({
   runId: z.string(),
   barrelIndex: z.number().int().positive(),
+  eventId: z.string().min(1).max(160).optional(),
   itemKey: z.string().min(1),
   qty: z.number().positive(),
 });
@@ -304,14 +305,14 @@ async function loadItemResponse(itemId: number) {
 
 // Executor type shared by the top-level db handle and a transaction handle, so
 // drawDown can run either standalone or inside a transaction.
-type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type InventoryExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // Draw `qty` out of an item's lots in FIFO/FEFO order. Never goes negative;
 // returns how much was actually consumed (may be less than requested). The
 // ordering and never-negative math live in planDrawDown (pure, unit-tested);
 // this wrapper only adds the locking read and persists the planned updates.
 export async function drawDown(
-  exec: Executor,
+  exec: InventoryExecutor,
   itemId: number,
   qty: number,
   locationCond?: SQL,
@@ -320,7 +321,7 @@ export async function drawDown(
 }
 
 async function drawDownDetails(
-  exec: Executor,
+  exec: InventoryExecutor,
   itemId: number,
   qty: number,
   locationCond?: SQL,
@@ -1484,43 +1485,71 @@ export async function consumeSauceBarrel(
   barrelIndex: number,
   itemKey: string,
   qty: number,
+  eventId?: string,
 ): Promise<{ applied: boolean; consumed: number }> {
-  const claimId = `${runId}:sauce-barrel:${barrelIndex}`;
   return db.transaction(async (tx) => {
-    const [claim] = await tx
-      .insert(inventoryConsumedRunsTable)
-      .values({ runId: claimId, scope: currentScope() })
-      .onConflictDoNothing({
-        target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
-      })
-      .returning();
-    if (!claim) return { applied: false, consumed: 0 };
-
-    const [item] = await tx
-      .select()
-      .from(inventoryItemsTable)
-      .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
-    if (!item) return { applied: true, consumed: 0 };
-
-    const onsiteId = await resolveOnsiteLocationId();
-    const consumed = await drawDown(tx, item.id, qty, onsiteLotCond(onsiteId));
-    if (consumed > 0) {
-      await tx.insert(inventoryLedgerTable).values({
-        itemId: item.id,
-        scope: currentScope(),
-        lotId: null,
-        type: "consume",
-        qtyDelta: -consumed,
-        runId,
-        note: `Sauce barrel ${barrelIndex} used during run`,
-      });
-      await tx
-        .update(inventoryItemsTable)
-        .set({ updatedAt: new Date() })
-        .where(and(eq(inventoryItemsTable.id, item.id), eq(inventoryItemsTable.scope, currentScope())));
-    }
-    return { applied: true, consumed };
+    return consumeSauceBarrelInTransaction(tx, runId, barrelIndex, itemKey, qty, false, eventId);
   });
+}
+
+/**
+ * Claim and draw down one Sauce barrel inside the caller's transaction.
+ * Automatic tracking sets requireItem so a missing inventory mapping rolls
+ * back both the progress claim and its inventory marker for a safe retry.
+ */
+export async function consumeSauceBarrelInTransaction(
+  tx: InventoryExecutor,
+  runId: string,
+  barrelIndex: number,
+  itemKey: string,
+  qty: number,
+  requireItem = true,
+  eventId?: string,
+): Promise<{ applied: boolean; consumed: number }> {
+  const scope = currentScope();
+  const claimId = eventId
+    ? `${runId}:sauce-event:${eventId}`
+    : `${runId}:sauce-barrel:${barrelIndex}`;
+  const [claim] = await tx
+    .insert(inventoryConsumedRunsTable)
+    .values({ runId: claimId, scope })
+    .onConflictDoNothing({
+      target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+    })
+    .returning();
+  if (!claim) return { applied: false, consumed: 0 };
+
+  const [item] = await tx
+    .select()
+    .from(inventoryItemsTable)
+    .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, scope)));
+  if (!item) {
+    if (requireItem) throw new Error(`No inventory item is linked for ${itemKey}`);
+    return { applied: true, consumed: 0 };
+  }
+
+  const [onsite] = await tx
+    .select({ id: inventoryLocationsTable.id })
+    .from(inventoryLocationsTable)
+    .where(and(eq(inventoryLocationsTable.scope, scope), eq(inventoryLocationsTable.isOnsite, true)))
+    .limit(1);
+  const consumed = await drawDown(tx, item.id, qty, onsiteLotCond(onsite?.id ?? null));
+  if (consumed > 0) {
+    await tx.insert(inventoryLedgerTable).values({
+      itemId: item.id,
+      scope,
+      lotId: null,
+      type: "consume",
+      qtyDelta: -consumed,
+      runId,
+      note: `Sauce barrel ${barrelIndex} used during run`,
+    });
+    await tx
+      .update(inventoryItemsTable)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(inventoryItemsTable.id, item.id), eq(inventoryItemsTable.scope, scope)));
+  }
+  return { applied: true, consumed };
 }
 
 router.post("/inventory/consume-sauce-barrel", async (req, res): Promise<void> => {
@@ -1529,8 +1558,8 @@ router.post("/inventory/consume-sauce-barrel", async (req, res): Promise<void> =
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { runId, barrelIndex, itemKey, qty } = parsed.data;
-  const result = await consumeSauceBarrel(runId, barrelIndex, itemKey, qty);
+  const { runId, barrelIndex, eventId, itemKey, qty } = parsed.data;
+  const result = await consumeSauceBarrel(runId, barrelIndex, itemKey, qty, eventId);
   broadcast(headerSenderId(req), currentScope());
   res.json(result);
 });

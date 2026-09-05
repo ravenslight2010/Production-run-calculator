@@ -30,6 +30,15 @@ export const DEFAULT_SKILL_ROOTS: SkillRoot[] = [
   },
 ];
 
+const PROJECT_REFERENCE_PREFIXES = [
+  ".agents/",
+  ".local/",
+  "artifacts/",
+  "evals/",
+  "lib/",
+  "scripts/",
+];
+
 export type DuplicateAllowlistEntry = {
   name: string;
   roots: string[];
@@ -53,6 +62,7 @@ export type FindingCode =
   | "frontmatter_duplicate_field"
   | "missing_name"
   | "invalid_name"
+  | "name_directory_mismatch"
   | "name_too_long"
   | "missing_description"
   | "description_too_long"
@@ -196,14 +206,78 @@ function isSafeLocalReference(target: string): boolean {
   );
 }
 
-function localReferenceTargets(content: string): Array<{ target: string; line: number }> {
-  const references: Array<{ target: string; line: number }> = [];
+function isSafeInlineLocalReference(target: string): boolean {
+  const isFileLike =
+    !target.endsWith("/") &&
+    !target.includes("<") &&
+    !target.includes(">") &&
+    !target.includes("*") &&
+    !/\s/.test(target) &&
+    /\.[A-Za-z0-9]+$/.test(target);
+
+  if (
+    target === "SKILL.md" ||
+    target.startsWith("./") ||
+    target.startsWith("../") ||
+    target.startsWith("references/") ||
+    target.startsWith("scripts/") ||
+    target.startsWith("assets/")
+  ) {
+    return isFileLike;
+  }
+
+  return (
+    PROJECT_REFERENCE_PREFIXES.some((prefix) => target.startsWith(prefix)) &&
+    isFileLike
+  );
+}
+
+function withoutReferenceSuffix(target: string): string {
+  return target.split("#", 1)[0].split("?", 1)[0];
+}
+
+function lineNumberAt(content: string, index: number): number {
+  return content.slice(0, index).split(/\r?\n/).length;
+}
+
+type LocalReferenceTarget = {
+  target: string;
+  line: number;
+  source: "markdown" | "inline";
+};
+
+function localReferenceTargets(content: string): LocalReferenceTarget[] {
+  const references: LocalReferenceTarget[] = [];
   const markdownLink = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
   for (const match of content.matchAll(markdownLink)) {
     const target = match[1];
-    if (!target || isExternalReference(target) || !isSafeLocalReference(target)) continue;
-    const line = content.slice(0, match.index ?? 0).split(/\r?\n/).length;
-    references.push({ target: target.split("#", 1)[0].split("?", 1)[0], line });
+    if (!target || isExternalReference(target) || !isSafeLocalReference(target))
+      continue;
+    references.push({
+      target: withoutReferenceSuffix(target),
+      line: lineNumberAt(content, match.index ?? 0),
+      source: "markdown",
+    });
+  }
+
+  let inFence = false;
+  for (const [lineIndex, line] of content.split(/\r?\n/).entries()) {
+    if (/^\s{0,3}(?:`{3,}|~{3,})/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+
+    const inlineCode = /(?<!`)`([^`\n]+)`(?!`)/g;
+    for (const match of line.matchAll(inlineCode)) {
+      const target = withoutReferenceSuffix(match[1].trim());
+      if (!isSafeInlineLocalReference(target)) continue;
+      references.push({
+        target,
+        line: lineIndex + 1,
+        source: "inline",
+      });
+    }
   }
   return references;
 }
@@ -256,14 +330,39 @@ async function readSkill(
   }
 
   const skillDirectory = dirname(skillPath);
+  const directoryName = basename(skillDirectory);
+  if (name && name !== directoryName) {
+    findings.push(finding("name_directory_mismatch"));
+  }
   for (const reference of localReferenceTargets(content)) {
-    const targetPath = resolve(skillDirectory, reference.target);
-    if (isWithin(skillDirectory, targetPath)) {
+    const localTargetPath = resolve(skillDirectory, reference.target);
+    const canCheckLocalTarget = isWithin(skillDirectory, localTargetPath);
+    const projectTargetPath = resolve(projectRoot, reference.target);
+    const canCheckProjectTarget =
+      reference.source === "inline" &&
+      PROJECT_REFERENCE_PREFIXES.some((prefix) =>
+        reference.target.startsWith(prefix),
+      );
+
+    let exists = false;
+    if (canCheckLocalTarget) {
       try {
-        await readFile(targetPath);
+        await readFile(localTargetPath);
+        exists = true;
       } catch {
-        findings.push(finding("broken_local_reference", reference.line));
+        // Try the project-root form below for repository paths such as scripts/...
       }
+    }
+    if (!exists && canCheckProjectTarget) {
+      try {
+        await readFile(projectTargetPath);
+        exists = true;
+      } catch {
+        // Report the same finding for both Markdown and inline local references.
+      }
+    }
+    if (!exists && canCheckLocalTarget) {
+      findings.push(finding("broken_local_reference", reference.line));
     }
   }
 
@@ -393,6 +492,7 @@ const FINDING_LABELS: Record<FindingCode, string> = {
   frontmatter_duplicate_field: "duplicate frontmatter field",
   missing_name: "missing name",
   invalid_name: "invalid name",
+  name_directory_mismatch: "name must match its directory",
   name_too_long: "name too long",
   missing_description: "missing description",
   description_too_long: "description too long",
@@ -402,16 +502,21 @@ const FINDING_LABELS: Record<FindingCode, string> = {
   duplicate_name: "duplicate name",
 };
 
-function formatFindings(findings: SkillFinding[]): string {
-  return findings
-    .map((item) => `${FINDING_LABELS[item.code]}${item.line ? ` (line ${item.line})` : ""}`)
+function formatSkillFindings(skill: SkillRecord): string {
+  return skill.findings
+    .map((item) => {
+      if (item.code === "name_directory_mismatch") {
+        return `name must match directory '${basename(dirname(skill.path))}'`;
+      }
+      return `${FINDING_LABELS[item.code]}${item.line ? ` (line ${item.line})` : ""}`;
+    })
     .join(", ");
 }
 
 export function formatCatalogReport(report: CatalogReport): string {
   const lines = [
     "Skill catalog inventory",
-    "=======================",
+    "-----------------------",
     ...report.roots.map(
       (root) =>
         `Root ${root.id}: ${root.classification} (${root.relativePath}) — ${
@@ -427,7 +532,7 @@ export function formatCatalogReport(report: CatalogReport): string {
   }
   for (const skill of report.skills) {
     const status = skill.status === "valid" ? "PASS" : skill.status === "warning" ? "WARN" : "FAIL";
-    const detail = skill.findings.length > 0 ? ` — ${formatFindings(skill.findings)}` : "";
+    const detail = skill.findings.length > 0 ? ` — ${formatSkillFindings(skill)}` : "";
     const displayName =
       skill.name && skill.name.length <= MAX_SKILL_NAME_LENGTH && SKILL_NAME_PATTERN.test(skill.name)
         ? skill.name

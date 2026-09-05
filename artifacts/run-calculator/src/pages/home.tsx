@@ -1,7 +1,13 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import {
+  hasAutomaticUpdateReloadBlockingSurface,
+  isAutomaticUpdateReloadSafe,
+  reportAutomaticUpdateReloadSafety,
+  useAutomaticUpdateReloadBlocker,
+} from "../updateReloadSafety";
 import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
@@ -79,6 +85,9 @@ import {
   type PrepPhase,
   withTempOverrides,
   PRE_POST_TUNNEL_DEFAULT_MIN,
+  DOUGH_TRAY_SECTION_CAPACITY,
+  DOUGH_TRAY_SECTION_COUNT,
+  DOUGH_TRAY_ADVISORY_TOTAL,
 } from "../types";
 import {
   fmtElapsed,
@@ -233,6 +242,7 @@ import {
   recordManualPackagingProgress,
   savePackagingProgress,
 } from "../packagingProgress";
+import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import { consumeSyncWriteResponse } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -330,12 +340,17 @@ import {
 import {
   confirmFreezerSurplus,
   fetchFreezerSurplus,
+  getFreezerSurplusRemainingMs,
   replaceFreezerSurplusAllocation,
 } from "../freezerSurplus";
 import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
 import { useIngredients } from "../hooks/useIngredients";
+import {
+  invalidateMasterDataSlice,
+  setMasterDataSlice,
+} from "../masterData";
 import {
   saveIngredients as saveIngredientsRemote,
   deleteIngredients as deleteIngredientsRemote,
@@ -412,6 +427,8 @@ import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
+import AiStatusNotice from "../components/AiStatusNotice";
+import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
@@ -480,6 +497,7 @@ import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavi
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
+import { computeEffectiveLineSpeed } from "../lineSpeed";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 import {
   DepartmentProvider,
@@ -495,7 +513,7 @@ import {
 } from "../departments";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
-import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
+import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../sauceBarrelStore";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
 import { useProductionRules } from "../hooks/useProductionRules";
@@ -1373,6 +1391,7 @@ export function CheesePickCard({
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
 }) {
+  const updateReloadBlockerId = useId();
   // A temporary substitution must be visible anywhere floor staff read the
   // blend. Apply it to this display copy rather than the form's saved rows, so
   // clearing tomorrow's overlay restores the original master recipe exactly.
@@ -1417,6 +1436,10 @@ export function CheesePickCard({
   );
 
   const showMissingWarning = recipeName.trim() !== "" && !!recipeMissing;
+  useAutomaticUpdateReloadBlocker(
+    `missing-cheese-recipe-${updateReloadBlockerId}`,
+    showMissingWarning,
+  );
   const body = (
     <>
       {effectiveRecipe.changed && (
@@ -2354,16 +2377,16 @@ function StepperField({
           const cur = Number(fieldRef.current?.value) || 0;
           navigator.vibrate?.(8);
           const next = Math.max(min, cur - step);
-          onManualChange?.(next);
           fieldRef.current?.onChange(next);
+          onManualChange?.(next);
         };
         const increment = () => {
           const cur = Number(fieldRef.current?.value) || 0;
           if (max !== undefined && cur >= max) return;
           navigator.vibrate?.(8);
           const next = max !== undefined ? Math.min(max, cur + step) : cur + step;
-          onManualChange?.(next);
           fieldRef.current?.onChange(next);
+          onManualChange?.(next);
         };
         return (
           <FormItem>
@@ -2401,8 +2424,8 @@ function StepperField({
                   onChange={(e) => {
                     const val = e.target.value === "" ? "" : Number(e.target.value);
                     const next = max !== undefined && typeof val === "number" ? Math.min(max, val) : val;
-                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
                     field.onChange(next);
+                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
                   }}
                   onFocus={e => e.target.select()}
                   className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
@@ -2921,6 +2944,7 @@ export default function Home() {
   // Shared auto-track suppress ref — owned in Home, passed to LiveRunProvider
   // so both Home callbacks and useAutoTrack suppress the same latch.
   const autoSuppressUntilRef = useRef<number>(0);
+  const doughAutoSuppressUntilRef = useRef<number>(0);
   // Automatic sandbox refresh: when the server reports the sandbox copy is stale
   // (older than its cutoff, or never copied), re-copy live → sandbox and reload —
   // the same flow as the manual "Reset sandbox" button, minus the confirm. This
@@ -3038,7 +3062,7 @@ export default function Home() {
     () => findMixPresets(currentRun?.brand ?? "", currentRun?.flavor ?? ""),
     [currentRun?.brand, currentRun?.flavor]
   );
-  // Most recently ended run across the whole day — used for freezer-drain countdown
+  // Most recently ended run across the whole day — used for Freeze tunnel drain countdown
   // regardless of which run is currently being viewed.
   const lastEndedRun = dayState.runs.reduce<RunMeta | undefined>((best, r) => {
     if (!r.endedAt) return best;
@@ -3280,9 +3304,9 @@ export default function Home() {
       // merged-away names immediately instead of waiting out the 60s poll,
       // then invalidate as a backstop refetch.
       await mergeCatalogEntriesByName(ingredientCatalog, sourceNames, targetName, (items) =>
-        cycleCountQc.setQueryData(["ingredients"], items),
+        setMasterDataSlice(cycleCountQc, "ingredients", items),
       );
-      void cycleCountQc.invalidateQueries({ queryKey: ["ingredients"] });
+      void invalidateMasterDataSlice(cycleCountQc, "ingredients");
          } catch {
       // Best-effort: the local merge above already succeeded; the catalog will
       // self-heal next time these names are touched.
@@ -4765,8 +4789,8 @@ export default function Home() {
         ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce, undefined, undefined, undefined, { upsertComponents: tags?.upsertComponents })
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
     ]);
-    if (d.items.length > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
-    if (s.items.length > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items);
+    if (d.items.length > 0) setMasterDataSlice(cycleCountQc, "doughRecipes", d.items);
+    if (s.items.length > 0) setMasterDataSlice(cycleCountQc, "sauceRecipes", s.items);
     return d.added + s.added;
   }, [cycleCountQc]);
 
@@ -4993,7 +5017,7 @@ export default function Home() {
       const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
       if (added > 0) {
         await saveMixes(merged);
-        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "mixes");
       }
       clearPendingServerMixPushes();
     })().catch(() => { pendingMixPushRef.current = false; });
@@ -5071,7 +5095,7 @@ export default function Home() {
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
   // the user across devices instead of being tied to one browser.
-  const floorModeEnabled = me?.floorModeEnabled ?? true;
+  const floorModeEnabled = me?.floorModeEnabled ?? false;
   function toggleFloorModeEnabled() {
     const next = !floorModeEnabled;
     if (!next) setShowFloorMode(false);
@@ -5098,11 +5122,6 @@ export default function Home() {
     } catch { /* ignore storage errors */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
-  // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
-  // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
-  const [floorDimmed, setFloorDimmed] = useState(false);
-
-
   // Keep the local PIN cache fresh as an offline fallback for checkPin(). We
   // persist an empty string too: "" is a valid facility value ("no gate"), so a
   // PIN cleared on another device must survive a reload/offline session here, or
@@ -5445,7 +5464,7 @@ export default function Home() {
           .map((n) => namedRecipeFromDraft({ name: n, components: sauceRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "sauce" }))
           .filter((r): r is NamedRecipe => r !== null);
         const { added, updated, items } = await addNamedRecipesToServerIfAbsent("sauce", drafts, undefined, undefined, undefined, undefined, { upsertComponents: true });
-        if (added > 0 || updated > 0) cycleCountQc.setQueryData(["sauceRecipes"], items);
+        if (added > 0 || updated > 0) setMasterDataSlice(cycleCountQc, "sauceRecipes", items);
         reconcile("sauce", items.map((r) => r.name), ["sauce", "recipe"]);
       }
       if (plans.dough.additions.length > 0) {
@@ -5453,7 +5472,7 @@ export default function Home() {
           .map((n) => namedRecipeFromDraft({ name: n, components: doughRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "dough" }))
           .filter((r): r is NamedRecipe => r !== null);
         const { added, updated, items } = await addNamedRecipesToServerIfAbsent("dough", drafts, undefined, undefined, undefined, undefined, { upsertComponents: true });
-        if (added > 0 || updated > 0) cycleCountQc.setQueryData(["doughRecipes"], items);
+        if (added > 0 || updated > 0) setMasterDataSlice(cycleCountQc, "doughRecipes", items);
         reconcile("dough", items.map((r) => r.name), ["dough", "recipe"]);
       }
       if (plans.cheese.additions.length > 0) {
@@ -5464,7 +5483,7 @@ export default function Home() {
         let finalNames = cheesePool.map((r) => r.name);
         if (added > 0) {
           const saved = await saveCheeseRecipes(merged);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
           finalNames = saved.map((r) => r.name);
         }
         reconcile("cheese", finalNames, ["recipe"]);
@@ -5482,7 +5501,7 @@ export default function Home() {
         let finalNames = mixPool.map((m) => m.name);
         if (added > 0) {
           const saved = await saveMixes(merged);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
           finalNames = saved.map((m) => m.name);
         }
         reconcile("mixes", finalNames, ["recipe"]);
@@ -6184,7 +6203,7 @@ export default function Home() {
         const changed = repointCheeseRecipeIngredients(cheese, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch {
         // Non-fatal: the local merge already succeeded.
@@ -6194,7 +6213,7 @@ export default function Home() {
         const changed = repointMixIngredients(mixesList, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch {
         // Non-fatal: the local merge already succeeded.
@@ -6387,7 +6406,7 @@ export default function Home() {
             : repointCheeseRecipesForFlavorMerge(cheese, mergeBfBrand, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch {
         // Non-fatal: the merge itself already succeeded.
@@ -6400,7 +6419,7 @@ export default function Home() {
             : repointMixesForFlavorMerge(mixesList, mergeBfBrand, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch {
         // Non-fatal: the merge itself already succeeded.
@@ -6549,9 +6568,9 @@ export default function Home() {
             }
             const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
-              cycleCountQc.setQueryData(["cheeseRecipes"], await deleteCheeseRecipes(ids));
+              setMasterDataSlice(cycleCountQc, "cheeseRecipes", await deleteCheeseRecipes(ids));
             } else if (targetRow) {
-              cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+              void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
             }
           } else if (category === "mixes") {
             const pool = await fetchMixes();
@@ -6582,9 +6601,9 @@ export default function Home() {
             }
             const ids = sourceRows.map((m) => m.id);
             if (ids.length > 0) {
-              cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids));
+              setMasterDataSlice(cycleCountQc, "mixes", await deleteMixes(ids));
             } else if (targetRow) {
-              cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+              void invalidateMasterDataSlice(cycleCountQc, "mixes");
             }
           } else {
             // dough | sauce — their own named-recipe pools.
@@ -6623,14 +6642,16 @@ export default function Home() {
             }
             const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
-              cycleCountQc.setQueryData(
-                [category === "dough" ? "doughRecipes" : "sauceRecipes"],
+              setMasterDataSlice(
+                cycleCountQc,
+                category === "dough" ? "doughRecipes" : "sauceRecipes",
                 await deleteNamedRecipes(category, ids),
               );
             } else if (targetRow) {
-              cycleCountQc.invalidateQueries({
-                queryKey: [category === "dough" ? "doughRecipes" : "sauceRecipes"],
-              });
+              void invalidateMasterDataSlice(
+                cycleCountQc,
+                category === "dough" ? "doughRecipes" : "sauceRecipes",
+              );
             }
           }
         }
@@ -7539,8 +7560,16 @@ export default function Home() {
     }
     return { outcome: body.outcome, state: body.state, values: body.values };
       });
-    autoTrackClaimQueueRef.current = request.then(() => {}, () => {});
-    return request;
+    const surfaced = request.catch((error) => {
+      if (claim.channel === "sauce-barrel") {
+        setWriteError(
+          "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.",
+        );
+      }
+      throw error;
+    });
+    autoTrackClaimQueueRef.current = surfaced.then(() => {}, () => {});
+    return surfaced;
   }
 
   // Mirror today's substitution overlay into the shared-calc module so every
@@ -7556,7 +7585,11 @@ export default function Home() {
   // an active day and skips the AI call when idle with no at-risk stock). The
   // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
   // provider in (tabs)/_layout.tsx (replit.md parity).
-  const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
+  const {
+    alert: proactiveAlert,
+    dismiss: dismissProactiveAlert,
+    aiStatus: proactiveAiStatus,
+  } = useProactiveAlert({
     enabled: isManager,
     buildInput: () => {
       // Resolve upcoming scheduled runs to their FormValues (scheduled runs carry
@@ -10516,7 +10549,7 @@ export default function Home() {
         const changed = repointCheeseRecipesForBrandMerge(cheese, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
       try {
@@ -10524,7 +10557,7 @@ export default function Home() {
         const changed = repointMixesForBrandMerge(mixesList, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
       // Dough and sauce named-recipe pools also carry a `brand` field for
@@ -10538,8 +10571,9 @@ export default function Home() {
             .map((r) => ({ ...r, brand: trimmed }));
           if (changed.length > 0) {
             const saved = await saveNamedRecipes(kind, changed);
-            cycleCountQc.setQueryData(
-              [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
+            setMasterDataSlice(
+              cycleCountQc,
+              kind === "dough" ? "doughRecipes" : "sauceRecipes",
               saved,
             );
           }
@@ -10616,7 +10650,7 @@ export default function Home() {
         const changed = repointCheeseRecipesForFlavorMerge(cheese, b, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
       try {
@@ -10624,7 +10658,7 @@ export default function Home() {
         const changed = repointMixesForFlavorMerge(mixesList, b, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
     })();
@@ -10680,7 +10714,7 @@ export default function Home() {
         brand = row?.brand?.trim() || undefined;
         if (row) {
           const saved = await saveMixes([{ ...row, name: trimmed }]);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch {}
       await learnRecipeNameChangeAliases("mixes", [oldName], trimmed, brand);
@@ -11022,13 +11056,35 @@ export default function Home() {
     // turn that stale UI into a lifecycle write; the reconciled state will
     // render before the controls become actionable again.
     if (foregroundSyncBarrierRef.current) return;
-    initialFinishTimestampRef.current = Date.now() + (calcRef.current?.totalTimeSec ?? 0) * 1000;
     const base = dayStateRef.current;
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
     const activeRunId = activeRun.id;
     const now = Date.now();
+    // A pending run owns no Packaging completion. If a run-switch handoff ever
+    // leaked the prior run's counters into this form/storage, clear them before
+    // the lifecycle starts so the new run cannot begin already "complete".
+    const rawOpeningValues = form.getValues();
+    const isolatedOpeningValues = isolatePendingRunPackagingProgress(
+      activeRun,
+      rawOpeningValues,
+    );
+    if (isolatedOpeningValues !== rawOpeningValues) {
+      form.setValue("skidsCompleted", 0, { shouldDirty: true });
+      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+      recordManualPackagingProgress({
+        runId: activeRunId,
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+        manualOverrideUntil: now,
+        now,
+      });
+      saveRunValues(activeRunId, form.getValues());
+      markRunValuesUpdated(activeRunId, now);
+    }
+    initialFinishTimestampRef.current =
+      now + (calcRef.current?.totalTimeSec ?? 0) * 1000;
     // Starting a run stops any other run that is currently running. Finalize each
     // like an explicit endRun: deduct its own inventory (idempotent per runId,
     // from its stored values) before marking it ended.
@@ -12847,7 +12903,7 @@ export default function Home() {
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh Mix Recipes so they appear right away.
-      if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      if (mixesAdded > 0) void invalidateMasterDataSlice(cycleCountQc, "mixes");
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
       // so the run applicator "Cheese" pickers list them right away. Existing
       // pool recipes may also have had their per-pizza OZ column refreshed
@@ -12856,16 +12912,16 @@ export default function Home() {
       // replaced via the review's "update it with this sheet" checkbox
       // (dough/sauce ONLY), those pickers must refetch too.
       if (cheeseRecipesAdded > 0)
-        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
       // Invalidate dough recipes when server recipe rows were replaced or
       // doughball variants were pushed to the server — so autofill and recipe
       // pickers always see the fresh variant/customer lists without waiting for
       // the next app load.
       if (recipesUpdated > 0 || (importedRecipes && canManageInventory)) {
-        void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "doughRecipes");
       }
       if (recipesUpdated > 0) {
-        void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "sauceRecipes");
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
@@ -13095,7 +13151,7 @@ export default function Home() {
       }).catch(() => {});
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
-      void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      void invalidateMasterDataSlice(cycleCountQc, "mixes");
       // Refresh the Mix Monitoring saved-sheet lists so the just-saved premix
       // sheet snapshot shows up immediately.
       setSheetListSignal((c) => c + 1);
@@ -13588,7 +13644,7 @@ export default function Home() {
       }).catch(() => {});
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
-      void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
       setSheetListSignal((c) => c + 1);
       setShowCheeseImport(false);
       setCheeseImportPrepared(null);
@@ -14023,8 +14079,87 @@ export default function Home() {
     : currentRun?.startedAt ? "running"
     : "pending";
 
+  const hasActiveRun = dayState.runs.some((run) => run.startedAt && !run.endedAt);
+  const hasUnsavedForm =
+    Boolean(currentRunId) && !deepEqual(v, loadRunValues(currentRunId));
+  // Keep every Home-owned modal/full-screen interaction in one named inventory.
+  // Locally owned surfaces (for example Ingredient Detail inside Summary) use
+  // useAutomaticUpdateReloadBlocker and are aggregated by the external store.
+  const hasBlockingDialog = hasAutomaticUpdateReloadBlockingSurface({
+    supervisorPin: showPinDialog,
+    logStoppage: showStopDialog,
+    editStoppage: editingStop,
+    addPastStoppage: showManualStopDialog,
+    editStoppageReasons: showEditReasonsDialog,
+    manageLists: showManageDialog,
+    scheduledDays: showScheduleDialog,
+    scheduleImport: showImportDialog,
+    specImport: showSpecImport,
+    premixImport: showPremixImport,
+    shippingImport: showShippingImport,
+    sauceGuideImport: showSauceGuideImport,
+    doughGuideImport: showDoughGuideImport,
+    cheeseImport: showCheeseImport,
+    setupEditor: setupEditorOpen,
+    castScreens: showScreensDialog,
+    reorderRuns: showReorderDialog,
+    reportIssue: showReportIssue,
+    managerAttention: showManagerAttention,
+    alertSettings: showAlertSettings,
+    floorMode: showFloorMode,
+    glance: showGlance,
+    sauceWeights: sauceWeightsOpen,
+    pauseTunnelDecision: pauseDecisionRunId,
+    changePassword: showPasswordDialog,
+    guidedTour: showTour,
+    getStarted: showGetStarted,
+    importedCaseDecision: caseUpdatePrompt,
+    confirmDeleteBrand,
+    confirmDeleteFlavor,
+    confirmRemoveRun,
+    confirmRemoveBlankRuns: confirmRemoveBlanks,
+    confirmDeleteStoppage: confirmDeleteStopId,
+    confirmDeleteScheduledDay: scheduleDeleteConfirm,
+    moveScheduledRun: scheduleMove,
+    confirmMerge: mergeConfirming,
+  });
+  const hasBlockingOperation = Boolean(
+    specImportLoading
+    || specImportApplying
+    || premixImportLoading
+    || premixImportApplying
+    || shippingImportLoading
+    || shippingImportApplying
+    || sauceGuideImportLoading
+    || sauceGuideImportApplying
+    || doughGuideImportLoading
+    || doughGuideImportApplying
+    || cheeseImportLoading
+    || cheeseImportApplying
+    || scheduleSaving
+    || scheduleMoving
+    || mergeBusy
+    || mergeSuggestBusy
+    || mergeBatchBusy
+    || undoBusy
+    || exporting
+    || freezerSurplusBusy
+    || foregroundRecoveryNotice?.kind === "recovering"
+  );
+  const automaticUpdateReloadSafe = isAutomaticUpdateReloadSafe({
+    hasActiveRun,
+    hasUnsavedForm,
+    hasBlockingDialog,
+    hasBlockingOperation,
+  });
+
+  useEffect(() => {
+    reportAutomaticUpdateReloadSafety(automaticUpdateReloadSafe);
+    return () => reportAutomaticUpdateReloadSafety(false);
+  }, [automaticUpdateReloadSafe]);
+
   // Effective values for calculation/display: the Run-tab temporary overrides
-  // (freezer time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
+  // (Freeze tunnel time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
   // Setup fields themselves are never touched.
   const ve = useMemo(() => withTempOverrides(v), [v]);
 
@@ -14051,28 +14186,6 @@ export default function Home() {
       events.forEach(ev => window.removeEventListener(ev, resetTimer));
     };
   }, [floorModeEnabled]); // setShowFloorMode is a stable setter
-
-  // Floor Mode auto-dim: once Floor Mode is showing, dim it after a stretch of
-  // inactivity and restore instantly on any interaction. Paired with the slow
-  // CSS drift (.floor-drift) this keeps a left-on floor monitor safe from
-  // burn-in/glare without hiding the live numbers when someone is watching.
-  useEffect(() => {
-    if (!showFloorMode) { setFloorDimmed(false); return; }
-    const DIM_MS = 90 * 1000;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    function arm() {
-      setFloorDimmed(false);
-      if (timerId) clearTimeout(timerId);
-      timerId = setTimeout(() => setFloorDimmed(true), DIM_MS);
-    }
-    arm();
-    const events = ["touchstart", "mousedown", "keydown", "mousemove"] as const;
-    events.forEach(ev => window.addEventListener(ev, arm, { passive: true }));
-    return () => {
-      if (timerId) clearTimeout(timerId);
-      events.forEach(ev => window.removeEventListener(ev, arm));
-    };
-  }, [showFloorMode]);
 
   // Reset all runs at midnight — archive current day first, auto-end any active run
   useEffect(() => {
@@ -14570,7 +14683,7 @@ export default function Home() {
     doughRecipesList, doughSauceMigratedRef, doughSubTab, doughVariantPick, downtimeDays, editingStop,
     enabledCheeseRecipes, endRun, endStop, existingImportRecipeNames, expandedHistoryDay, expandedScheduleDay,
     exportCSV, exportExcel, exportHistoryCSV, exportQuickBooks, exportSelection, exporting,
-    fetchSchedulePayload, flashSaved, flavorInput, flavorScrollKeep, flexibleViolations, floorDimmed,
+    fetchSchedulePayload, flashSaved, flavorInput, flavorScrollKeep, flexibleViolations,
     floorModeEnabled, floorModeMigratedRef, forceSignedOut, form, freezerPullItems, frontlineFields,
     frontlineIngredients, frontlineRecipeNameOptions, frontlineRecipeNames, gripSheets, gripSheetsList, handleApplyBrandFlavorMerge,
     handleApplyMerge, handleApplyRecipeNameMerge, handleCheeseImportConfirm, handleCheeseImportFile, handleConfirmMerge, handleImportFile,
@@ -14620,7 +14733,7 @@ export default function Home() {
     setCircles, setConfirmDeleteBrand, setConfirmDeleteFlavor, setConfirmDeleteStopId, setConfirmRemoveBlanks, setConfirmRemoveRun,
     setCopiedSummary, setDayState, setDieTypes, setDoughIngredients, setDoughRecipeNames, setDoughSubTab,
     setDoughVariantPick, setEditingStop, setExpandedHistoryDay, setExpandedScheduleDay, setExportSelection,
-    setExporting, setFlavorInput, setFloorDimmed, setFrontlineIngredients, setFrontlineRecipeNames, setGripSheets,
+    setExporting, setFlavorInput, setFrontlineIngredients, setFrontlineRecipeNames, setGripSheets,
     setHistory, setImportDefaultDate, setImportIntoEditor, setImportProgress, setImportResult, setIngredientTypes,
     setIsFullscreen, setIsOnline, setManageBrandFilter, setManageCategory, setManageInput, setManualStopEnd,
     setManualStopNotes, setManualStopReason, setManualStopStart, setManualStopType, setMergeBatchBusy, setMergeBfBrand,
@@ -14679,7 +14792,7 @@ export default function Home() {
     doughRecipeNameOptions, doughRecipeNames, doughRecipesList, doughSubTab, doughVariantPick,
     downtimeDays, editingStop, enabledCheeseRecipes, existingImportRecipeNames,
     expandedHistoryDay, expandedScheduleDay, exportSelection, exporting,
-    flashSaved, flavorInput, flexibleViolations, floorDimmed, floorModeEnabled,
+    flashSaved, flavorInput, flexibleViolations, floorModeEnabled,
     freezerPullItems, frontlineFields, frontlineIngredients,
     frontlineRecipeNameOptions, frontlineRecipeNames, gripSheets, gripSheetsList,
     histBenchmarkPpm, history, importDefaultDate, importIntoEditor,
@@ -14765,7 +14878,7 @@ export default function Home() {
       dieLineDefaultOverrides, dieTypes, doughFields, doughIngredients, doughPoolDrift,
       doughRecipeNameOptions, doughRecipeNames, doughRecipesList, doughSubTab, doughVariantPick,
       downtimeDays, editingStop, enabledCheeseRecipes,
-      exportSelection, exporting, flashSaved, flexibleViolations, floorDimmed, floorModeEnabled,
+      exportSelection, exporting, flashSaved, flexibleViolations, floorModeEnabled,
       frontlineFields, frontlineIngredients, frontlineRecipeNameOptions, frontlineRecipeNames,
       gripSheets, gripSheetsList, histBenchmarkPpm, history,
       ingredientCatalog, ingredientTypeOptions, ingredientTypes,
@@ -14829,8 +14942,8 @@ export default function Home() {
       if (scope === "inventory") {
         void cycleCountQc.invalidateQueries({ queryKey: ["inventory"] });
       } else if (scope === "master-data") {
-        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
-        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "mixes");
+        void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
         void cycleCountQc.invalidateQueries({ queryKey: ["brand-profiles"] });
       } else {
         void cycleCountQc.invalidateQueries({ queryKey: ["scheduled"] });
@@ -16500,7 +16613,7 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowReportIssue(true)}>
                   <LifeBuoy className="w-4 h-4 mr-2" /> Report an issue
                 </DropdownMenuItem>
-                {isManager && (
+                {canReviewIncidents && (
                   <DropdownMenuItem onClick={() => setActiveTab("incidents")}>
                     <LifeBuoy className="w-4 h-4 mr-2" /> Reported issues
                   </DropdownMenuItem>
@@ -16639,6 +16752,7 @@ export default function Home() {
                 )}
               </div>
             )}
+            <AiStatusNotice status={proactiveAiStatus ?? undefined} feature="AI proactive alerts" />
             <ProactiveAlertBanner
               alert={proactiveAlert}
               onDismiss={dismissProactiveAlert}
@@ -18933,7 +19047,7 @@ export default function Home() {
                           ["cycleSpeed", "Cycle Speed (rpm)"],
                           ["speedAdjustment", "Speed Adj"],
                           ["approxLineSpeed", "Line Speed"],
-                          ["freezerTime", "Total line time (min)"],
+                          ["freezerTime", "Freeze tunnel time (min)"],
                           ["pizzasPerCase", "Pizzas / Case"],
                           ["casesPerLayer", "Cases / Layer"],
                           ["doughballsPerTray", "Doughballs / Tray"],
@@ -19188,6 +19302,7 @@ export default function Home() {
         prefs={me?.notificationPrefs}
         screenMode={screenMode}
         externalAutoSuppressRef={autoSuppressUntilRef}
+        externalDoughAutoSuppressRef={doughAutoSuppressUntilRef}
         onPackagingProgressAutoAdvance={persistAutomaticPackagingProgress}
         machine={{
           spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
@@ -19284,7 +19399,7 @@ function ScreenModeView() {
               <p className="text-lg font-semibold text-muted-foreground">
                 {Math.round(casesPct * 100)}% complete
                 {calc.casesInFreezer > 0 && (
-                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer ({Math.round(casesPctWithFreezer * 100)}%)</span>
+                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in Freeze tunnel ({Math.round(casesPctWithFreezer * 100)}%)</span>
                 )}
               </p>
               {v.casesPerSkid > 0 && v.casesNeeded > 0 && (
@@ -19424,7 +19539,7 @@ function ScreenModeView() {
               <p className="text-3xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
               <p className="text-sm text-muted-foreground">/ {fmtComma(v.casesNeeded)}</p>
               {calc.casesInFreezer > 0 && (
-                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
               )}
             </div>
           )}
@@ -19509,7 +19624,7 @@ function ScreenModeView() {
             <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
               {fmtComma(calc.casesCompleted)} <span className="text-lg">/ {fmtComma(v.casesNeeded)} cases</span>
               {calc.casesInFreezer > 0 && (
-                <span className="text-lg text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer</span>
+                <span className="text-lg text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in Freeze tunnel</span>
               )}
             </span>
           )}
@@ -19613,7 +19728,7 @@ function ScreenModeView() {
                 <p className="text-6xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
                 <p className="text-3xl text-muted-foreground font-bold mb-1">/ {fmtComma(v.casesNeeded)} cases</p>
                 {calc.casesInFreezer > 0 && (
-                  <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+                  <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
                 )}
               </div>
               <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
@@ -19638,11 +19753,11 @@ function ScreenModeView() {
             </div>
           )}
 
-          {/* Freezer countdown */}
+          {/* Freeze tunnel countdown */}
           {runStatus === "ended" && freezerMs > 0 && (
             <div className="flex flex-col gap-4">
               <p className={`text-sm font-bold uppercase tracking-widest ${freezerDraining ? "text-amber-400" : "text-emerald-400"}`}>
-                {freezerDraining ? "❄️ Freezer Draining" : "✅ Freezer Empty — Ready"}
+                {freezerDraining ? "❄️ Freeze Tunnel Draining" : "✅ Freeze Tunnel Empty — Ready"}
               </p>
               {freezerDraining && (
                 <>
@@ -19688,7 +19803,7 @@ function ScreenModeView() {
                     <div className="flex gap-4 mt-auto">
                       {s.totalCases > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cases</p><p className="text-xl font-black tabular-nums">{fmtComma(s.totalCases)}</p></div>}
                       {estSec > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Time</p><p className="text-xl font-black tabular-nums">{fmtTime(estSec)}</p></div>}
-                      {vals.freezerTime && Number(vals.freezerTime) > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Freezer</p><p className="text-xl font-black tabular-nums">{fmtNum(Number(vals.freezerTime), 0)}m</p></div>}
+                       {vals.freezerTime && Number(vals.freezerTime) > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Freeze Tunnel</p><p className="text-xl font-black tabular-nums">{fmtNum(Number(vals.freezerTime), 0)}m</p></div>}
                     </div>
                   </div>
                 );
@@ -19946,7 +20061,7 @@ function PauseTunnelDecision({
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
-    endStop, floorDimmed, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
     persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
@@ -19987,12 +20102,19 @@ function FloorModeView() {
 
         return (
           <div
+            data-testid="floor-mode-overlay"
             className="fixed inset-0 z-[40] flex flex-col font-sans select-none"
-            style={{ background: bg, color: "white", opacity: floorDimmed ? 0.45 : 1, transition: "opacity 1200ms ease" }}
+            style={{ background: bg, color: "white" }}
           >
-            <div className="floor-drift flex flex-1 flex-col min-h-0">
             {/* Header */}
-            <header className="flex justify-between items-center px-5 pt-5 pb-2 shrink-0">
+            <header
+              className="relative z-10 flex justify-between items-center pb-2 shrink-0"
+              style={{
+                paddingTop: "calc(1.25rem + env(safe-area-inset-top))",
+                paddingLeft: "calc(1.25rem + env(safe-area-inset-left))",
+                paddingRight: "calc(1.25rem + env(safe-area-inset-right))",
+              }}
+            >
               <div className="flex flex-col gap-1.5">
                 <span className="text-lg font-bold break-words min-w-0" style={{ color: "rgba(255,255,255,0.75)" }}>
                   {currentRun ? runLabel(currentRun) : "No Active Run"}
@@ -20005,7 +20127,8 @@ function FloorModeView() {
               <button
                 type="button"
                 onClick={() => setShowFloorMode(false)}
-                className="p-2.5 rounded-full transition-colors"
+                aria-label="Exit Floor Mode and return to calculator"
+                className="min-h-11 min-w-11 p-2.5 rounded-full transition-colors"
                 style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.5)" }}
                 title="Exit floor mode"
               >
@@ -20013,13 +20136,14 @@ function FloorModeView() {
               </button>
             </header>
 
+            <div className="floor-drift flex flex-1 flex-col min-h-0">
             {/* Big three numbers */}
             <main className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
               <div className="flex flex-col items-center">
                 <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
                 {calc.casesInFreezer > 0 && (
-                  <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZER</div>
+                  <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZE TUNNEL</div>
                 )}
               </div>
               <div className="flex flex-col items-center">
@@ -20361,6 +20485,10 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     stallPrompt, setStallPrompt, stallCheck,
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
   } = useLiveRun();
+  useAutomaticUpdateReloadBlocker(
+    "live-run-operational-alert",
+    Boolean(stallPrompt || showPaceAlert || showBatchDue),
+  );
 
   // Confirm before starting a run that is not the next unstarted run in the
   // schedule, so an accidental tap on the wrong run can be caught before it
@@ -20824,7 +20952,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 if (!activePhase) return (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
                     <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                    Ended · Line clear
+                    Ended · Freeze tunnel clear
                   </span>
                 );
                 const mm2 = Math.floor(activePhase.remainMs / 60000);
@@ -20860,18 +20988,12 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 </button>
               </div>
             )}
-            {showPaceAlert && (
-              <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-red-950/40 border border-red-700/30 text-red-400" data-testid="pace-alert-banner">
-                <span>🐢 {paceAlertMsg}</span>
-                <button
-                  type="button"
-                  data-testid="button-pace-alert-dismiss"
-                  className="px-2.5 py-1 rounded-md border border-red-700/40 hover-elevate"
-                  onClick={() => setShowPaceAlert(false)}
-                >
-                  Dismiss
-                </button>
-              </div>
+            {showPaceAlert && currentRun?.id && (
+              <BehindPaceAlertBanner
+                runId={currentRun.id}
+                message={paceAlertMsg}
+                onDismiss={() => setShowPaceAlert(false)}
+              />
             )}
                   {/* 3-phase line status — filling at run start, draining only after
                       a persisted pause or stop.
@@ -20986,7 +21108,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                             )}
                             {calc.casesInFreezer > 0 && (
                               <div className="text-sm font-bold text-sky-400 bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/30 tabular-nums" data-testid="tile-cases-in-freezer">
-                                +{fmtComma(calc.casesInFreezer)} in freezer
+                                +{fmtComma(calc.casesInFreezer)} in Freeze tunnel
                               </div>
                             )}
                           </div>
@@ -21061,12 +21183,12 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                                   <div className="text-sm font-medium text-foreground tabular-nums">{fmtTime(calc.adjustedTimeSec)} remaining</div>
                                   {v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
                                     <div className="text-xs font-semibold text-foreground/80 tabular-nums" data-testid="text-press-cases-left">
-                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + freezer counted done)
+                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + Freeze tunnel counted done)
                                     </div>
                                   )}
                                   {Number(ve.freezerTime) > 0 && (
                                     <div className="text-xs font-semibold text-sky-400 tabular-nums" data-testid="text-line-clear-time">
-                                      Line clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)} (incl. freezer)
+                                      Freeze tunnel clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)}
                                     </div>
                                   )}
                                   {showDrift && (
@@ -21106,11 +21228,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`}>
                             {draining
-                              ? `Freezer draining — ${fmtCountdownParts(mm, ss)} remaining`
-                              : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."}
+                              ? `Freeze tunnel draining — ${fmtCountdownParts(mm, ss)} remaining`
+                              : emptyMs > 0 ? "Freeze tunnel empty — run complete." : "Run ended."}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} freezer time` : ""} — switch to another run to continue.
+                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} Freeze tunnel time` : ""} — switch to another run to continue.
                           </p>
                           {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
@@ -21143,8 +21265,8 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 })()}
 
                 {/* Missing-setup nudge — a running run with no line-speed /
-                    case / freezer numbers can't compute anything: the count,
-                    timing, and freezer status all silently sit at 0. Tell the
+                    case / Freeze tunnel numbers can't compute anything: the count,
+                    timing, and tunnel status all silently sit at 0. Tell the
                     operator exactly which numbers are missing instead. */}
                 {!currentRun?.endedAt && runStatus === "running" && (() => {
                   const missing: string[] = [];
@@ -21165,7 +21287,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     : "Line phase status can't show yet — Total line time not set";
                   const detail = missing.length > 0
                     ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
-                    : "If this run uses a freezer tunnel, scroll down and enter Total line time (min) under the line settings to see the 3-stage filling/emptying status.";
+                    : "If this run uses a Freeze tunnel, scroll down and enter Freeze tunnel time (min) under the line settings to see the 3-stage filling/emptying status.";
                   return (
                     <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-missing-line-setup">
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
@@ -21178,7 +21300,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 })()}
 
                 {/* Warehouse switchover staging — measured at the PRESS (cased
-                    product + freezer contents count as done): frontline must be
+                    product + Freeze tunnel contents count as done): frontline must be
                     staged 2 skids before the switchover, packaging 1 skid
                     before. Short runs (< 2 skids total) show it from the start
                     and tell warehouse to stage 2+ runs ahead. Mirrors the
@@ -21209,7 +21331,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           </p>
                         )}
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + freezer counted done)
+                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + Freeze tunnel counted done)
                           {calc.adjustedTimeSec > 0 ? ` — press stops ~${fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}` : ""}
                           {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
                           {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
@@ -21352,7 +21474,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     {([
-                      { name: "tempFreezerTime" as const, label: "Freezer Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
+                      { name: "tempFreezerTime" as const, label: "Freeze Tunnel Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
                       { name: "tempCrustsPerCycle" as const, label: "Crusts/Cycle", setup: Number(v.crustsPerCycle) > 0 ? fmtNum(Number(v.crustsPerCycle), 0) : null, step: "1", testId: "input-temp-crusts-per-cycle" },
                       { name: "tempCycleSpeed" as const, label: "Cycle Speed", setup: Number(v.cycleSpeed) > 0 ? fmtNum(Number(v.cycleSpeed), 1) : null, step: "0.1", testId: "input-temp-cycle-speed" },
                     ]).map((t: any) => (
@@ -21733,7 +21855,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <NumField
                           control={form.control}
                           name="freezerTime"
-                          label="Total line time (min)"
+                          label="Freeze tunnel time (min)"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -21834,6 +21956,8 @@ function FreezerSurplusPanel({
   busy,
   error,
   completedRun,
+  freezerTimeMin,
+  nowMs,
   pendingRuns,
   getOriginalTarget,
   onConfirm,
@@ -21845,6 +21969,8 @@ function FreezerSurplusPanel({
   busy: boolean;
   error: string | null;
   completedRun?: RunMeta | null;
+  freezerTimeMin?: number;
+  nowMs?: number;
   pendingRuns?: RunMeta[];
   getOriginalTarget: (run: RunMeta) => number;
   onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
@@ -21855,6 +21981,7 @@ function FreezerSurplusPanel({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
   const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
   const runs = pendingRuns ?? [];
 
   async function confirmLot() {
@@ -21870,6 +21997,7 @@ function FreezerSurplusPanel({
     try {
       await onConfirm(completedRun, count, productionDate);
       setCases("");
+      setConfirmedRunId(completedRun.id);
       setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
     } catch {
       // The parent exposes the server's actionable error.
@@ -21896,6 +22024,12 @@ function FreezerSurplusPanel({
 
   if (mode === "packaging") {
     if (!completedRun?.brand && !completedRun?.flavor) return null;
+    const remainingMs = getFreezerSurplusRemainingMs({
+      endedAt: completedRun.endedAt,
+      freezerTimeMin: freezerTimeMin ?? 0,
+      nowMs: nowMs ?? 0,
+    });
+    if (confirmedRunId === completedRun.id || remainingMs <= 0) return null;
     return (
       <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
         <div className="flex items-start gap-3">
@@ -22068,11 +22202,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   } = useLiveRun();
 
   // ── Auto-tick skid/case counter for the prior run draining through the
-  // freezer tunnel while the NEXT run is already active on the form.
+  // Freeze tunnel while the NEXT run is already active on the form.
   // useAutoTrack only drives the CURRENT form run; once endRun() advances
   // currentIndex the ended run's counter stops. This effect replays the same
-  // drain-delta logic for the "Draining Prior Run" panel so cases keep
-  // flowing from "in freezer" to "cased" automatically. ────────────────────
+  // drain-delta logic for the "Freeze Tunnel Draining · Prior Run" panel so cases keep
+  // flowing from "in Freeze tunnel" to "cased" automatically. ───────────────
   const priorDrainFreezerRef = useRef<{ id: string; cases: number }>({ id: "", cases: -1 });
   useEffect(() => {
     if (!autoTrackProgress) return;
@@ -22103,14 +22237,13 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
 
     // Compute cases still in the tunnel for this run.
     const subTab = drainingRun.subTab ?? "dough";
-    const ppm =
-      Math.round(
-        (subTab === "crusts"
-          ? (Number(dv.approxLineSpeed) || 0)
-          : (Number(dv.crustsPerCycle) || 0) *
-            (Number(dv.cycleSpeed) || 0) *
-            (Number(dv.speedAdjustment) || 1)) * 100,
-      ) / 100;
+    const ppm = computeEffectiveLineSpeed({
+      mode: subTab === "crusts" ? "crusts" : "dough",
+      approxLineSpeed: Number(dv.approxLineSpeed),
+      crustsPerCycle: Number(dv.crustsPerCycle),
+      cycleSpeed: Number(dv.cycleSpeed),
+      speedAdjustment: Number(dv.speedAdjustment),
+    });
     const curFreezer = Math.max(0, Math.floor(computeCasesInFreezer({
       startedAt: drainingRun.startedAt ?? undefined,
       endedAt: drainingRun.endedAt ?? undefined,
@@ -22158,6 +22291,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   busy={freezerSurplusBusy}
                   error={freezerSurplusError}
                   completedRun={lastEndedRun}
+                  freezerTimeMin={lastEndedRun
+                    ? Number(withTempOverrides(loadRunValues(lastEndedRun.id)).freezerTime) || 0
+                    : 0}
+                  nowMs={nowTime.getTime()}
                   getOriginalTarget={(run) => run.id === currentRunId ? Number(v.casesNeeded) || 0 : Number(loadRunValues(run.id).casesNeeded) || 0}
                   onConfirm={async (run, count, date) => {
                     await confirmRunSurplus(run, count, date);
@@ -22166,10 +22303,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   onAllocate={async () => {}}
                 />
                 <div className="flex flex-col">
-                {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
+                {/* ─── Finishing — Freeze Tunnel Draining (just-ended run still exiting tunnel) ─── */}
                 {(() => {
                   // Pick the most-recently-ended run (other than the active one)
-                  // whose freezer is STILL draining AND that still has unpackaged
+                  // whose Freeze tunnel is STILL draining AND that still has unpackaged
                   // cases. Filter for eligibility FIRST, then take the latest, so a
                   // newer ended-but-finished run can't hide an older still-draining one.
                   // (The active run shows its own emptying bar elsewhere.)
@@ -22182,7 +22319,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     const rv = withTempOverrides(loadRunValues(r.id));
                     const rfT = Number(rv.freezerTime) || 0;
                     if (rfT <= 0) continue;
-                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // freezer fully empty
+                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // Freeze tunnel fully empty
                     const cps = Number(rv.casesPerSkid) || 0;
                     const cn = Number(rv.casesNeeded) || 0;
                     const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
@@ -22223,7 +22360,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-0.5">Draining Prior Run</p>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-0.5">Freeze Tunnel Draining · Prior Run</p>
                               <p className="text-sm font-semibold text-amber-100 truncate">{name}</p>
                             </div>
                             <div className="text-right shrink-0">
@@ -22352,10 +22489,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                         <div className={`border rounded-lg p-3 ${drainDone ? "bg-emerald-950/20 border-emerald-700/30" : lifecycleDraining ? "bg-amber-950/20 border-amber-600/30" : "bg-primary/5 border-primary/20"}`}>
                           <div className="flex justify-between items-end mb-2">
                             <span className={`text-sm font-semibold uppercase tracking-wider ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary"}`}>
-                              {drainDone ? "Line Clear" : lifecycleDraining ? "Line Draining" : "Line Loading"}
+                              {drainDone ? "Freeze Tunnel Clear" : lifecycleDraining ? "Freeze Tunnel Draining" : "Freeze Tunnel Loading"}
                             </span>
                             <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary/80"}`}>
-                              {drainDone ? "✓ Line clear" : `${fmtNum(pct * 100, 0)}%`}
+                              {drainDone ? "✓ Freeze tunnel clear" : `${fmtNum(pct * 100, 0)}%`}
                             </span>
                           </div>
                           <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden mb-2">
@@ -22631,7 +22768,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
                                   {/* Total cases still to PUT ON SKIDS = casesNeeded − casesCompleted.
                                       Previously used casesLeftToRun which subtracts the ~50 cases already
-                                      in the freezer tunnel, understating what packaging still has to do. */}
+                                      in the Freeze tunnel, understating what packaging still has to do. */}
                                   {(() => {
                                     const toPackage = Math.max(0, v.casesNeeded - calc.casesCompleted);
                                     return (
@@ -22655,7 +22792,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 </div>
                                 {calc.casesInFreezer > 0 && (
                                   <div className="bg-sky-950/30 border border-sky-700/40 rounded-xl p-3 flex items-center justify-between">
-                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">In Freezer / On Line</span>
+                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">In Freeze Tunnel / On Line</span>
                                     <span className="text-2xl font-mono font-black tabular-nums text-sky-400">{fmtNum(calc.casesInFreezer, 0)}</span>
                                   </div>
                                 )}
@@ -22872,7 +23009,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   // back restores the barrel count, anchor, and alert latches rather than
   // resetting them to zero.  All setters write back to the store immediately.
   const [sauceMade, setSauceMadeRaw] = useState(
-    () => getSauceBarrelEntry(currentRunId).barrelsMade,
+    () => Math.max(0, Number(v.sauceBarrelsMade) || getSauceBarrelEntry(currentRunId).barrelsMade),
   );
   const [showSauceBarrelDue, setShowSauceBarrelDueRaw] = useState(
     () => getSauceBarrelEntry(currentRunId).showBarrelDue,
@@ -22880,11 +23017,15 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const [showSauceQuickCheck, setShowSauceQuickCheckRaw] = useState(
     () => getSauceBarrelEntry(currentRunId).showQuickCheck,
   );
+  useAutomaticUpdateReloadBlocker(
+    "sauce-production-due-alert",
+    showSauceBarrelDue || showSauceQuickCheck,
+  );
 
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
   const lastBarrelNetSecRef = useRef<number>(
-    getSauceBarrelEntry(currentRunId).lastBarrelNetSec,
+    Math.max(0, Number(v.sauceBarrelAnchorNetSec) || getSauceBarrelEntry(currentRunId).lastBarrelNetSec),
   );
   const sauceBarrelDueKeyRef = useRef<string>(
     getSauceBarrelEntry(currentRunId).barrelDueKey,
@@ -22893,18 +23034,25 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     getSauceBarrelEntry(currentRunId).quickCheckKey,
   );
 
-  // Write-through wrappers — keep the persistent store in sync so remounts
-  // restore the correct values.
-  const setSauceMade = useCallback(
-    (fn: ((n: number) => number) | number) => {
-      setSauceMadeRaw((prev) => {
-        const next = typeof fn === "function" ? fn(prev) : fn;
-        getSauceBarrelEntry(currentRunId).barrelsMade = next;
-        return next;
-      });
-    },
-    [currentRunId],
-  );
+  const applyManualSauceProgress = useCallback((
+    nextMade: number,
+    nextAnchor: number,
+    targetCorrectionGeneration?: number,
+  ) => {
+    const made = Math.max(0, Math.floor(nextMade));
+    const anchor = Math.max(0, Math.floor(nextAnchor));
+    const correctionGeneration = targetCorrectionGeneration
+      ?? Math.max(0, Number(form.getValues("sauceBarrelCorrectionGeneration")) || 0) + 1;
+    form.setValue("sauceBarrelsMade", made, { shouldDirty: true });
+    form.setValue("sauceBarrelAnchorNetSec", anchor, { shouldDirty: true });
+    form.setValue("sauceBarrelCorrectionGeneration", correctionGeneration, { shouldDirty: true });
+    mirrorSauceBarrelProgress(currentRunId, { barrelsMade: made, lastBarrelNetSec: anchor });
+    setSauceMadeRaw(made);
+    lastBarrelNetSecRef.current = anchor;
+    const now = Date.now();
+    markRunValuesUpdated(currentRunId, now);
+    lastLocalEditRef.current = now;
+  }, [currentRunId, form, lastLocalEditRef]);
   const setShowSauceBarrelDue = useCallback(
     (val: boolean) => {
       getSauceBarrelEntry(currentRunId).showBarrelDue = val;
@@ -22919,57 +23067,36 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     },
     [currentRunId],
   );
-  // Helper: update the barrel anchor ref AND the store in one call.
-  const writeLastBarrelAnchor = useCallback(
-    (sec: number) => {
-      lastBarrelNetSecRef.current = sec;
-      getSauceBarrelEntry(currentRunId).lastBarrelNetSec = sec;
-    },
-    [currentRunId],
-  );
-
   // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
   const {
     prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
   } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: 580, sauceBatchSec: 1800 });
 
-  // Track the PREVIOUS run ID so the reset effect can distinguish a genuine
-  // new-run transition from a remount with the same run ID (e.g. Radix
-  // TabsContent unmounting and re-mounting when the operator switches tabs).
-  // On a remount the prev ref initialises to currentRunId — equal → skip reset.
-  const prevRunIdRef = useRef<string>(currentRunId);
-
+  // Canonical progress comes from synchronized run values. Mirror it into the
+  // tab-surviving UI store so automatic advances remain visible across
+  // navigation, reload, run switching, and peer reconciliation.
   useEffect(() => {
-    // Reset only when the run ID genuinely changes — not on tab-return remounts.
-    // A remount sets prevRunIdRef to currentRunId on creation, so this guard
-    // returns immediately, leaving the module-level store (and its persisted
-    // barrel count, anchor, and latches) untouched.
-    if (prevRunIdRef.current === currentRunId) return;
-    prevRunIdRef.current = currentRunId;
-    // Wipe the store entry for the new run so state starts from zero.
-    // Raw setters avoid a write-through echo back to the just-reset entry.
-    resetSauceBarrelEntry(currentRunId);
-    setSauceMadeRaw(0);
-    lastBarrelNetSecRef.current = 0;
-    setShowSauceBarrelDueRaw(false);
-    sauceBarrelDueKeyRef.current = "";
-    sauceQuickCheckKeyRef.current = "";
-    setShowSauceQuickCheckRaw(false);
-  }, [currentRunId]);
-  useEffect(() => {
-    if (runStatus === "ended") {
-      resetSauceBarrelEntry(currentRunId);
-      setSauceMadeRaw(0);
-      setShowSauceBarrelDueRaw(false);
-      setShowSauceQuickCheckRaw(false);
-    }
-  }, [runStatus, currentRunId]);
+    const made = Math.max(0, Math.floor(Number(v.sauceBarrelsMade) || 0));
+    const anchor = Math.max(0, Math.floor(Number(v.sauceBarrelAnchorNetSec) || 0));
+    mirrorSauceBarrelProgress(currentRunId, { barrelsMade: made, lastBarrelNetSec: anchor });
+    setSauceMadeRaw(made);
+    lastBarrelNetSecRef.current = anchor;
+  }, [currentRunId, v.sauceBarrelAnchorNetSec, v.sauceBarrelsMade]);
   // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
   useEffect(() => {
     if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
-      setSauceMade(n => n === 0 ? prep.prepBatchesSauce : n);
+      if ((Number(v.sauceBarrelsMade) || 0) === 0) {
+        applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
+      }
     }
-  }, [runStatus, prep.prepCarriedOver, prep.prepBatchesSauce]);
+  }, [
+    applyManualSauceProgress,
+    elapsedBatchSec,
+    prep.prepBatchesSauce,
+    prep.prepCarriedOver,
+    runStatus,
+    v.sauceBarrelsMade,
+  ]);
 
   // ── Sauce barrel nearly-exhausted alert ───────────────────────────────────
   // Fire when < 15% of barrel time remains (same threshold as 15-min run alert).
@@ -23092,9 +23219,14 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               totalBatches={calc.sauceBatches}
               made={sauceMade}
               onIncrement={() => {
-                // writeLastBarrelAnchor syncs both the ref and the store so the
-                // anchor survives subsequent tab navigation (remounts).
-                const barrelIndex = getSauceBarrelEntry(currentRunId).barrelsMade + 1;
+                const barrelIndex = Math.max(0, Number(v.sauceBarrelsMade) || 0) + 1;
+                const targetCorrectionGeneration =
+                  Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0) + 1;
+                // Deterministic until this action commits: retries, reloads, or
+                // duplicate taps share one marker, while a decrement advances
+                // the generation so a genuinely remade barrel gets a new one.
+                const manualEventId =
+                  `manual:${targetCorrectionGeneration}:${barrelIndex}`.slice(0, 160);
                 const sauceName = (v.frontlineRecipeName ?? "").trim();
                 const hasSauceRecipe = (v.frontlineRecipe ?? []).some((r: RecipeRow) => Number(r.lbs ?? 0) > 0);
                 const itemKey = hasSauceRecipe
@@ -23104,15 +23236,42 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                     : "";
                 const barrelQty = hasSauceRecipe ? 1 : calc.sauceEffBarrel;
                 if (itemKey && barrelQty > 0) {
-                  void consumeSauceBarrel(currentRunId, barrelIndex, itemKey, barrelQty).catch(() => {
-                    setWriteError("Couldn't record sauce barrel usage — inventory may be out of sync. Check your connection.");
-                  });
+                  const retryDelays = [0, 1_500, 5_000];
+                  const attempt = (index: number): void => {
+                    window.setTimeout(() => {
+                      void consumeSauceBarrel(
+                        currentRunId,
+                        barrelIndex,
+                        itemKey,
+                        barrelQty,
+                        manualEventId,
+                      )
+                        .then(() => {
+                          applyManualSauceProgress(
+                            barrelIndex,
+                            elapsedBatchSec,
+                            targetCorrectionGeneration,
+                          );
+                          setShowSauceBarrelDue(false);
+                        })
+                        .catch(() => {
+                          setWriteError(
+                            "Couldn't record Sauce barrel usage. Inventory was not advanced; this same barrel is retrying.",
+                          );
+                          if (index + 1 < retryDelays.length) attempt(index + 1);
+                        });
+                    }, retryDelays[index]);
+                  };
+                  attempt(0);
+                } else {
+                  applyManualSauceProgress(barrelIndex, elapsedBatchSec);
+                  setShowSauceBarrelDue(false);
                 }
-                writeLastBarrelAnchor(elapsedBatchSec);
-                setSauceMade(n => n + 1);
+              }}
+              onDecrement={() => {
+                applyManualSauceProgress(Math.max(0, sauceMade - 1), elapsedBatchSec);
                 setShowSauceBarrelDue(false);
               }}
-              onDecrement={() => setSauceMade(n => Math.max(0, n - 1))}
               isLive={isLive}
               testId="output-sauce-batches"
               sauceEffBarrel={calc.sauceEffBarrel}
@@ -23284,29 +23443,30 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
 
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState } = hx;
-  const { calc } = useLiveRun();
+  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef } = hx;
+  const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
 
-  const [app1Made, setApp1Made] = useState(0);
-  const [app2Made, setApp2Made] = useState(0);
-  const [app3Made, setApp3Made] = useState(0);
-  const [app4Made, setApp4Made] = useState(0);
-
-  useEffect(() => {
-    setApp1Made(0);
-    setApp2Made(0);
-    setApp3Made(0);
-    setApp4Made(0);
-  }, [currentRunId]);
-
-  useEffect(() => {
-    if (runStatus === "ended") {
-      setApp1Made(0);
-      setApp2Made(0);
-      setApp3Made(0);
-      setApp4Made(0);
-    }
-  }, [runStatus]);
+  // These are canonical run values, not tab-local state: switching Frontline
+  // away, reloading, or adopting another station's progress leaves the made
+  // counter and its net-clock baseline intact.
+  const setManualAppProgress = useCallback((slot: "app1" | "app2" | "app3" | "app4", made: number) => {
+    const madeField = `${slot}BatchesMade` as keyof FormValues;
+    const anchorField = `${slot}BatchAnchorNetSec` as keyof FormValues;
+    const generationField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
+    form.setValue(madeField, Math.max(0, Math.floor(made)) as never, { shouldDirty: true });
+    form.setValue(anchorField, Math.max(0, elapsedBatchSec) as never, { shouldDirty: true });
+    form.setValue(
+      generationField,
+      (Math.max(0, Number(form.getValues(generationField)) || 0) + 1) as never,
+      { shouldDirty: true },
+    );
+    // The shared one-minute correction fence means a due automatic tick cannot
+    // overwrite this new baseline or replay the elapsed interval on resume.
+    autoSuppressUntilRef.current = Date.now() + 60_000;
+    const now = Date.now();
+    markRunValuesUpdated(currentRunId, now);
+    lastLocalEditRef.current = now;
+  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
 
@@ -23356,9 +23516,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       <BatchMadeRow
                         label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
                         totalBatches={calc.app1Batches}
-                        made={app1Made}
-                        onIncrement={() => setApp1Made(n => n + 1)}
-                        onDecrement={() => setApp1Made(n => Math.max(0, n - 1))}
+                        made={Math.max(0, Number(v.app1BatchesMade) || 0)}
+                        onIncrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) + 1)}
+                        onDecrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) - 1)}
                         isLive={isLive}
                         testId="output-app1-batches"
                         sub={v.app1CheeseRecipeName?.trim() || undefined}
@@ -23377,9 +23537,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       <BatchMadeRow
                         label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
                         totalBatches={calc.app2Batches}
-                        made={app2Made}
-                        onIncrement={() => setApp2Made(n => n + 1)}
-                        onDecrement={() => setApp2Made(n => Math.max(0, n - 1))}
+                        made={Math.max(0, Number(v.app2BatchesMade) || 0)}
+                        onIncrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) + 1)}
+                        onDecrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) - 1)}
                         isLive={isLive}
                         testId="output-app2-batches"
                         sub={v.app2CheeseRecipeName?.trim() || undefined}
@@ -23439,9 +23599,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                         <BatchMadeRow
                           label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
                           totalBatches={calc.app3Batches}
-                          made={app3Made}
-                          onIncrement={() => setApp3Made(n => n + 1)}
-                          onDecrement={() => setApp3Made(n => Math.max(0, n - 1))}
+                          made={Math.max(0, Number(v.app3BatchesMade) || 0)}
+                          onIncrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) + 1)}
+                          onDecrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) - 1)}
                           isLive={isLive}
                           testId="output-app3-batches"
                           sub={v.app3CheeseRecipeName?.trim() || undefined}
@@ -23462,9 +23622,9 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                         <BatchMadeRow
                           label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
                           totalBatches={calc.app4Batches}
-                          made={app4Made}
-                          onIncrement={() => setApp4Made(n => n + 1)}
-                          onDecrement={() => setApp4Made(n => Math.max(0, n - 1))}
+                          made={Math.max(0, Number(v.app4BatchesMade) || 0)}
+                          onIncrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) + 1)}
+                          onDecrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) - 1)}
                           isLive={isLive}
                           testId="output-app4-batches"
                           sub={v.app4CheeseRecipeName?.trim() || undefined}
@@ -23561,7 +23721,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     calc, nowTime, elapsedBatchSec,
     showBatchDue, setShowBatchDue,
     autoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
+    fireAutoTrackNow, tickDueRefs, doughAutoSuppressUntilRef,
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
     nextRunPrepActive, packagingDrainActive, detectPackagingSpeedDrift,
   } = useLiveRun();
@@ -23574,6 +23734,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     prep, prepActive, elapsedSec: prepElapsedSec, doughSecLeft, doughBatchNum, startPrep, addPrepBatchDough,
   } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: doughPrepBatchSec, sauceBatchSec: 1800 });
   const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
+  useAutomaticUpdateReloadBlocker(
+    "dough-production-due-alert",
+    showBatchDue || showPrepBatchDue,
+  );
   const prevDoughBatchNumRef = useRef(0);
   useEffect(() => {
     if (prepActive && doughBatchNum > 0 && doughBatchNum > prevDoughBatchNumRef.current) setShowPrepBatchDue(true);
@@ -23676,15 +23840,15 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   const hopperLeft = running && timing.hopperMs > 0 && hopperProdDue > 0
                     ? Math.min(timing.hopperMs / 1000, Math.max(0, (hopperProdDue - nowMs) / 1000))
                     : null;
-                  const suppressedNow = Date.now() < autoSuppressUntilRef.current;
-                  const suppressedMinsLeftNow = suppressedNow ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
+                   const suppressedNow = Date.now() < doughAutoSuppressUntilRef.current;
+                   const suppressedMinsLeftNow = suppressedNow ? Math.ceil((doughAutoSuppressUntilRef.current - Date.now()) / 60000) : 0;
                   return (
                     <>
                       <ManualOverrideBanner
-                        show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef.current)}
+                         show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, doughAutoSuppressUntilRef.current)}
                         station="Dough"
                         minsLeft={suppressedMinsLeftNow}
-                        onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow("dough"); }}
+                         onResume={() => { doughAutoSuppressUntilRef.current = 0; fireAutoTrackNow("dough"); }}
                       />
                       <div className="rounded-lg border border-border/50 bg-card/60 px-4 py-3 mb-3">
                           <div className="flex items-center justify-between mb-2">
@@ -23694,7 +23858,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             {running && !isDoughTimerPaused && (
                               <button
                                 type="button"
-                                onClick={pauseDoughTimers}
+                                 onClick={() => pauseDoughTimers()}
                                 className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-amber-400 transition-colors"
                                 title="Pause dough timers"
                                 data-testid="btn-pause-dough-timers"
@@ -23887,21 +24051,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 <div className="mb-4">
                   {(() => {
                     const s = autoTrackSuggestion;
-                    const suppressed = Date.now() < autoSuppressUntilRef.current;
-                    const onManual = () => {
-                      autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
-                      markRunValuesUpdated(currentRunId, Date.now());
-                    };
                     const { trays: suggestedTrays, batches: suggestedBatches } =
                       suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
-                    // Stop auto-track TickBars once the press is done — no more
-                    // batches are needed for this run at that point.
-                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
-                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
-                    // ── Live countdowns to each auto counter's next tick ──
-                    const nowMs = nowTime.getTime();
-                    const secLeftOf = (dueMs: number, periodSec: number) =>
-                      dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
                     const timing = getAutoTrackTiming(
                       calc.ppm,
                       v.pizzasPerCase,
@@ -23912,6 +24063,29 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         hopperSec: Math.max(0, Number(v.hopperSec) || 0),
                       },
                     );
+                    const onManual = () => {
+                      const now = Date.now();
+                      if (timing.trayMs > 0) {
+                        doughAutoSuppressUntilRef.current = now + timing.trayMs;
+                        pauseDoughTimers(timing.trayMs);
+                      } else {
+                        // No valid tray cadence means the dough hook cannot
+                        // tick either, so clear any stale timed pause rather
+                        // than inventing a fixed fallback interval.
+                        doughAutoSuppressUntilRef.current = 0;
+                        resumeDoughTimers();
+                      }
+                      markRunValuesUpdated(currentRunId, now);
+                    };
+                    // Stop auto-track TickBars once the press is done — no more
+                    // batches are needed for this run at that point.
+                    const suppressed = Date.now() < doughAutoSuppressUntilRef.current;
+                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
+                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
+                    // ── Live countdowns to each auto counter's next tick ──
+                    const nowMs = nowTime.getTime();
+                    const secLeftOf = (dueMs: number, periodSec: number) =>
+                      dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
                     const trayPeriodSec = timing.trayMs / 1000;
                     const trayProductionSec = timing.trayProductionMs / 1000;
                     const drainQuarterSec = timing.batchConsumptionMs / 1000;
@@ -23926,15 +24100,27 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               label={trayAutoActive
                                 ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
                                 : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
-                              max={74}
                               suggestion={!trayAutoActive ? suggestedTrays : null}
                               onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true }); }}
                               onManualChange={onManual}
                             />
-                            {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
-                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
-                                <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
-                              </p>
+                            {doughSubTab !== "crusts" && (
+                              <div className="mt-1.5 space-y-1" data-testid="tray-section-capacity-guide">
+                                <p className="text-[10px] text-muted-foreground">
+                                  Physical guide: {DOUGH_TRAY_SECTION_COUNT} sections × {DOUGH_TRAY_SECTION_CAPACITY} trays
+                                  {" "}({DOUGH_TRAY_ADVISORY_TOTAL} total). This aggregate count is not capped.
+                                </p>
+                                {v.traysOnLine > DOUGH_TRAY_ADVISORY_TOTAL && (
+                                  <p
+                                    className="text-[11px] text-amber-400 font-semibold flex items-start gap-1"
+                                    role="status"
+                                    data-testid="tray-section-capacity-warning"
+                                  >
+                                    <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" aria-hidden="true" />
+                                    Above the three-section guide — confirm tray placement; auto-track will keep the full count.
+                                  </p>
+                                )}
+                              </div>
                             )}
                             {doughSubTab !== "crusts" && (trayAutoActive && trayPeriodSec > 0 ? (
                               <>
@@ -25398,6 +25584,10 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   const { isManager } = useMe();
   const { calc, liveFreezerMin } = useLiveRun();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
+  useAutomaticUpdateReloadBlocker(
+    "ingredient-detail-dialog",
+    Boolean(ingredientDetailRunId),
+  );
   return (
     <>
                 {/* Shift notes */}
@@ -25654,9 +25844,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                           {/* Expected cases by now — only for running current run */}
                           {isCurrent && run.startedAt && !run.endedAt && (() => {
                             const ev = withTempOverrides(vals);
-                            const ppm = ev.crustsPerCycle * ev.cycleSpeed * ev.speedAdjustment;
-                            const expectedCases = ppm > 0 && vals.pizzasPerCase > 0
-                              ? Math.floor(ppm * liveFreezerMin / vals.pizzasPerCase)
+                            const ppm = computeEffectiveLineSpeed({
+                              mode: run.subTab === "crusts" ? "crusts" : "dough",
+                              approxLineSpeed: ev.approxLineSpeed,
+                              crustsPerCycle: ev.crustsPerCycle,
+                              cycleSpeed: ev.cycleSpeed,
+                              speedAdjustment: ev.speedAdjustment,
+                            });
+                            const expectedCases = ppm > 0 && ev.pizzasPerCase > 0
+                              ? Math.floor(ppm * liveFreezerMin / ev.pizzasPerCase)
                               : 0;
                             return (
                               <div className="flex items-center justify-between bg-primary/10 border border-primary/25 rounded-lg px-4 py-2">

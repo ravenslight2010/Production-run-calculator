@@ -7,6 +7,8 @@ import { saveAiCorrections } from "@/aiCorrections";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import ReviewBadge from "./ReviewBadge";
 import { useAccessibleDialog } from "./useAccessibleDialog";
+import AiStatusNotice from "./AiStatusNotice";
+import type { AiStatus } from "../aiStatus";
 
 const SKIP = "";
 const CREATE = "__create__";
@@ -64,6 +66,7 @@ export default function ExcelImportDialog({
   const [aiBrandReview, setAiBrandReview] = useState<Record<string, ReviewVerdict>>({});
   const [aiFlavorReview, setAiFlavorReview] = useState<Record<string, ReviewVerdict>>({});
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   // Candidate keys already sent to the AI, so the brand->flavor cascade does not
   // refetch the same names repeatedly.
   const aiRequestedBrands = useRef<Set<string>>(new Set());
@@ -81,6 +84,7 @@ export default function ExcelImportDialog({
 
   useEffect(() => {
     if (!result) return;
+    setAiStatus(null);
     setDate(defaultDate);
     const bc: Record<string, string> = {};
     for (const r of result.rows) {
@@ -218,6 +222,7 @@ export default function ExcelImportDialog({
     requestMatchImport({ brands, brandFlavors, unmatchedBrands: newBrands, unmatchedFlavors: newFlavors })
       .then((r) => {
         if (cancelled) return;
+        setAiStatus(r.aiStatus ?? null);
         if (r.brandMatches.length) {
           setAiBrandMatch((p) => {
             const next = { ...p };
@@ -575,6 +580,7 @@ export default function ExcelImportDialog({
               AI matching…
             </div>
           )}
+          <AiStatusNotice status={aiStatus ?? undefined} feature="AI matching" />
 
           {uniqueBrands.length > 0 && (
             <div>

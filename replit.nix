@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.shellcheck
     pkgs.libgbm
     pkgs.wayland
     pkgs.libxkbcommon

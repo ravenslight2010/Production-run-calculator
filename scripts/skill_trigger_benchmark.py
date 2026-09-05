@@ -45,6 +45,18 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
         ["A new workbook was imported; only audit whether the result is correct, do not repair anything.",
          "The UI displays the wrong number, but no incorrect value has been saved yet."],
     ),
+    "db-schema-change": (
+        ["Add a new Drizzle table and carry the Postgres schema change through push-force, API codegen, and typechecks.",
+         "Remove a persisted database column safely and route any stored-data impact through the schema-change guardrails."],
+        ["Add one nullable field to an existing populated table using the detailed new-column checklist.",
+         "Rename a client-only TypeScript property that is never persisted or exposed by the API."],
+    ),
+    "external-skill-import": (
+        ["Review this uploaded third-party skill archive for provenance, licensing, unsafe paths, and local compatibility before installing it.",
+         "Assess a skill bundle from GitHub as untrusted data and recommend accept, adapt, defer, or reject without executing its scripts."],
+        ["Create a new project-owned skill from requirements we wrote ourselves.",
+         "Install a vetted npm dependency from the public registry after checking its package provenance."],
+    ),
     "import-bug-investigation": (
         ["The cheese Excel import skipped several varieties and created duplicate links; trace parse versus apply versus pool data.",
          "A premix workbook misnamed recipes after import—investigate which layer produced the bad result before changing code."],
@@ -110,6 +122,12 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
          "Where should this feature test go? Triage the gap before proposing a new test task."],
         ["Run the existing test suite and fix the failing assertion immediately.",
          "Design a new product workflow before implementation."],
+    ),
+    "verify-before-commit": (
+        ["Before committing these repo changes, check status, run the supported local verification, and confirm the dependency lockfile is consistent.",
+         "We are about to push and claim the build is green; apply this repository's ARM-safe verification discipline first."],
+        ["Run the full pre-publish release checklist and decide whether the application is ready to deploy.",
+         "Review a finished feature for security and product risks, but do not commit or push it."],
     ),
     "wrong-number-triage": (
         ["The screen says 5.7 batches but the expected value is 8.25; trace where the wrong number comes from before editing it.",
@@ -225,7 +243,7 @@ def build() -> dict:
         yes, no = PROMPTS[name]
         skills.append({
             "name": name,
-            "metadata_name": raw_name,
+            "metadata_name": name,
             "path": str(path.relative_to(ROOT)),
             "description": description,
             "evals": [
@@ -305,7 +323,8 @@ def main() -> None:
             "",
             "## Runtime attempt",
             "",
-            "The evaluator was exercised on all 25 skills: 100 prompts × 3 repetitions (300 attempts). "
+            "The prior Claude evaluator attempt covered the former 25-skill corpus: "
+            "100 prompts × 3 repetitions (300 attempts). "
             "A deterministic balanced 40% held-out split (one positive and one near-miss per skill) "
             "was also exercised: 50 prompts × 3 repetitions (150 attempts). Every attempt failed "
             "before model evaluation with `[Errno 2] No such file or directory: 'claude'`.",

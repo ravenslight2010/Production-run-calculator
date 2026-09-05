@@ -33,7 +33,7 @@ export const HOME_TAB_CTX_DEP_FIELDS = [
   "dieLineDefaultOverrides", "dieTypes", "doughFields", "doughIngredients", "doughPoolDrift",
   "doughRecipeNameOptions", "doughRecipeNames", "doughRecipesList", "doughSubTab", "doughVariantPick",
   "downtimeDays", "editingStop", "enabledCheeseRecipes",
-  "exportSelection", "exporting", "flashSaved", "flexibleViolations", "floorDimmed", "floorModeEnabled",
+  "exportSelection", "exporting", "flashSaved", "flexibleViolations", "floorModeEnabled",
   "frontlineFields", "frontlineIngredients", "frontlineRecipeNameOptions", "frontlineRecipeNames",
   "gripSheets", "gripSheetsList", "histBenchmarkPpm", "history",
   "ingredientCatalog", "ingredientTypeOptions", "ingredientTypes",

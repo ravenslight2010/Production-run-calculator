@@ -9,6 +9,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers } from "./isolation";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 function uid(): string {
   return `e2edie${Math.random().toString(36).slice(2, 9)}`;
@@ -33,21 +34,17 @@ async function signUpAndDismissOnboarding(
   username: string,
   password: string,
 ): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  await getStarted.waitFor({ state: "visible", timeout: 10_000 });
-  await getStarted.click();
-  await page.locator('[data-state="open"][aria-hidden="true"]')
-    .waitFor({ state: "detached", timeout: 5_000 })
-    .catch(() => {});
+  await signUpAndHandleOnboarding(page, username, password, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      afterComplete: async (currentPage) => {
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 5_000 })
+          .catch(() => {});
+      },
+    },
+  });
 }
 
 async function openRunForm(page: Page): Promise<void> {

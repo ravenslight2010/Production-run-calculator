@@ -334,6 +334,28 @@ export function backfillMixFromMergedSources(
     ...target,
     components: target.components.map((c) => ({ ...c })),
   };
+  // Collapse legacy duplicate target rows onto their first spelling before
+  // sources are folded in. Canonical values win conflicts; duplicate values
+  // only fill blanks, matching normal backfill semantics.
+  const canonicalComponents: MixComponent[] = [];
+  const targetComponentsByKey = new Map<string, MixComponent>();
+  for (const component of next.components) {
+    const key = looseMergeIngredientKey(component.ingredient);
+    const canonical = key ? targetComponentsByKey.get(key) : undefined;
+    if (!canonical) {
+      canonicalComponents.push(component);
+      if (key) targetComponentsByKey.set(key, component);
+      continue;
+    }
+    if (!(canonical.perPizza > 0) && component.perPizza > 0) {
+      canonical.perPizza = component.perPizza;
+    }
+    if (!((canonical.perBatchLbs ?? 0) > 0) && (component.perBatchLbs ?? 0) > 0) {
+      canonical.perBatchLbs = component.perBatchLbs;
+    }
+    changed = true;
+  }
+  next.components = canonicalComponents;
   for (const src of sources) {
     if (!next.brand.trim() && src.brand.trim()) {
       next.brand = src.brand;
@@ -363,11 +385,7 @@ export function backfillMixFromMergedSources(
       next.isPrep = true;
       changed = true;
     }
-    const byKey = new Map<string, MixComponent>();
-    for (const c of next.components) {
-      const key = looseMergeIngredientKey(c.ingredient);
-      if (key && !byKey.has(key)) byKey.set(key, c);
-    }
+    const byKey = targetComponentsByKey;
     for (const sc of src.components) {
       const key = looseMergeIngredientKey(sc.ingredient);
       if (!key) continue;

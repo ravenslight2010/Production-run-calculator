@@ -1,0 +1,1 @@
+export type AiStatus = "deterministic" | "enriched" | "unavailable";

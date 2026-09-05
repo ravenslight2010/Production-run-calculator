@@ -26,7 +26,7 @@ instruction remaining visible when staff are already in the application:
 | Condition | Primary notice | Browser escalation | Expected action |
 | --- | --- | --- | --- |
 | Dough batch due | Persistent Dough action card | Only while the app is out of view; controlled by **Dough batch due** preference | Dough station: start the next batch, then acknowledge the card |
-| Behind pace | Persistent Run-station action banner plus the pace KPI | None | Run station: investigate throughput before the projected shortfall grows |
+| Behind pace | Run-station action banner plus the pace KPI | None | Run station: investigate throughput before the projected shortfall grows |
 | Manual auto-track override | Persistent Dough or Packaging station banner | None | Resume auto tracking now, or deliberately allow the scheduled resume |
 | Packaging lag | Packaging station inline quick check | None | Update packed cases or clear the packaging backlog |
 | Run time / freezer completion | Existing Run or Pack status | Only while the app is out of view; controlled by the matching notification preference | End the run when time is complete; transition once the freezer is clear |
@@ -130,7 +130,7 @@ section pills are assembled from the current user’s available tabs.
 | --- | --- | --- | --- | --- |
 | Sandbox mode banner | Sandbox users | Current session is in a sandbox scope | Understand that data is isolated; reset only when intended | Persistent above tab content; advisory |
 | Sync/write failure banner | All signed-in users | A day-state sync or inventory write failed | Retry sync; do not assume other devices received changes. The local change remains on this device until acknowledged. | Persistent top-level banner with a retry action; the sync failure cannot be dismissed as resolved without acknowledgment |
-| Proactive alert banner | Relevant shift users; often manager-facing correction | A proactive shift alert is available | Read the nudge; optionally **Apply** its proposed correction or **Dismiss** | Persistent top-level banner above tabs; advisory, one alert shown at a time |
+| Proactive alert banner | Relevant shift users; often manager-facing correction | A proactive shift alert is available | Read the nudge; optionally **Apply** its proposed correction or **Dismiss** | Top-level banner above tabs; low/medium impact auto-dismisses after 10 seconds, high impact after 30 seconds, and pointer/focus interaction pauses the timer |
 | Alert preferences | All signed-in users | User opens Alert & Floor Mode | Toggle account-level browser/in-app alert preferences and Floor Mode | Header menu → dialog; not an operational warning |
 | Browser permission state | All signed-in users | Notification permission is not granted/available | Grant permission if browser alerts are desired | Alert & Floor Mode dialog; preference/setup notice |
 | Saved / sync status | All signed-in users | Ongoing connection and save state | Reassurance or connection awareness; open Sync status for recovery | Header; informational and actionable |
@@ -165,7 +165,7 @@ does not mark an unsent write as delivered.
 | Flexible production-rule violations | Operator/supervisor | A flexible rule is violated | Review/correct when appropriate; start remains possible | Run / setup flow; advisory warning |
 | Missing line setup banner | Active run user | Speed, cycle, pizzas-per-case, or line-time values needed for live calculations are absent | Enter missing line settings | Run surface near operational controls; advisory but calculation-critical |
 | Auto-detected stall prompt | Active run user | Line appears behind with no stoppage logged | **Log stoppage** or **Dismiss** | Run surface; advisory, explicitly actionable/dismissible |
-| Behind-pace alert | Active run user | Pace alert condition is reached | Investigate pace; **Dismiss** after acknowledging | Run surface; red advisory banner |
+| Behind-pace alert | Active run user | Pace alert condition is reached | Investigate pace; **Dismiss** after acknowledging | Run surface; red advisory banner auto-dismisses after 30 seconds when untouched, with pointer/focus interaction pausing the timer |
 | Pace status / catch-up PPM | Active run user | Pace can be calculated | Adjust line pace as needed | Run KPI card; persistent, informational/advisory |
 | Estimated-finish drift | Active run user | Projected finish moves materially from initial estimate | Use the changed finish estimate to plan staffing/hand-off | Run KPI card; advisory |
 | Target reached | Active run user | Completed cases meet or exceed target | End or transition the run when operationally ready | Run completion KPI badge; informational |
@@ -274,10 +274,12 @@ These can be implemented without changing the underlying alert rules, permission
    plan upcoming production or maintain the shared recipe definition. This removes a
    high-probability navigation ambiguity without moving either workflow.
 
-2. **Make “Stock” and “Warehouse” terminology consistent.**  
-   The bottom tab says **Whse**, the menu says **Stock**, and cast screens say **Warehouse**.
-   Retain the six-tab structure, but use one user-facing term in menu, page heading, cast screen,
-   and help copy—for example, **Warehouse & Stock** until a final term is chosen.
+2. **Use the approved Warehouse and Inventory terminology.**
+   The product decision is recorded in
+   `docs/superpowers/specs/2026-09-05-warehouse-inventory-navigation-design.md`.
+   Keep **Warehouse** as the operational bottom-tab and cast-screen destination, and use
+   **Inventory** for the overflow-menu stock-record destination. Do not use **Whse** or **Stock**
+   as destination names; “stock” remains valid as a common noun in content such as “low stock.”
 
 3. **Add one-line role explanations where a destination is visible but partly unavailable.**  
    The existing role-gate banners are good local explanations. Match that clarity in the Settings
@@ -334,12 +336,11 @@ These can be implemented without changing the underlying alert rules, permission
    the first is acted on is correct, or whether a queue/count and “next alert” behavior is needed.
    This affects alert semantics, not just layout.
 
-5. **Choose a warehouse workflow boundary.**  
-   Operational warehouse guidance is split between **Whse** (pulls, reorder, use-first) and
-   **Stock** (inventory maintenance, low stock, transfers). Product should decide whether:
-   - both remain separate but use clear task-based naming/descriptions, or
-   - low-stock/transfer alerts should be surfaced as compact links in Whse while full editing
-     remains in Stock.
+5. **Warehouse workflow boundary (decided).**
+   Keep two destinations in the same application. **Warehouse** owns operational preparation:
+   pulls, due counts, reorder/use-first guidance, and run staging. **Inventory** owns stock records,
+   lots, alerts, transfers, substitutions, and authorized adjustments. Preserve the existing
+   capability checks and explain an Inventory editing restriction before a user attempts it.
 
 6. **Decide whether manager configuration should remain one dialog.**  
    **Manage Lists & Settings** combines recipes, master lists, shift configuration, rules,
@@ -363,7 +364,8 @@ These can be implemented without changing the underlying alert rules, permission
 
 Before changing a menu or notice, review these decisions with product/operations:
 
-1. Confirm the preferred terminology for **Warehouse / Stock**.
+1. Apply the approved **Warehouse / Inventory** terminology contract without changing destination
+   ownership or permissions.
 2. Choose the manager attention model and owner for each count/badge.
 3. Approve a notification escalation policy for batch, pace, completion, and manual-override
    signals.

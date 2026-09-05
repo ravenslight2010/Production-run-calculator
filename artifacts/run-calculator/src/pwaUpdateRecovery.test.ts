@@ -16,7 +16,7 @@ describe("updateAndReload", () => {
     await updateAndReload(registration, activateWaitingWorker, reload);
 
     expect(registration.update).toHaveBeenCalledOnce();
-    expect(activateWaitingWorker).toHaveBeenCalledWith(true);
+    expect(activateWaitingWorker).toHaveBeenCalledWith(false, expect.any(Function));
     expect(reload).not.toHaveBeenCalled();
   });
 
@@ -50,7 +50,7 @@ describe("updateAndReload", () => {
     expect(activateWaitingWorker).not.toHaveBeenCalled();
     await recovery;
 
-    expect(activateWaitingWorker).toHaveBeenCalledWith(true);
+    expect(activateWaitingWorker).toHaveBeenCalledWith(false, expect.any(Function));
     expect(reload).not.toHaveBeenCalled();
   });
 
@@ -112,5 +112,60 @@ describe("updateAndReload", () => {
     await updateAndReload(registration, vi.fn().mockRejectedValue(new Error("activation failed")), reload);
 
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("cancels an automatic handoff if the calculator becomes unsafe during the update check", async () => {
+    let finishUpdate: (() => void) | undefined;
+    let safe = true;
+    const reload = vi.fn();
+    const activateWaitingWorker = vi.fn();
+    const registration = {
+      waiting: undefined as ServiceWorker | undefined,
+      update: vi.fn(() => new Promise<void>((resolve) => {
+        finishUpdate = () => {
+          registration.waiting = {} as ServiceWorker;
+          resolve();
+        };
+      })),
+    };
+
+    const recovery = updateAndReload(
+      registration,
+      activateWaitingWorker,
+      reload,
+      () => safe,
+    );
+    await Promise.resolve();
+    safe = false;
+    finishUpdate?.();
+    await recovery;
+
+    expect(activateWaitingWorker).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("keeps the safety guard live while a waiting worker activates", async () => {
+    let activationGuard: (() => boolean) | undefined;
+    let safe = true;
+    const reload = vi.fn();
+    const activateWaitingWorker = vi.fn(
+      (_reloadPage: boolean, canReload: () => boolean) => {
+        activationGuard = canReload;
+      },
+    );
+
+    await updateAndReload(
+      {
+        waiting: {} as ServiceWorker,
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+      activateWaitingWorker,
+      reload,
+      () => safe,
+    );
+    safe = false;
+
+    expect(activationGuard?.()).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
   });
 });

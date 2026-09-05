@@ -1,4 +1,9 @@
 import { AiMatchImportBody } from "@workspace/api-zod";
+import {
+  canonicalize,
+  specImportBrandMatchKey,
+  specImportNameMatchKey,
+} from "@workspace/spec-import";
 import * as z from "zod";
 
 // Bounds so a single request can't blow up cost/latency or return junk. Mirrors
@@ -106,6 +111,17 @@ export type FlavorMatch = { brand: string; candidate: string; match: string };
 export type NameMatch = { candidate: string; match: string };
 export type IngredientMatch = { kind: "dough" | "sauce" | "cheese"; candidate: string; match: string };
 
+export type DeterministicMatchImportResult = {
+  resolved: {
+    brandMatches: BrandMatch[];
+    flavorMatches: FlavorMatch[];
+    ingredientMatches: IngredientMatch[];
+    appTypeMatches: NameMatch[];
+    pepTypeMatches: NameMatch[];
+  };
+  unresolved: MatchImportInput;
+};
+
 // The model returns structured JSON but is not trustworthy: parse leniently
 // (coerce strings, tolerate extras), then drop anything whose candidate was not
 // asked for OR whose match is not a real saved option. A brand match must be one
@@ -142,6 +158,106 @@ function findCanonical(value: string, options: readonly string[]): string | null
   const v = value.trim().toLowerCase();
   if (!v) return null;
   return options.find((o) => o.trim().toLowerCase() === v) ?? null;
+}
+
+/**
+ * Resolve the high-confidence part of an import match request without a model.
+ * The client normally performs this pass already, but keeping it at the route
+ * boundary makes the cost gate trustworthy for older clients and for callers
+ * that construct the request directly.
+ *
+ * Loose-key matches are accepted only when they identify one saved option.
+ * The shared canonicalizer then supplies its guarded fuzzy layer. Fuzzy matches
+ * are suggestions, not learned aliases, and brand product-line conflicts remain
+ * blocked by the same safety rule used for model output.
+ */
+export function resolveDeterministicMatchImport(
+  input: MatchImportInput,
+): DeterministicMatchImportResult {
+  const resolveName = (
+    candidate: string,
+    options: readonly string[],
+    kind:
+      | "brand"
+      | "flavor"
+      | "doughIngredient"
+      | "sauceIngredient"
+      | "cheeseIngredient"
+      | "appType"
+      | "pepType",
+  ): string | null => {
+    const raw = candidate.trim();
+    if (!raw) return null;
+    const keyOf = kind === "brand" ? specImportBrandMatchKey : specImportNameMatchKey;
+    const key = keyOf(raw);
+    const looseHits = options.filter((option) => key && keyOf(option) === key);
+    if (looseHits.length === 1) return looseHits[0]!;
+    const result = canonicalize(raw, options, [], kind);
+    return result.source === "new" ? null : result.value;
+  };
+
+  const brandMatches: BrandMatch[] = [];
+  const unresolvedBrands: string[] = [];
+  for (const candidate of input.unmatchedBrands) {
+    const match = resolveName(candidate, input.brands, "brand");
+    if (match && !conflictingProductLine(candidate, match)) brandMatches.push({ candidate, match });
+    else unresolvedBrands.push(candidate);
+  }
+
+  const flavorMatches: FlavorMatch[] = [];
+  const unresolvedFlavors: MatchImportInput["unmatchedFlavors"] = [];
+  for (const item of input.unmatchedFlavors) {
+    const brand = resolveName(item.brand, input.brands, "brand");
+    const options = brand
+      ? input.brandFlavors[brand] ?? input.brandFlavors[item.brand] ?? []
+      : [];
+    const match = resolveName(item.flavor, options, "flavor");
+    if (brand && match) flavorMatches.push({ brand, candidate: item.flavor, match });
+    else unresolvedFlavors.push(item);
+  }
+
+  const ingredientMatches: IngredientMatch[] = [];
+  const unresolvedIngredients: NonNullable<MatchImportInput["unmatchedIngredients"]> = [];
+  for (const item of input.unmatchedIngredients ?? []) {
+    const options = input.knownIngredients?.[item.kind] ?? [];
+    const match = resolveName(item.name, options, `${item.kind}Ingredient`);
+    if (match) ingredientMatches.push({ kind: item.kind, candidate: item.name, match });
+    else unresolvedIngredients.push(item);
+  }
+
+  const resolveFlat = (
+    candidates: readonly string[],
+    options: readonly string[],
+  ): { matches: NameMatch[]; unresolved: string[] } => {
+    const matches: NameMatch[] = [];
+    const unresolved: string[] = [];
+    for (const candidate of candidates) {
+      const match = resolveName(candidate, options, "appType");
+      if (match) matches.push({ candidate, match });
+      else unresolved.push(candidate);
+    }
+    return { matches, unresolved };
+  };
+  const app = resolveFlat(input.unmatchedAppTypes ?? [], input.knownAppTypes ?? []);
+  const pep = resolveFlat(input.unmatchedPepTypes ?? [], input.knownPepTypes ?? []);
+
+  return {
+    resolved: {
+      brandMatches,
+      flavorMatches,
+      ingredientMatches,
+      appTypeMatches: app.matches,
+      pepTypeMatches: pep.matches,
+    },
+    unresolved: {
+      ...input,
+      unmatchedBrands: unresolvedBrands,
+      unmatchedFlavors: unresolvedFlavors,
+      unmatchedIngredients: unresolvedIngredients,
+      unmatchedAppTypes: app.unresolved,
+      unmatchedPepTypes: pep.unresolved,
+    },
+  };
 }
 
 // Product-line qualifiers that make two same-company brands DIFFERENT products

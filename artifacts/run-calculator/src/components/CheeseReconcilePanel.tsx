@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateMasterDataSlice } from "../masterData";
 import { AlertTriangle, CheckCircle2, RotateCcw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -86,7 +87,7 @@ export default function CheeseReconcilePanel({
     setError(null);
     try {
       await applyCheeseReconcileItem(item);
-      await qc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      await invalidateMasterDataSlice(qc, "cheeseRecipes");
       setApplied((previous) => new Set(previous).add(item.recipeId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't apply that repair. Refresh and review it again.");

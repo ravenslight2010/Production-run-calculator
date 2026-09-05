@@ -12,6 +12,7 @@ import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
 } from "./isolation";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -73,34 +74,25 @@ test.afterAll(async () => {
 });
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-
-  await page.getByTestId("tab-run").waitFor({
-    state: "attached",
-    timeout: 25_000,
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) =>
+        currentPage.getByRole("dialog", {
+          name: /welcome to production run calculator/i,
+        }),
+      visibilityTimeout: 10_000,
+    },
+    afterSignUp: async (currentPage) => {
+      // Authenticated startup can finish in stages: the tab shell may attach
+      // before the first-login overview is rendered. Wait briefly for that
+      // delayed overlay so it cannot appear later and block the diagnostics
+      // controls during the journey.
+      await currentPage.waitForTimeout(500);
+      await currentPage.keyboard.press("Escape");
+      await currentPage.keyboard.press("Escape");
+    },
   });
-  // Authenticated startup can finish in stages: the tab shell may attach
-  // before the first-login overview is rendered. Wait briefly for that
-  // delayed overlay so it cannot appear later and block the diagnostics
-  // controls during the journey.
-  await page.waitForTimeout(500);
-  const onboarding = page.getByRole("dialog", {
-    name: /welcome to production run calculator/i,
-  });
-  await onboarding.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
-  if (await onboarding.isVisible().catch(() => false)) {
-    await onboarding.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect(onboarding).toBeHidden({ timeout: 10_000 });
-  } else {
-    await page.keyboard.press("Escape");
-  }
-  await page.keyboard.press("Escape");
 }
 
 test("downloads a date-scoped sync diagnostic JSON report", async ({ page }) => {

@@ -29,6 +29,22 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
+      "skill": "db-schema-change",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "external-skill-import",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
       "skill": "import-bug-investigation",
       "precision": null,
       "recall": null,
@@ -110,6 +126,14 @@
     },
     {
       "skill": "test-gap-triage",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "verify-before-commit",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -286,6 +310,62 @@
         {
           "id": "data-heal-playbook-near-miss-2",
           "query": "The UI displays the wrong number, but no incorrect value has been saved yet.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "db-schema-change",
+      "metadata_name": "db-schema-change",
+      "path": ".agents/skills/db-schema-change/SKILL.md",
+      "description": "Compatibility router for any Postgres schema change under lib/db/src/schema/*. Use whenever modifying, adding, or removing a Drizzle table/column, or when a migration/db push is needed. For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.",
+      "evals": [
+        {
+          "id": "db-schema-change-trigger-1",
+          "query": "Add a new Drizzle table and carry the Postgres schema change through push-force, API codegen, and typechecks.",
+          "should_trigger": true
+        },
+        {
+          "id": "db-schema-change-trigger-2",
+          "query": "Remove a persisted database column safely and route any stored-data impact through the schema-change guardrails.",
+          "should_trigger": true
+        },
+        {
+          "id": "db-schema-change-near-miss-1",
+          "query": "Add one nullable field to an existing populated table using the detailed new-column checklist.",
+          "should_trigger": false
+        },
+        {
+          "id": "db-schema-change-near-miss-2",
+          "query": "Rename a client-only TypeScript property that is never persisted or exposed by the API.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "external-skill-import",
+      "metadata_name": "external-skill-import",
+      "path": ".agents/skills/external-skill-import/SKILL.md",
+      "description": "Review externally sourced agent skills from uploaded archives or GitHub before installation. Use whenever a user wants to import, install, copy, adapt, or assess a third-party skill bundle; inventory first, check safety, provenance, licensing, ownership, duplicates, and local compatibility, then recommend accept, adapt, defer, or reject before writing files.",
+      "evals": [
+        {
+          "id": "external-skill-import-trigger-1",
+          "query": "Review this uploaded third-party skill archive for provenance, licensing, unsafe paths, and local compatibility before installing it.",
+          "should_trigger": true
+        },
+        {
+          "id": "external-skill-import-trigger-2",
+          "query": "Assess a skill bundle from GitHub as untrusted data and recommend accept, adapt, defer, or reject without executing its scripts.",
+          "should_trigger": true
+        },
+        {
+          "id": "external-skill-import-near-miss-1",
+          "query": "Create a new project-owned skill from requirements we wrote ourselves.",
+          "should_trigger": false
+        },
+        {
+          "id": "external-skill-import-near-miss-2",
+          "query": "Install a vetted npm dependency from the public registry after checking its package provenance.",
           "should_trigger": false
         }
       ]
@@ -599,6 +679,34 @@
       ]
     },
     {
+      "name": "verify-before-commit",
+      "metadata_name": "verify-before-commit",
+      "path": ".agents/skills/verify-before-commit/SKILL.md",
+      "description": "Verify changes before committing or pushing, and on any change to the repo. Use whenever about to commit, push, or claim a \"green build\" / \"tests pass\" / \"ready to deploy\" for this app. Encodes the local verification discipline for this repo: git status always clean before commit, locked dependency overrides kept in sync, typecheck (not build) because this machine is ARM, rely on CI for the real test gate, and check .agents/memory before touching unfamiliar areas.",
+      "evals": [
+        {
+          "id": "verify-before-commit-trigger-1",
+          "query": "Before committing these repo changes, check status, run the supported local verification, and confirm the dependency lockfile is consistent.",
+          "should_trigger": true
+        },
+        {
+          "id": "verify-before-commit-trigger-2",
+          "query": "We are about to push and claim the build is green; apply this repository's ARM-safe verification discipline first.",
+          "should_trigger": true
+        },
+        {
+          "id": "verify-before-commit-near-miss-1",
+          "query": "Run the full pre-publish release checklist and decide whether the application is ready to deploy.",
+          "should_trigger": false
+        },
+        {
+          "id": "verify-before-commit-near-miss-2",
+          "query": "Review a finished feature for security and product risks, but do not commit or push it.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
       "name": "wrong-number-triage",
       "metadata_name": "wrong-number-triage",
       "path": ".agents/skills/wrong-number-triage/SKILL.md",
@@ -628,7 +736,7 @@
     },
     {
       "name": "check-dependency-licenses",
-      "metadata_name": "Check dependency licenses",
+      "metadata_name": "check-dependency-licenses",
       "path": ".local/custom_skills/check-dependency-licenses/SKILL.md",
       "description": "Use this skill when adding dependencies or before releasing, or when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance.",
       "evals": [
@@ -656,7 +764,7 @@
     },
     {
       "name": "handle-personal-and-sensitive-data",
-      "metadata_name": "Handle personal and sensitive data",
+      "metadata_name": "handle-personal-and-sensitive-data",
       "path": ".local/custom_skills/handle-personal-and-sensitive-data/SKILL.md",
       "description": "Use when building anything that collects, stores, logs, or transmits user data \u2014 sign-up, profiles, payments, uploads, analytics, logging \u2014 or when the user mentions PII, GDPR, CCPA, HIPAA, PCI, or privacy.",
       "evals": [
@@ -684,7 +792,7 @@
     },
     {
       "name": "instrument-observability-and-graceful-errors",
-      "metadata_name": "Instrument observability and graceful errors",
+      "metadata_name": "instrument-observability-and-graceful-errors",
       "path": ".local/custom_skills/instrument-observability-and-graceful-errors/SKILL.md",
       "description": "Use when building backend services, APIs, scheduled jobs, or anything going to production \u2014 to add structured logging, health checks, and graceful error handling so the app is debuggable in production without leaking internals to users.",
       "evals": [
@@ -712,7 +820,7 @@
     },
     {
       "name": "make-apps-resilient-to-abuse-and-overload",
-      "metadata_name": "Make apps resilient to abuse and overload",
+      "metadata_name": "make-apps-resilient-to-abuse-and-overload",
       "path": ".local/custom_skills/make-apps-resilient-to-abuse-and-overload/SKILL.md",
       "description": "Use when building public endpoints, APIs, auth/login routes, forms, file uploads, search, or any endpoint that calls a paid service (AI, email, SMS) \u2014 to add rate limiting, timeouts, and quotas that prevent abuse, runaway cost, and denial of service.",
       "evals": [
@@ -740,7 +848,7 @@
     },
     {
       "name": "make-ui-responsive-across-devices",
-      "metadata_name": "Make UI responsive across devices",
+      "metadata_name": "make-ui-responsive-across-devices",
       "path": ".local/custom_skills/make-ui-responsive-across-devices/SKILL.md",
       "description": "Use when building or changing any web UI that real people will use on different screens \u2014 pages, dashboards, forms, marketing sites, customer-facing apps \u2014 so the layout works on phone, tablet, and desktop, not just the preview width.",
       "evals": [
@@ -768,7 +876,7 @@
     },
     {
       "name": "meet-an-accessibility-baseline",
-      "metadata_name": "Meet an accessibility baseline",
+      "metadata_name": "meet-an-accessibility-baseline",
       "path": ".local/custom_skills/meet-an-accessibility-baseline/SKILL.md",
       "description": "Use this skill when building or changing any user-facing UI \u2014 pages, forms, navigation, modals, components \u2014 especially for customer-facing or public apps. Ensures the app meets basic WCAG accessibility so it doesn't exclude users or fail an audit.",
       "evals": [
@@ -796,7 +904,7 @@
     },
     {
       "name": "review-before-shipping",
-      "metadata_name": "Review before shipping",
+      "metadata_name": "review-before-shipping",
       "path": ".local/custom_skills/review-before-shipping/SKILL.md",
       "description": "Use this skill before committing, opening a pull request, merging, deploying, or publishing, or when the user says the app is \"done\", \"ready to ship\", or \"ready to go live\".",
       "evals": [
@@ -824,7 +932,7 @@
     },
     {
       "name": "secure-ai-features-against-prompt-injection",
-      "metadata_name": "Secure AI features against prompt injection",
+      "metadata_name": "secure-ai-features-against-prompt-injection",
       "path": ".local/custom_skills/secure-ai-features-against-prompt-injection/SKILL.md",
       "description": "Use when building any feature that sends user input or external content (web pages, files, emails, documents) to an LLM \u2014 chatbots, AI assistants, summarizers, RAG, or agents that can call tools or take actions. Defends against prompt injection and excessive agency.",
       "evals": [
@@ -852,7 +960,7 @@
     },
     {
       "name": "validate-and-encode-untrusted-input",
-      "metadata_name": "Validate and encode untrusted input",
+      "metadata_name": "validate-and-encode-untrusted-input",
       "path": ".local/custom_skills/validate-and-encode-untrusted-input/SKILL.md",
       "description": "Use whenever the app accepts input from any source the server doesn't control \u2014 form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output \u2014 to prevent SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation, parameterized/safe APIs, and contextual output encoding.",
       "evals": [
@@ -880,7 +988,7 @@
     },
     {
       "name": "vet-dependencies-before-adding",
-      "metadata_name": "Vet dependencies before adding",
+      "metadata_name": "vet-dependencies-before-adding",
       "path": ".local/custom_skills/vet-dependencies-before-adding/SKILL.md",
       "description": "Use this skill when adding, upgrading, or installing any third-party package or library (npm, pip, etc.), or when the user asks to add a dependency.",
       "evals": [
@@ -945,6 +1053,34 @@
       "negative_overlap": [
         0,
         3
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "db-schema-change",
+      "positive_overlap": [
+        9,
+        1
+      ],
+      "negative_overlap": [
+        4,
+        1
+      ],
+      "under_trigger_signal": 1,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "external-skill-import",
+      "positive_overlap": [
+        8,
+        8
+      ],
+      "negative_overlap": [
+        0,
+        2
       ],
       "under_trigger_signal": 0,
       "over_trigger_signal": 0,
@@ -1095,6 +1231,20 @@
       "positive_overlap": [
         10,
         8
+      ],
+      "negative_overlap": [
+        2,
+        2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "verify-before-commit",
+      "positive_overlap": [
+        9,
+        7
       ],
       "negative_overlap": [
         2,

@@ -1239,4 +1239,33 @@ describe("POST /api/inventory/consume-sauce-barrel — retry-safe barrel taps", 
       "run-sauce-barrels:sauce-barrel:2",
     ]);
   });
+
+  it("deducts a remade manual barrel after a decrement gives the displayed index a new action identity", async () => {
+    const itemId = await makeItem("ingredient:Correction Sauce:lbs");
+    await addLot(itemId, 100);
+    const request = (eventId: string) =>
+      fetch(`${baseUrl}/api/inventory/consume-sauce-barrel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: "run-sauce-correction",
+          barrelIndex: 1,
+          eventId,
+          itemKey: "ingredient:Correction Sauce:lbs",
+          qty: 10,
+        }),
+      });
+
+    expect(await request("manual:1:1").then((response) => response.json()))
+      .toEqual({ applied: true, consumed: 10 });
+    // Same action retry is idempotent.
+    expect(await request("manual:1:1").then((response) => response.json()))
+      .toEqual({ applied: false, consumed: 0 });
+    // After a decrement correction, the next real barrel has a new generation
+    // even though its displayed index is 1 again.
+    expect(await request("manual:3:1").then((response) => response.json()))
+      .toEqual({ applied: true, consumed: 10 });
+    expect(await onHand(itemId)).toBe(80);
+    expect(await consumeLedgerCount(itemId)).toBe(2);
+  });
 });

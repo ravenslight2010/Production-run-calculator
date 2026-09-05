@@ -3,6 +3,7 @@ import {
   buildMatchPremixPrompt,
   sanitizeMatchPremix,
   validateMatchPremixBody,
+  resolveDeterministicMatchPremix,
   MAX_KNOWN_BRANDS,
   MAX_UNMATCHED_NAMES,
   type MatchPremixInput,
@@ -38,6 +39,34 @@ describe("validateMatchPremixBody", () => {
   it("accepts a well-formed body", () => {
     const r = validateMatchPremixBody(input());
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("resolveDeterministicMatchPremix", () => {
+  it("grounds known brand and flavor names without a model", () => {
+    const out = resolveDeterministicMatchPremix(
+      input({
+        brands: ["Bobo's"],
+        brandFlavors: { "Bobo's": ["Deluxe"] },
+        unmatchedNames: ["Bobos Deluxe Mix"],
+      }),
+    );
+    expect(out.matches).toEqual([
+      { name: "Bobos Deluxe Mix", brand: "Bobo's", flavor: "Deluxe" },
+    ]);
+    expect(out.unresolvedNames).toEqual([]);
+  });
+
+  it("keeps ambiguous or unknown products for AI/manual review", () => {
+    const out = resolveDeterministicMatchPremix(
+      input({
+        brands: ["Bobo's"],
+        brandFlavors: { "Bobo's": ["Deluxe Chicken", "Chicken Deluxe"] },
+        unmatchedNames: ["Bobos Deluxe Mix", "Unknown Mix"],
+      }),
+    );
+    expect(out.matches).toEqual([]);
+    expect(out.unresolvedNames).toEqual(["Bobos Deluxe Mix", "Unknown Mix"]);
   });
 });
 

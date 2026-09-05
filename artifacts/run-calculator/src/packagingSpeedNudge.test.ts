@@ -50,7 +50,7 @@ describe("packaging speed nudge", () => {
     expect(evaluation.reason).toBeNull();
   });
 
-  it("explains that a correction before 30 seconds of post-freezer output is waiting", () => {
+  it("explains that a correction before 30 seconds of post-tunnel output is waiting", () => {
     const evaluation = evaluatePackagingSpeedNudge({
       ...BASE,
       elapsedOutputMin: 29 / 60,

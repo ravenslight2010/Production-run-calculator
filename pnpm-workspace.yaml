@@ -1,6 +1,6 @@
-# ============================================================================
+# ----------------------------------------------------------------------------
 # SECURITY: Minimum release age for npm packages (supply-chain attack defense)
-# ============================================================================
+# ----------------------------------------------------------------------------
 #
 # This setting requires that any npm package version must have been published
 # for at least 1 day (1440 minutes) before pnpm will allow installing it.
@@ -24,7 +24,7 @@
 #     - react
 #     - typescript
 #
-# ============================================================================
+# ----------------------------------------------------------------------------
 minimumReleaseAge: 1440
 
 minimumReleaseAgeExclude:
@@ -75,12 +75,14 @@ onlyBuiltDependencies:
 overrides:
   # Security overrides formerly stored in package.json. Keep them here because
   # pnpm 11 reads workspace overrides and ignores package.json.pnpm.
+  adm-zip: "0.6.0"
+  browserslist: "4.28.7"
   image-size: ">=2.0.2"
   body-parser: "2.3.0"
   protobufjs: "7.6.5"
   "minimatch@5>brace-expansion": "2.1.4"
   "minimatch@10>brace-expansion": "5.0.9"
-  fast-uri: "3.1.5"
+  fast-uri: "3.1.6"
   js-yaml: "4.3.1"
   undici: "7.29.0"
   "@esbuild-kit/esm-loader": "npm:tsx@^4.23.12"
@@ -168,7 +170,7 @@ overrides:
   "js-yaml@3": "^3.15.0"
   "js-yaml@4": "^4.2.0"
   # qs.stringify can crash with a TypeError on malformed comma-format arrays (DoS)
-  qs: "^6.15.2"
+  qs: "^6.16.0"
   # postcss has an XSS via unescaped </style> in stringified output
   postcss: "8.5.23"
   # @babel/core allows arbitrary file read via sourceMappingURL comments

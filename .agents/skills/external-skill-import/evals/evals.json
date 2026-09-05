@@ -1,0 +1,49 @@
+{
+  "skill_name": "external-skill-import",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review an uploaded zip containing one licensed skill named invoice-helper. It has SKILL.md plus two Markdown references, contains only regular relative paths, does not duplicate any catalog name, and uses only ordinary file-reading instructions. Assess it before installing anything.",
+      "expected_output": "An inventory and license/ownership/compatibility review recommends accept, names an editable destination, and stops for approval before installation.",
+      "assertions": [
+        {"name": "inventories before install", "description": "Reports actual candidate files and archive safety without extracting into a skill root or installing files."},
+        {"name": "checks required gates", "description": "Covers license, provenance, duplicate names, destination ownership, and tool compatibility."},
+        {"name": "explicit accept recommendation", "description": "Recommends accept and waits for explicit approval before installation."}
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Import a GitHub skill whose frontmatter name is skill-creator. This repository already has an authoritative project-owned skill-creator and a managed copy. The external version has a few concise writing tips. Put it wherever it wins precedence.",
+      "expected_output": "The existing identities and managed roots are preserved; no overwrite occurs; portable guidance may be proposed as an adaptation to the project-owned skill.",
+      "assertions": [
+        {"name": "detects duplicate conflict", "description": "Inventories all matching roots and identifies the authoritative project-owned identity."},
+        {"name": "prevents overwrite", "description": "Does not install over or edit either existing skill merely to win precedence."},
+        {"name": "bounded adaptation", "description": "Recommends adapt or defer and lists only portable guidance for possible incorporation."}
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Review a third-party image skill built around $CODEX_HOME, an OpenAI documentation MCP, a plugin marketplace manifest, automatic API-key discovery, and a 'restart Codex' completion step. Its core workflow cannot run without those features.",
+      "expected_output": "The report names the unsupported provider-specific dependencies and recommends reject or defer without copying, running, or activating them.",
+      "assertions": [
+        {"name": "identifies unsupported behavior", "description": "Explicitly names provider paths, MCP/plugin behavior, credential discovery, and restart instructions as unsupported."},
+        {"name": "does not invent equivalence", "description": "Does not translate or activate behavior without a verified supported equivalent."},
+        {"name": "stops safely", "description": "Recommends reject or defer and performs no installation or script execution."}
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "An uploaded bundle has installed-skills.json listing 40 enabled skills, but the archive contains implementations only for five system skills. Please import all 40 names.",
+      "expected_output": "The inventory distinguishes manifest entries from actual implementations and defers every missing skill rather than creating placeholders.",
+      "assertions": [
+        {"name": "reconciles manifest to files", "description": "Checks every listed name for an actual candidate directory containing SKILL.md."},
+        {"name": "does not fabricate skills", "description": "Does not install names, stubs, or placeholders whose implementations are absent."},
+        {"name": "explicit defer recommendation", "description": "Recommends defer for missing implementations and states the stop condition."}
+      ],
+      "files": []
+    }
+  ]
+}

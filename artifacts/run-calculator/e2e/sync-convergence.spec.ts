@@ -13,6 +13,10 @@ import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
 } from "./isolation";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -50,24 +54,19 @@ test.afterAll(async () => {
 });
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  try {
-    await getStarted.waitFor({ state: "visible", timeout: 8_000 });
-    await getStarted.click();
-    await page.locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 });
-    await page.waitForTimeout(300);
-  } catch {
-    // The dialog may already have been dismissed for this account.
-  }
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) => currentPage.getByRole("dialog"),
+      afterComplete: async (currentPage) => {
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 5_000 })
+          .catch(() => {});
+        await currentPage.waitForTimeout(300);
+      },
+    },
+  });
 }
 
 async function promoteToManager(page: Page): Promise<void> {
@@ -915,10 +914,7 @@ test(
 
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-      const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-      if (await getStarted.isVisible().catch(() => false)) {
-        await getStarted.click();
-      }
+      await dismissOnboardingIfPresent(page);
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: /^Schedule/ }).click();
       const reloadedDialog = page.getByRole("dialog", { name: "Scheduled Days" });

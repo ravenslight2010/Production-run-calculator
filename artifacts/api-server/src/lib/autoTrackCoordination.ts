@@ -7,6 +7,11 @@ export const AUTO_TRACK_CHANNELS = [
   "batch-consume",
   "batch-produce",
   "hopper",
+  "sauce-barrel",
+  "app1-batch",
+  "app2-batch",
+  "app3-batch",
+  "app4-batch",
 ] as const;
 
 export type AutoTrackChannel = typeof AUTO_TRACK_CHANNELS[number];
@@ -26,9 +31,40 @@ export type AutoTrackCoordination = {
 };
 
 export type AutoTrackMutation = {
-  field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady";
+  field:
+    | "skidsCompleted"
+    | "casesOnCurrentSkid"
+    | "traysOnLine"
+    | "batchesReady"
+    | "sauceBarrelsMade"
+    | "sauceBarrelAnchorNetSec"
+    | "sauceBarrelCorrectionGeneration"
+    | "app1BatchesMade"
+    | "app1BatchAnchorNetSec"
+    | "app1BatchCorrectionGeneration"
+    | "app2BatchesMade"
+    | "app2BatchAnchorNetSec"
+    | "app2BatchCorrectionGeneration"
+    | "app3BatchesMade"
+    | "app3BatchAnchorNetSec"
+    | "app3BatchCorrectionGeneration"
+    | "app4BatchesMade"
+    | "app4BatchAnchorNetSec"
+    | "app4BatchCorrectionGeneration";
   from: number;
   to: number;
+};
+
+// An accepted claim emits an instruction, not an inventory result. The sync
+// route can hand it to inventory while retaining its row lock and commit both
+// effects atomically. It is derived exclusively from stored run values.
+export type AutoTrackInventoryConsumption = {
+  kind: "sauce-barrel";
+  runId: string;
+  barrelIndex: number;
+  eventId: string;
+  itemKey: string;
+  qty: number;
 };
 
 export type AutoTrackClaim = {
@@ -53,6 +89,21 @@ const MUTATING_FIELDS = new Set<AutoTrackMutation["field"]>([
   "casesOnCurrentSkid",
   "traysOnLine",
   "batchesReady",
+  "sauceBarrelsMade",
+  "sauceBarrelAnchorNetSec",
+  "sauceBarrelCorrectionGeneration",
+  "app1BatchesMade",
+  "app1BatchAnchorNetSec",
+  "app1BatchCorrectionGeneration",
+  "app2BatchesMade",
+  "app2BatchAnchorNetSec",
+  "app2BatchCorrectionGeneration",
+  "app3BatchesMade",
+  "app3BatchAnchorNetSec",
+  "app3BatchCorrectionGeneration",
+  "app4BatchesMade",
+  "app4BatchAnchorNetSec",
+  "app4BatchCorrectionGeneration",
 ]);
 const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["field"]>> = {
   case: new Set(["skidsCompleted", "casesOnCurrentSkid"]),
@@ -61,6 +112,31 @@ const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["fi
   "batch-consume": new Set(["batchesReady"]),
   "batch-produce": new Set(["batchesReady"]),
   hopper: new Set(),
+  "sauce-barrel": new Set([
+    "sauceBarrelsMade",
+    "sauceBarrelAnchorNetSec",
+    "sauceBarrelCorrectionGeneration",
+  ]),
+  "app1-batch": new Set([
+    "app1BatchesMade",
+    "app1BatchAnchorNetSec",
+    "app1BatchCorrectionGeneration",
+  ]),
+  "app2-batch": new Set([
+    "app2BatchesMade",
+    "app2BatchAnchorNetSec",
+    "app2BatchCorrectionGeneration",
+  ]),
+  "app3-batch": new Set([
+    "app3BatchesMade",
+    "app3BatchAnchorNetSec",
+    "app3BatchCorrectionGeneration",
+  ]),
+  "app4-batch": new Set([
+    "app4BatchesMade",
+    "app4BatchAnchorNetSec",
+    "app4BatchCorrectionGeneration",
+  ]),
 };
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -89,21 +165,23 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     || !finiteNumber(body.nextDueAt)
     || !finiteNumber(body.baseUpdatedAt)
     || body.baseUpdatedAt < 0
-    || body.dueAt < now - 24 * 60 * 60_000
-    // The client may be operating with a clock that is ahead of the API (and
-    // browser tests deliberately advance their page clock to exercise wake
-    // catch-up). `dueAt` is coordination metadata only; the mutation itself is
-    // still checked against the server's canonical run values below. Keep the
-    // same bounded horizon as `nextDueAt` rather than rejecting valid timer
-    // events because of modest clock skew.
-    || body.dueAt > now + 24 * 60 * 60_000
     || body.nextDueAt <= body.dueAt
-    || body.nextDueAt > now + 24 * 60 * 60_000
     || !Array.isArray(body.mutations)
-    || body.mutations.length > 2
+    || body.mutations.length > 3
+  ) return null;
+  const netTimeChannel = body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel);
+  if (
+    netTimeChannel
+      ? body.dueAt < 0 || body.nextDueAt > 1_000_000
+      : body.dueAt < now - 24 * 60 * 60_000
+        // The client may be operating with a clock that is ahead of the API
+        // (and browser tests deliberately advance their page clock). Keep a
+        // bounded horizon while allowing modest clock skew.
+        || body.dueAt > now + 24 * 60 * 60_000
+        || body.nextDueAt > now + 24 * 60 * 60_000
   ) return null;
   if (
-    body.channel === "case"
+    (body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel))
     && (!Number.isSafeInteger(body.correctionGeneration) || (body.correctionGeneration as number) < 0)
   ) return null;
 
@@ -133,6 +211,36 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     });
   }
   if (body.channel === "hopper" ? mutations.length !== 0 : mutations.length === 0) return null;
+  // A barrel event is one completed physical barrel, never a client-side
+  // reconciliation of the canonical counter.
+  if (body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel)) {
+    const prefix = body.channel === "sauce-barrel"
+      ? "sauceBarrel"
+      : `app${body.channel[3]}Batch`;
+    const madeField = body.channel === "sauce-barrel" ? "sauceBarrelsMade" : `${prefix}esMade`;
+    const anchorField = `${prefix}AnchorNetSec`;
+    const correctionField = `${prefix}CorrectionGeneration`;
+    const byField = new Map(mutations.map((mutation) => [mutation.field, mutation]));
+    const made = byField.get(madeField as AutoTrackMutation["field"]);
+    const anchor = byField.get(anchorField as AutoTrackMutation["field"]);
+    const correction = byField.get(correctionField as AutoTrackMutation["field"]);
+    if (
+      mutations.length !== 3
+      || !made
+      || !anchor
+      || !correction
+      || !Number.isSafeInteger(made.from)
+      || !Number.isSafeInteger(made.to)
+      || made.to !== made.from + 1
+      || (body.channel === "sauce-barrel" && !Number.isSafeInteger(anchor.from))
+      || (body.channel === "sauce-barrel" && !Number.isSafeInteger(anchor.to))
+      || anchor.to < anchor.from
+      || !Number.isSafeInteger(correction.from)
+      || !Number.isSafeInteger(correction.to)
+      || correction.from !== correction.to
+      || correction.from !== body.correctionGeneration
+    ) return null;
+  }
 
   return {
     version: AUTO_TRACK_COORDINATION_VERSION,
@@ -144,7 +252,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     dueAt: body.dueAt,
     nextDueAt: body.nextDueAt,
     baseUpdatedAt: body.baseUpdatedAt,
-    ...(body.channel === "case"
+    ...(body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel)
       ? { correctionGeneration: body.correctionGeneration as number }
       : {}),
     mutations,
@@ -166,6 +274,7 @@ export function applyAutoTrackClaim(
   outcome: AutoTrackClaimOutcome;
   channelState: AutoTrackChannelState;
   values: Record<string, unknown>;
+  inventoryConsumption?: AutoTrackInventoryConsumption;
 } {
   const data = { ...object(stored) };
   const runValues = { ...object(data.runValues) };
@@ -206,8 +315,8 @@ export function applyAutoTrackClaim(
       // the per-mutation `from` check below still rejects overlapping or
       // externally edited fields. Ordinary edits have no accepted channel
       // stamp and continue to invalidate a queued automatic write.
-      const currentStampIsAutomatic = Object.values(runCoordination[claim.runId] ?? {}).some(
-        (channelState) => channelState?.acceptedRunValuesUpdatedAt === currentUpdatedAt,
+      const currentStampIsAutomatic = Object.values(runCoordination).some(
+        (channelState) => object(channelState).acceptedRunValuesUpdatedAt === currentUpdatedAt,
       );
       if (!currentStampIsAutomatic) outcome = "conflict";
     }
@@ -223,6 +332,23 @@ export function applyAutoTrackClaim(
     ) outcome = "conflict";
   }
 
+  if (outcome === "accepted" && (claim.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(claim.channel))) {
+    const correctionField = claim.channel === "sauce-barrel"
+      ? "sauceBarrelCorrectionGeneration"
+      : `app${claim.channel[3]}BatchCorrectionGeneration`;
+    // Applicator coordination was added after durable run values existed in
+    // the field. A missing progress register is its documented zero default;
+    // accept its first claim so a live legacy run can adopt the new register.
+    // Sauce intentionally remains strict because it can produce inventory work.
+    const correctionGeneration = claim.channel === "sauce-barrel"
+      ? values[correctionField]
+      : values[correctionField] ?? 0;
+    if (
+      !Number.isSafeInteger(correctionGeneration)
+      || correctionGeneration !== claim.correctionGeneration
+    ) outcome = "conflict";
+  }
+
   if (outcome === "accepted") {
     for (const mutation of claim.mutations) {
       const current = Number(values[mutation.field]) || 0;
@@ -230,6 +356,42 @@ export function applyAutoTrackClaim(
         outcome = "conflict";
         break;
       }
+    }
+  }
+
+  let inventoryConsumption: AutoTrackInventoryConsumption | undefined;
+  if (outcome === "accepted" && claim.channel === "sauce-barrel") {
+    const mutation = claim.mutations.find(({ field }) => field === "sauceBarrelsMade")!;
+    const current = values.sauceBarrelsMade;
+    const sauceBarrelLbs = Number(values.sauceBarrelLbs);
+    const sauceName = typeof values.frontlineRecipeName === "string"
+      ? values.frontlineRecipeName.trim()
+      : "";
+    const recipe = Array.isArray(values.frontlineRecipe) ? values.frontlineRecipe : [];
+    const hasSauceRecipe = recipe.some((row) => {
+      const entry = object(row);
+      return finiteNumber(entry.lbs) && entry.lbs > 0;
+    });
+    // Validate the stored progress and recipe/configuration, never client
+    // inventory fields. A manual snapshot correction therefore conflicts
+    // instead of creating an untrusted stock deduction.
+    if (
+      !Number.isSafeInteger(current)
+      || current !== mutation.from
+      || (!hasSauceRecipe && (!sauceName || !Number.isFinite(sauceBarrelLbs) || sauceBarrelLbs <= 0))
+    ) {
+      outcome = "conflict";
+    } else {
+      inventoryConsumption = {
+        kind: "sauce-barrel",
+        runId: claim.runId,
+        barrelIndex: mutation.to,
+        eventId: claim.eventId,
+        itemKey: hasSauceRecipe
+          ? "ingredient:Sauce:batches"
+          : `ingredient:${sauceName}:lbs`,
+        qty: hasSauceRecipe ? 1 : sauceBarrelLbs,
+      };
     }
   }
 
@@ -282,5 +444,5 @@ export function applyAutoTrackClaim(
     };
     data.packagingProgress = packagingProgress;
   }
-  return { data, outcome, channelState, values };
+  return { data, outcome, channelState, values, ...(inventoryConsumption ? { inventoryConsumption } : {}) };
 }

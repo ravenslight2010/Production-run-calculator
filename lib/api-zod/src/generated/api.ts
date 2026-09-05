@@ -1348,7 +1348,9 @@ export const AiSpecReconcileResponse = zod.object({
   "message": zod.string()
 })),
   "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number()
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1373,7 +1375,9 @@ export const AiMixReconcileBody = zod.object({
 
 export const AiMixReconcileResponse = zod.object({
   "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number()
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1484,6 +1488,7 @@ export const AiProactiveAlertResponse = zod.object({
   "impact": zod.enum(['high', 'medium', 'low'])
 }).describe('A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. \"behind-plan\", \"break-window\") so repeats of the same situation can be de-duped\/cooled down client-side; it is never run-instance or timestamp specific.'),zod.null()]).describe('The single nudge to surface now, or null when nothing applies'),
   "generatedAt": zod.number(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional message when no alert could be produced')
 })
 
@@ -1571,6 +1576,8 @@ export const AiForecastResponse = zod.object({
 }).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
 })).optional().describe('One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon.'),
   "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI produced a forecast; false when no forecast was produced'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Explanation when no forecast could responsibly be produced')
 })
 
@@ -1618,7 +1625,8 @@ export const AiSummaryResponse = zod.object({
   "hasData": zod.boolean()
 }).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used')
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1869,7 +1877,8 @@ export const AiAnomaliesResponse = zod.object({
   "summary": zod.string().describe('Plain-language narration (AI), or empty when nothing was flagged \/ AI unavailable'),
   "note": zod.string().optional().describe('Optional explanation (e.g. not enough history to judge)'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise')
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -1915,7 +1924,8 @@ export const AiScheduleOptimizeResponse = zod.object({
   "summary": zod.string().describe('Plain-language narration (AI), or empty when no improvement \/ AI unavailable'),
   "note": zod.string().optional().describe('Optional explanation (e.g. already optimally ordered)'),
   "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise')
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
 })
 
 
@@ -2023,6 +2033,8 @@ export const AiMatchImportResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported pepperoni type names. Optional.'),
   "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional message when no matches could be made')
 })
 
@@ -2048,6 +2060,8 @@ export const AiMatchPremixResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional message when no matches could be made')
 })
 
@@ -2162,6 +2176,8 @@ export const AiSuggestMergesResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
   "note": zod.string().optional().describe('Optional brief overall comment from the model')
 })
 
@@ -4647,6 +4663,107 @@ export const SavePhotoAliasesResponse = zod.object({
 
 
 /**
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data.
+ * @summary Submit passive browser field-check observations
+ */
+export const submitFieldCheckObservationsBodyObservationsItemObservationIdMin = 8;
+export const submitFieldCheckObservationsBodyObservationsItemObservationIdMax = 160;
+
+export const submitFieldCheckObservationsBodyObservationsItemCheckVersionMax = 20;
+
+export const submitFieldCheckObservationsBodyObservationsItemAppBuildMax = 100;
+
+export const submitFieldCheckObservationsBodyObservationsItemMetricsMinOne = 0;
+export const submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne = 10000000;
+
+export const submitFieldCheckObservationsBodyObservationsMax = 20;
+
+
+
+export const SubmitFieldCheckObservationsBody = zod.object({
+  "observations": zod.array(zod.object({
+  "observationId": zod.string().min(submitFieldCheckObservationsBodyObservationsItemObservationIdMin).max(submitFieldCheckObservationsBodyObservationsItemObservationIdMax),
+  "checkName": zod.enum(['startup', 'foreground-recovery', 'sync-acknowledgment', 'cross-device-convergence', 'reload-persistence', 'offline-recovery', 'pwa-update-handoff', 'performance']),
+  "checkVersion": zod.string().max(submitFieldCheckObservationsBodyObservationsItemCheckVersionMax),
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "appBuild": zod.string().min(1).max(submitFieldCheckObservationsBodyObservationsItemAppBuildMax),
+  "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'other-browser']),
+  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne))
+})).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
+})
+
+export const submitFieldCheckObservationsResponseAcceptedMin = 0;
+
+export const submitFieldCheckObservationsResponseDuplicateMin = 0;
+
+
+
+export const SubmitFieldCheckObservationsResponse = zod.object({
+  "accepted": zod.number().int().min(submitFieldCheckObservationsResponseAcceptedMin),
+  "duplicate": zod.number().int().min(submitFieldCheckObservationsResponseDuplicateMin)
+})
+
+
+/**
+ * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
+ * @summary Get manager field-check health
+ */
+export const GetFieldChecksResponse = zod.object({
+  "version": zod.string(),
+  "scope": zod.enum(['current facility']),
+  "generatedAt": zod.coerce.date(),
+  "checks": zod.array(zod.object({
+  "name": zod.string(),
+  "label": zod.string(),
+  "status": zod.enum(['healthy', 'collecting', 'needs-review', 'unsupported']),
+  "observedBy": zod.enum(['browser', 'hardware']),
+  "evidence": zod.string(),
+  "expiresHours": zod.number().nullable(),
+  "lastSuccessfulAt": zod.coerce.date().nullable(),
+  "lastObservedAt": zod.coerce.date().nullable(),
+  "recentFailures": zod.array(zod.object({
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "appBuild": zod.string(),
+  "deviceCategory": zod.string(),
+  "metrics": zod.record(zod.string(), zod.number())
+})),
+  "failureCount": zod.number().int(),
+  "incompleteCount": zod.number().int(),
+  "actionable": zod.boolean(),
+  "issueStatus": zod.union([zod.literal('open'),zod.literal('recovered'),zod.literal(null)]).nullable()
+})),
+  "overallStatus": zod.enum(['healthy', 'collecting', 'needs-review', 'unsupported']),
+  "actionableCount": zod.number().int()
+})
+
+
+/**
+ * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name.
+ * @summary Record a guided physical-device check
+ */
+export const ConfirmHardwareFieldCheckBody = zod.object({
+  "checkName": zod.enum(['touch-accuracy', 'keyboard-clearance', 'process-kill-recovery']),
+  "checkVersion": zod.enum(['2026-09']),
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "deviceCategory": zod.enum(['android-phone', 'android-tablet', 'ipad'])
+})
+
+export const confirmHardwareFieldCheckResponseAcceptedMin = 0;
+
+export const confirmHardwareFieldCheckResponseDuplicateMin = 0;
+
+
+
+export const ConfirmHardwareFieldCheckResponse = zod.object({
+  "accepted": zod.number().int().min(confirmHardwareFieldCheckResponseAcceptedMin),
+  "duplicate": zod.number().int().min(confirmHardwareFieldCheckResponseDuplicateMin)
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */
@@ -5405,7 +5522,7 @@ export const claimAutoTrackEventBodyClaimMutationsItemFromMax = 1000000;
 export const claimAutoTrackEventBodyClaimMutationsItemToMin = 0;
 export const claimAutoTrackEventBodyClaimMutationsItemToMax = 1000000;
 
-export const claimAutoTrackEventBodyClaimMutationsMax = 2;
+export const claimAutoTrackEventBodyClaimMutationsMax = 3;
 
 
 
@@ -5414,7 +5531,7 @@ export const ClaimAutoTrackEventBody = zod.object({
   "claim": zod.object({
   "version": zod.literal(1),
   "runId": zod.string().min(1).max(claimAutoTrackEventBodyClaimRunIdMax),
-  "channel": zod.enum(['case', 'tray-consume', 'tray-produce', 'batch-consume', 'batch-produce', 'hopper']),
+  "channel": zod.enum(['case', 'tray-consume', 'tray-produce', 'batch-consume', 'batch-produce', 'hopper', 'sauce-barrel', 'app1-batch', 'app2-batch', 'app3-batch', 'app4-batch']),
   "generation": zod.string().min(1).max(claimAutoTrackEventBodyClaimGenerationMax),
   "sequence": zod.number().int().min(1).max(claimAutoTrackEventBodyClaimSequenceMax),
   "eventId": zod.string().min(1).max(claimAutoTrackEventBodyClaimEventIdMax),
@@ -5423,7 +5540,7 @@ export const ClaimAutoTrackEventBody = zod.object({
   "baseUpdatedAt": zod.number().min(claimAutoTrackEventBodyClaimBaseUpdatedAtMin),
   "correctionGeneration": zod.number().int().min(claimAutoTrackEventBodyClaimCorrectionGenerationMin).optional(),
   "mutations": zod.array(zod.object({
-  "field": zod.enum(['skidsCompleted', 'casesOnCurrentSkid', 'traysOnLine', 'batchesReady']),
+  "field": zod.enum(['skidsCompleted', 'casesOnCurrentSkid', 'traysOnLine', 'batchesReady', 'sauceBarrelsMade', 'sauceBarrelAnchorNetSec', 'sauceBarrelCorrectionGeneration', 'app1BatchesMade', 'app1BatchAnchorNetSec', 'app1BatchCorrectionGeneration', 'app2BatchesMade', 'app2BatchAnchorNetSec', 'app2BatchCorrectionGeneration', 'app3BatchesMade', 'app3BatchAnchorNetSec', 'app3BatchCorrectionGeneration', 'app4BatchesMade', 'app4BatchAnchorNetSec', 'app4BatchCorrectionGeneration']),
   "from": zod.number().min(claimAutoTrackEventBodyClaimMutationsItemFromMin).max(claimAutoTrackEventBodyClaimMutationsItemFromMax),
   "to": zod.number().min(claimAutoTrackEventBodyClaimMutationsItemToMin).max(claimAutoTrackEventBodyClaimMutationsItemToMax)
 })).max(claimAutoTrackEventBodyClaimMutationsMax)

@@ -2,14 +2,14 @@
 
 - Provider: **gemini**
 - Model: **gemini-2.5-flash**
-- Run at: **2026-08-25T22:37:27.774333+00:00**
+- Run at: **2026-09-03T14:25:20.586419+00:00**
 - Scope: Gemini classification only; this is not evidence of Claude behavior or Claude tool selection.
 
 ## Metrics
 
-- Evaluated: **98**; excluded: **2**
-- Accuracy: **0.918**
-- Precision: **0.862**
+- Evaluated: **102**; excluded: **10**
+- Accuracy: **0.922**
+- Precision: **0.871**
 - Recall: **1.000**
 - False-positive rate: **0.167**
 - False-negative rate: **0.000**

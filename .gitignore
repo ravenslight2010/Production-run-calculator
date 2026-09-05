@@ -34,9 +34,11 @@ node_modules
 /artifacts/run-calculator/playwright-report/
 /artifacts/run-calculator/test-results/
 /release-evidence/clean-start/
+/release-evidence/release-check-checkpoint.md
 /release-evidence/release-check-report.md
 /release-evidence/release-check-state.json
 /release-evidence-full/
+/rollback-rehearsal-report.md
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log

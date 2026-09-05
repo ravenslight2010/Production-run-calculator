@@ -11,6 +11,7 @@ on:
       - scripts/package.json
       - scripts/src/check-ci-binary-provenance.sh
       - scripts/src/check-workflows.sh
+      - scripts/src/check-workflows.test.sh
   pull_request:
     paths:
       - .github/workflows/**
@@ -19,6 +20,7 @@ on:
       - scripts/package.json
       - scripts/src/check-ci-binary-provenance.sh
       - scripts/src/check-workflows.sh
+      - scripts/src/check-workflows.test.sh
   workflow_dispatch:
 
 permissions:
@@ -81,6 +83,9 @@ jobs:
 
       - name: Validate all GitHub Actions workflows
         run: pnpm run check:workflows
+
+      - name: Verify workflow guard contracts
+        run: bash scripts/src/check-workflows.test.sh
 
       - name: Enforce CI binary provenance policy
         run: pnpm --filter @workspace/scripts run check:ci-binary-provenance

@@ -1,18 +1,18 @@
 {
   "provider": "gemini",
   "model": "gemini-2.5-flash",
-  "run_at": "2026-08-25T22:37:27.774333+00:00",
+  "run_at": "2026-09-03T14:25:20.586419+00:00",
   "claude_evidence": "unavailable and intentionally unchanged",
   "metrics": {
-    "evaluated": 98,
-    "excluded": 2,
-    "accuracy": 0.9183673469387755,
-    "precision": 0.8620689655172413,
+    "evaluated": 102,
+    "excluded": 10,
+    "accuracy": 0.9215686274509803,
+    "precision": 0.8709677419354839,
     "recall": 1.0,
     "false_positive_rate": 0.16666666666666666,
     "false_negative_rate": 0.0,
     "confusion": {
-      "true_positive": 50,
+      "true_positive": 54,
       "false_positive": 8,
       "true_negative": 40,
       "false_negative": 0
@@ -26,8 +26,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly asks to 'design a new customer-facing workflow before anyone writes code', which perfectly matches the skill's description of being used 'before any creative work' and 'before implementation' to 'explore user intent, requirements and design'. This is a direct and strong match.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states they want help 'designing a new customer-facing workflow before anyone writes code'. The brainstorming skill is designed for 'creative work' and 'exploring user intent, requirements and design before implementation', which perfectly matches the user's request.",
       "status": "included"
     },
     {
@@ -38,7 +38,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states they have a 'fuzzy product idea' and wants to 'explore the intent, compare approaches, and get approval on a design first.' This directly matches the skill description which emphasizes exploring 'user intent, requirements and design before implementation' for 'creative work' and 'building components'.",
+      "rationale": "The user request perfectly matches the skill description by asking to 'explore the intent, compare approaches, and get approval on a design first,' which directly aligns with 'Explores user intent, requirements and design before implementation' creative work or implementation work.",
       "status": "included"
     },
     {
@@ -49,7 +49,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'Implement this small fix directly; do not spend time exploring alternatives', which directly contradicts the purpose of the brainstorming skill to explore user intent, requirements, and design before implementation.",
+      "rationale": "The user explicitly states 'Implement this small fix directly; do not spend time exploring alternatives.' This is in direct opposition to the brainstorming skill's purpose, which is to 'explore user intent, requirements and design before implementation' and is to be used 'before any creative work'.",
       "status": "included"
     },
     {
@@ -60,7 +60,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user wants to review a finished API implementation for bugs and type errors. The brainstorming skill is explicitly for use *before* creative work and implementation, focusing on exploring user intent, requirements, and design. Reviewing a finished product is a post-implementation task and does not align with the skill's purpose.",
+      "rationale": "The user request is to review a finished API implementation for bugs and type errors, which is a post-implementation quality assurance task. The brainstorming skill is explicitly for pre-implementation creative work, exploring intent, requirements, and design before any building or modification. The skill's purpose does not align with the user's request.",
       "status": "included"
     },
     {
@@ -71,7 +71,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user's request explicitly states that 'A new customer's workbook was imported yesterday' and asks to 'audit what landed in profiles and pools and tell me if it is correct.' This perfectly matches the skill's purpose of auditing after importing a new customer's spec workbook to confirm everything landed correctly.",
+      "rationale": "The user explicitly states 'A new customer's workbook was imported yesterday' and asks to 'audit what landed in profiles and pools and tell me if it is correct.' This directly aligns with the skill description: 'Audit after importing a new customer's spec workbook. Use when the user imports a new brand/customer and wants confirmation everything landed right.'",
       "status": "included"
     },
     {
@@ -82,7 +82,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.9,
-      "rationale": "The user explicitly asks to 'verify the imported brand's recipes, links, and names', which directly matches the skill's purpose of 'Audit after importing a new customer's spec workbook' and confirming 'everything landed right'. The mention of 'without changing the importer or repairing data' further confirms the request is for an audit/verification, not a modification.",
+      "rationale": "The user is asking to 'verify the imported brand's recipes, links, and names'. This directly matches the skill's purpose of 'Audit after importing a new customer's spec workbook' and wanting 'confirmation everything landed right' after a new-customer import.",
       "status": "included"
     },
     {
@@ -91,10 +91,10 @@
       "query": "The Excel parser linked a recipe to the wrong flavor; trace the bug and fix the poisoned records.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "trigger",
-      "confidence": 0.9,
-      "rationale": "The user is reporting an issue with data being linked incorrectly after an import process (implied by 'Excel parser'). This aligns with the skill description for 'customer-import-audit' which is used when 'reports something off after a new-customer import'.",
-      "status": "disagreement"
+      "decision": "uncertain",
+      "confidence": 0.5,
+      "rationale": "The user is reporting a bug with an Excel parser linking data incorrectly. While this could potentially be related to importing a new customer's spec workbook, the request does not explicitly mention a 'new customer' or a 'new-customer import'. The skill is specific to post-import audits for new customers, and this request lacks that specific context, making the connection ambiguous.",
+      "status": "uncertain"
     },
     {
       "id": "customer-import-audit-near-miss-2",
@@ -104,7 +104,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user wants to import a new workbook and build a customer setup from scratch. The skill 'customer-import-audit' is for auditing *after* a new customer's spec workbook has been imported, not for the initial import and setup process itself. The request is about the action of importing and setting up, which precedes an audit.",
+      "rationale": "The user is requesting to import a new workbook and build a customer setup from scratch. The skill 'customer-import-audit' is designed for auditing *after* an import has already occurred, to confirm everything landed correctly or to report issues post-import. The user's request is about the initial import and setup process, not the subsequent audit.",
       "status": "included"
     },
     {
@@ -114,8 +114,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user request explicitly states that an 'importer saved the wrong yield into hundreds of profiles' and asks to 'diagnose the stored damage and ship a one-time data heal'. This perfectly matches the skill's description, which covers fixing poisoned stored data, specifically mentioning 'an import wrote a wrong number into many profiles' and 'writing a one-time server heal'.",
+      "confidence": 0.98,
+      "rationale": "The user request explicitly mentions that an importer saved wrong data into profiles and asks for diagnosing the stored damage and shipping a one-time data heal. This directly aligns with the skill's purpose to 'Fix bugs that poisoned stored data' and specifically mentions the example 'an import wrote a wrong number into many profiles', covering 'checking for poisoned data, writing a one-time server heal, and verifying it'.",
       "status": "included"
     },
     {
@@ -125,8 +125,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user request explicitly states 'production rows are already poisoned', 'repair persisted profiles safely', and 'verify the heal', which directly aligns with the skill's purpose of fixing 'poisoned stored data (profiles)' when 'wrong values are already saved in the database' and 'verifying it' through a 'one-time server heal'. This is a perfect match.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states that production rows are 'poisoned' and asks to 'repair persisted profiles safely and verify the heal.' This directly aligns with the skill's purpose of fixing bugs that poisoned stored data, repairing wrong values in the database, and verifying the heal.",
       "status": "included"
     },
     {
@@ -137,7 +137,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The skill is designed to 'fix bugs that poisoned stored data' and includes 'writing a one-time server heal'. The user explicitly states 'do not repair anything', which contradicts the core purpose of the skill, even though it covers 'checking for poisoned data'.",
+      "rationale": "The user wants to audit imported data without repairing anything. The skill 'data-heal-playbook' is specifically for fixing bugs that poisoned stored data, which involves a 'heal' or repair. Although it includes checking for poisoned data, the user's explicit instruction 'do not repair anything' contradicts the core purpose of this skill.",
       "status": "included"
     },
     {
@@ -148,7 +148,95 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'no incorrect value has been saved yet', which means the data is not poisoned. The skill is specifically designed for fixing issues where 'wrong values are already saved in the database'.",
+      "rationale": "The user explicitly states 'no incorrect value has been saved yet', which is the opposite of the skill's purpose to 'Fix bugs that poisoned stored data' where 'wrong values are already saved in the database'. This skill is for rectifying existing bad data, not for preventing it or fixing UI display issues that haven't corrupted the backend data.",
+      "status": "included"
+    },
+    {
+      "id": "db-schema-change-trigger-1",
+      "skill": "db-schema-change",
+      "query": "Add a new Drizzle table and carry the Postgres schema change through push-force, API codegen, and typechecks.",
+      "expected": "trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states 'Add a new Drizzle table' and requests 'Postgres schema change through push-force, API codegen, and typechecks'. The skill description states 'Use whenever modifying, adding, or removing a Drizzle table/column' and specifically mentions 'API/codegen, typecheck, push-force' as routing capabilities. This is a direct match.",
+      "status": "included"
+    },
+    {
+      "id": "db-schema-change-trigger-2",
+      "skill": "db-schema-change",
+      "query": "Remove a persisted database column safely and route any stored-data impact through the schema-change guardrails.",
+      "expected": "trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states 'Remove a persisted database column safely' which directly matches the skill's description 'removing a Drizzle table/column'. The request also mentions 'route any stored-data impact through the schema-change guardrails', which is covered by the skill's 'data-heal routing' capability and general focus on schema changes.",
+      "status": "included"
+    },
+    {
+      "id": "db-schema-change-near-miss-1",
+      "skill": "db-schema-change",
+      "query": "Add one nullable field to an existing populated table using the detailed new-column checklist.",
+      "expected": "do_not_trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states the need to 'Add one nullable field to an existing populated table using the detailed new-column checklist'. The skill description states, 'For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.' This is a direct match, indicating the skill is highly relevant.",
+      "status": "disagreement"
+    },
+    {
+      "id": "db-schema-change-near-miss-2",
+      "skill": "db-schema-change",
+      "query": "Rename a client-only TypeScript property that is never persisted or exposed by the API.",
+      "expected": "do_not_trigger",
+      "attempts": 1,
+      "decision": "do_not_trigger",
+      "confidence": 1.0,
+      "rationale": "The user is renaming a client-only TypeScript property that is never persisted or exposed by the API. This change does not involve any database schema modifications, Drizzle tables/columns, migrations, or database pushes, which are the purview of the 'db-schema-change' skill.",
+      "status": "included"
+    },
+    {
+      "id": "external-skill-import-trigger-1",
+      "skill": "external-skill-import",
+      "query": "Review this uploaded third-party skill archive for provenance, licensing, unsafe paths, and local compatibility before installing it.",
+      "expected": "trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 1.0,
+      "rationale": "The user explicitly asks to 'Review this uploaded third-party skill archive for provenance, licensing, unsafe paths, and local compatibility before installing it.' This aligns perfectly with the skill's description, which is to 'Review externally sourced agent skills from uploaded archives... before installation' and specifically mentions checking 'provenance, licensing, ownership... and local compatibility'.",
+      "status": "included"
+    },
+    {
+      "id": "external-skill-import-trigger-2",
+      "skill": "external-skill-import",
+      "query": "Assess a skill bundle from GitHub as untrusted data and recommend accept, adapt, defer, or reject without executing its scripts.",
+      "expected": "trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 1.0,
+      "rationale": "The user explicitly asks to \"Assess a skill bundle from GitHub\" and \"recommend accept, adapt, defer, or reject,\" which directly aligns with the core functionality of the skill: \"Review externally sourced agent skills from uploaded archives or GitHub... then recommend accept, adapt, defer, or reject.\" The mention of \"untrusted data\" and \"without executing its scripts\" further emphasizes the safety review aspect, which is also covered by the skill's description to \"check safety.\"",
+      "status": "included"
+    },
+    {
+      "id": "external-skill-import-near-miss-1",
+      "skill": "external-skill-import",
+      "query": "Create a new project-owned skill from requirements we wrote ourselves.",
+      "expected": "do_not_trigger",
+      "attempts": 1,
+      "decision": "do_not_trigger",
+      "confidence": 1.0,
+      "rationale": "The user wants to create a new skill from internally written requirements. The 'external-skill-import' skill is specifically for reviewing externally sourced agent skills, not for creating new ones from internal specifications.",
+      "status": "included"
+    },
+    {
+      "id": "external-skill-import-near-miss-2",
+      "skill": "external-skill-import",
+      "query": "Install a vetted npm dependency from the public registry after checking its package provenance.",
+      "expected": "do_not_trigger",
+      "attempts": 1,
+      "decision": "do_not_trigger",
+      "confidence": 0.8,
+      "rationale": "The skill is specifically designed for reviewing 'externally sourced agent skills' or 'third-party skill bundles' from archives or GitHub. The user is asking to install an 'npm dependency from the public registry', which is a general software package, not necessarily an 'agent skill'. While both involve installation and provenance checks, the object of the installation is different and falls outside the specific scope of this skill.",
       "status": "included"
     },
     {
@@ -159,7 +247,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'cheese Excel import skipped several varieties and created duplicate links; trace parse versus apply versus pool data.' This directly matches the skill's description to 'Diagnose spec/premix/cheese/shipping Excel import bugs' when 'an import got something wrong, mislinked, misnamed, duplicated, or skipped data' and to perform the 'Standard drill for tracing what the parse saw vs what landed in profiles/pools.'",
+      "rationale": "The user explicitly states 'cheese Excel import skipped several varieties and created duplicate links; trace parse versus apply versus pool data', which directly matches the skill's description for diagnosing 'cheese' Excel import bugs where data is 'skipped' or 'duplicated' and requires 'tracing what the parse saw vs what landed in profiles/pools'.",
       "status": "included"
     },
     {
@@ -169,8 +257,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states that a 'premix workbook misnamed recipes after import' and asks to 'investigate which layer produced the bad result'. This perfectly matches the skill's description for 'Diagnose spec/premix/cheese/shipping Excel import bugs' and 'Use when the user says an import got something wrong, mislinked, misnamed...'. The request is a direct call for import bug investigation.",
+      "confidence": 0.95,
+      "rationale": "The user explicitly states 'premix workbook misnamed recipes after import\u2014investigate', which directly aligns with the skill's purpose to 'Diagnose spec/premix/cheese/shipping Excel import bugs' and 'when the user says an import got something wrong, mislinked, misnamed, duplicated, or skipped data.' The keywords 'premix', 'misnamed', and 'import' are all present.",
       "status": "included"
     },
     {
@@ -181,7 +269,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'The import is correct'. The skill is designed to diagnose import bugs when an import got something wrong, mislinked, misnamed, duplicated, or skipped data. Since the import itself is not the issue, this skill is not applicable. The request is about a post-import data migration.",
+      "rationale": "The user explicitly states 'The import is correct', which means there is no import bug to investigate. The request is about repairing old profile rows with a migration, which is out of scope for this skill.",
       "status": "included"
     },
     {
@@ -191,8 +279,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user wants to add a new column to a database table, which is a database schema modification request. The skill is designed for diagnosing Excel import bugs, specifically when data is wrong, mislinked, misnamed, duplicated, or skipped during an import process. These two tasks are unrelated.",
+      "confidence": 0.95,
+      "rationale": "The user wants to add a new column to a database table. This is a database schema modification task. The skill is designed for diagnosing Excel import bugs, not for altering database schemas.",
       "status": "included"
     },
     {
@@ -203,7 +291,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user request explicitly asks to 'Verify the manager queue in a real browser' and lists specific aspects (authorization, scoped navigation, queue action, reload persistence, and startup health) that are directly mentioned in the skill description as capabilities ('Verify manager-facing operational workflows in a real browser, including authorization, scoped navigation, queue actions, reload persistence, and startup health'). This is a perfect match.",
+      "rationale": "The user request explicitly asks to 'Verify the manager queue in a real browser' and then lists several items (authorization, scoped navigation, queue action, reload persistence, and startup health) that are direct matches for the operational workflows mentioned in the skill description. The skill is specifically designed for 'manager-facing operational workflows in a real browser' and the listed checks. This is a perfect match.",
       "status": "included"
     },
     {
@@ -213,8 +301,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly requests 'browser evidence' for a 'manager' to 'reopen an import review' and 'complete the operational workflow'. The skill description directly mentions 'Verify manager-facing operational workflows in a real browser, including... import-review reopening', and states its use case for requests needing 'user-journey evidence' beyond unit tests. This is a perfect match for the skill's capabilities and intended use.",
+      "confidence": 0.9,
+      "rationale": "The user explicitly requests 'browser evidence' for a manager to 'reopen an import review and complete the operational workflow'. This directly matches the skill's description, which includes 'Verify manager-facing operational workflows in a real browser' and specifically lists 'import-review reopening' as a capability. The request clearly asks for user-journey evidence that unit tests (which are mentioned as passing) cannot provide.",
       "status": "included"
     },
     {
@@ -223,10 +311,8 @@
       "query": "Add a Playwright unit test for a pure date formatter.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The skill is designed for verifying manager-facing operational workflows in a real browser, requiring user-journey evidence. The user's request is to add a unit test for a pure date formatter, which does not involve operational workflows or necessitate a real browser for verification. This type of test falls under standard unit testing, not the scope of this browser-based operational verification skill.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "operational-browser-verification-near-miss-2",
@@ -234,10 +320,8 @@
       "query": "Compare two screenshots visually and update the accessibility snapshots.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "do_not_trigger",
-      "confidence": 0.9,
-      "rationale": "The user request is to 'Compare two screenshots visually and update the accessibility snapshots'. The skill description explicitly states that it is to be used 'when a request needs user-journey evidence that unit, API, integration, visual, or accessibility checks cannot provide'. This implies that visual and accessibility checks are outside the scope of what this specific skill provides, making it unsuitable for the current request.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "production-go-trigger-1",
@@ -247,7 +331,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks \"Is this app ready to go live?\" and requests to \"Run the applicable release gates and give one bounded GO or NO-GO decision.\" This directly aligns with the skill description which states to use it \"whenever the user asks if the app is production-ready... ready to go live, or asks for release status\" and to \"Run the applicable release and shipping gates before recommending publish\".",
+      "rationale": "The user explicitly asks 'Is this app ready to go live?' and requests a 'GO or NO-GO decision', which perfectly matches the skill's description and purpose to decide production-readiness and give a bounded GO/NO-GO release status after running applicable release gates.",
       "status": "included"
     },
     {
@@ -257,8 +341,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly asks about publishing an application, including 'production safety' and 'deployment readiness'. This directly aligns with the skill's purpose of determining if an application is 'production-ready' and 'ready to publish', and providing a GO/NO-GO release status. The keywords used in the request are explicitly mentioned in the skill description as triggers.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly asks if they 'can safely publish this application today', which directly matches the skill's purpose of determining if an application is 'production-ready', 'ready to publish', or 'safe to ship'.",
       "status": "included"
     },
     {
@@ -269,7 +353,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.9,
-      "rationale": "The user explicitly asks to 'run the pre-publish checklist'. The skill description states, 'Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.' This indicates that running such a checklist is a core part of this skill's process, even if the user isn't directly asking for the GO/NO-GO decision itself yet.",
+      "rationale": "The user is explicitly asking to run a 'pre-publish checklist' before deciding to deploy, which directly aligns with the skill's purpose of running 'applicable release and shipping gates before recommending publish' and determining if an application is 'production-ready' or 'ready to publish'.",
       "status": "disagreement"
     },
     {
@@ -279,8 +363,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user is reporting an incident on an *already deployed* production system and asking for investigation and repair. The skill 'production-go' is designed to determine if an application is *production-ready* or to provide a release status (GO/NO-GO) *before* deployment, not for incident response or debugging a broken production deploy.",
+      "confidence": 0.9,
+      "rationale": "The user's request is about an incident with an *already deployed* production application, asking to investigate logs and repair. The 'production-go' skill is designed to assess if an application is *production-ready* or to provide a *release status (GO/NO-GO)*, not for incident response, debugging, or repair of a currently broken production system.",
       "status": "included"
     },
     {
@@ -291,7 +375,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks to run pre-publish verification steps including tests, typechecks, workflow restart, and live-data-heal checks, which directly matches the skill's description and functionality for 'release-checklist'.",
+      "rationale": "The user's request explicitly lists all the functionalities described in the skill 'release-checklist', including 'release tests, typechecks, workflow restart, and live-data-heal checks', and clearly states 'Before publishing', which aligns perfectly with the skill's purpose of 'Pre-publish verification' and use 'before suggesting a deploy/publish, or when the user asks to publish'.",
       "status": "included"
     },
     {
@@ -302,7 +386,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks for the 'pre-publish verification checklist completed' and mentions 'before we suggest a deployment,' which directly matches the skill's description of 'Pre-publish verification for this app. Use before suggesting a deploy/publish.'",
+      "rationale": "The user explicitly asks for 'pre-publish verification checklist completed' and mentions 'before we suggest a deployment'. The skill description perfectly matches this request, stating 'Pre-publish verification for this app. Use before suggesting a deploy/publish'.",
       "status": "included"
     },
     {
@@ -313,7 +397,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.9,
-      "rationale": "The user is asking for a 'final production-ready GO or NO-GO decision', which directly aligns with the 'Pre-publish verification' and 'before suggesting a deploy/publish' functionality of the 'release-checklist' skill. The skill is designed to perform the checks necessary to inform such a decision.",
+      "rationale": "The user is asking for a 'final production-ready GO or NO-GO decision', which directly aligns with the 'Pre-publish verification' function of the skill. The skill's description indicates it is used 'before suggesting a deploy/publish', implying it leads to such a decision.",
       "status": "disagreement"
     },
     {
@@ -323,8 +407,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states 'rather than running release gates' and asks to 'diagnose production'. The skill's purpose is 'Pre-publish verification' and 'runs the right tests, typechecks, workflow restarts, and reminds what data heals will apply live' which are release gates. The request directly opposes the skill's function.",
+      "confidence": 0.95,
+      "rationale": "The user is asking to diagnose an issue with an already deployed application in production, explicitly stating 'diagnose production rather than running release gates'. The skill 'release-checklist' is for 'Pre-publish verification' before a deploy/publish, which is the opposite of the user's intent.",
       "status": "included"
     },
     {
@@ -335,7 +419,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user request explicitly mentions 'restoring an old checkpoint', 'recover the missing post-merge behavior incrementally', and 'without replacing the branch wholesale', all of which are directly covered and addressed by the skill's description. The request perfectly matches the skill's purpose and steps for recovery.",
+      "rationale": "The user request explicitly mentions 'restoring an old checkpoint', 'recover the missing post-merge behavior incrementally', and 'prove parity without replacing the branch wholesale', all of which are directly covered by the skill's description. The skill is designed for scenarios involving recovery after checkpoints, restoring incrementally, and ensuring parity without wholesale branch replacement.",
       "status": "included"
     },
     {
@@ -345,8 +429,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states 'rollback removed a feature' and asks to 'compare against a named baseline and safely restore only what is missing'. This directly matches the skill's description for recovering missing behavior after a rollback, using a named baseline, and restoring incrementally.",
+      "confidence": 0.95,
+      "rationale": "The user explicitly states 'rollback removed a feature' and asks to 'compare against a named baseline and safely restore only what is missing'. This directly aligns with the skill's description of recovering missing behavior after a rollback, using a named baseline, and restoring incrementally.",
       "status": "included"
     },
     {
@@ -357,7 +441,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'no rollback or restore involved', which directly negates the primary purpose and trigger conditions of the 'rollback-recovery' skill. The request is for implementing a 'normal feature' and not recovering from a rollback or restore event.",
+      "rationale": "The user explicitly states they want to \"Implement a normal feature on the current branch with no rollback or restore involved,\" which is contrary to the skill's purpose of handling rollbacks, recoveries, and restores.",
       "status": "included"
     },
     {
@@ -366,10 +450,8 @@
       "query": "Revert the last commit because the user wants a simple undo of their local edit.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "do_not_trigger",
-      "confidence": 0.8,
-      "rationale": "The user wants a simple undo of the last commit, which is a standard version control operation (e.g., git revert). The skill 'rollback-recovery' is designed for complex recovery scenarios after significant system state changes like rollbacks, checkpoints, or partial restores, involving audits and incremental restoration, not for a straightforward local commit undo.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "schema-change-checklist-trigger-1",
@@ -378,8 +460,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.98,
-      "rationale": "The user explicitly states the need to 'Add an isPrep column to an existing populated production-rules table'. This directly aligns with the skill description: 'Use this skill whenever you are adding a new column or field to an existing database table'.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states 'Add an isPrep column to an existing populated production-rules table', which directly matches the skill description 'Use this skill whenever you are adding a new column or field to an existing database table'.",
       "status": "included"
     },
     {
@@ -389,8 +471,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states 'Extend a persisted database entity with a new field', which directly maps to 'adding a new column or field to an existing database table' as described by the skill's purpose. The additional requirements like 'push-force and additive migration safety' are considerations for this type of schema change, making the skill highly relevant.",
+      "confidence": 0.95,
+      "rationale": "The user explicitly states 'Extend a persisted database entity with a new field', which directly corresponds to 'adding a new column or field to an existing database table' as described by the skill. The additional requirements ('push-force and additive migration safety') are also typical considerations for schema changes, further reinforcing the relevance of this skill.",
       "status": "included"
     },
     {
@@ -401,7 +483,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user wants to rename a TypeScript interface field that is explicitly stated to be 'never persisted'. The skill 'schema-change-checklist' is specifically for 'adding a new column or field to an existing database table', which does not apply to non-persisted TypeScript interface fields.",
+      "rationale": "The user request is to rename a TypeScript interface field that is explicitly stated as 'never persisted'. The skill 'schema-change-checklist' is specifically for adding a new column or field to an existing database table, which is unrelated to the user's request.",
       "status": "included"
     },
     {
@@ -412,7 +494,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states that there is \"no database schema change,\" which directly contradicts the skill's purpose to be used \"whenever you are adding a new column or field to an existing database table.\" The request involves UI/client-side changes, not database modifications.",
+      "rationale": "The user explicitly states that there is no database schema change, which is the exact condition for this skill not to be used according to its description.",
       "status": "included"
     },
     {
@@ -422,8 +504,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly states a desire to \"Improve an existing skill's trigger description\" and \"measure it with should-trigger and should-not-trigger held-out prompts.\" The skill description for 'skill-creator' directly covers \"optimize a skill's description for better triggering accuracy\" and \"run evals to test a skill\" or \"measure skill performance.\" This is a strong match.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly asks to 'improve an existing skill's trigger description' and 'measure it with should-trigger and should-not-trigger held-out prompts'. The skill description for 'skill-creator' directly states it can be used to 'optimize a skill's description for better triggering accuracy' and 'run evals to test a skill' or 'measure skill performance', which perfectly aligns with the user's request.",
       "status": "included"
     },
     {
@@ -434,7 +516,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'Create or optimize a reusable skill' and 'run a bounded evaluation and report its results'. The skill description for 'skill-creator' directly covers 'Create new skills', 'modify and improve existing skills', and 'run evals to test a skill' and 'measure skill performance', which perfectly aligns with the user's request.",
+      "rationale": "The user explicitly requests to 'Create or optimize a reusable skill' and 'run a bounded evaluation and report its results'. The skill description for 'skill-creator' directly states its capabilities include 'Create new skills, modify and improve existing skills, and measure skill performance' and to 'run evals to test a skill, benchmark skill performance'. This is a perfect match for the user's intent.",
       "status": "included"
     },
     {
@@ -445,7 +527,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user wants to validate an application using a release checklist before publishing. The skill-creator is designed for creating, modifying, improving, and measuring the performance of 'skills' (e.g., AI skills, functions), not for general application validation or release processes.",
+      "rationale": "The user wants to validate an application using a release checklist. The 'skill-creator' skill is designed for creating, modifying, or measuring the performance of *skills*, not general applications. While validation is a form of testing, this skill is specific to the performance of skills themselves, not external applications.",
       "status": "included"
     },
     {
@@ -455,8 +537,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user wants to write a README section, which involves content creation, not the creation, modification, or measurement of skills. This task falls outside the scope of the skill-creator's description.",
+      "confidence": 0.9,
+      "rationale": "The user wants to write a README section, which is a general documentation task. The skill-creator skill is specifically designed for creating, modifying, or evaluating AI skills, not for general documentation writing or content creation.",
       "status": "included"
     },
     {
@@ -467,7 +549,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states they changed 'the spec Excel parser and prompt' and asks to 'run the import guard, corpus checks, and alias safety checks'. The skill description covers 'AI parse prompts' and 'parse/sanitize logic (lib/spec-import, @workspace/spec-import)' and directly mentions 'corpus harness' and 'the alias system', all of which are directly referenced in the user's request as reasons to run the guard.",
+      "rationale": "The user explicitly states they changed the 'spec Excel parser and prompt', which directly falls under 'AI parse prompts' and 'parse/sanitize logic' in the skill description. They also explicitly ask to 'run the import guard, corpus checks, and alias safety checks', which is the purpose of this skill.",
       "status": "included"
     },
     {
@@ -477,8 +559,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user request explicitly mentions 'split-grid merge logic' and 'spec export', both of which are listed in the skill description as triggers ('chunk/merge logic (splitGridsForPrompt, mergeParsedSpecImports)' and 'spec export (lib/spec-export)').",
+      "confidence": 1.0,
+      "rationale": "The user request explicitly mentions 'split-grid merge logic' and 'spec export', both of which are listed in the skill description as triggers for running the checklist ('chunk/merge logic (splitGridsForPrompt, mergeParsedSpecImports)' and 'spec export (lib/spec-export)').",
       "status": "included"
     },
     {
@@ -489,7 +571,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.9,
-      "rationale": "The user wants to investigate a 'bad imported workbook' by 'tracing what landed in the database'. This directly implies debugging or understanding issues related to the 'spec import pipeline' and its output, which is precisely what the `spec-import-guard` skill is designed to cover, especially in areas like parse/sanitize logic, chunk/merge logic, import link passes, and ultimately what data results from the import.",
+      "rationale": "The user wants to investigate a 'bad imported workbook' by 'tracing what landed in the database'. This directly relates to the outcome and process of the spec import pipeline, which is the domain of this skill. Understanding why an import was 'bad' or what 'landed in the database' necessitates understanding or debugging the spec import pipeline components, even if not directly 'touching' the code in a development sense.",
       "status": "disagreement"
     },
     {
@@ -499,8 +581,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states the request is 'unrelated to spec parsing or exports', which are the core functionalities covered by the skill's description. The skill is specifically for changes to the 'spec import pipeline' or 'spec export'.",
+      "confidence": 0.9,
+      "rationale": "The user request is to 'Add a new server column', which is unrelated to the 'spec import pipeline' components listed in the skill description (AI parse prompts, parse/sanitize logic, alias system, corpus harness, chunk/merge logic, import link passes, or spec export).",
       "status": "included"
     },
     {
@@ -510,8 +592,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly asks to 'verify counters' and ensure 'dough supply, and press completion remain accurate' after changes to 'live run timer', which directly aligns with the skill's description to 'Verify that timers, counters, and live state remain accurate and consistent'.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly asks to 'verify counters, pause/resume, dough supply, and press completion remain accurate' after changes to 'live run timer and autosave math'. This directly aligns with the skill's purpose of verifying 'timers, counters, and live state remain accurate and consistent'.",
       "status": "included"
     },
     {
@@ -521,8 +603,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.9,
-      "rationale": "The user explicitly asks to check that 'timers and production counts stay consistent across live state updates'. The skill 'state-accuracy-check' is designed to 'Verify that timers, counters, and live state remain accurate and consistent'. This is a direct and strong match for the skill's purpose.",
+      "confidence": 0.95,
+      "rationale": "The user's request explicitly asks to 'check that timers and production counts stay consistent across live state updates' after a modification. This directly matches the skill's purpose to 'Verify that timers, counters, and live state remain accurate and consistent', with 'production counts' being a type of counter.",
       "status": "included"
     },
     {
@@ -533,7 +615,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user request is to change a static settings page that explicitly 'does not read live run state'. The skill 'state-accuracy-check' is designed to verify 'timers, counters, and live state', which is precisely what the user's request states is not involved.",
+      "rationale": "The skill is designed to verify the accuracy of 'live state, timers, and counters'. The user request explicitly states that the page in question 'does not read live run state' and is a 'static settings page'. This directly indicates that the skill is not applicable.",
       "status": "included"
     },
     {
@@ -544,7 +626,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.9,
-      "rationale": "The user request to \"Audit SSE merge stamps and stale writes across multiple devices\" directly matches the skill's description of verifying that state remains accurate and consistent. Identifying stale writes is a core aspect of checking state accuracy and consistency.",
+      "rationale": "The user request to 'Audit SSE merge stamps and stale writes across multiple devices' directly aligns with the skill's purpose of 'Verify that timers, counters, and live state remain accurate and consistent'. Stale writes are a form of inaccurate or inconsistent state, and merge stamps are used to maintain accuracy and consistency of state across devices. 'Audit' is synonymous with 'Verify'.",
       "status": "disagreement"
     },
     {
@@ -555,7 +637,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.95,
-      "rationale": "The user explicitly mentions changing 'routes/sync.ts' and asks to check 'epochs, stamps, reset behavior, and stale-write invariants', which directly aligns with the 'Pre-ship checklist for sync-related code changes' description of the skill.",
+      "rationale": "The user explicitly mentions changing 'routes/sync.ts' and requests checks for 'epochs, stamps, reset behavior, and stale-write invariants', which are all directly related to sync-related code changes and the specific function of the 'sync-invariant-check' skill.",
       "status": "included"
     },
     {
@@ -566,7 +648,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.95,
-      "rationale": "The user explicitly mentions 'day-state synchronization change' and the skill is described as a 'Pre-ship checklist for sync-related code changes'. The request's focus on 'awake-device handoff and non-clobber guarantees' are common concerns directly relevant to synchronization.",
+      "rationale": "The user request explicitly mentions 'day-state synchronization change' and 'awake-device handoff and non-clobber guarantees,' which directly aligns with the skill's purpose of handling 'sync-related code changes' and providing a 'Pre-ship checklist'.",
       "status": "included"
     },
     {
@@ -576,8 +658,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly states that the change involves 'no sync or day-state involvement', which directly indicates that the change is not sync-related. The skill is specifically for 'sync-related code changes'.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states that the change has \"no sync or day-state involvement,\" which directly contradicts the skill's purpose of being a \"Pre-ship checklist for sync-related code changes.\"",
       "status": "included"
     },
     {
@@ -587,8 +669,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user request is to verify a manager's browser workflow, which does not align with the skill's purpose of a pre-ship checklist for sync-related code changes.",
+      "confidence": 0.9,
+      "rationale": "The user request is to 'Verify a manager's browser workflow in a real browser.' The skill 'sync-invariant-check' is for a 'Pre-ship checklist for sync-related code changes.' There is no indication that the browser workflow verification involves sync-related code changes or a pre-ship checklist.",
       "status": "included"
     },
     {
@@ -598,8 +680,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user request perfectly matches the skill's description, specifically mentioning 'bug report', 'classify the source of truth', and 'smallest effective regression test and specialist safety checks', which are all key functions of the 'test-gap-triage' skill.",
+      "confidence": 0.95,
+      "rationale": "The user request directly asks for the core functionalities described by the skill: handling a bug report for coverage, classifying the source of truth, and choosing the smallest effective regression test and specialist safety checks. This aligns perfectly with the skill's purpose to 'Turn a bug report... into a bounded regression strategy' and to 'classify the source-of-truth layer' and 'route to the smallest effective test and specialist safety skills.'",
       "status": "included"
     },
     {
@@ -610,7 +692,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.95,
-      "rationale": "The user's request 'Where should this feature test go? Triage the gap before proposing a new test task.' directly matches the core functionality described by the skill: 'Turn a ... \u201cwhere should this test go?\u201d question into a bounded regression strategy. Use before proposing new coverage or a test task.'",
+      "rationale": "The user explicitly asks 'Where should this feature test go?' and 'Triage the gap before proposing a new test task,' which directly matches the skill's purpose of turning 'where should this test go?' questions into a regression strategy and to be used 'before proposing new coverage or a test task'.",
       "status": "included"
     },
     {
@@ -621,7 +703,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user is asking to run an existing test suite and fix an immediate failing assertion. The skill 'test-gap-triage' is designed for strategic tasks like turning bug reports into regression strategies, classifying source-of-truth layers, or routing new test coverage, not for direct execution and fixing of current test failures.",
+      "rationale": "The user wants to run an existing test suite and fix a failing assertion, which is an operational task. The skill 'test-gap-triage' is designed for strategic planning, such as creating a regression strategy, proposing new test coverage, or classifying test types, not for executing existing tests or fixing immediate failures.",
       "status": "included"
     },
     {
@@ -632,7 +714,51 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user is asking to design a new product workflow, which is a product management/design task. The skill 'test-gap-triage' is specifically designed for turning bug reports, feature requests, or testing questions into regression strategies and test tasks, not for product workflow design.",
+      "rationale": "The user's request is to design a new product workflow, which is a product design or engineering task. The skill 'test-gap-triage' is focused on defining testing strategies, classifying tests, and routing testing tasks. These two objectives are entirely unrelated.",
+      "status": "included"
+    },
+    {
+      "id": "verify-before-commit-trigger-1",
+      "skill": "verify-before-commit",
+      "query": "Before committing these repo changes, check status, run the supported local verification, and confirm the dependency lockfile is consistent.",
+      "expected": "trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 0.95,
+      "rationale": "The user explicitly states 'Before committing these repo changes' and lists verification steps that directly align with the skill's purpose: 'verify changes before committing or pushing', 'git status always clean before commit', and 'locked dependency overrides kept in sync'.",
+      "status": "included"
+    },
+    {
+      "id": "verify-before-commit-trigger-2",
+      "skill": "verify-before-commit",
+      "query": "We are about to push and claim the build is green; apply this repository's ARM-safe verification discipline first.",
+      "expected": "trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states 'about to push and claim the build is green' and requests to 'apply this repository's ARM-safe verification discipline first', which perfectly matches the skill's description: 'Use whenever about to commit, push, or claim a 'green build' / 'tests pass' / 'ready to deploy' for this app' and 'typecheck (not build) because this machine is ARM'.",
+      "status": "included"
+    },
+    {
+      "id": "verify-before-commit-near-miss-1",
+      "skill": "verify-before-commit",
+      "query": "Run the full pre-publish release checklist and decide whether the application is ready to deploy.",
+      "expected": "do_not_trigger",
+      "attempts": 1,
+      "decision": "trigger",
+      "confidence": 0.95,
+      "rationale": "The user request explicitly asks to 'decide whether the application is ready to deploy', which directly matches the skill's trigger condition 'ready to deploy'. The skill is designed for verification before deployment.",
+      "status": "disagreement"
+    },
+    {
+      "id": "verify-before-commit-near-miss-2",
+      "skill": "verify-before-commit",
+      "query": "Review a finished feature for security and product risks, but do not commit or push it.",
+      "expected": "do_not_trigger",
+      "attempts": 1,
+      "decision": "do_not_trigger",
+      "confidence": 0.9,
+      "rationale": "The user explicitly states 'do not commit or push it', which is contrary to the core trigger conditions of the skill 'verify-before-commit' (i.e., 'whenever about to commit, push'). The request is for a review of risks, not for local verification prior to a commit or push.",
       "status": "included"
     },
     {
@@ -642,8 +768,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly states 'The screen says 5.7 batches but the expected value is 8.25', which perfectly matches the skill's example trigger 'it says 5.7 but should be 8.25' and 'wrong batch count'. The request also includes the intent to 'trace where the wrong number comes from', which is the primary purpose of the 'wrong-number-triage' skill.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states a 'wrong number' (5.7 batches) and an 'expected value' (8.25), and asks to 'trace where the wrong number comes from'. This directly matches the skill's purpose and example usage ('it says 5.7 but should be 8.25').",
       "status": "included"
     },
     {
@@ -654,7 +780,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'wrong yield' and 'wrong batch count', which are direct examples provided in the skill's description for when to use it ('wrong yield', 'wrong batch count'). The request perfectly matches the skill's purpose of tracing where wrong numbers on screen come from.",
+      "rationale": "The user explicitly states 'wrong yield' and 'wrong batch count', which are direct examples given in the skill description for when to use the 'wrong-number-triage' skill. The request perfectly aligns with the skill's purpose of tracing where a wrong number on screen comes from.",
       "status": "included"
     },
     {
@@ -665,7 +791,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states that the displayed number is correct and only requests a layout redesign. The skill is specifically designed to trace the origin of a *wrong* number.",
+      "rationale": "The user explicitly states 'The displayed number is correct', which means the core condition for triggering this skill (reporting a wrong number) is not met. The user's request is for a layout redesign, which is outside the scope of this skill.",
       "status": "included"
     },
     {
@@ -674,10 +800,8 @@
       "query": "A database import created incorrect stored values across many profiles.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "do_not_trigger",
-      "confidence": 0.8,
-      "rationale": "The user is reporting incorrect stored values across many profiles due to a database import, which is a broad data integrity issue. The skill 'wrong-number-triage' is designed for tracing a specific wrong number that appears on screen, not for widespread data corruption from an import.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "check-dependency-licenses-trigger-1",
@@ -687,7 +811,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'Before release' and mentions 'license policy violations' for 'production dependency', which perfectly matches the skill's description for when to use it ('when adding dependencies or before releasing' and 'mentions open-source license or IP compliance').",
+      "rationale": "The user request explicitly mentions 'Before release' and 'license policy violations' for 'production dependency', which directly aligns with the skill description for 'check-dependency-licenses' which states 'Use this skill when adding dependencies or before releasing, or when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance'.",
       "status": "included"
     },
     {
@@ -697,8 +821,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly asks to 'Check the npm dependency tree for license compliance' and mentions 'before we ship', which directly aligns with the skill's description for triggering: 'when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance' and 'before releasing'.",
+      "confidence": 0.95,
+      "rationale": "The user explicitly asks to 'Check the npm dependency tree for license compliance' and mentions 'before we ship'. This directly aligns with the skill's purpose of checking licenses before releasing and for open-source license compliance.",
       "status": "included"
     },
     {
@@ -708,9 +832,9 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 0.7,
-      "rationale": "The user wants to 'add a new package' which aligns with the skill's purpose for 'adding dependencies'. However, the primary request is to 'verify it is genuine', which relates to authenticity or security, not license compliance. The skill 'check-dependency-licenses' is specifically for license-related checks (commercial use, open-source license, IP compliance), not genuineness.",
-      "status": "uncertain"
+      "confidence": 0.8,
+      "rationale": "The user wants to add a new package, which aligns with the skill description's 'adding dependencies'. However, the primary intent of the request is to 'verify it is genuine', which relates to authenticity and security, not dependency licenses, commercial use safety, or IP compliance as described by the skill. The skill is for license checking, not genuineness verification.",
+      "status": "included"
     },
     {
       "id": "check-dependency-licenses-near-miss-2",
@@ -720,7 +844,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user is asking to scan for security vulnerabilities (SQL injection, XSS), which is unrelated to checking dependency licenses or IP compliance. The skill's description clearly states its purpose is for license-related checks, not vulnerability scanning.",
+      "rationale": "The user is asking to scan for security vulnerabilities like SQL injection and XSS. The 'check-dependency-licenses' skill is specifically for checking dependency licenses, commercial use safety, or IP compliance, which are distinct from security vulnerability scanning. Therefore, this skill is not applicable.",
       "status": "included"
     },
     {
@@ -731,7 +855,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user request explicitly mentions 'customer addresses and private account details,' which are sensitive personal data (PII). The request also discusses designing 'data flow with minimization, access controls, and retention limits,' which directly relates to the secure handling of such data, as described in the skill's purpose for collecting, storing, or transmitting user data and mentioning PII.",
+      "rationale": "The user request explicitly mentions processing 'customer addresses and private account details', which are forms of personal and sensitive data. It also asks for data flow design with 'minimization, access controls, and retention limits', indicating concerns directly related to data privacy and protection. This perfectly aligns with the skill's description of handling user data and PII.",
       "status": "included"
     },
     {
@@ -742,7 +866,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly mentions 'collect and store personal information and sensitive data' and preventing it from 'leaking into logs or analytics', which directly aligns with the skill's description about handling user data, logging, and analytics, and preventing leakage.",
+      "rationale": "The user explicitly asks to 'collect and store personal information and sensitive data' and to prevent it from 'leaking into logs or analytics'. This directly matches the skill's purpose, which is to handle 'collects, stores, logs, or transmits user data' and mentions 'analytics' and 'logging'.",
       "status": "included"
     },
     {
@@ -751,10 +875,8 @@
       "query": "Validate a public URL parameter against an allow-list.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "do_not_trigger",
-      "confidence": 0.9,
-      "rationale": "The user request is to 'Validate a public URL parameter against an allow-list'. This is a technical validation task and does not inherently involve collecting, storing, logging, or transmitting user data, nor does it mention PII, GDPR, CCPA, HIPAA, PCI, or privacy. Therefore, it does not align with the skill's purpose of handling personal and sensitive data.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "handle-personal-and-sensitive-data-near-miss-2",
@@ -764,7 +886,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 0.9,
-      "rationale": "A password reset flow deals with user authentication credentials, which are highly sensitive data. This process involves transmitting, and potentially temporarily storing or logging, personal user data to enable the reset. This directly aligns with the skill's description for handling anything that 'collects, stores, logs, or transmits user data'.",
+      "rationale": "A password reset flow involves collecting, storing, and transmitting user data (e.g., new password, email for verification), and is directly related to authentication and user profiles. This aligns with the skill's description for handling user data and sign-up/profiles.",
       "status": "disagreement"
     },
     {
@@ -774,8 +896,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user request explicitly asks for 'bounded structured events', 'correlation IDs', 'useful timing', and 'safe user-facing errors' for a 'production workflow'. This directly aligns with the skill's purpose of adding 'structured logging', 'health checks', and 'graceful error handling' for applications going 'to production' to make them 'debuggable in production without leaking internals to users'.",
+      "confidence": 1.0,
+      "rationale": "The user request explicitly mentions 'structured events', 'correlation IDs', 'useful timing' which are core components of observability and structured logging. It also mentions 'safe user-facing errors', which directly relates to graceful error handling and not leaking internals. The context of 'production workflow' further confirms the applicability of the skill. All aspects of the request align perfectly with the skill description.",
       "status": "included"
     },
     {
@@ -786,7 +908,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks to 'Instrument this API so failures are observable without logging request payloads or secrets, and degrade gracefully'. This directly matches the skill's purpose of adding structured logging, health checks, and graceful error handling for production services, without leaking internals.",
+      "rationale": "The user explicitly asks to 'Instrument this API' for 'failures are observable' and 'degrade gracefully,' which directly matches the skill's description of adding 'structured logging, health checks, and graceful error handling' for 'backend services, APIs.' The additional constraint 'without logging request payloads or secrets' is a common and important aspect of secure observability.",
       "status": "included"
     },
     {
@@ -797,7 +919,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user request is about adding authentication and role checks to an endpoint, which falls under security and access control. The skill description focuses on observability (structured logging, health checks) and graceful error handling, which are distinct from authentication/authorization features.",
+      "rationale": "The user request is about adding authentication and role checks to an endpoint, which are security and authorization features. The skill 'instrument-observability-and-graceful-errors' focuses on structured logging, health checks, and graceful error handling for production debugging and stability, not security mechanisms.",
       "status": "included"
     },
     {
@@ -807,8 +929,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 0.9,
-      "rationale": "The user request to 'Add SQL parameterization and HTML escaping for form input' pertains to security practices for preventing SQL injection and XSS vulnerabilities. The skill 'instrument-observability-and-graceful-errors' is designed for adding structured logging, health checks, and graceful error handling for debugging and operational stability, not for preventing security vulnerabilities related to input sanitization. These two concerns are distinct.",
+      "confidence": 0.8,
+      "rationale": "The user request is about adding SQL parameterization and HTML escaping, which are security measures for input validation. The skill focuses on 'observability' (structured logging, health checks) and 'graceful error handling', not input sanitization or security best practices for preventing vulnerabilities like SQL injection or XSS.",
       "status": "included"
     },
     {
@@ -819,7 +941,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user request explicitly mentions 'public endpoint', 'spammed', 'expensive requests', 'exhaust the service', and asks to 'add rate limits, quotas, timeouts, and overload behavior'. This directly matches the skill description which focuses on making 'public endpoints' resilient to 'abuse and overload' by adding 'rate limiting, timeouts, and quotas' to 'prevent abuse, runaway cost, and denial of service'.",
+      "rationale": "The user request directly asks to add 'rate limits, quotas, timeouts, and overload behavior' to a 'public endpoint' to prevent it from being 'spammed' and 'exhausting the service'. This perfectly matches the skill's description, which focuses on adding 'rate limiting, timeouts, and quotas that prevent abuse, runaway cost, and denial of service' to 'public endpoints'.",
       "status": "included"
     },
     {
@@ -829,8 +951,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly asks to 'Make this app resilient to abuse and traffic spikes'. This directly matches the core purpose of the skill, which is to make apps resilient to abuse and overload, including preventing denial of service due to traffic spikes, using methods like rate limiting and quotas.",
+      "confidence": 0.9,
+      "rationale": "The user explicitly requests to 'make this app resilient to abuse and traffic spikes', which directly matches the core purpose of the skill 'make-apps-resilient-to-abuse-and-overload' which is designed to prevent abuse, runaway cost, and denial of service. The additional constraint about not exposing protected records can be incorporated into the implementation of the resilience features.",
       "status": "included"
     },
     {
@@ -841,7 +963,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user request is about adding a responsive tablet layout, which is a UI/UX design and development task. The skill is designed for implementing security and resilience measures like rate limiting, timeouts, and quotas to prevent abuse and overload. There is no functional overlap between these two concerns.",
+      "rationale": "The user request is about adding a responsive tablet layout for a dashboard, which is a UI/frontend development task. The skill is designed for making applications resilient to abuse and overload by adding features like rate limiting, timeouts, and quotas, which are backend/infrastructure concerns. There is no overlap between the user's request and the skill's purpose.",
       "status": "included"
     },
     {
@@ -851,8 +973,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user request is about 'personal-data retention and privacy controls', which falls under data governance and compliance. The skill 'make-apps-resilient-to-abuse-and-overload' focuses on implementing technical measures like rate limiting, timeouts, and quotas to prevent abuse, runaway costs, and denial of service for endpoints. These two topics are distinct and do not overlap.",
+      "confidence": 0.9,
+      "rationale": "The user request is about reviewing personal data retention and privacy controls, which falls under data governance and compliance. The skill is designed for making apps resilient to abuse and overload through rate limiting, timeouts, and quotas. There is no direct overlap between the user's request and the skill's functionality.",
       "status": "included"
     },
     {
@@ -863,7 +985,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states that the UI (dashboard) works at desktop width but breaks on phones and tablets, and requests to 'make the real UI usable across screen sizes'. The skill's description is 'Use when building or changing any web UI... so the layout works on phone, tablet, and desktop'. This is a direct and strong match.",
+      "rationale": "The user explicitly states that the dashboard 'breaks on phones and tablets' and asks to 'make the real UI usable across screen sizes'. The skill's description perfectly matches this need: 'Use when building or changing any web UI... so the layout works on phone, tablet, and desktop'.",
       "status": "included"
     },
     {
@@ -874,7 +996,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks to build a 'customer-facing form so it is responsive on mobile, tablet, and desktop rather than only the preview width.' This directly matches the skill's description, which states it should be used for 'building or changing any web UI... so the layout works on phone, tablet, and desktop, not just the preview width.'",
+      "rationale": "The user explicitly asks to build a customer-facing form that is responsive on mobile, tablet, and desktop, which perfectly aligns with the skill's description to make UI responsive across devices (phone, tablet, desktop) for forms and customer-facing apps.",
       "status": "included"
     },
     {
@@ -885,7 +1007,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user request is about making an API tolerate traffic spikes and abusive callers, which relates to backend robustness, scalability, and security. The skill 'make-ui-responsive-across-devices' is specifically for making web user interfaces adapt to different screen sizes. There is no overlap between the user's need and the skill's capability.",
+      "rationale": "The user's request is about making an API tolerate traffic spikes and abusive callers, which relates to backend scalability, security, or rate limiting. The skill 'make-ui-responsive-across-devices' is specifically for ensuring a web user interface (UI) adapts to different screen sizes (phone, tablet, desktop). These are completely different domains of work.",
       "status": "included"
     },
     {
@@ -896,7 +1018,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user is asking for an accessibility audit focusing on keyboard navigation and screen readers. The skill `make-ui-responsive-across-devices` is specifically for adapting UI layouts to different screen sizes (responsive design). While both are aspects of accessibility, responsive design and screen reader/keyboard navigation audits are distinct concerns. This skill does not cover the requested audit type.",
+      "rationale": "The user is requesting an accessibility audit focusing on keyboard navigation and screen readers. The skill 'make-ui-responsive-across-devices' is specifically designed for ensuring UI layouts adapt to different screen sizes (responsive design), not for general accessibility audits related to assistive technologies.",
       "status": "included"
     },
     {
@@ -906,8 +1028,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.95,
-      "rationale": "The user explicitly requests an 'audit' for accessibility features like 'keyboard access, labels, focus management, contrast, and screen-reader semantics', and to 'fix the blockers'. This directly matches the skill's purpose of ensuring an app 'meets basic WCAG accessibility' and addressing issues to 'not exclude users or fail an audit'.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly asks to 'Audit this app for keyboard access, labels, focus management, contrast, and screen-reader semantics, then fix the blockers.' This directly matches the skill's purpose of ensuring an app meets basic WCAG accessibility by addressing UI elements and potential audit failures.",
       "status": "included"
     },
     {
@@ -918,7 +1040,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks to \"establish an accessibility baseline\" for a \"new dialog,\" which directly matches the skill's description about meeting an accessibility baseline for user-facing UI elements like modals/dialogs. The mention of 'representative viewports' further emphasizes the need for thorough testing as implied by the skill.",
+      "rationale": "The user explicitly asks to 'establish an accessibility baseline' for a 'new dialog' and 'verify it'. The skill 'meet-an-accessibility-baseline' is designed precisely for 'building or changing any user-facing UI' (a dialog is UI) and 'ensures the app meets basic WCAG accessibility'. This is a direct and strong match.",
       "status": "included"
     },
     {
@@ -927,10 +1049,8 @@
       "query": "Make the layout responsive across phone and desktop widths.",
       "expected": "do_not_trigger",
       "attempts": 1,
-      "decision": "trigger",
-      "confidence": 0.8,
-      "rationale": "The user request to make a layout responsive across phone and desktop widths directly relates to WCAG 2.1 Success Criterion 1.4.10 Reflow (AA), which is an accessibility requirement. Ensuring content reflows and is usable on different screen sizes is part of meeting a basic accessibility baseline to avoid excluding users, as described by the skill.",
-      "status": "disagreement"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "meet-an-accessibility-baseline-near-miss-2",
@@ -940,7 +1060,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user's request is about benchmarking skill descriptions for realistic prompts, which is a meta-task about skill triggering itself. The skill 'meet-an-accessibility-baseline' is specifically for ensuring user-facing UI meets WCAG accessibility standards, which is not what the user is asking to do.",
+      "rationale": "The user's request is to 'Benchmark whether a skill description triggers for realistic prompts.' This is a request about evaluating skill descriptions and prompts, not about building or changing user-facing UI or meeting accessibility standards, which is the purpose of the 'meet-an-accessibility-baseline' skill.",
       "status": "included"
     },
     {
@@ -951,7 +1071,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly requests a 'Review this completed change before release'. The skill description specifies its use 'before committing, opening a pull request, merging, deploying, or publishing', all of which are actions taken 'before release'. The request directly aligns with the purpose of the 'review-before-shipping' skill.",
+      "rationale": "The user explicitly asks to 'Review this completed change before release' for several critical aspects, including 'deploy readiness'. This perfectly matches the skill's description to be used 'before committing, opening a pull request, merging, deploying, or publishing' or when the app is 'ready to ship' or 'ready to go live'.",
       "status": "included"
     },
     {
@@ -962,7 +1082,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks for a 'final risk-based shipping review', which perfectly matches the skill's purpose of being used 'before shipping' and for 'review'.",
+      "rationale": "The user explicitly asks for a 'final risk-based shipping review', which directly matches the skill's purpose of reviewing before shipping and aligns with phrases like 'ready to ship' or 'ready to go live'. The request uses keywords strongly associated with the skill's trigger conditions.",
       "status": "included"
     },
     {
@@ -972,8 +1092,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.9,
-      "rationale": "The user explicitly mentions 'pre-publish release checklist', which directly indicates a readiness for publishing, aligning with the skill description 'before...publishing'.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly requests to run a 'pre-publish release checklist', which directly aligns with the skill's trigger condition for 'publishing'.",
       "status": "disagreement"
     },
     {
@@ -983,8 +1103,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 0.95,
-      "rationale": "The user request is to 'Design the feature architecture before any implementation begins', which is a very early stage in the development process. The skill 'review-before-shipping' is intended for later stages such as before committing, merging, deploying, or publishing, or when the application is 'done' or 'ready to ship'. These two contexts are not aligned.",
+      "confidence": 0.9,
+      "rationale": "The user is asking to 'Design the feature architecture before any implementation begins.' This action occurs very early in the development lifecycle, well before any code is committed, merged, deployed, or published, and does not indicate the app is 'done' or 'ready to ship'. The skill `review-before-shipping` is intended for stages much later in the process, specifically before shipping-related actions.",
       "status": "included"
     },
     {
@@ -993,10 +1113,8 @@
       "query": "Build an AI assistant that summarizes uploaded documents and can call tools; defend against prompt injection and excessive agency.",
       "expected": "trigger",
       "attempts": 1,
-      "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states the need to build an AI assistant that summarizes uploaded documents and can call tools, and also explicitly asks to defend against prompt injection and excessive agency. This directly aligns with the skill's description, which covers AI assistants, summarizers, agents that call tools, and defense against prompt injection and excessive agency.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "secure-ai-features-against-prompt-injection-trigger-2",
@@ -1004,10 +1122,8 @@
       "query": "User text and web pages will be sent to an LLM\u2014secure the feature against instruction hijacking and unauthorized actions.",
       "expected": "trigger",
       "attempts": 1,
-      "decision": "trigger",
-      "confidence": 1.0,
-      "rationale": "The user explicitly states that 'User text and web pages will be sent to an LLM' and wants to 'secure the feature against instruction hijacking and unauthorized actions.' The skill's description perfectly matches this need, as it is designed for features that send 'user input or external content (web pages, files, emails, documents) to an LLM' and 'Defends against prompt injection and excessive agency,' which directly relates to instruction hijacking and unauthorized actions.",
-      "status": "included"
+      "status": "invalid_output",
+      "error": "invalid_output"
     },
     {
       "id": "secure-ai-features-against-prompt-injection-near-miss-1",
@@ -1017,7 +1133,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states that no LLM is involved in the task, and this skill is specifically designed for securing AI features that send user input or external content to an LLM against prompt injection.",
+      "rationale": "The user explicitly states that 'no LLM is involved,' and the skill description clearly specifies its use 'when building any feature that sends user input or external content...to an LLM.' Since the core condition for skill activation (involving an LLM) is absent, the skill should not be triggered.",
       "status": "included"
     },
     {
@@ -1028,7 +1144,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states 'no AI or external content' and requests a conventional password login. The skill is designed for features that send user input or external content to an LLM to defend against prompt injection. Since no AI or LLM is involved, this skill is not applicable.",
+      "rationale": "The user explicitly states 'no AI or external content' and requests a 'conventional password login'. This skill is specifically for securing AI features that involve LLMs and user input/external content, which is not applicable here.",
       "status": "included"
     },
     {
@@ -1039,7 +1155,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user request explicitly mentions 'This endpoint accepts JSON, path parameters, uploads, and webhook data', which are all forms of untrusted input. It also requests 'add allow-list validation, safe queries, and contextual output encoding', which directly corresponds to the preventative measures described in the skill's purpose for handling untrusted input.",
+      "rationale": "The user explicitly states that the endpoint accepts various forms of untrusted input (JSON, path parameters, uploads, webhook data) and requests exactly the mitigation techniques (allow-list validation, safe queries, contextual output encoding) that the skill is designed to provide to prevent injection and XSS.",
       "status": "included"
     },
     {
@@ -1050,7 +1166,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly asks to harden the API against SQL injection, XSS, and SSRF from user input and third-party responses. This directly matches the skill's description, which focuses on preventing these vulnerabilities from various untrusted inputs like form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output.",
+      "rationale": "The user explicitly asks to harden an API against SQL injection, XSS, and SSRF from user input and third-party responses. The skill's description directly states its purpose is to prevent these exact vulnerabilities from various input sources, including user input and third-party API responses, through validation and encoding.",
       "status": "included"
     },
     {
@@ -1069,8 +1185,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 0.9,
-      "rationale": "The user is asking to audit PII retention and access, which falls under data governance, security auditing, and access control. The skill 'validate-and-encode-untrusted-input' is designed to prevent injection attacks and XSS by sanitizing inputs, not for auditing data retention policies or access permissions.",
+      "confidence": 1.0,
+      "rationale": "The user is asking to audit customer PII retention and access, which is a security and compliance auditing task. The skill is designed for validating and encoding untrusted input to prevent injection attacks and XSS. These two concerns are unrelated.",
       "status": "included"
     },
     {
@@ -1081,7 +1197,7 @@
       "attempts": 1,
       "decision": "trigger",
       "confidence": 1.0,
-      "rationale": "The user explicitly states they want to 'install a new npm package' and asks to 'verify' several aspects (registry package, provenance, typosquat risk, and compatibility). This aligns perfectly with the skill's purpose of vetting third-party packages/libraries before adding them.",
+      "rationale": "The user explicitly states they want to \"install a new npm package\" and requests several verification steps that fall under vetting dependencies, which perfectly matches the skill's purpose for adding third-party packages and verifying them.",
       "status": "included"
     },
     {
@@ -1091,8 +1207,8 @@
       "expected": "trigger",
       "attempts": 1,
       "decision": "trigger",
-      "confidence": 0.9,
-      "rationale": "The user explicitly asks to 'vet' a 'pip dependency' before 'adding or upgrading' it, which perfectly matches the skill's description for vetting dependencies before adding or upgrading them.",
+      "confidence": 1.0,
+      "rationale": "The user explicitly states 'Before adding or upgrading this pip dependency, vet that it is genuine and safe'. The skill description directly covers 'adding, upgrading, or installing any third-party package or library (npm, pip, etc.)' and 'vetting' it for safety.",
       "status": "included"
     },
     {
@@ -1103,7 +1219,7 @@
       "attempts": 1,
       "decision": "do_not_trigger",
       "confidence": 0.9,
-      "rationale": "The user wants to audit licenses of existing packages. The skill is specifically for vetting dependencies *before* they are added, upgraded, or installed. This request is about packages already present, not about introducing new ones.",
+      "rationale": "The user is asking to audit existing dependencies, not to add, upgrade, or install new ones. The skill is specifically for actions related to introducing new dependencies or changes to existing ones (add, upgrade, install).",
       "status": "included"
     },
     {
@@ -1113,8 +1229,8 @@
       "expected": "do_not_trigger",
       "attempts": 1,
       "decision": "do_not_trigger",
-      "confidence": 1.0,
-      "rationale": "The user request is to fix a parser bug in an existing dependency-free module. The skill is specifically for 'adding, upgrading, or installing any third-party package or library' or 'when the user asks to add a dependency'. Since no dependencies are being added, upgraded, or installed, this skill is not relevant.",
+      "confidence": 0.95,
+      "rationale": "The user explicitly states 'dependency-free module' and the task is to 'Fix a parser bug'. This request does not involve adding, upgrading, or installing dependencies, which is the sole purpose of the 'vet-dependencies-before-adding' skill.",
       "status": "included"
     }
   ]
