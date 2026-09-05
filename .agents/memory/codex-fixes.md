@@ -107,3 +107,45 @@ Each entry includes:
 ---
 
 *Last updated: 2026-09-03*
+
+---
+
+## 2026-09-05 — Restore GOOGLE_API_KEY fallback in AI client
+
+**File(s):** `lib/integrations-openai-ai-server/src/client.ts`
+
+**Problem:** The Replit branch's version of the AI client only supported Replit's `AI_INTEGRATIONS_GEMINI_API_KEY` + `AI_INTEGRATIONS_GEMINI_BASE_URL` proxy vars. Render deploys use `GOOGLE_API_KEY` (standard Gemini key), so AI features on Render would break with "AI_INTEGRATIONS_GEMINI_API_KEY and AI_INTEGRATIONS_GEMINI_BASE_URL must be set".
+
+**Fix:** Restored the dual-path client: `replitKey || directKey` where `directKey = process.env.GOOGLE_API_KEY`. When only `GOOGLE_API_KEY` is set, the SDK's default base URL is used. When both are set, the Replit proxy path wins.
+
+**Context:** This is a re-apply of the 2026-08-30 fix that Replit's branch overwrote. Make sure future merges from Replit keep this fallback.
+
+## 2026-09-05 — Fix skill-catalog CI failure on platform-injected skill refs
+
+**File(s):** `.agents/skills/production-go/SKILL.md`
+
+**Problem:** The `Typecheck` CI job's `check:skill-catalog` step failed on `.agents/skills/production-go/SKILL.md` — three inline references to `.local/.../SKILL.md` (review-before-shipping, security-scan, debug-workflow-ports-issues) were flagged as broken local references. `.local/` roots are platform-injected and absent from GitHub checkouts by design (see `.agents/memory/skill-catalog-ci-roots.md`), so those paths cannot resolve in GitHub CI even though they exist in the Replit workspace.
+
+**Fix:** Converted the three references to directory-form paths (`.local/custom_skills/review-before-shipping`, `.local/skills/security-scan`, `.local/skills/debug-workflow-ports-issues`), matching the repo's established convention for platform-injected skill references (see `.agents/skills/README.md`, `skill-creator` skill).
+
+**Context:** Needed so the Replit merge (`PR #17 merge/replit-updates`) can pass the required Typecheck check. If Replit re-introduces `.../SKILL.md` refs into `.local/` paths, the skill catalog check will fail again in GitHub CI.
+
+## 2026-09-05 — Regenerate stale source-library reconciliation plan
+
+**File(s):** `artifacts/api-server/src/lib/sourceLibraryReconciliationPlan.generated.ts`
+
+**Problem:** The Typecheck CI job's "Run routine scripts tests" step failed with "Generated source-library reconciliation plan is stale" (`test:source-heal-plan`). The checked-in generated plan's gzip payload did not match the output of the current generator (same JSON payload/SHA, different deflate stream), so the freshness check failed.
+
+**Fix:** Regenerated the file with `pnpm --filter @workspace/scripts run audit:source-heal-plan` (file-only generator, no DB needed). Verified `test:source-heal-plan --check` passes under both Node 22 and Node 24.
+
+**Context:** Needed so the Replit merge (PR #17) can pass the required Typecheck check. If Replit regenerates this file in a different environment, keep the committed output in sync with the generator.
+
+## 2026-09-05 — Fix flaky AI cache telemetry race in API tests
+
+**File(s):** `artifacts/api-server/src/lib/observability.ts`
+
+**Problem:** The `API tests (Postgres)` required check failed in `aiResultCache.integration.test.ts` ("keeps cache requests available and local recurrence visible when shared diagnostics reject") — one `cache_maintenance_events` row (id 1, scope live) persisted after the test's diagnostics trigger should have rejected every write. `prune` in `aiResultCache.ts` records cache-maintenance diagnostics fire-and-forget (`void recordCacheMaintenance(...)`), so an event committed by the previous test can still land after the next test's `beforeEach` clear, racing the empty-table assertion.
+
+**Fix:** Track in-flight shared-cache-maintenance failure writes in `observability.ts` (`pendingSharedCacheMaintenance` + `trackPendingSharedCacheMaintenance`) and have `clearCacheMaintenanceDiagnosticsForTests()` await them (`Promise.allSettled`) before deleting the shared events table. Production behavior is unchanged — the cache path is still fire-and-forget.
+
+**Context:** Needed so the Replit merge (PR #17) can pass the required API tests check. Also removes a latent flake for every test that asserts on the shared events table.

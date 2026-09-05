@@ -1,7 +1,8 @@
 // Gemini-backed adapter that preserves the OpenAI chat-completions surface the
-// rest of the server is written against. Backed by Google Gemini through Replit
-// AI Integrations (no user-supplied API key required — the modelfarm proxy is
-// configured via AI_INTEGRATIONS_GEMINI_BASE_URL / AI_INTEGRATIONS_GEMINI_API_KEY).
+// rest of the server is written against. Works with either the Replit AI
+// Integrations proxy (AI_INTEGRATIONS_GEMINI_BASE_URL / API key) or a direct
+// Gemini API key (GOOGLE_API_KEY from aistudio.google.com) — the client picks
+// whichever is configured.
 //
 // Only the small slice of the OpenAI API the app actually uses is implemented:
 //   openai.chat.completions.create({ model, messages, response_format,
@@ -45,19 +46,30 @@ interface ChatChunk {
 let _client: GoogleGenAI | null = null;
 // Lazily construct the client so merely importing this module (e.g. in a
 // non-AI context or a mocked test) never throws on a missing env var.
+//
+// Supports two paths:
+//   1. Replit proxy (AI_INTEGRATIONS_GEMINI_API_KEY + BASE_URL) — the
+//      original path; apiVersion is blanked and baseUrl is set explicitly.
+//   2. Direct Gemini API (GOOGLE_API_KEY) — standard key from
+//      aistudio.google.com; the SDK's default base URL is used.
 function client(): GoogleGenAI {
   if (_client) return _client;
-  const apiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
-  const baseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
-  if (!apiKey || !baseUrl) {
+  const replitKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  const replitBase = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+  const directKey = process.env.GOOGLE_API_KEY;
+  const apiKey = replitKey || directKey;
+  if (!apiKey) {
     throw new Error(
-      "AI_INTEGRATIONS_GEMINI_API_KEY and AI_INTEGRATIONS_GEMINI_BASE_URL must be set. " +
-        "These are provisioned automatically by the Replit Gemini AI integration.",
+      "No Gemini API key found. Set GOOGLE_API_KEY for the direct Gemini API " +
+        "(get one at https://aistudio.google.com/apikey), or set " +
+        "AI_INTEGRATIONS_GEMINI_API_KEY for the Replit proxy.",
     );
   }
   _client = new GoogleGenAI({
     apiKey,
-    httpOptions: { apiVersion: "", baseUrl },
+    ...(replitKey && replitBase
+      ? { httpOptions: { apiVersion: "", baseUrl: replitBase } }
+      : {}),
   });
   return _client;
 }

@@ -33,6 +33,14 @@ SSE/day-state merge, and sleeping-device adoption. Use
 pause/resume, and the first post-wake counter tick. Read both when a wake
 handoff crosses those boundaries; do not duplicate timing formulas here.
 
+## Boundary with state-accuracy checks
+
+Use this skill for sync transport, persistence, LWW stamps, reset epochs,
+SSE/day-state merge, and sleeping-device adoption. Use
+`state-accuracy-check` for timer/counter math, auto-track bookkeeping,
+pause/resume, and the first post-wake counter tick. Read both when a wake
+handoff crosses those boundaries; do not duplicate timing formulas here.
+
 Out of scope: inventory SSE stream (separate invariants).
 
 ---

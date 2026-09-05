@@ -525,6 +525,10 @@ const steps: ReleaseStep[] = [
     stage: "release-tests",
   },
   {
+    label: "spec import tests",
+    args: ["--filter", "@workspace/spec-import", "run", "test"],
+  },
+  {
     label: "scheduled recipe check tests",
     args: ["--filter", "@workspace/scheduled-recipe-check", "run", "test"],
     stage: "release-tests",

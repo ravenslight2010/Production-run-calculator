@@ -29,6 +29,19 @@ const CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS =
   CACHE_MAINTENANCE_SHARED_TIMEOUT_MS - 100;
 const cacheMaintenanceFailureTimes = new Map<string, number[]>();
 const cacheMaintenanceAlerts = new Set<string>();
+// The cache path records diagnostics fire-and-forget so telemetry can never
+// block a cache operation. Track the in-flight shared-failure writes so test
+// isolation can wait for them before asserting on the shared events table.
+const pendingSharedCacheMaintenance = new Set<Promise<unknown>>();
+
+function trackPendingSharedCacheMaintenance<T>(promise: Promise<T>): Promise<T> {
+  pendingSharedCacheMaintenance.add(promise);
+  promise.then(
+    () => pendingSharedCacheMaintenance.delete(promise),
+    () => pendingSharedCacheMaintenance.delete(promise),
+  );
+  return promise;
+}
 
 const OPERATION_NAMES: Array<[RegExp, string]> = [
   [/\/sync(?:\/|$)/, "sync"],
@@ -325,7 +338,9 @@ export function recordCacheMaintenance(
 
   if (fields.outcome !== "error") return Promise.resolve();
 
-  return recordSharedCacheMaintenanceFailure(fields.scope, now)
+  return trackPendingSharedCacheMaintenance(
+    recordSharedCacheMaintenanceFailure(fields.scope, now),
+  )
     .then((sharedRecurrence) => {
       if (!sharedRecurrence.shouldAlert) return;
       try {
@@ -370,6 +385,13 @@ export function recordCacheMaintenance(
 export async function clearCacheMaintenanceDiagnosticsForTests(): Promise<void> {
   cacheMaintenanceFailureTimes.clear();
   cacheMaintenanceAlerts.clear();
+  // Fire-and-forget diagnostics from the cache path can still be committing a
+  // last event after the triggering test finishes; wait for them so the
+  // subsequent delete is deterministic instead of racing the insert.
+  const pending = [...pendingSharedCacheMaintenance];
+  if (pending.length > 0) {
+    await Promise.allSettled(pending);
+  }
   try {
     await db.delete(cacheMaintenanceEventsTable);
   } catch {
