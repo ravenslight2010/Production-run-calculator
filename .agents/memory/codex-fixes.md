@@ -107,3 +107,15 @@ Each entry includes:
 ---
 
 *Last updated: 2026-09-03*
+
+---
+
+## 2026-09-05 — Restore GOOGLE_API_KEY fallback in AI client
+
+**File(s):** `lib/integrations-openai-ai-server/src/client.ts`
+
+**Problem:** The Replit branch's version of the AI client only supported Replit's `AI_INTEGRATIONS_GEMINI_API_KEY` + `AI_INTEGRATIONS_GEMINI_BASE_URL` proxy vars. Render deploys use `GOOGLE_API_KEY` (standard Gemini key), so AI features on Render would break with "AI_INTEGRATIONS_GEMINI_API_KEY and AI_INTEGRATIONS_GEMINI_BASE_URL must be set".
+
+**Fix:** Restored the dual-path client: `replitKey || directKey` where `directKey = process.env.GOOGLE_API_KEY`. When only `GOOGLE_API_KEY` is set, the SDK's default base URL is used. When both are set, the Replit proxy path wins.
+
+**Context:** This is a re-apply of the 2026-08-30 fix that Replit's branch overwrote. Make sure future merges from Replit keep this fallback.
