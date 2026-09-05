@@ -1,17 +1,26 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands after Codex 2026-09-05 session — Steps 1-3 done, 4a in PR, 4b/5/6 not started.
+description: Where the server-side refactor stands after Codex 2026-09-05 session — Steps 1-4a done, 4b in PR, 5/6 not started.
 ---
 
 # Server-side refactor — current status (2026-09-05)
 
-## In review (branch `refactor/extract-warehouse-tab`, PR #20)
+## In review (branch `refactor/extract-inventory-mixes-tab`, PR #21)
+
+**Step 4b: Inventory + Mix Plan panels extracted with narrow contexts** — same recipe as Step 4a:
+- `InventoryTabContent.tsx` (memo'd) reads `InventoryTabCtx` (deps: `dayState`, `inventoryCandidates`, `inventoryRunValues`, `inventorySubstitutionOptions`).
+- `MixesTabContent.tsx` (memo'd) reads `MixesTabCtx` (deps: `canManageInventory`, `currentRunId`, `dayState`, `freezerSurplus`, `mixMakeDay`, `mixPlanItems`, `mixes`, `scheduledDays`).
+- `prepMixExpanded` (expand/collapse UI) moved to local state inside `MixesTabContent` — no longer re-renders all of Home. `mixMakeDay` stays in Home so it persists across tab unmounts.
+- Dep registries (`inventoryTabCtxDeps.ts`, `mixesTabCtxDeps.ts`) + Suite 4 freeze-guard tests added.
+- All three warehouse-inventory department panels are now extracted.
+
+## Done (branch `refactor/extract-warehouse-tab`, PR #20 — merged to main)
 
 **Step 4a: Warehouse panel extracted with narrow context** — the earlier Warehouse extraction attempt was reverted because the panel referenced ~20 Home-scope variables. This time it succeeded by doing exactly what the "next agent" note suggested: split off a **narrow `WarehouseTabCtx`** instead of reusing `HomeTabCtx`.
 - `WarehouseTabContent.tsx` (memo'd) + `WarehouseNeedsList.tsx` + `FreezerSurplusPanel.tsx` extracted from home.tsx.
 - `warehouseTabCtxValue` in home.tsx memoizes on warehouse production deps ONLY — dialog/manage/merge/import fields excluded (freeze pattern, same as `HomeTabCtx`).
 - `warehouseTabCtxDeps.ts` (`WAREHOUSE_TAB_CTX_DEP_FIELDS`) + Suite 4 freeze-guard tests in `LiveTabMemo.snappy.test.tsx` prevent dialog fields from leaking back into the warehouse dep list.
-- Inventory and Mixes panels remain inline (later phases).
+- Inventory and Mixes panels extracted in Step 4b (PR #21).
 
 ## Done (on branch `refactor/extract-screen-mode-view`, PR #19)
 
@@ -39,9 +48,9 @@ description: Where the server-side refactor stands after Codex 2026-09-05 sessio
 
 ## Not started
 
-**Step 4b: Inventory/Mixes/Schedule panels** — same narrow-context pattern as Step 4a; Inventory and Mixes panels are still inline in home.tsx.
+**Step 5: Additional panels** — Setup/AI/Manager panels remain inline and are management-heavy; same narrow-context recipe applies if needed. The 8 live panels were already memo'd; Warehouse/Inventory/Mixes now too.
 
-**Step 5: React.memo on remaining panels** — mostly done implicitly by Step 4a (WarehouseTabContent is memo'd). Remaining panels still inline.
+**Step 4c (if wanted): Schedule panel** — the Schedule editor stays inline; it is dialog-heavy by design (schedule dialog fields are DIALOG_REGISTRY-excluded elsewhere), so it may not benefit from a narrow ctx.
 
 **Step 6: Server-side auto-track** — `useAutoTrack` is 1,645 lines, deeply coupled to React refs, timers, form values, and state. Moving tick detection server-side is a multi-day architectural change. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
 
@@ -54,6 +63,6 @@ description: Where the server-side refactor stands after Codex 2026-09-05 sessio
 
 ## What the next agent should do
 
-1. Verify PR #20 (Warehouse extraction) is merged to main.
-2. Steps 4b-6: apply the `WarehouseTabCtx` recipe to Inventory and Mixes panels (each gets its own narrow ctx + dep registry + freeze-guard test). Keep dialog/manage/merge/import fields out of the dep lists.
-3. The battery win from Step 6 (server-side auto-track) is the biggest remaining prize but requires understanding the full 1,645-line useAutoTrack hook first.
+1. Verify PR #21 (Inventory/Mixes extraction) is merged to main.
+2. Consider Step 5 for the Setup/AI/Manager panels or server-side auto-track (Step 6) next — the big remaining prize is Step 6, but it requires understanding the full 1,645-line useAutoTrack hook first.
+3. When extracting any remaining panel, reuse the recipe: narrow per-concern ctx + dep registry + Suite 4 freeze-guard test; keep dialog/manage/merge/import fields out of the dep lists.
