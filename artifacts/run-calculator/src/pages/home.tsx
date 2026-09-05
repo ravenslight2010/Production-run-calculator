@@ -15207,7 +15207,7 @@ export default function Home() {
             key: "warehouse",
             icon: <Warehouse className="w-5 h-5 text-amber-400" />,
             title: "Warehouse",
-            desc: "Total ingredient needs across all active runs + upcoming schedule",
+            desc: "Production material needs across all active runs + upcoming schedule",
             url: `${base}?screen=warehouse`,
           },
           {
@@ -16785,7 +16785,7 @@ export default function Home() {
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
-                  <ClipboardList className="w-4 h-4 mr-2" /> Stock
+                  <ClipboardList className="w-4 h-4 mr-2" /> Inventory
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
                   <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
@@ -17162,10 +17162,19 @@ export default function Home() {
 
               {/* ─── WAREHOUSE ─── */}
               <WarehouseInventoryDepartment warehouse={<>
+                <div className="mb-4" data-testid="warehouse-page-heading">
+                  <h2 className="flex items-center gap-2 text-lg font-bold">
+                    <Warehouse className="h-5 w-5 text-primary" />
+                    Warehouse
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Prepare materials and packaging for production.
+                  </p>
+                </div>
                 <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="warehouse-attention-header">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-                    <h2 className="text-sm font-bold">Warehouse attention</h2>
+                    <h3 className="text-sm font-bold">Warehouse attention</h3>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
@@ -17466,6 +17475,15 @@ export default function Home() {
                 </>} />
 
               <WarehouseInventoryDepartment inventory={<>
+                  <div className="mb-4" data-testid="inventory-page-heading">
+                    <h2 className="flex items-center gap-2 text-lg font-bold">
+                      <ClipboardList className="h-5 w-5 text-primary" />
+                      Inventory
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Review stock, lots, alerts, transfers, and substitutions.
+                    </p>
+                  </div>
                   <InventoryTab
                   candidates={inventoryCandidates}
                   runValsList={inventoryRunValues}
@@ -17969,7 +17987,7 @@ export default function Home() {
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid h-12 min-h-12 grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Run</span>
@@ -17990,9 +18008,9 @@ export default function Home() {
                   <Package className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Pack</span>
                 </TabsTrigger>
-                <TabsTrigger value="warehouse" data-testid="tab-warehouse" className="flex flex-col items-center gap-0.5 px-1">
-                  <Warehouse className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Whse</span>
+                <TabsTrigger value="warehouse" data-testid="tab-warehouse" aria-label="Warehouse" className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1">
+                  <Warehouse className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                  <span className="whitespace-nowrap text-[9px] leading-tight sm:text-[10px]">Warehouse</span>
                 </TabsTrigger>
               </TabsList>
 

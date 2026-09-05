@@ -239,7 +239,7 @@ export default function QualityHistoryTab() {
         <div className="text-center py-10">
           <ShieldCheck className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm text-muted-foreground">
-            No quality checks recorded yet. Run a check from the Stock tab and confirm the outcome
+             No quality checks recorded yet. Run a check from the Inventory destination and confirm the outcome
             to start the history.
           </p>
         </div>

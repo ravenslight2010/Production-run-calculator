@@ -82,7 +82,7 @@ async function signIn(page: Page, username: string): Promise<void> {
 
 async function openInventory(page: Page): Promise<void> {
   await page.locator('button[title="More"]').click();
-  await page.getByRole("menuitem", { name: "Stock", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
   await expect(page.getByTestId("warehouse-coverage")).toBeVisible();
 }
 

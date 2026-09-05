@@ -104,7 +104,7 @@ async function openPhotoCount(page: Page): Promise<ReturnType<Page["getByTestId"
       response.status() === 200,
   );
   await page.getByRole("button", { name: /^More/ }).click();
-  await page.getByRole("menuitem", { name: "Stock", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
   await observationsLoaded;
   const card = page.locator('[data-testid="photo-count-card"]:visible');
   await expect(card).toBeVisible();
@@ -276,7 +276,7 @@ test("completes the manager photo-count review on desktop and phone", async ({
     );
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: /^More/ }).click();
-    await page.getByRole("menuitem", { name: "Stock", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
     card = page.getByTestId("photo-count-card");
     await card.getByRole("button", { name: "Start count", exact: true }).click();
     await expect(card.getByTestId("photo-count-review")).toContainText("2 photos");

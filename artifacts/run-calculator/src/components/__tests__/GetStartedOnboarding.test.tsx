@@ -59,6 +59,8 @@ describe("first-login Get Started overview (web)", () => {
     // Manual reopen from the header menu works.
     await user.click(screen.getByRole("button", { name: "Reopen overview" }));
     expect(screen.getByText(WELCOME)).toBeTruthy();
+    expect(screen.getByText("Inventory")).toBeTruthy();
+    expect(screen.queryByText("Stock", { exact: true })).toBeNull();
   });
 });
 

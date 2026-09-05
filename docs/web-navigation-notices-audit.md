@@ -49,11 +49,11 @@ key: its in-app Run action banner must remain visible until acknowledged.
 | **Sauce** | All signed-in users | Always | Review and stage sauce requirements | Bottom tab 3 |
 | **Front** | All signed-in users | Always | View frontline/applicator needs | Bottom tab 4 |
 | **Pack** | All signed-in users | Always | Track packaging progress and completion | Bottom tab 5 |
-| **Whse** | All signed-in users | Always | See warehouse pulls, staging, reorder, and stock guidance | Bottom tab 6 |
+| **Warehouse** | All signed-in users | Always | See warehouse pulls, staging, reorder, and stock guidance | Bottom tab 6 |
 
 The bottom navigation is deliberately limited to six operational stations. The following
 destinations are still tab panels in the web shell, but are reached through the overflow menu
-instead of becoming additional bottom tabs: Stoppages, Summary, Stock/Inventory, Mix Plan, AI
+instead of becoming additional bottom tabs: Stoppages, Summary, Inventory, Mix Plan, AI
 Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 
 ### 1.2 Header controls outside the overflow menu
@@ -74,7 +74,7 @@ Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 | --- | --- | --- | --- | --- |
 | Stoppages | All signed-in users | Always | Review or manage logged stoppages | Header menu → hidden panel |
 | Summary | All signed-in users | Always | Review run/day summary | Header menu → hidden panel |
-| Stock | All signed-in users | Always | Open the inventory editor/stock view | Header menu → `inventory` panel |
+| Inventory | All signed-in users | Always | Review stock and maintain inventory records | Header menu → `inventory` panel |
 | AI Assistant | All signed-in users | Always | Ask operational questions or use available AI assistance | Header menu → `ai` panel |
 | Mix Plan | All signed-in users | Always | View operational mix plan and make-day needs | Header menu → `mixes` panel |
 | Report an issue | All signed-in users | Always | Submit a product/operational issue | Header menu → issue dialog |
@@ -199,14 +199,14 @@ does not mark an unsent write as delivered.
 
 | Notice | Audience | Trigger | Expected action | Location / behavior |
 | --- | --- | --- | --- | --- |
-| Pull-for-run staging checklist | Warehouse operator | Current run has materials that should be staged | Check off each item as it is staged | Whse tab; operational checklist |
-| Reorder Now | Warehouse users | Cross-location stock after scheduled demand is at/below a reorder threshold | Order the suggested quantity | Whse tab; advisory, read-only card |
-| Use First | Warehouse users | A lot is expired or inside the configured expiry window | Use the displayed lot first, or remove/quarantine expired stock as appropriate | Whse tab; advisory, read-only card |
-| Inventory Alerts: expired lots | Warehouse/inventory users | An on-hand lot is expired | Do not use it; correct/quarantine inventory | Stock/Inventory panel; persistent warning |
-| Inventory Alerts: expiring lots | Warehouse/inventory users | An on-hand lot expires inside the configured window | Prioritize its use | Stock/Inventory panel; persistent warning |
-| Inventory Alerts: low stock | Warehouse/inventory users | On-hand stock is at/below its reorder threshold | Reorder or use **Substitute** to stage a temporary substitution | Stock/Inventory panel; persistent warning with action |
-| Transfer Needed | Warehouse users | Onsite/line inventory cannot cover the plan while another location can transfer stock | Move the stated stock from the named location | Stock/Inventory panel; persistent advisory |
-| Inventory load/save error | Warehouse/inventory users | Inventory fetch or settings write fails | Retry or correct connection/settings | Stock/Inventory panel near inventory controls; persistent until next successful operation |
+| Pull-for-run staging checklist | Warehouse operator | Current run has materials that should be staged | Check off each item as it is staged | Warehouse tab; operational checklist |
+| Reorder Now | Warehouse users | Cross-location stock after scheduled demand is at/below a reorder threshold | Order the suggested quantity | Warehouse tab; advisory, read-only card |
+| Use First | Warehouse users | A lot is expired or inside the configured expiry window | Use the displayed lot first, or remove/quarantine expired stock as appropriate | Warehouse tab; advisory, read-only card |
+| Inventory Alerts: expired lots | Warehouse/inventory users | An on-hand lot is expired | Do not use it; correct/quarantine inventory | Inventory panel; persistent warning |
+| Inventory Alerts: expiring lots | Warehouse/inventory users | An on-hand lot expires inside the configured window | Prioritize its use | Inventory panel; persistent warning |
+| Inventory Alerts: low stock | Warehouse/inventory users | On-hand stock is at/below its reorder threshold | Reorder or use **Substitute** to stage a temporary substitution | Inventory panel; persistent warning with action |
+| Transfer Needed | Warehouse users | Onsite/line inventory cannot cover the plan while another location can transfer stock | Move the stated stock from the named location | Inventory panel; persistent advisory |
+| Inventory load/save error | Warehouse/inventory users | Inventory fetch or settings write fails | Retry or correct connection/settings | Inventory panel near inventory controls; persistent until next successful operation |
 | Freezer-pull configuration error | Inventory-management-capable user | Freezer-pull item save/delete fails | Retry or correct connection | Manage Lists → Settings; inline error near form |
 | Cycle-count configuration error | Inventory-management-capable user | Cycle-count save/delete fails | Retry or correct connection | Manage Lists → Settings; inline error near form |
 

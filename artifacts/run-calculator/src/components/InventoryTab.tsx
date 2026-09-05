@@ -809,12 +809,13 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
       <Separator className="bg-border/40" />
 
       <RestockForm item={item} locations={locations} busy={busy} run={run} />
-      <AdjustForm item={item} busy={busy} run={run} />
+      <AdjustForm item={item} busy={busy} run={run} canManageInventory={canManageInventory} />
 
-      {/* Transfer stock between locations. Open to any signed-in user (same as
-          restock). Hidden until at least two locations exist. */}
+      {/* Transfer stock between locations. Manager-only, with the server
+          capability check retained as the source of truth. Hidden until at
+          least two locations exist. */}
       {locations.length > 1 && (
-        <TransferForm item={item} locations={locations} busy={busy} run={run} />
+        <TransferForm item={item} locations={locations} busy={busy} run={run} canManageInventory={canManageInventory} />
       )}
 
       <Separator className="bg-border/40" />
@@ -992,11 +993,13 @@ function TransferForm({
   locations,
   busy,
   run,
+  canManageInventory,
 }: {
   item: InventoryItem;
   locations: InventoryLocation[];
   busy: boolean;
   run: (fn: () => Promise<unknown>) => Promise<void>;
+  canManageInventory: boolean;
 }) {
   const onsite = locations.find((l) => l.isOnsite);
   const offsite = locations.filter((l) => !l.isOnsite);
@@ -1016,10 +1019,16 @@ function TransferForm({
       <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
         <ArrowRightLeft className="w-3 h-3" /> Transfer
       </p>
+      {!canManageInventory && (
+        <p className="text-xs text-muted-foreground" role="note">
+          Inventory Manager required to change stock records through transfers. You can still review current inventory and record received stock.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-1.5">
         <select
           value={fromId}
           onChange={(e) => setFromId(e.target.value)}
+          disabled={!canManageInventory}
           className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
         >
           <option value="">From…</option>
@@ -1032,6 +1041,7 @@ function TransferForm({
         <select
           value={toId}
           onChange={(e) => setToId(e.target.value)}
+          disabled={!canManageInventory}
           className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
         >
           <option value="">To…</option>
@@ -1047,13 +1057,14 @@ function TransferForm({
         placeholder={`Qty (max ${fmtQty(sourceOnHand)})`}
         value={qty}
         onChange={(e) => setQty(e.target.value)}
+        disabled={!canManageInventory}
         className="h-8 text-xs"
       />
       <Button
         size="sm"
         variant="outline"
         className="h-8 w-full text-xs"
-        disabled={busy || !valid}
+        disabled={!canManageInventory || busy || !valid}
         onClick={() =>
           run(async () => {
             await transferInventory({
@@ -1076,10 +1087,12 @@ function AdjustForm({
   item,
   busy,
   run,
+  canManageInventory,
 }: {
   item: InventoryItem;
   busy: boolean;
   run: (fn: () => Promise<unknown>) => Promise<void>;
+  canManageInventory: boolean;
 }) {
   const [delta, setDelta] = useState("");
   const [note, setNote] = useState("");
@@ -1087,15 +1100,20 @@ function AdjustForm({
   return (
     <div className="space-y-1.5">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Manual adjustment</p>
+      {!canManageInventory && (
+        <p className="text-xs text-muted-foreground" role="note">
+          Inventory Manager required to change stock records through manual adjustments. You can still review current inventory and record received stock.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-1.5">
-        <Input type="number" placeholder="± Qty" value={delta} onChange={(e) => setDelta(e.target.value)} className="h-8 text-xs" />
-        <Input placeholder="Reason" value={note} onChange={(e) => setNote(e.target.value)} className="h-8 text-xs" />
+        <Input type="number" placeholder="± Qty" value={delta} onChange={(e) => setDelta(e.target.value)} disabled={!canManageInventory} className="h-8 text-xs" />
+        <Input placeholder="Reason" value={note} onChange={(e) => setNote(e.target.value)} disabled={!canManageInventory} className="h-8 text-xs" />
       </div>
       <Button
         size="sm"
         variant="outline"
         className="h-8 w-full text-xs"
-        disabled={busy || !(n !== 0) || Number.isNaN(n)}
+        disabled={!canManageInventory || busy || !(n !== 0) || Number.isNaN(n)}
         onClick={() =>
           run(async () => {
             await adjustInventory({ itemId: item.id, qtyDelta: n, note: note.trim() || undefined });
@@ -1200,6 +1218,7 @@ function LocationsCard({
                     {!loc.isOnsite && (
                       <button
                         type="button"
+                        aria-label={`Delete location ${loc.name}`}
                         disabled={busy}
                         onClick={() => run(() => updateInventoryLocation(loc.id, { isOnsite: true }))}
                         className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50"
@@ -1209,6 +1228,7 @@ function LocationsCard({
                     )}
                     <button
                       type="button"
+                      aria-label={`Edit location ${loc.name}`}
                       onClick={() => {
                         setEditId(loc.id);
                         setEditName(loc.name);
