@@ -100,6 +100,7 @@ export type CatalogReport = {
   skills: SkillRecord[];
   allowedDuplicates: DuplicateAllowlistEntry[];
   managedWarningBaseline: ManagedWarningBaselineEntry[];
+  managedWarningDrift: ManagedWarningDrift[];
   failures: number;
   warnings: number;
   documentedWarnings: number;
@@ -111,6 +112,22 @@ export type ManagedWarningBaselineEntry = {
   findings: Partial<Record<FindingCode, number>>;
   reason: string;
 };
+
+export type ManagedWarningDrift =
+  | {
+      kind: "stale_path";
+      path: string;
+      reason: string;
+    }
+  | {
+      kind: "excess_finding_count";
+      path: string;
+      code: FindingCode;
+      baselineCount: number;
+      actualCount: number;
+      excessCount: number;
+      reason: string;
+    };
 
 export type ScanOptions = {
   projectRoot?: string;
@@ -488,6 +505,51 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
     }
   }
 
+  const managedWarningDrift: ManagedWarningDrift[] = [];
+  const skillsByPath = new Map(skills.map((skill) => [skill.path, skill]));
+  for (const baseline of managedWarningBaseline) {
+    const managedRoot = roots.find(
+      (root) =>
+        root.classification === "managed" &&
+        isWithin(root.relativePath, baseline.path),
+    );
+    if (!managedRoot) continue;
+
+    const rootReport = rootReports.find((root) => root.id === managedRoot.id);
+    if (!rootReport || rootReport.missing) continue;
+
+    const skill = skillsByPath.get(baseline.path);
+    if (!skill) {
+      managedWarningDrift.push({
+        kind: "stale_path",
+        path: baseline.path,
+        reason: baseline.reason,
+      });
+      continue;
+    }
+
+    const actualCounts = new Map<FindingCode, number>();
+    for (const item of skill.findings) {
+      actualCounts.set(item.code, (actualCounts.get(item.code) ?? 0) + 1);
+    }
+    for (const [code, baselineCount] of Object.entries(baseline.findings) as [
+      FindingCode,
+      number,
+    ][]) {
+      const actualCount = actualCounts.get(code) ?? 0;
+      if (actualCount >= baselineCount) continue;
+      managedWarningDrift.push({
+        kind: "excess_finding_count",
+        path: baseline.path,
+        code,
+        baselineCount,
+        actualCount,
+        excessCount: baselineCount - actualCount,
+        reason: baseline.reason,
+      });
+    }
+  }
+
   for (const skill of skills) {
     skill.status =
       skill.findings.length === 0
@@ -522,6 +584,7 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
     skills,
     allowedDuplicates,
     managedWarningBaseline,
+    managedWarningDrift,
     failures,
     warnings,
     documentedWarnings,
@@ -576,6 +639,19 @@ export function formatCatalogReport(report: CatalogReport): string {
       lines.push(`WARN ${root.relativePath}: root missing`);
     }
   }
+  for (const drift of report.managedWarningDrift) {
+    if (drift.kind === "stale_path") {
+      lines.push(
+        `DRIFT ${drift.path}: baseline path no longer exists under a present managed root`,
+      );
+    } else {
+      lines.push(
+        `DRIFT ${drift.path}: baseline expected ${drift.baselineCount} ${
+          FINDING_LABELS[drift.code]
+        }, found ${drift.actualCount} (${drift.excessCount} excess)`,
+      );
+    }
+  }
   for (const skill of report.skills) {
     const status =
       skill.status === "valid"
@@ -614,7 +690,7 @@ export function formatCatalogReport(report: CatalogReport): string {
       report.warnings
     } warning(s); ${report.documentedWarnings} documented managed warning(s), ${
       report.undocumentedWarnings
-    } undocumented managed warning(s).`,
+    } undocumented managed warning(s); ${report.managedWarningDrift.length} managed baseline drift item(s).`,
   );
   return `${lines.join("\n")}\n`;
 }

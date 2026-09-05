@@ -12,6 +12,14 @@ new policy violation in an otherwise known skill is printed as `WARN`, while
 the reviewed finding is printed as `KNOWN`. A managed warning is never treated
 as an editable-skill pass, and editable findings still fail the check.
 
+## Baseline drift
+
+The catalog also compares the baseline back against managed roots that are
+present. If a reviewed skill path disappears, or a reviewed finding count is
+higher than the current count, the report prints a `DRIFT` entry for review.
+This is non-blocking and does not turn a missing platform root into drift:
+platform roots remain optional in CI when they are not injected.
+
 ## Review outcome
 
 - Oversized managed documents are vendor guidance that exceeds the 500-line
@@ -26,5 +34,6 @@ as an editable-skill pass, and editable findings still fail the check.
 
 Run `pnpm run check:skill-catalog` to review the inventory. A new managed
 finding appears as `WARN` and increments the undocumented-warning count; the
-command remains non-blocking for managed roots. A new editable finding appears
-as `FAIL` and exits unsuccessfully.
+command remains non-blocking for managed roots. A stale baseline entry appears
+as `DRIFT` and should be reviewed before the baseline is edited. A new
+editable finding appears as `FAIL` and exits unsuccessfully.

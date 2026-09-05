@@ -215,6 +215,61 @@ test("managed baseline labels known findings without hiding additional findings"
   assert.match(output, /over 500-line limit \[documented managed warning\]/);
 });
 
+test("managed baseline reports stale paths and excess counts without blocking", async () => {
+  const root = await fixture();
+  await addSkill(
+    root,
+    ".local/skills",
+    "managed-bad",
+    `${"line\n".repeat(MAX_EDITABLE_LINES + 1)}`,
+  );
+  const report = await scanSkillCatalog({
+    projectRoot: root,
+    roots,
+    managedWarningBaseline: [
+      {
+        path: ".local/skills/managed-bad/SKILL.md",
+        findings: { line_limit_exceeded: 2, broken_local_reference: 1 },
+        reason: "Fixture baseline.",
+      },
+      {
+        path: ".local/skills/replaced-skill/SKILL.md",
+        findings: { line_limit_exceeded: 1 },
+        reason: "Replaced managed skill.",
+      },
+    ],
+  });
+
+  assert.equal(report.failures, 0);
+  assert.equal(report.managedWarningDrift.length, 3);
+  assert.deepEqual(report.managedWarningDrift[0], {
+    kind: "excess_finding_count",
+    path: ".local/skills/managed-bad/SKILL.md",
+    code: "line_limit_exceeded",
+    baselineCount: 2,
+    actualCount: 1,
+    excessCount: 1,
+    reason: "Fixture baseline.",
+  });
+  assert.deepEqual(report.managedWarningDrift[1], {
+    kind: "excess_finding_count",
+    path: ".local/skills/managed-bad/SKILL.md",
+    code: "broken_local_reference",
+    baselineCount: 1,
+    actualCount: 0,
+    excessCount: 1,
+    reason: "Fixture baseline.",
+  });
+  assert.deepEqual(report.managedWarningDrift[2], {
+    kind: "stale_path",
+    path: ".local/skills/replaced-skill/SKILL.md",
+    reason: "Replaced managed skill.",
+  });
+  const output = formatCatalogReport(report);
+  assert.match(output, /DRIFT .*managed-bad.*baseline expected 2 over 500-line limit, found 1/);
+  assert.match(output, /DRIFT .*replaced-skill.*baseline path no longer exists/);
+});
+
 test("CLI accepts an isolated fixture project root without provider credentials", async () => {
   const root = await fixture();
   await addSkill(root, ".agents/skills", "cli-skill");
@@ -223,8 +278,19 @@ test("CLI accepts an isolated fixture project root without provider credentials"
 
 test("missing roots warn so platform-injected roots remain optional in CI", async () => {
   const root = await mkdtemp(join(tmpdir(), "skill-catalog-missing-"));
-  const report = await scanSkillCatalog({ projectRoot: root, roots });
+  const report = await scanSkillCatalog({
+    projectRoot: root,
+    roots,
+    managedWarningBaseline: [
+      {
+        path: ".local/skills/platform-skill/SKILL.md",
+        findings: { line_limit_exceeded: 1 },
+        reason: "Optional platform root.",
+      },
+    ],
+  });
   assert.equal(report.failures, 0);
   assert.equal(report.warnings, 4);
+  assert.equal(report.managedWarningDrift.length, 0);
   assert.match(formatCatalogReport(report), /warning\(s\)/);
 });
