@@ -8999,11 +8999,15 @@ export default function Home() {
         // session boundary (resetBoundaryAt) will be established on the next
         // successful push once the connection recovers.
         let serverConfirmedNoRuns = false;
-        try {
-          const res = await fetch(`/api/sync/${newDate}`);
-          if (res.ok) {
-            const payload = await res.json() as SyncPayload | null;
-            if (payload?.dayState?.runs?.length) {
+        // Retry once after a short delay when the initial fetch fails.
+        // On Render free-tier the service spins down after inactivity; a
+        // cold-start GET can time out while the server is still waking.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(`/api/sync/${newDate}`);
+            if (res.ok) {
+              const payload = await res.json() as SyncPayload | null;
+              if (payload?.dayState?.runs?.length) {
               // Apply the saved line-type (dough/crusts) preference to each run
               // that has no subTab set — so brands always scheduled as "crusts"
               // start in the right mode without a manual toggle every morning.
@@ -9054,7 +9058,13 @@ export default function Home() {
             }
             serverConfirmedNoRuns = true;
           }
-        } catch {}
+          } catch {}
+          // Brief pause before retry to allow a cold-starting server to
+          // finish waking; skip on the final attempt.
+          if (attempt === 0 && !serverConfirmedNoRuns) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 5_000));
+          }
+        }
         // Fallback: fresh empty state. Only push to the server if the GET
         // confirmed there are no scheduled runs — otherwise we'd risk wiping
         // them via the wholesale-adopt escape hatch (see comment above).
