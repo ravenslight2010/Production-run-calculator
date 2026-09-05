@@ -25,3 +25,9 @@ focused verifier test as equivalent evidence would allow a false GO.
 **How to apply:** Clearly label disposable CI validation and force its release
 decision to NO-GO when production-state evidence is omitted. Keep the omission
 guarded to CI test databases; real release runs remain fail-closed.
+
+Source-library reconciliation evidence must declare its evidence environment, and failed release gates must write only a pending artifact until every gate passes.
+
+**Why:** A local database can contain a partial heal while a retained report describes a different revision or environment; overwriting that report with a timeout or partial result hides the distinction between stale evidence and a live data defect.
+
+**How to apply:** Pass `development` or `release` explicitly to the verifier, compare it during retained-evidence validation, and promote pending source evidence only after the complete standard or full gate succeeds.

@@ -8,7 +8,7 @@
     "audit:source-compare": "tsx ./src/compare-source-audit.mts",
     "audit:source-manifest": "tsx ./src/source-library-manifest.mts",
     "audit:source-reconcile": "tsx ./src/reconcile-source-library.mts",
-    "audit:source-heal-verify": "tsx ./src/verify-source-library-reconciliation.mts",
+    "audit:source-heal-verify": "tsx ./src/verify-source-library-reconciliation.mts --environment development",
     "audit:source-heal-plan": "tsx ./src/generate-source-library-heal-plan.mts",
     "test:source-compare": "tsx ./src/compare-source-audit.test.mts",
     "test:source-manifest": "tsx ./src/source-library-manifest.test.mts",

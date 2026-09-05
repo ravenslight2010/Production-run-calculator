@@ -64,6 +64,7 @@ async function fixture(
         : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
           ? `${JSON.stringify({
               verifier: "source-library-reconciliation",
+              environment: "development",
               repairBoundary: { fromDate: "2026-08-26" },
               report: {
                 sha256: "a".repeat(64),
@@ -165,8 +166,23 @@ async function run(): Promise<void> {
     SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--report") &&
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--heal-id") &&
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--from-date") &&
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--environment") &&
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--output"),
     "the source-library gate must pass its report, heal boundary, and evidence output",
+  );
+  assert.equal(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.args[
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.indexOf("--environment") + 1
+    ],
+    "development",
+    "local release evidence must identify the development database explicitly",
+  );
+  assert.match(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.args[
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.indexOf("--output") + 1
+    ] ?? "",
+    /\.source-library-reconciliation\.json\.pending$/,
+    "failed release gates must not overwrite retained source-library evidence",
   );
   assert.equal(
     defaultReleaseEvidenceDir("standard"),
@@ -290,6 +306,7 @@ async function run(): Promise<void> {
       Buffer.from(
         JSON.stringify({
           verifier: "source-library-reconciliation",
+          environment: "development",
           idempotencyFingerprint: {
             algorithm: "sha256",
             value: "c".repeat(64),
@@ -306,6 +323,27 @@ async function run(): Promise<void> {
         Buffer.from(
           JSON.stringify({
             verifier: "source-library-reconciliation",
+            environment: "development",
+            idempotencyFingerprint: {
+              algorithm: "sha256",
+              value: "c".repeat(64),
+            },
+            ok: true,
+            failures: [],
+          }),
+        ),
+        { expectedEnvironment: "release" },
+      ),
+    /targets development, but release evidence was requested/,
+    "evidence from another environment must not be accepted",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify({
+            verifier: "source-library-reconciliation",
+            environment: "development",
             idempotencyFingerprint: {
               algorithm: "sha256",
               value: "c".repeat(64),
@@ -324,6 +362,7 @@ async function run(): Promise<void> {
         Buffer.from(
           JSON.stringify({
             verifier: "source-library-reconciliation",
+            environment: "development",
             idempotencyFingerprint: {
               algorithm: "sha256",
               value: "c".repeat(64),

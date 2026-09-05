@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -14,6 +15,8 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  parseSourceLibraryEvidenceEnvironment,
+  type SourceLibraryEvidenceEnvironment,
 } from "./verify-source-library-reconciliation.mts";
 
 export type ReleaseStep = {
@@ -62,6 +65,7 @@ export type ReleaseEvidenceOptions = {
   expectedMode?: "standard" | "full";
   expectedLabels?: readonly string[];
   allowIncompleteCheckpoint?: boolean;
+  expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
 };
 
 export type BrowserDurationRegression = {
@@ -175,6 +179,8 @@ const fullBrowserReportPath = resolve(
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
+const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE =
+  `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
@@ -415,6 +421,11 @@ const sourceLibraryFromDate =
   process.env.SOURCE_LIBRARY_RECONCILIATION_FROM_DATE ??
   sourceLibraryHealDate ??
   DEFAULT_FROM_DATE;
+const sourceLibraryEnvironment = parseSourceLibraryEvidenceEnvironment(
+  cliOptionValue("--source-library-environment") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT ??
+    (process.env.CI ? "release" : "development"),
+);
 export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   label: "source-library reconciliation verification",
   args: [
@@ -429,8 +440,10 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     sourceLibraryHealId,
     "--from-date",
     sourceLibraryFromDate,
+    "--environment",
+    sourceLibraryEnvironment,
     "--output",
-    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
   ],
   stage: "prerequisites",
 };
@@ -741,6 +754,9 @@ function printHelp(): void {
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence  Verify retained evidence files",
   );
+  console.log(
+    "  Add --source-library-environment development|release when verifying a selected database.",
+  );
   console.log("");
   console.log(
     "The full browser suite requires a disposable isolated test database.",
@@ -895,16 +911,21 @@ export async function verifyReleaseEvidence(
   }
   const revision =
     options.currentRevision ?? (await currentRevision());
+  const expectedSourceLibraryEnvironment =
+    options.expectedSourceLibraryEnvironment ?? sourceLibraryEnvironment;
   validateReleaseReport(report, {
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
+    expectedSourceLibraryEnvironment,
   });
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
     );
-    validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence);
+    validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence, {
+      expectedEnvironment: expectedSourceLibraryEnvironment,
+    });
   }
   if (evidenceMode === "full") {
     const browserReport = await readFile(
@@ -926,6 +947,7 @@ export async function verifyReleaseEvidence(
 
 export function validateSourceLibraryReconciliationEvidence(
   evidenceBytes: Uint8Array,
+  options: { expectedEnvironment?: SourceLibraryEvidenceEnvironment } = {},
 ): void {
   const MAX_EVIDENCE_BYTES = 64 * 1024;
   if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
@@ -950,6 +972,23 @@ export function validateSourceLibraryReconciliationEvidence(
   if (output.verifier !== "source-library-reconciliation") {
     throw new Error(
       "Source-library reconciliation evidence has the wrong verifier identity.",
+    );
+  }
+  const evidenceEnvironment = output.environment;
+  if (
+    evidenceEnvironment !== "development" &&
+    evidenceEnvironment !== "release"
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence is missing a valid development/release environment.",
+    );
+  }
+  if (
+    options.expectedEnvironment !== undefined &&
+    evidenceEnvironment !== options.expectedEnvironment
+  ) {
+    throw new Error(
+      `Source-library reconciliation evidence targets ${String(evidenceEnvironment)}, but ${options.expectedEnvironment} evidence was requested; use the matching database and evidence directory.`,
     );
   }
   if (output.ok !== true) {
@@ -1144,6 +1183,7 @@ export function validateReleaseReport(
     currentRevision: string;
     expectedMode?: "standard" | "full";
     expectedLabels?: readonly string[];
+    expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
@@ -1210,10 +1250,23 @@ export function validateReleaseReport(
   if (
     !/^Environment:\s*.+$/m.test(report) ||
     !/^Commands:\s*.+$/m.test(report) ||
-    !/^Evidence paths:\s*.+$/m.test(report)
+    !/^Evidence paths:\s*.+$/m.test(report) ||
+    (options.expectedSourceLibraryEnvironment !== undefined &&
+      !/^Source-library evidence environment:\s*(development|release)\s*$/m.test(report))
   ) {
     throw new Error(
       "Release report is malformed: environment, commands, and evidence paths are required.",
+    );
+  }
+  const sourceLibraryReportEnvironment = report.match(
+    /^Source-library evidence environment:\s*(development|release)\s*$/m,
+  )?.[1];
+  if (
+    options.expectedSourceLibraryEnvironment !== undefined &&
+    sourceLibraryReportEnvironment !== options.expectedSourceLibraryEnvironment
+  ) {
+    throw new Error(
+      `Release report source-library evidence targets ${sourceLibraryReportEnvironment ?? "unknown"}, but ${options.expectedSourceLibraryEnvironment} evidence was requested.`,
     );
   }
   const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
@@ -1385,6 +1438,7 @@ export function formatReleaseReport(
   metadata: {
     revision?: string;
     environment?: string;
+    sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
@@ -1470,6 +1524,7 @@ export function formatReleaseReport(
         ]
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
+    `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     "",
@@ -1664,6 +1719,7 @@ async function writeReleaseReport(
             ? "CI release validation"
             : "disposable CI gate test (not production reconciliation evidence)"
           : "local release validation",
+        sourceLibraryEnvironment,
         browserDurationRegressions,
         timing: metadata.timing,
       },
@@ -1778,6 +1834,20 @@ async function currentRevision(): Promise<string> {
   });
 }
 
+async function promoteSourceLibraryEvidence(): Promise<void> {
+  const pendingPath = resolve(
+    rootDir,
+    releaseEvidenceDir,
+    SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+  );
+  const retainedPath = resolve(
+    rootDir,
+    releaseEvidenceDir,
+    SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  );
+  await rename(pendingPath, retainedPath);
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
@@ -1858,6 +1928,10 @@ async function main(): Promise<void> {
     );
   } else {
     await rm(checkpointReportPath, { force: true });
+    await rm(
+      resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+      { force: true },
+    );
     await writeFile(
       logPath,
       `Release check ${new Date().toISOString()} revision ${revision} mode ${
@@ -2095,6 +2169,7 @@ async function main(): Promise<void> {
       ? "GO"
       : "NO-GO";
     try {
+      await promoteSourceLibraryEvidence();
       const reportPath = await writeReleaseReport(results, {
         revision,
         decision: releaseDecision,
@@ -2131,6 +2206,10 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  await rm(
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+    { force: true },
+  );
   try {
     const checkpointReportPath = await writeReleaseReport(results, {
         revision,
