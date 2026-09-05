@@ -351,6 +351,13 @@ const ROUTES: GatedRoute[] = [
     body: { expirySoonDays: 14 },
     okStatus: 200,
   },
+  {
+    name: "GET /duplicate-reviews",
+    capability: "manage-inventory",
+    method: "GET",
+    path: () => "/api/duplicate-reviews",
+    okStatus: 200,
+  },
   // --- use-ai-tools ---
   {
     name: "POST /inventory/identify-photo",

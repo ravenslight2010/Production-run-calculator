@@ -22,6 +22,8 @@ tags:
     description: AI assistant (optimization recommendations)
   - name: incidents
     description: Issue reports, crash capture, and AI diagnosis
+  - name: duplicateReviews
+    description: Manager-visible duplicate review reminders
   - name: specImport
     description: Learned spec-sheet / recipe import aliases
   - name: productionRules
@@ -1739,6 +1741,74 @@ paths:
         "400":
           description: Invalid input
 
+  /duplicate-reviews:
+    get:
+      operationId: listDuplicateReviews
+      tags: [duplicateReviews]
+      summary: List outstanding duplicate-review groups
+      description: >-
+        Returns the pending duplicate groups for the current facility scope.
+        This is a manager-only advisory read; it never applies a merge.
+      responses:
+        "200":
+          description: Outstanding duplicate-review groups and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateReviewList"
+        "403":
+          description: Missing manage-inventory capability
+    post:
+      operationId: saveDuplicateReviews
+      tags: [duplicateReviews]
+      summary: Record duplicate groups for manager review
+      description: >-
+        Adds newly observed duplicate groups to the current facility's pending
+        review ledger. Existing groups are left unchanged, including groups
+        already resolved or ignored, so stale scans cannot reopen work.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDuplicateReviewsInput"
+      responses:
+        "200":
+          description: Current outstanding duplicate-review groups and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateReviewList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Missing manage-inventory capability
+
+  /duplicate-reviews/resolve:
+    post:
+      operationId: resolveDuplicateReview
+      tags: [duplicateReviews]
+      summary: Resolve or ignore one duplicate-review group
+      description: >-
+        Explicitly closes one pending group after a manager reviewed it. This
+        endpoint does not merge or delete master data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveDuplicateReviewInput"
+      responses:
+        "200":
+          description: Current outstanding duplicate-review groups and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateReviewList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Missing manage-inventory capability
   /merged-away:
     get:
       operationId: listMergedAway
@@ -8720,6 +8790,74 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DeniedMerge"
+
+    DuplicateReviewGroup:
+      type: object
+      required:
+        - groupKey
+        - category
+        - target
+        - sources
+        - status
+      properties:
+        groupKey:
+          type: string
+          minLength: 1
+          maxLength: 500
+        category:
+          $ref: "#/components/schemas/MergeSuggestCategory"
+        brand:
+          type: [string, "null"]
+        target:
+          type: string
+          minLength: 1
+        sources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        status:
+          type: string
+          enum: [pending, resolved, ignored]
+
+    DuplicateReviewList:
+      type: object
+      required:
+        - groups
+        - count
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/DuplicateReviewGroup"
+        count:
+          type: integer
+          minimum: 0
+
+    SaveDuplicateReviewsInput:
+      type: object
+      required:
+        - groups
+      properties:
+        groups:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/DuplicateReviewGroup"
+
+    ResolveDuplicateReviewInput:
+      type: object
+      required:
+        - groupKey
+        - outcome
+      properties:
+        groupKey:
+          type: string
+          minLength: 1
+          maxLength: 500
+        outcome:
+          type: string
+          enum: [resolved, ignored]
 
     SaveDeniedMergesInput:
       type: object

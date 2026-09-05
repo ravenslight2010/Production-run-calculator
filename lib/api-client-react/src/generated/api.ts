@@ -64,6 +64,7 @@ import type {
   DeniedMergeList,
   DieLineDefaultsList,
   DieTypeList,
+  DuplicateReviewList,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -163,6 +164,7 @@ import type {
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
+  ResolveDuplicateReviewInput,
   RestockInput,
   RoleCapabilitiesUpdate,
   RoleDefinition,
@@ -177,6 +179,7 @@ import type {
   SaveDeniedMergesInput,
   SaveDieLineDefaultsInput,
   SaveDieTypesInput,
+  SaveDuplicateReviewsInput,
   SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
   SaveFreezerPullItemsInput,
@@ -5521,6 +5524,242 @@ export const useDeleteDeniedMerges = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteDeniedMergesMutationOptions(options));
+    }
+
+export const getListDuplicateReviewsUrl = () => {
+
+
+
+
+  return `/api/duplicate-reviews`
+}
+
+/**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
+export const listDuplicateReviews = async ( options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
+
+  return customFetch<DuplicateReviewList>(getListDuplicateReviewsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDuplicateReviewsQueryKey = () => {
+    return [
+    `/api/duplicate-reviews`
+    ] as const;
+    }
+
+
+export const getListDuplicateReviewsQueryOptions = <TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDuplicateReviewsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDuplicateReviews>>> = ({ signal }) => listDuplicateReviews({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDuplicateReviewsQueryResult = NonNullable<Awaited<ReturnType<typeof listDuplicateReviews>>>
+export type ListDuplicateReviewsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List outstanding duplicate-review groups
+ */
+
+export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDuplicateReviewsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveDuplicateReviewsUrl = () => {
+
+
+
+
+  return `/api/duplicate-reviews`
+}
+
+/**
+ * Adds newly observed duplicate groups to the current facility's pending review ledger. Existing groups are left unchanged, including groups already resolved or ignored, so stale scans cannot reopen work.
+ * @summary Record duplicate groups for manager review
+ */
+export const saveDuplicateReviews = async (saveDuplicateReviewsInput: SaveDuplicateReviewsInput, options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<DuplicateReviewList>(getSaveDuplicateReviewsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(saveDuplicateReviewsInput)
+  }
+);}
+
+
+
+
+
+export const getSaveDuplicateReviewsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDuplicateReviews>>, TError,SaveDuplicateReviewsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveDuplicateReviews>>, TError,SaveDuplicateReviewsMutationVariables, TContext> => {
+
+const mutationKey = ['saveDuplicateReviews'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveDuplicateReviews>>, SaveDuplicateReviewsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveDuplicateReviews(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveDuplicateReviewsMutationResult = NonNullable<Awaited<ReturnType<typeof saveDuplicateReviews>>>
+    export type SaveDuplicateReviewsMutationBody = BodyType<SaveDuplicateReviewsInput>
+    export type SaveDuplicateReviewsMutationError = ErrorType<void>
+    export type SaveDuplicateReviewsMutationVariables = {data: BodyType<SaveDuplicateReviewsInput>}
+
+    /**
+ * @summary Record duplicate groups for manager review
+ */
+export const useSaveDuplicateReviews = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDuplicateReviews>>, TError,SaveDuplicateReviewsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveDuplicateReviews>>,
+        TError,
+        SaveDuplicateReviewsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveDuplicateReviewsMutationOptions(options));
+    }
+
+export const getResolveDuplicateReviewUrl = () => {
+
+
+
+
+  return `/api/duplicate-reviews/resolve`
+}
+
+/**
+ * Explicitly closes one pending group after a manager reviewed it. This endpoint does not merge or delete master data.
+ * @summary Resolve or ignore one duplicate-review group
+ */
+export const resolveDuplicateReview = async (resolveDuplicateReviewInput: ResolveDuplicateReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<DuplicateReviewList>(getResolveDuplicateReviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(resolveDuplicateReviewInput)
+  }
+);}
+
+
+
+
+
+export const getResolveDuplicateReviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDuplicateReview>>, TError,ResolveDuplicateReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resolveDuplicateReview>>, TError,ResolveDuplicateReviewMutationVariables, TContext> => {
+
+const mutationKey = ['resolveDuplicateReview'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveDuplicateReview>>, ResolveDuplicateReviewMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  resolveDuplicateReview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveDuplicateReviewMutationResult = NonNullable<Awaited<ReturnType<typeof resolveDuplicateReview>>>
+    export type ResolveDuplicateReviewMutationBody = BodyType<ResolveDuplicateReviewInput>
+    export type ResolveDuplicateReviewMutationError = ErrorType<void>
+    export type ResolveDuplicateReviewMutationVariables = {data: BodyType<ResolveDuplicateReviewInput>}
+
+    /**
+ * @summary Resolve or ignore one duplicate-review group
+ */
+export const useResolveDuplicateReview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDuplicateReview>>, TError,ResolveDuplicateReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resolveDuplicateReview>>,
+        TError,
+        ResolveDuplicateReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResolveDuplicateReviewMutationOptions(options));
     }
 
 export const getListMergedAwayUrl = () => {

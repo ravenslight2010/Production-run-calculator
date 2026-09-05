@@ -2958,6 +2958,59 @@ export interface DeniedMergeList {
   denied: DeniedMerge[];
 }
 
+export type DuplicateReviewGroupStatus = typeof DuplicateReviewGroupStatus[keyof typeof DuplicateReviewGroupStatus];
+
+
+export const DuplicateReviewGroupStatus = {
+  pending: 'pending',
+  resolved: 'resolved',
+  ignored: 'ignored',
+} as const;
+
+export interface DuplicateReviewGroup {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  groupKey: string;
+  category: MergeSuggestCategory;
+  /** @nullable */
+  brand?: string | null;
+  /** @minLength 1 */
+  target: string;
+  /** @minItems 1 */
+  sources: string[];
+  status: DuplicateReviewGroupStatus;
+}
+
+export interface DuplicateReviewList {
+  groups: DuplicateReviewGroup[];
+  /** @minimum 0 */
+  count: number;
+}
+
+export interface SaveDuplicateReviewsInput {
+  /** @maxItems 1000 */
+  groups: DuplicateReviewGroup[];
+}
+
+export type ResolveDuplicateReviewInputOutcome = typeof ResolveDuplicateReviewInputOutcome[keyof typeof ResolveDuplicateReviewInputOutcome];
+
+
+export const ResolveDuplicateReviewInputOutcome = {
+  resolved: 'resolved',
+  ignored: 'ignored',
+} as const;
+
+export interface ResolveDuplicateReviewInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  groupKey: string;
+  outcome: ResolveDuplicateReviewInputOutcome;
+}
+
 export interface SaveDeniedMergesInput {
   /** The batch of denied pairs to add or remove */
   pairs: DeniedMerge[];

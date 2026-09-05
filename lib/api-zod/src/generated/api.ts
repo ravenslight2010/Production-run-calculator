@@ -2280,6 +2280,109 @@ export const DeleteDeniedMergesResponse = zod.object({
 
 
 /**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
+export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
+
+
+
+export const listDuplicateReviewsResponseCountMin = 0;
+
+
+
+export const ListDuplicateReviewsResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(listDuplicateReviewsResponseGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})),
+  "count": zod.number().int().min(listDuplicateReviewsResponseCountMin)
+})
+
+
+/**
+ * Adds newly observed duplicate groups to the current facility's pending review ledger. Existing groups are left unchanged, including groups already resolved or ignored, so stale scans cannot reopen work.
+ * @summary Record duplicate groups for manager review
+ */
+export const saveDuplicateReviewsBodyGroupsItemGroupKeyMax = 500;
+
+
+
+export const saveDuplicateReviewsBodyGroupsMax = 1000;
+
+
+
+export const SaveDuplicateReviewsBody = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(saveDuplicateReviewsBodyGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})).max(saveDuplicateReviewsBodyGroupsMax)
+})
+
+export const saveDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
+
+
+
+export const saveDuplicateReviewsResponseCountMin = 0;
+
+
+
+export const SaveDuplicateReviewsResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(saveDuplicateReviewsResponseGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})),
+  "count": zod.number().int().min(saveDuplicateReviewsResponseCountMin)
+})
+
+
+/**
+ * Explicitly closes one pending group after a manager reviewed it. This endpoint does not merge or delete master data.
+ * @summary Resolve or ignore one duplicate-review group
+ */
+export const resolveDuplicateReviewBodyGroupKeyMax = 500;
+
+
+
+export const ResolveDuplicateReviewBody = zod.object({
+  "groupKey": zod.string().min(1).max(resolveDuplicateReviewBodyGroupKeyMax),
+  "outcome": zod.enum(['resolved', 'ignored'])
+})
+
+export const resolveDuplicateReviewResponseGroupsItemGroupKeyMax = 500;
+
+
+
+export const resolveDuplicateReviewResponseCountMin = 0;
+
+
+
+export const ResolveDuplicateReviewResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(resolveDuplicateReviewResponseGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})),
+  "count": zod.number().int().min(resolveDuplicateReviewResponseCountMin)
+})
+
+
+/**
  * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
  * @summary List durable merged-away ingredient/die names
  */

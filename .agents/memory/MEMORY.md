@@ -156,3 +156,4 @@
 - [Dough correction browser fixture](dough-correction-browser-fixture.md) — live-run tabs can rehydrate or mount lazily; assert active-tab UI and inspect actual `/api/sync/today` payloads.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
+- [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.

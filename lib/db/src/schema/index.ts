@@ -24,6 +24,7 @@ export * from "./savedCheeseSheets";
 export * from "./importHistory";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
+export * from "./duplicateReviewGroups";
 export * from "./mergedAway";
 export * from "./aiCorrections";
 export * from "./facilityKnowledge";

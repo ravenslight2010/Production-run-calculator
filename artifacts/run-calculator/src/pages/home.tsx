@@ -467,7 +467,21 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, isCurrentMergeSuggestionRequest, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
+import {
+  suggestMerges,
+  saveMergeAliases,
+  denyMerge,
+  fetchMergedAwayNames,
+  saveMergedAwayNames,
+  deleteMergedAwayNames,
+  fetchPendingDuplicateReviews,
+  savePendingDuplicateReviews,
+  resolvePendingDuplicateReview,
+  duplicateReviewGroupKey,
+  isCurrentMergeSuggestionRequest,
+  type ReviewedMergeSuggestion,
+  type MergeSuggestCategory,
+} from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
@@ -614,7 +628,6 @@ import {
   PENDING_DUPLICATE_REVIEW_SCAN,
   loadPendingDuplicateReview,
   pendingDuplicateReviewAfterResolution,
-  pendingDuplicateReviewAfterScan,
   savePendingDuplicateReview,
 } from "@/pendingDuplicateReview";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
@@ -5359,6 +5372,31 @@ export default function Home() {
     } catch {}
   }, []);
 
+  // Duplicate-review state is facility-scoped on the server. Keep the local
+  // value as a fail-safe cache: a failed or stale read must not make outstanding
+  // review work disappear from this device.
+  useEffect(() => {
+    if (!canManageInventory) return;
+    let active = true;
+    const refresh = () => {
+      void fetchPendingDuplicateReviews()
+        .then((result) => {
+          if (active) persistPendingDuplicateReview(result.count);
+        })
+        .catch(() => {
+          // Preserve the last known reminder when the server is unavailable.
+        });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [canManageInventory, persistPendingDuplicateReview]);
+
   const openPendingDuplicateReview = useCallback(() => {
     setMergeFromImport(true);
     setMergeCategory("ingredients");
@@ -6006,17 +6044,49 @@ export default function Home() {
         { signal: controller.signal, forceRefresh },
       );
       if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
-      setMergeSuggestions(suggestions);
+       let visibleSuggestions = suggestions;
+       if (scope.category === "ingredient" && canManageInventory) {
+         try {
+           const remote = await savePendingDuplicateReviews(
+             suggestions,
+             "ingredient",
+             undefined,
+             controller.signal,
+           );
+           if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) {
+             return null;
+           }
+           persistPendingDuplicateReview(remote.count);
+           const localKeys = new Set(
+             suggestions.map((suggestion) =>
+               duplicateReviewGroupKey(suggestion.target, suggestion.sources, "ingredient"),
+             ),
+           );
+           const remoteSuggestions = remote.groups
+             .filter((group) => group.category === "ingredient" && group.status === "pending")
+              .filter((group) =>
+                !localKeys.has(
+                  duplicateReviewGroupKey(group.target, group.sources, "ingredient"),
+                ),
+              )
+             .map(({ target, sources }) => ({ target, sources }));
+           visibleSuggestions = [...suggestions, ...remoteSuggestions];
+         } catch {
+           // The scan remains useful locally; retain the local reminder rather
+           // than hiding it when the shared ledger is temporarily unavailable.
+         }
+       }
+       setMergeSuggestions(visibleSuggestions);
       setMergeSuggestSelected(new Set());
       if (!usedAi && error) {
         setMergeSuggestError(
           `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
         );
       }
-      if (usedAi && suggestions.length === 0) {
+       if (usedAi && visibleSuggestions.length === 0) {
         setMergeSuggestNote("No duplicate groups found.");
       }
-      return suggestions.length;
+       return visibleSuggestions.length;
     } catch (e) {
       if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
       setMergeSuggestions([]);
@@ -6036,13 +6106,7 @@ export default function Home() {
   // the manager's back, and leaving the surface cancels any active request.
   useEffect(() => {
     if (manageCategory === "merge") {
-      void handleSuggestMerges().then((count) => {
-        if (mergeCategory === "ingredients" && pendingDuplicateReviewCount !== 0) {
-          persistPendingDuplicateReview(
-            pendingDuplicateReviewAfterScan(pendingDuplicateReviewCount, count),
-          );
-        }
-      });
+       void handleSuggestMerges();
     } else {
       mergeSuggestRequestRef.current.controller?.abort();
     }
@@ -6059,8 +6123,6 @@ export default function Home() {
     setMergeCategory("ingredients");
     setMergeFromImport(true);
     void handleSuggestMerges(true).then((count) => {
-      const pendingCount = pendingDuplicateReviewAfterScan(PENDING_DUPLICATE_REVIEW_SCAN, count);
-      persistPendingDuplicateReview(pendingCount);
       if (count === null || count <= 0) return;
       toast({
         title: "Possible duplicate ingredients",
@@ -6142,6 +6204,12 @@ export default function Home() {
       : await handleApplyMerge(sources, s.target);
     if (ok) {
       setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+      if (mergeCategory === "ingredients") {
+        void resolvePendingDuplicateReview(
+          duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
+          "resolved",
+        ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
+      }
       if (mergeCategory === "ingredients" && mergeSuggestions.length <= 1) {
         persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
       }
@@ -6201,6 +6269,12 @@ export default function Home() {
     } catch {
       // Non-fatal: the suggestion is already hidden for this session; it may
       // reappear on a later scan if the deny didn't persist.
+    }
+    if (mergeCategory === "ingredients") {
+      void resolvePendingDuplicateReview(
+        duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
+        "ignored",
+      ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
     }
   }
 
