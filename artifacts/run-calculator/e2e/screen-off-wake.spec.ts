@@ -51,7 +51,7 @@
  */
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
-import { computeCasesOnLine } from "@workspace/inventory-math";
+import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -428,6 +428,28 @@ async function readDoughCounters(page: Page): Promise<{
       trays: value("traysOnLine"),
       batches: value("batchesReady"),
     };
+  });
+}
+
+async function readLiveRunSnapshot(page: Page): Promise<{
+  runId: string;
+  values: Record<string, number | string | boolean | null | undefined>;
+}> {
+  return page.evaluate(async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`live run payload request failed: ${response.status}`);
+    }
+    const body = await response.json() as {
+      dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+      runValues?: Record<string, Record<string, number | string | boolean | null | undefined>>;
+    };
+    const runId = body.dayState?.currentRunId ?? body.dayState?.runs?.find((run) => run.id)?.id;
+    if (!runId || !body.runValues?.[runId]) {
+      throw new Error("current run is missing from the live run payload");
+    }
+    return { runId, values: body.runValues[runId] };
   });
 }
 
@@ -1036,6 +1058,175 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       ).toBe(beforePause.cases + 1);
       // Dough counters are no longer on the Run tab; the exact boundaries
       // above prove their writes before this final packaging assertion.
+    },
+  );
+
+  test(
+    "speed adjustment during a dough run stays aligned across screen wake",
+    async ({ page }, testInfo) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
+
+      // Use the real Dough station controls to establish known on-hand stock,
+      // then return to Run for the operator's speed edit. The production
+      // fixture is intentionally simple: 60 PPM initially, 2 doughballs/tray,
+      // and 4 doughballs/batch.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await page.getByTestId("btn-resume-now").click();
+      await page.locator('[data-testid="tab-run"]').click();
+
+      const lineSetupDetails = page.locator("details").filter({
+        has: page.locator("summary", { hasText: /line.?setup/i }),
+      }).first();
+      if (!(await lineSetupDetails.evaluate((element) => (element as HTMLDetailsElement).open))) {
+        await lineSetupDetails.locator("summary").click();
+      }
+      const speedInput = page.locator('[data-testid="input-speedAdjustment"]:visible').first();
+      await expect(speedInput).toBeVisible();
+      expect(Number(await speedInput.inputValue()), "baseline speed adjustment").toBe(1);
+      await expect.poll(async () => {
+        const current = await readLiveRunSnapshot(page);
+        return {
+          speedAdjustment: current.values.speedAdjustment,
+          traysOnLine: current.values.traysOnLine,
+          batchesReady: current.values.batchesReady,
+        };
+      }, { timeout: 15_000 }).toEqual({
+        speedAdjustment: 1,
+        traysOnLine: 10,
+        batchesReady: 2,
+      });
+
+      // This is the operator action under test: slow the line while it is
+      // already running. A 12-second hidden interval is long enough to expose
+      // stale due timestamps at the new 30 PPM speed, but remains inside the
+      // five-minute freezer window so the case count stays at zero.
+      const speedEditedAt = safeBaseMs + 1_000;
+      await mockDateNow(page, speedEditedAt);
+      const speedPush = page.waitForRequest((request) => {
+        return request.method() === "PUT"
+          && new URL(request.url()).pathname.endsWith("/api/sync/today");
+      }, { timeout: 15_000 });
+      await speedInput.fill("0.5");
+      await speedPush;
+      await expect(speedInput).toHaveValue("0.5");
+      await expect.poll(async () => {
+        const snapshot = await readLiveRunSnapshot(page);
+        return snapshot.values.speedAdjustment;
+      }, { timeout: 15_000 }).toBe(0.5);
+
+      await page.screenshot({
+        path: testInfo.outputPath("speed-adjustment-before-wake.png"),
+        fullPage: true,
+      });
+
+      await simulateScreenOff(page);
+      const wakeAt = speedEditedAt + 12_000;
+      await mockDateNow(page, wakeAt);
+      await simulateWake(page);
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+
+      // Foreground reconciliation intentionally re-arms all live timers from
+      // the wake instant. Hidden time must not be replayed with either the old
+      // 60 PPM cadence or the new 30 PPM cadence, so the staged counters stay
+      // at their operator-entered values until a fresh visible interval.
+      await expect.poll(() => readDoughCounters(page), { timeout: 10_000 }).toEqual({
+        trays: 10,
+        batches: 2,
+      });
+
+      await expect.poll(async () => {
+        const current = await readLiveRunSnapshot(page);
+        return {
+          speedAdjustment: current.values.speedAdjustment,
+          traysOnLine: current.values.traysOnLine,
+          batchesReady: current.values.batchesReady,
+        };
+      }, { timeout: 10_000 }).toEqual({
+        speedAdjustment: 0.5,
+        traysOnLine: 10,
+        batchesReady: 2,
+      });
+      const snapshot = await readLiveRunSnapshot(page);
+      const values = snapshot.values;
+      await page.locator('[data-testid="tab-run"]').click();
+      const casesCompleted =
+        Number(values.skidsCompleted ?? 0) * Number(values.casesPerSkid ?? 0)
+        + Number(values.casesOnCurrentSkid ?? 0);
+      expect(casesCompleted, "visible case count must match the live run payload").toBe(
+        await readCaseTotal(page),
+      );
+      expect(casesCompleted, "the new speed has not reached the freezer exit yet").toBe(0);
+      expect(values.speedAdjustment).toBe(0.5);
+      expect(values.traysOnLine).toBe(10);
+      expect(values.batchesReady).toBe(2);
+      const casesInFreezer = computeCasesInFreezer({
+        startedAt: safeBaseMs,
+        now: wakeAt,
+        ppm: 30,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      });
+      const pressCasesLeft = Math.max(0, Number(values.casesNeeded ?? 200) - casesCompleted - casesInFreezer);
+
+      // Dough output cards must be derived from the same server-visible
+      // counters, not from a stale pre-wake React snapshot.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      const doughOnHand = Number(values.traysOnLine) * 2 + Number(values.batchesReady) * 4;
+      const casesOnLine = computeCasesOnLine({
+        startedAt: safeBaseMs,
+        now: wakeAt,
+        ppm: 30,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      });
+      const casesLeftToRun =
+        Number(values.casesNeeded ?? 200)
+        - casesCompleted
+        - casesOnLine
+        + Number(values.casesPerLayer ?? 0);
+      const doughDeficit = Math.max(0, casesLeftToRun * 6 - doughOnHand);
+      await expect(page.getByTestId("output-batches-needed")).toHaveText(
+        (doughDeficit / 4).toFixed(2),
+      );
+      await expect(page.getByTestId("output-trays-needed")).toHaveText(
+        (doughDeficit / 2).toFixed(0),
+      );
+      await expect(page.locator('input[name="traysOnLine"]')).toHaveValue("10");
+      await expect(page.locator('input[name="batchesReady"]')).toHaveValue("2");
+
+      await page.locator('[data-testid="tab-run"]').click();
+      await expect(page.getByTestId("text-press-cases-left")).toContainText(`${pressCasesLeft} cases left`);
+
+      // Finish time must use the same live press-left value and adjusted 30 PPM
+      // cadence that the visible case count uses.
+      const adjustedFinishSec = (pressCasesLeft * 6 * 60) / 30;
+      const finishMinutes = Math.floor(adjustedFinishSec / 60);
+      const finishSeconds = Math.round(adjustedFinishSec % 60);
+      const expectedFinish = await page.evaluate((timestamp) =>
+        new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }),
+      wakeAt + adjustedFinishSec * 1000);
+      const finishPanels = await page.getByText("Est. Finish", { exact: true }).evaluateAll(
+        (elements) => elements.map((element) => element.parentElement?.innerText ?? ""),
+      );
+      expect(
+        finishPanels.some((text) => text.includes(`${finishMinutes}m ${finishSeconds}s`)),
+        finishPanels.join(" | "),
+      ).toBe(true);
+      expect(finishPanels.some((text) => text.includes(expectedFinish)), finishPanels.join(" | ")).toBe(true);
+
+      await page.screenshot({
+        path: testInfo.outputPath("speed-adjustment-after-wake.png"),
+        fullPage: true,
+      });
     },
   );
 
