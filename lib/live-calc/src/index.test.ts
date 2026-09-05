@@ -169,7 +169,8 @@ describe("computeCalc", () => {
     const ve = makeFormValues({ crustsPerCycle: 10, cycleSpeed: 60 });
     const result = computeCalc({ v, ve, nowTimeMs: Date.now(), doughSubTab: "dough", defaultPepTypes: [] });
     expect(result.rackTimes).toHaveLength(6);
-    expect(result.rackTimes[0]).toEqual({ trays: 10, sec: 3 });
+    // ppm = 10 × 60 × 1 = 600; (10 trays × 30 doughballs/tray × 60) / 600 = 30 sec
+    expect(result.rackTimes[0]).toEqual({ trays: 10, sec: 30 });
   });
 
   it("combined pep doubles sticks", () => {
