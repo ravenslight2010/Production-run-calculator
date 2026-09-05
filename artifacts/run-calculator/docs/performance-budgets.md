@@ -76,6 +76,38 @@ tests, and cancellation coverage. Browser verification must confirm the
 unauthenticated shell starts without loading the workbook chunk and that the
 existing import review flow still opens after the chunk is requested.
 
+## Department bundle split evidence
+
+The department split keeps the authenticated Home shell, auth, sync, navigation,
+`LiveRunProvider`, form state, current production run, live counters, and
+emergency controls eager. Warehouse Inventory and manager-only editor modules
+are loaded through the active tab or settings intent instead of entering the
+initial Home chunk. Deferred surfaces expose an accessible loading status and a
+local retry action when a chunk cannot be fetched.
+
+The production build comparison below uses the same Vite configuration and
+minification settings:
+
+| Artifact | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Home chunk, minified | 2,097.78 kB | 1,961.16 kB | -136.62 kB |
+| Home chunk, gzip | 573.09 kB | 544.53 kB | -28.56 kB |
+| Deferred department/editor chunks | QC, staff, AI only | + Inventory (72.94 kB), + manager editors (4.62–15.23 kB each) | On demand |
+
+The split is retained because it reduces the initial authenticated payload without
+moving shared providers or production state. Warehouse Inventory is prefetched
+on pointer/focus intent from the Warehouse tab and the More menu. Manager editor
+chunks are prefetched only when the operator focuses or opens Settings; their
+surfaces still render on demand behind the retry boundary. The existing
+250 ms ordinary tab-transition and 350 ms staff first-visit budgets remain in
+force; a deferred first visit is measured separately from ordinary navigation.
+
+The eager department code remaining in Home is the production-line composition
+and its live Run, Dough, Sauce, Frontline, Packaging, Stoppages, and Summary
+surfaces, plus Home-owned Warehouse staging/mix-plan composition and the shared
+department contracts. QC tabs, InventoryTab, and manager-only editor modules
+are not part of that initial department payload.
+
 The calculator records these additional browser-level signals:
 
 - `browser:navigation-to-dom-content-loaded` and
@@ -85,7 +117,7 @@ The calculator records these additional browser-level signals:
 - `hmr:update` captures the Vite development update duration.
 
 The current architecture keeps auth, sync, `LiveRunProvider`, form state, and
-shared calculations in `Home`, while management and QC surfaces are composed
-inside the same `home.tsx` module. A surface should only be deferred if it can
-be extracted without moving those shared owners and if browser measurements show
-a meaningful startup improvement without making tab navigation unreliable.
+shared calculations in `Home`, while department composition remains in the
+same `home.tsx` module. A surface should only be deferred if it can be
+extracted without moving those shared owners and if browser measurements show a
+meaningful startup improvement without making tab navigation unreliable.

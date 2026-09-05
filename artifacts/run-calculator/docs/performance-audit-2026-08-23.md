@@ -158,3 +158,24 @@ mode; their individual outcomes are recorded above.
   not be moved into the initial bundle.
 - Any future guide-import split should preserve the same cached loader and
   review-state ownership rather than introducing a second workbook loader.
+
+## Department bundle split follow-up (2026-09-05)
+
+The next measured split removed optional Warehouse Inventory and manager editor
+modules from the authenticated Home chunk while preserving Home ownership of
+auth, sync, form state, shared master data, and `LiveRunProvider`. Production
+run, current counters, and emergency controls remain eager.
+
+| Measure | Before | After | Result |
+| --- | ---: | ---: | --- |
+| Home chunk, minified | 2,097.78 kB | 1,961.16 kB | Improved by 136.62 kB |
+| Home chunk, gzip | 573.09 kB | 544.53 kB | Improved by 28.56 kB |
+| Inventory surface | Included in Home | 72.94 kB deferred chunk | Loaded on Warehouse navigation |
+| Manager editor modules | Included in Home | 4.62–15.23 kB deferred chunks | Loaded on editor navigation |
+| Vite production build | 11.30 s | 7.17 s | Build-time variance; not a startup budget |
+
+The deferred surfaces use one shared boundary with an accessible loading status
+and local retry action. Warehouse loading is prefetched from pointer/focus
+navigation intent; manager editor loading is prefetched from the Settings
+intent. No provider, synchronized data store, or live-run owner was moved into
+the deferred chunks.

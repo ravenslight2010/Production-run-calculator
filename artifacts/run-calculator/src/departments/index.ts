@@ -20,3 +20,15 @@ export {
   ManagementDepartment,
   preloadStaffManagementSurface,
 } from "./ManagementDepartment";
+export {
+  DeferredCheeseRecipesManager,
+  DeferredCycleCountManager,
+  DeferredDieLineDefaultsManager,
+  DeferredFreezerPullItemsManager,
+  DeferredInventoryTab,
+  DeferredMixesManager,
+  DeferredNamedRecipesManager,
+  DeferredProductionRulesManager,
+  preloadManagementEditors,
+  preloadWarehouseInventorySurface,
+} from "./DeferredDepartmentSurface";

@@ -289,7 +289,6 @@ import {
 } from "../dieTypesServer";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
-import InventoryTab from "../components/InventoryTab";
 import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
@@ -310,9 +309,6 @@ import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
-import ProductionRulesManager from "../components/ProductionRulesManager";
-import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
-import CycleCountManager from "../components/CycleCountManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
@@ -343,7 +339,6 @@ import {
   getFreezerSurplusRemainingMs,
   replaceFreezerSurplusAllocation,
 } from "../freezerSurplus";
-import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
 import { useIngredients } from "../hooks/useIngredients";
@@ -512,14 +507,24 @@ import { computeEffectiveLineSpeed } from "../lineSpeed";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 import {
   DepartmentProvider,
+  DeferredCheeseRecipesManager,
+  DeferredCycleCountManager,
+  DeferredDieLineDefaultsManager,
+  DeferredFreezerPullItemsManager,
+  DeferredInventoryTab,
+  DeferredMixesManager,
+  DeferredNamedRecipesManager,
+  DeferredProductionRulesManager,
   DeferredStaffManagementSurface,
   ManagementDepartment,
+  preloadManagementEditors,
   preloadStaffManagementSurface,
   ProductionLineDepartment,
   QcDowntimeSurface,
   QcIncidentsSurface,
   QcQualitySurface,
   WarehouseInventoryDepartment,
+  preloadWarehouseInventorySurface,
   type DepartmentAppContext,
 } from "../departments";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
@@ -649,9 +654,7 @@ import type { ShippingPatch } from "@workspace/shipping-import";
 import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
 import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
-import CheeseRecipesManager from "@/components/CheeseRecipesManager";
 import CheeseReconcilePanel from "@/components/CheeseReconcilePanel";
-import DieLineDefaultsManager from "@/components/DieLineDefaultsManager";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import CheeseImportDialog from "@/components/CheeseImportDialog";
 import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
@@ -667,7 +670,6 @@ import {
   addCheeseRecipesIfAbsentByName,
 } from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
-import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
@@ -15645,7 +15647,7 @@ export default function Home() {
                         Cheese tabs. The run form's Dough / Sauce cards pick one
                         by name and hydrate their rows from the chosen recipe. */}
                     {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
-                      <NamedRecipesManager
+                      <DeferredNamedRecipesManager
                         kind={manageCategory === "dough" ? "dough" : "sauce"}
                         ingredientSuggestions={unifiedIngredientUniverse}
                       />
@@ -16420,11 +16422,11 @@ export default function Home() {
                 )}
 
                 {/* Rules */}
-                {manageCategory === "rules" && canEditRules && <ProductionRulesManager />}
+                {manageCategory === "rules" && canEditRules && <DeferredProductionRulesManager />}
 
                 {/* Freezer-pull items */}
                 {manageCategory === "freezer" && canManageInventory && (
-                  <FreezerPullItemsManager
+                  <DeferredFreezerPullItemsManager
                     suggestions={[
                       // Top-level need-row labels that aggregateNeedRows emits.
                       "Dough",
@@ -16456,7 +16458,7 @@ export default function Home() {
                         <Upload className="w-4 h-4" /> Import Premix Sheet
                       </button>
                     )}
-                    <MixesManager
+                    <DeferredMixesManager
                       brands={brands}
                       brandFlavors={brandFlavors}
                       ingredientSuggestions={unifiedIngredientUniverse}
@@ -16475,7 +16477,7 @@ export default function Home() {
                         <Upload className="w-4 h-4" /> Import Cheese Mix Recipe Specs
                       </button>
                     )}
-                    <CheeseRecipesManager
+                    <DeferredCheeseRecipesManager
                       brands={brands}
                       ingredientSuggestions={unifiedIngredientUniverse}
                       onSaved={propagateCheeseRecipeUpdates}
@@ -16490,12 +16492,12 @@ export default function Home() {
 
                 {/* Per-die line-setting defaults (server master-data) */}
                 {manageCategory === "dieDefaults" && canManageInventory && (
-                  <DieLineDefaultsManager dieTypes={dieTypes} />
+                  <DeferredDieLineDefaultsManager dieTypes={dieTypes} />
                 )}
 
                 {/* Cycle-count schedules */}
                 {manageCategory === "cycleCount" && canManageInventory && (
-                  <CycleCountManager suggestions={DEFAULT_CYCLE_COUNT_SECTIONS} />
+                  <DeferredCycleCountManager suggestions={DEFAULT_CYCLE_COUNT_SECTIONS} />
                 )}
 
                 {/* Staff (roster + roles) */}
@@ -16783,7 +16785,11 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("summary")}>
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
+                <DropdownMenuItem
+                  onPointerEnter={preloadWarehouseInventorySurface}
+                  onFocus={preloadWarehouseInventorySurface}
+                  onClick={() => setActiveTab("inventory")}
+                >
                   <ClipboardList className="w-4 h-4 mr-2" /> Inventory
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
@@ -16836,7 +16842,11 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
+                <DropdownMenuItem
+                  onPointerEnter={preloadManagementEditors}
+                  onFocus={preloadManagementEditors}
+                  onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
+                >
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowPasswordDialog(true)}>
@@ -17484,7 +17494,7 @@ export default function Home() {
                       Review stock, lots, alerts, transfers, and substitutions.
                     </p>
                   </div>
-                  <InventoryTab
+                  <DeferredInventoryTab
                   candidates={inventoryCandidates}
                   runValsList={inventoryRunValues}
                   coverageRunVals={inventoryRunValues}
@@ -18007,7 +18017,14 @@ export default function Home() {
                   <Package className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Pack</span>
                 </TabsTrigger>
-                <TabsTrigger value="warehouse" data-testid="tab-warehouse" aria-label="Warehouse" className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1">
+                <TabsTrigger
+                  value="warehouse"
+                  data-testid="tab-warehouse"
+                  aria-label="Warehouse"
+                  onPointerEnter={preloadWarehouseInventorySurface}
+                  onFocus={preloadWarehouseInventorySurface}
+                  className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
+                >
                   <Warehouse className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
                   <span className="whitespace-nowrap text-[9px] leading-tight sm:text-[10px]">Warehouse</span>
                 </TabsTrigger>
