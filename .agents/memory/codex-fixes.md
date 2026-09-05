@@ -200,4 +200,29 @@ Each entry includes:
 
 **Why it was needed:** Moves the Warehouse panel toward step 4/5 of the refactor (extract tab panels → React.memo isolation), so manager dialogs/imports no longer re-render warehouse UI, and future per-component extraction has a template. Inventory and Mixes panels remain inline (later phases). Web typecheck passes; 68/68 tests in the LiveTabMemo suite pass; full web suite runs in CI.
 
+
+## 2026-09-05 — Extract Inventory and Mix Plan panels into narrow memoized contexts (refactor step 4b)
+
+**File(s):**
+- `artifacts/run-calculator/src/pages/home.tsx` (removed inline Inventory/Mix Plan JSX; wired `InventoryTabCtx` + `MixesTabCtx` providers)
+- `artifacts/run-calculator/src/contexts/InventoryTabCtx.ts` (new — narrow ctx + `useInventoryTabCtx()`, mirrors `WarehouseTabCtx`)
+- `artifacts/run-calculator/src/contexts/MixesTabCtx.ts` (new — narrow ctx + `useMixesTabCtx()`, mirrors `WarehouseTabCtx`)
+- `artifacts/run-calculator/src/pages/inventoryTabCtxDeps.ts` (new — `INVENTORY_TAB_CTX_DEP_FIELDS` registry)
+- `artifacts/run-calculator/src/pages/mixesTabCtxDeps.ts` (new — `MIXES_TAB_CTX_DEP_FIELDS` registry)
+- `artifacts/run-calculator/src/components/InventoryTabContent.tsx` (new — memo'd wrapper feeding `InventoryTab`)
+- `artifacts/run-calculator/src/components/MixesTabContent.tsx` (new — memo'd Mix Plan panel, verbatim block)
+- `artifacts/run-calculator/src/contexts/__tests__/LiveTabMemo.snappy.test.tsx` (new Suite 4 freeze-guard tests for both contexts)
+
+**What was wrong:** `home.tsx` was still a ~25.4k-line monolith; the Inventory panel (~13 lines wrapping `InventoryTab`) and the Mix Plan panel (~350 lines) rendered inline. Every state change in the giant `homeCtxValue` (incl. manage/merge/import dialogs) re-rendered both panels, and `prepMixExpanded` (expand/collapse UI state) re-rendered all of Home on every card toggle.
+
+**What the fix was:** Applied the Step 4a recipe to both panels:
+1. `InventoryTabContent` (memo'd) reads `InventoryTabCtx`, whose value is memoized on `dayState` + the tab-gated candidate/coverage/substitution memos only.
+2. `MixesTabContent` (memo'd) reads `MixesTabCtx`, whose value is memoized on `canManageInventory, currentRunId, dayState, freezerSurplus, mixMakeDay, mixPlanItems, mixes, scheduledDays` only.
+3. `prepMixExpanded` moved to local state inside `MixesTabContent` — expand/collapse no longer re-renders Home. `mixMakeDay` stays in Home (persists across tab unmounts; already a HomeTabCtx live dep).
+4. Callbacks/setters (e.g. `addSubstitution`, `saveMixAlreadyMadeOptimistically`, `form`, `setMixMakeDay`) ride on the ref-capture pattern — NOT in the dep arrays, per the documented closure rule (all reactive state they close over IS in deps).
+5. Added dep registries + Suite 4 freeze-guard tests (static guards that no `DIALOG_REGISTRY` field enters either dep list, plus live render-count guards).
+
+**Why it was needed:** Completes step 4 of the approved server-side refactor: all three warehouse-inventory department panels now have narrow-context isolation, so manage/import/dialog churn no longer re-renders them. Inventory/Mixes were the last big inline panel blocks in the department. Typecheck passes; LiveTabMemo 75/75; adjacent mix suites 22/22.
+
+*Last updated: 2026-09-05*
 *Last updated: 2026-09-05*
