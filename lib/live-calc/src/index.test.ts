@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeCalc, type CalcFormValues, type CalcStoppage } from "./index";
+import { computeCalc, computeServerCalc, type CalcFormValues, type CalcStoppage } from "./index";
 
 /** Build a minimal CalcFormValues with sensible non-zero defaults. */
 function makeFormValues(overrides: Partial<CalcFormValues> = {}): CalcFormValues {
@@ -190,5 +190,92 @@ describe("computeCalc", () => {
     const ve = makeFormValues({ crustsPerCycle: 10, cycleSpeed: 60 });
     const result = computeCalc({ v, ve, nowTimeMs: Date.now(), doughSubTab: "dough", defaultPepTypes: [] });
     expect(result.sauceDepletionSec).toBeGreaterThan(0);
+  });
+});
+
+describe("computeServerCalc", () => {
+  /** Build a server-calc payload, casting form values to the untyped server shape. */
+  function payload(overrides: {
+    runs?: unknown[];
+    currentIndex?: number;
+    runValues?: Record<string, CalcFormValues>;
+    packagingProgress?: Record<string, { skidsCompleted: number; casesOnCurrentSkid: number }>;
+  }): Parameters<typeof computeServerCalc>[0] {
+    return {
+      dayState: { runs: (overrides.runs ?? []) as never[], currentIndex: overrides.currentIndex },
+      runValues: Object.fromEntries(
+        Object.entries(overrides.runValues ?? {}).map(([id, vals]) => [id, vals as unknown as Record<string, unknown>]),
+      ),
+      packagingProgress: overrides.packagingProgress,
+    } as Parameters<typeof computeServerCalc>[0];
+  }
+
+  it("returns null for empty runs", () => {
+    expect(computeServerCalc({ dayState: { runs: [] } }, [])).toBeNull();
+  });
+
+  it("returns null when runValues are missing", () => {
+    expect(computeServerCalc(
+      { dayState: { runs: [{ id: "run-1" }], currentIndex: 0 }, runValues: {} },
+      [],
+    )).toBeNull();
+  });
+
+  it("computes calc from SyncPayload-shaped data", () => {
+    const p = payload({
+      runs: [{ id: "run-1", startedAt: Date.now() - 60000, subTab: "dough" }],
+      currentIndex: 0,
+      runValues: { "run-1": makeFormValues({ casesNeeded: 100, skidsCompleted: 2, casesOnCurrentSkid: 4 }) },
+    });
+    const result = computeServerCalc(p, []);
+    expect(result).not.toBeNull();
+    expect(result!.runId).toBe("run-1");
+    expect(result!.calc.casesCompleted).toBe(20);
+    expect(result!.calc.casesLeftToRun).toBe(80);
+  });
+
+  it("falls back to dough subTab when subTab is absent", () => {
+    const p = payload({
+      runs: [{ id: "run-1" }],
+      currentIndex: 0,
+      runValues: { "run-1": makeFormValues() },
+    });
+    expect(computeServerCalc(p, [])!.calc.perTray).toBe(30);
+  });
+
+  it("uses crustsPerStack when subTab is crusts", () => {
+    const p = payload({
+      runs: [{ id: "run-1", subTab: "crusts" }],
+      currentIndex: 0,
+      runValues: { "run-1": makeFormValues({ approxLineSpeed: 200 }) },
+    });
+    expect(computeServerCalc(p, [])!.calc.perTray).toBe(30);
+  });
+
+  it("returns null when runValues entry is not an object", () => {
+    const p = payload({
+      runs: [{ id: "run-1" }],
+      currentIndex: 0,
+      runValues: {} as Record<string, CalcFormValues>,
+    });
+    expect(computeServerCalc(p, [])).toBeNull();
+  });
+
+  it("defaults currentIndex to 0", () => {
+    const p = payload({
+      runs: [{ id: "run-a" }, { id: "run-b" }],
+      runValues: { "run-a": makeFormValues({ casesNeeded: 50 }) },
+    });
+    expect(computeServerCalc(p, [])!.runId).toBe("run-a");
+  });
+
+  it("respects packagingProgress overrides", () => {
+    const p = payload({
+      runs: [{ id: "run-1" }],
+      currentIndex: 0,
+      runValues: { "run-1": makeFormValues({ casesNeeded: 100 }) },
+      packagingProgress: { "run-1": { skidsCompleted: 5, casesOnCurrentSkid: 3 } },
+    });
+    expect(computeServerCalc(p, [])!.calc.casesCompleted).toBe(43);
   });
 });
