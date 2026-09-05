@@ -129,3 +129,13 @@ Each entry includes:
 **Fix:** Converted the three references to directory-form paths (`.local/custom_skills/review-before-shipping`, `.local/skills/security-scan`, `.local/skills/debug-workflow-ports-issues`), matching the repo's established convention for platform-injected skill references (see `.agents/skills/README.md`, `skill-creator` skill).
 
 **Context:** Needed so the Replit merge (`PR #17 merge/replit-updates`) can pass the required Typecheck check. If Replit re-introduces `.../SKILL.md` refs into `.local/` paths, the skill catalog check will fail again in GitHub CI.
+
+## 2026-09-05 — Regenerate stale source-library reconciliation plan
+
+**File(s):** `artifacts/api-server/src/lib/sourceLibraryReconciliationPlan.generated.ts`
+
+**Problem:** The Typecheck CI job's "Run routine scripts tests" step failed with "Generated source-library reconciliation plan is stale" (`test:source-heal-plan`). The checked-in generated plan's gzip payload did not match the output of the current generator (same JSON payload/SHA, different deflate stream), so the freshness check failed.
+
+**Fix:** Regenerated the file with `pnpm --filter @workspace/scripts run audit:source-heal-plan` (file-only generator, no DB needed). Verified `test:source-heal-plan --check` passes under both Node 22 and Node 24.
+
+**Context:** Needed so the Replit merge (PR #17) can pass the required Typecheck check. If Replit regenerates this file in a different environment, keep the committed output in sync with the generator.
