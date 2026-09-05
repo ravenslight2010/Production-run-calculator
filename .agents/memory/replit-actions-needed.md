@@ -48,3 +48,25 @@ core checks), but they fail on every PR and should be fixed on the Replit side:
 - If your branch and `main` diverge again, Codex will re-merge with conflict
   resolution favoring the Replit branch, then restore any deploy-critical
   changes — but see the fixes above first so CI can go green on the first try.
+
+## 3. NEW (2026-09-05 update): pure calc engine extracted + server-side calc
+
+Codex pushed Steps 2–3 of the server-side refactor on branch
+`refactor/extract-screen-mode-view` (PR pending). The core production calc is
+NOW SHARED — do not re-create inline math:
+
+- **`lib/live-calc/`** — new workspace package. `computeCalc(input)` is the pure
+  math engine (ppm, cases, batches, sauce/app/pep quantities, pace, timing).
+  `computeEffectiveLineSpeed()` moved here (web `lineSpeed.ts` is now a thin
+  re-export). `computeServerCalc(payload, defaultPepTypes)` computes calc from a
+  SyncPayload-shaped object.
+- **`artifacts/run-calculator/src/contexts/LiveRunContext.tsx`** — the old ~220
+  line inline useMemo calc is replaced by the shared `computeCalc()` call.
+- **`artifacts/api-server/src/routes/sync.ts`** — SSE `broadcast()` now attaches
+  `serverCalc` (current run's calc computed server-side) to every frame.
+- **`home.tsx`** — SSE handler stores `serverCalc` in `serverCalcRef`.
+
+Rules: change a formula ONCE in `lib/live-calc`; never re-add inline calc to
+either app or the server. `DEFAULT_PEP_TYPES` is injected as a param (same
+pattern as inventory-math). If you touch `home.tsx`, keep the `serverCalcRef`
+SSE wiring and the `computeCalc` call in LiveRunContext intact.
