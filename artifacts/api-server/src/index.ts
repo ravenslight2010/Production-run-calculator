@@ -5,6 +5,8 @@ import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import {
   beginStartup,
   claimStartupSlowWarning,
@@ -80,10 +82,43 @@ async function startServer(): Promise<void> {
 }
 
 async function initializeStartup(startedAt: number): Promise<void> {
+  const startupTestMode =
+    process.env.NODE_ENV !== "production" &&
+    process.env.STARTUP_TEST_MODE === "true";
+  markStartupStage("database_schema");
+  try {
+    // Keep the process listening while required database initialization runs so
+    // the platform can distinguish "not ready" from a crashed process.
+    if (
+      startupTestMode &&
+      process.env.STARTUP_TEST_FAILURE_STAGE === "database_schema"
+    ) {
+      throw new Error("forced startup test failure");
+    }
+    if (
+      !startupTestMode ||
+      process.env.STARTUP_TEST_DATABASE_READY !== "true"
+    ) {
+      await db.execute(sql`SELECT 1`);
+    }
+  } catch {
+    const errorCode = "database_schema_failed";
+    markStartupFailed("database_schema", errorCode);
+    logger.error(
+      { stage: "database_schema", durationMs: performance.now() - startedAt, outcome: "degraded", errorCode },
+      "Startup initialization failed",
+    );
+    recordStartupEvent("database_schema", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode });
+    return;
+  }
+
   markStartupStage("seed_roles");
   try {
     // Seed the built-in and default editable roles (additive, only-if-absent)
     // before any authenticated application route is allowed through.
+    if (startupTestMode && process.env.STARTUP_TEST_FAILURE_STAGE === "seed_roles") {
+      throw new Error("forced startup test failure");
+    }
     await seedRoles();
   } catch {
     const errorCode = "seed_roles_failed";
@@ -100,6 +135,9 @@ async function initializeStartup(startedAt: number): Promise<void> {
   try {
     // Marker-guarded data heals must finish before application requests can
     // mutate the same master data or day-state rows.
+    if (startupTestMode && process.env.STARTUP_TEST_FAILURE_STAGE === "data_heals") {
+      throw new Error("forced startup test failure");
+    }
     await runDataHeals();
   } catch {
     const errorCode = "data_heals_failed";

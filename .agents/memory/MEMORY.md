@@ -141,6 +141,7 @@
 - [Multi-day import auth](schedule-import-401.md) — raw-fetch write loops must stop on 401 and trigger the normal unauthorized path instead of reporting misleading per-day failures.
 - [Dependency override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
 - [Release audit endpoint](release-audit-endpoint.md) — pnpm audit may fail before release tests when the npm advisory POST is unavailable; retain the failure as an external NO-GO.
+- [Startup failure evidence](startup-failure-evidence.md) — preserve the first categorized startup record separately from rolling logs during repeated readiness probes.
 - [Field verification boundary](field-verification.md) — passive field evidence must stay best-effort and advisory, never become a second source of truth for production state.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [Container image migration split](container-image-migration.md) — Render pre-deploy runs inside the pulled image; slim runtimes need a scoped migration payload while full migration stays a separate target.

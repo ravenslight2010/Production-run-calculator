@@ -38,6 +38,7 @@
     "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
     "check:clean-start": "tsx ./src/verify-clean-start.mts",
+    "check:startup-failures": "tsx ./src/verify-startup-failures.mts",
     "check:render-image": "tsx ./src/verify-render-image.mts",
     "check:schema-safe-rollback": "tsx ./src/rehearse-schema-safe-rollback.mts",
     "test:schema-safe-rollback": "tsx ./src/rehearse-schema-safe-rollback.test.mts",
