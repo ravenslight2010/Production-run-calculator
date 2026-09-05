@@ -4,6 +4,7 @@ import { render, screen, cleanup, renderHook, act } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GetStartedDialog from "../GetStartedDialog";
+import GuidedTour from "../GuidedTour";
 
 const WELCOME = "Welcome to Production Run Calculator";
 
@@ -59,8 +60,37 @@ describe("first-login Get Started overview (web)", () => {
     // Manual reopen from the header menu works.
     await user.click(screen.getByRole("button", { name: "Reopen overview" }));
     expect(screen.getByText(WELCOME)).toBeTruthy();
+    expect(screen.getByText("Warehouse", { exact: true })).toBeTruthy();
     expect(screen.getByText("Inventory")).toBeTruthy();
+    expect(
+      screen.getByText("Review stock and maintain inventory records.", { exact: true }),
+    ).toBeTruthy();
     expect(screen.queryByText("Stock", { exact: true })).toBeNull();
+    expect(screen.queryByText("Whse", { exact: true })).toBeNull();
+  });
+});
+
+describe("guided tour destination copy", () => {
+  it("names Warehouse and Inventory without turning stock into a destination", async () => {
+    const user = userEvent.setup();
+    render(
+      <GuidedTour
+        open
+        onClose={() => {}}
+        onNavigate={() => {}}
+        isManager={false}
+      />,
+    );
+
+    // The tour has one intro step, six primary destinations, then the menu.
+    for (let step = 0; step < 7; step += 1) {
+      await user.click(screen.getByRole("button", { name: /next/i }));
+    }
+
+    expect(screen.getByRole("heading", { name: "More in the menu" })).toBeTruthy();
+    expect(screen.getByText(/Inventory/)).toBeTruthy();
+    expect(screen.queryByText("Stock", { exact: true })).toBeNull();
+    expect(screen.queryByText("Whse", { exact: true })).toBeNull();
   });
 });
 

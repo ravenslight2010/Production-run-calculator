@@ -521,6 +521,14 @@ test.describe("phone layout smoke", () => {
       await expect(
         page.locator('[data-testid="tab-warehouse"]'),
       ).toHaveAttribute("data-state", "active");
+      await expect(page.locator('[data-testid="tab-warehouse"]')).toHaveAttribute(
+        "aria-label",
+        "Warehouse",
+      );
+      await expect(page.locator('[data-testid="tab-warehouse"]')).toContainText("Warehouse");
+      await expect(page.getByTestId("warehouse-page-heading")).toContainText(
+        "Warehouse",
+      );
       await expect(page.getByTestId("warehouse-attention-header")).toBeVisible();
       const warehouseDetails = page.getByTestId("warehouse-run-details");
       if (await warehouseDetails.count()) {
@@ -532,6 +540,23 @@ test.describe("phone layout smoke", () => {
 
       const moreButton = page.getByRole("button", { name: "More" });
       await expect(moreButton).toBeVisible();
+      await moreButton.click();
+      await expect(
+        page.getByRole("menuitem", { name: "Inventory", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("menuitem", { name: /^(Stock|Whse)$/ }),
+      ).toHaveCount(0);
+      await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
+      await expect(page.getByTestId("inventory-page-heading")).toContainText(
+        "Inventory",
+      );
+      await expect(
+        page.getByText("Review stock, lots, alerts, transfers, and substitutions.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+
       await moreButton.click();
       await page.getByRole("menuitem", { name: "Settings" }).click();
       const manageDialog = page.getByRole("heading", {
