@@ -26,6 +26,7 @@ import {
   deleteNamedRecipes,
   type NamedRecipeKind,
 } from "../namedRecipes";
+import { setMasterDataSlice } from "../masterData";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { maybeLearnPoolRename } from "@/specImportAliases";
 
@@ -92,7 +93,7 @@ export default function NamedRecipesManager({
   const saveMutation = useMutation({
     mutationFn: (next: NamedRecipe[]) => saveNamedRecipes(kind, next),
     onSuccess: (saved) => {
-      qc.setQueryData([queryKey], saved);
+      setMasterDataSlice(qc, kind === "dough" ? "doughRecipes" : "sauceRecipes", saved);
       setError(null);
     },
     onError: () =>
@@ -104,7 +105,7 @@ export default function NamedRecipesManager({
   const deleteMutation = useMutation({
     mutationFn: (ids: string[]) => deleteNamedRecipes(kind, ids),
     onSuccess: (saved) => {
-      qc.setQueryData([queryKey], saved);
+      setMasterDataSlice(qc, kind === "dough" ? "doughRecipes" : "sauceRecipes", saved);
       setError(null);
     },
     onError: () =>

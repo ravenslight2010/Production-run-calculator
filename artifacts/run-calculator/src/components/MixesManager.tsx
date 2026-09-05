@@ -27,6 +27,7 @@ import {
 } from "@workspace/setup-math-check";
 import { useMixes } from "../hooks/useMixes";
 import { saveMixes, deleteMixes } from "../mixes";
+import { setMasterDataSlice } from "../masterData";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
 import {
@@ -117,7 +118,7 @@ export default function MixesManager({
   const saveMutation = useMutation({
     mutationFn: (next: Mix[]) => saveMixes(next),
     onSuccess: (saved) => {
-      qc.setQueryData(["mixes"], saved);
+      setMasterDataSlice(qc, "mixes", saved);
       setError(null);
     },
     onError: () =>
@@ -127,7 +128,7 @@ export default function MixesManager({
   const deleteMutation = useMutation({
     mutationFn: (ids: string[]) => deleteMixes(ids),
     onSuccess: (saved) => {
-      qc.setQueryData(["mixes"], saved);
+      setMasterDataSlice(qc, "mixes", saved);
       setError(null);
     },
     onError: () =>

@@ -26,6 +26,7 @@ import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { recordPerformance } from "./performanceDiagnostics";
+import { MasterDataPolling } from "./masterData";
 import { emitFieldCheckSignal, FieldVerificationObserver } from "./fieldChecks";
 import { WEB_BUILD_ID } from "./buildIdentity";
 import {
@@ -64,9 +65,11 @@ function HomeGate() {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
   return isAuthenticated ? (
-    <Suspense fallback={null}>
-      <LazyHome />
-    </Suspense>
+    <MasterDataPolling>
+      <Suspense fallback={null}>
+        <LazyHome />
+      </Suspense>
+    </MasterDataPolling>
   ) : <Landing />;
 }
 

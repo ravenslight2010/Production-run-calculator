@@ -348,6 +348,10 @@ import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
 import { useIngredients } from "../hooks/useIngredients";
 import {
+  invalidateMasterDataSlice,
+  setMasterDataSlice,
+} from "../masterData";
+import {
   saveIngredients as saveIngredientsRemote,
   deleteIngredients as deleteIngredientsRemote,
   mergeIngredientsRemote,
@@ -3300,9 +3304,9 @@ export default function Home() {
       // merged-away names immediately instead of waiting out the 60s poll,
       // then invalidate as a backstop refetch.
       await mergeCatalogEntriesByName(ingredientCatalog, sourceNames, targetName, (items) =>
-        cycleCountQc.setQueryData(["ingredients"], items),
+        setMasterDataSlice(cycleCountQc, "ingredients", items),
       );
-      void cycleCountQc.invalidateQueries({ queryKey: ["ingredients"] });
+      void invalidateMasterDataSlice(cycleCountQc, "ingredients");
          } catch {
       // Best-effort: the local merge above already succeeded; the catalog will
       // self-heal next time these names are touched.
@@ -4785,8 +4789,8 @@ export default function Home() {
         ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce, undefined, undefined, undefined, { upsertComponents: tags?.upsertComponents })
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
     ]);
-    if (d.items.length > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
-    if (s.items.length > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items);
+    if (d.items.length > 0) setMasterDataSlice(cycleCountQc, "doughRecipes", d.items);
+    if (s.items.length > 0) setMasterDataSlice(cycleCountQc, "sauceRecipes", s.items);
     return d.added + s.added;
   }, [cycleCountQc]);
 
@@ -5013,7 +5017,7 @@ export default function Home() {
       const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
       if (added > 0) {
         await saveMixes(merged);
-        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "mixes");
       }
       clearPendingServerMixPushes();
     })().catch(() => { pendingMixPushRef.current = false; });
@@ -5460,7 +5464,7 @@ export default function Home() {
           .map((n) => namedRecipeFromDraft({ name: n, components: sauceRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "sauce" }))
           .filter((r): r is NamedRecipe => r !== null);
         const { added, updated, items } = await addNamedRecipesToServerIfAbsent("sauce", drafts, undefined, undefined, undefined, undefined, { upsertComponents: true });
-        if (added > 0 || updated > 0) cycleCountQc.setQueryData(["sauceRecipes"], items);
+        if (added > 0 || updated > 0) setMasterDataSlice(cycleCountQc, "sauceRecipes", items);
         reconcile("sauce", items.map((r) => r.name), ["sauce", "recipe"]);
       }
       if (plans.dough.additions.length > 0) {
@@ -5468,7 +5472,7 @@ export default function Home() {
           .map((n) => namedRecipeFromDraft({ name: n, components: doughRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "dough" }))
           .filter((r): r is NamedRecipe => r !== null);
         const { added, updated, items } = await addNamedRecipesToServerIfAbsent("dough", drafts, undefined, undefined, undefined, undefined, { upsertComponents: true });
-        if (added > 0 || updated > 0) cycleCountQc.setQueryData(["doughRecipes"], items);
+        if (added > 0 || updated > 0) setMasterDataSlice(cycleCountQc, "doughRecipes", items);
         reconcile("dough", items.map((r) => r.name), ["dough", "recipe"]);
       }
       if (plans.cheese.additions.length > 0) {
@@ -5479,7 +5483,7 @@ export default function Home() {
         let finalNames = cheesePool.map((r) => r.name);
         if (added > 0) {
           const saved = await saveCheeseRecipes(merged);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
           finalNames = saved.map((r) => r.name);
         }
         reconcile("cheese", finalNames, ["recipe"]);
@@ -5497,7 +5501,7 @@ export default function Home() {
         let finalNames = mixPool.map((m) => m.name);
         if (added > 0) {
           const saved = await saveMixes(merged);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
           finalNames = saved.map((m) => m.name);
         }
         reconcile("mixes", finalNames, ["recipe"]);
@@ -6199,7 +6203,7 @@ export default function Home() {
         const changed = repointCheeseRecipeIngredients(cheese, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch {
         // Non-fatal: the local merge already succeeded.
@@ -6209,7 +6213,7 @@ export default function Home() {
         const changed = repointMixIngredients(mixesList, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch {
         // Non-fatal: the local merge already succeeded.
@@ -6402,7 +6406,7 @@ export default function Home() {
             : repointCheeseRecipesForFlavorMerge(cheese, mergeBfBrand, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch {
         // Non-fatal: the merge itself already succeeded.
@@ -6415,7 +6419,7 @@ export default function Home() {
             : repointMixesForFlavorMerge(mixesList, mergeBfBrand, srcs, tgt);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch {
         // Non-fatal: the merge itself already succeeded.
@@ -6564,9 +6568,9 @@ export default function Home() {
             }
             const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
-              cycleCountQc.setQueryData(["cheeseRecipes"], await deleteCheeseRecipes(ids));
+              setMasterDataSlice(cycleCountQc, "cheeseRecipes", await deleteCheeseRecipes(ids));
             } else if (targetRow) {
-              cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+              void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
             }
           } else if (category === "mixes") {
             const pool = await fetchMixes();
@@ -6597,9 +6601,9 @@ export default function Home() {
             }
             const ids = sourceRows.map((m) => m.id);
             if (ids.length > 0) {
-              cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids));
+              setMasterDataSlice(cycleCountQc, "mixes", await deleteMixes(ids));
             } else if (targetRow) {
-              cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+              void invalidateMasterDataSlice(cycleCountQc, "mixes");
             }
           } else {
             // dough | sauce — their own named-recipe pools.
@@ -6638,14 +6642,16 @@ export default function Home() {
             }
             const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
-              cycleCountQc.setQueryData(
-                [category === "dough" ? "doughRecipes" : "sauceRecipes"],
+              setMasterDataSlice(
+                cycleCountQc,
+                category === "dough" ? "doughRecipes" : "sauceRecipes",
                 await deleteNamedRecipes(category, ids),
               );
             } else if (targetRow) {
-              cycleCountQc.invalidateQueries({
-                queryKey: [category === "dough" ? "doughRecipes" : "sauceRecipes"],
-              });
+              void invalidateMasterDataSlice(
+                cycleCountQc,
+                category === "dough" ? "doughRecipes" : "sauceRecipes",
+              );
             }
           }
         }
@@ -10543,7 +10549,7 @@ export default function Home() {
         const changed = repointCheeseRecipesForBrandMerge(cheese, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
       try {
@@ -10551,7 +10557,7 @@ export default function Home() {
         const changed = repointMixesForBrandMerge(mixesList, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
       // Dough and sauce named-recipe pools also carry a `brand` field for
@@ -10565,8 +10571,9 @@ export default function Home() {
             .map((r) => ({ ...r, brand: trimmed }));
           if (changed.length > 0) {
             const saved = await saveNamedRecipes(kind, changed);
-            cycleCountQc.setQueryData(
-              [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
+            setMasterDataSlice(
+              cycleCountQc,
+              kind === "dough" ? "doughRecipes" : "sauceRecipes",
               saved,
             );
           }
@@ -10643,7 +10650,7 @@ export default function Home() {
         const changed = repointCheeseRecipesForFlavorMerge(cheese, b, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveCheeseRecipes(changed);
-          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          setMasterDataSlice(cycleCountQc, "cheeseRecipes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
       try {
@@ -10651,7 +10658,7 @@ export default function Home() {
         const changed = repointMixesForFlavorMerge(mixesList, b, [oldName], trimmed);
         if (changed.length > 0) {
           const saved = await saveMixes(changed);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
     })();
@@ -10707,7 +10714,7 @@ export default function Home() {
         brand = row?.brand?.trim() || undefined;
         if (row) {
           const saved = await saveMixes([{ ...row, name: trimmed }]);
-          cycleCountQc.setQueryData(["mixes"], saved);
+          setMasterDataSlice(cycleCountQc, "mixes", saved);
         }
       } catch {}
       await learnRecipeNameChangeAliases("mixes", [oldName], trimmed, brand);
@@ -12896,7 +12903,7 @@ export default function Home() {
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh Mix Recipes so they appear right away.
-      if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      if (mixesAdded > 0) void invalidateMasterDataSlice(cycleCountQc, "mixes");
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
       // so the run applicator "Cheese" pickers list them right away. Existing
       // pool recipes may also have had their per-pizza OZ column refreshed
@@ -12905,16 +12912,16 @@ export default function Home() {
       // replaced via the review's "update it with this sheet" checkbox
       // (dough/sauce ONLY), those pickers must refetch too.
       if (cheeseRecipesAdded > 0)
-        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
       // Invalidate dough recipes when server recipe rows were replaced or
       // doughball variants were pushed to the server — so autofill and recipe
       // pickers always see the fresh variant/customer lists without waiting for
       // the next app load.
       if (recipesUpdated > 0 || (importedRecipes && canManageInventory)) {
-        void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "doughRecipes");
       }
       if (recipesUpdated > 0) {
-        void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "sauceRecipes");
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
@@ -13144,7 +13151,7 @@ export default function Home() {
       }).catch(() => {});
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
-      void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      void invalidateMasterDataSlice(cycleCountQc, "mixes");
       // Refresh the Mix Monitoring saved-sheet lists so the just-saved premix
       // sheet snapshot shows up immediately.
       setSheetListSignal((c) => c + 1);
@@ -13637,7 +13644,7 @@ export default function Home() {
       }).catch(() => {});
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
-      void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
       setSheetListSignal((c) => c + 1);
       setShowCheeseImport(false);
       setCheeseImportPrepared(null);
@@ -14935,8 +14942,8 @@ export default function Home() {
       if (scope === "inventory") {
         void cycleCountQc.invalidateQueries({ queryKey: ["inventory"] });
       } else if (scope === "master-data") {
-        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
-        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+        void invalidateMasterDataSlice(cycleCountQc, "mixes");
+        void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
         void cycleCountQc.invalidateQueries({ queryKey: ["brand-profiles"] });
       } else {
         void cycleCountQc.invalidateQueries({ queryKey: ["scheduled"] });
