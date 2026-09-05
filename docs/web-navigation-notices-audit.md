@@ -274,10 +274,12 @@ These can be implemented without changing the underlying alert rules, permission
    plan upcoming production or maintain the shared recipe definition. This removes a
    high-probability navigation ambiguity without moving either workflow.
 
-2. **Make “Stock” and “Warehouse” terminology consistent.**  
-   The bottom tab says **Whse**, the menu says **Stock**, and cast screens say **Warehouse**.
-   Retain the six-tab structure, but use one user-facing term in menu, page heading, cast screen,
-   and help copy—for example, **Warehouse & Stock** until a final term is chosen.
+2. **Use the approved Warehouse and Inventory terminology.**
+   The product decision is recorded in
+   `docs/superpowers/specs/2026-09-05-warehouse-inventory-navigation-design.md`.
+   Keep **Warehouse** as the operational bottom-tab and cast-screen destination, and use
+   **Inventory** for the overflow-menu stock-record destination. Do not use **Whse** or **Stock**
+   as destination names; “stock” remains valid as a common noun in content such as “low stock.”
 
 3. **Add one-line role explanations where a destination is visible but partly unavailable.**  
    The existing role-gate banners are good local explanations. Match that clarity in the Settings
@@ -334,12 +336,11 @@ These can be implemented without changing the underlying alert rules, permission
    the first is acted on is correct, or whether a queue/count and “next alert” behavior is needed.
    This affects alert semantics, not just layout.
 
-5. **Choose a warehouse workflow boundary.**  
-   Operational warehouse guidance is split between **Whse** (pulls, reorder, use-first) and
-   **Stock** (inventory maintenance, low stock, transfers). Product should decide whether:
-   - both remain separate but use clear task-based naming/descriptions, or
-   - low-stock/transfer alerts should be surfaced as compact links in Whse while full editing
-     remains in Stock.
+5. **Warehouse workflow boundary (decided).**
+   Keep two destinations in the same application. **Warehouse** owns operational preparation:
+   pulls, due counts, reorder/use-first guidance, and run staging. **Inventory** owns stock records,
+   lots, alerts, transfers, substitutions, and authorized adjustments. Preserve the existing
+   capability checks and explain an Inventory editing restriction before a user attempts it.
 
 6. **Decide whether manager configuration should remain one dialog.**  
    **Manage Lists & Settings** combines recipes, master lists, shift configuration, rules,
@@ -363,7 +364,8 @@ These can be implemented without changing the underlying alert rules, permission
 
 Before changing a menu or notice, review these decisions with product/operations:
 
-1. Confirm the preferred terminology for **Warehouse / Stock**.
+1. Apply the approved **Warehouse / Inventory** terminology contract without changing destination
+   ownership or permissions.
 2. Choose the manager attention model and owner for each count/badge.
 3. Approve a notification escalation policy for batch, pace, completion, and manual-override
    signals.
