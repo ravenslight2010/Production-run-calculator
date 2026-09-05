@@ -852,6 +852,29 @@ export function backfillCheeseRecipeFromMergedSources(
     components: target.components.map((c) => ({ ...c })),
     flavors: [...target.flavors],
   };
+  // Canonicalize equivalent target rows first. The first row keeps its label
+  // and nonblank values; later twins can only fill gaps. This also makes a
+  // repeated merge a no-op after legacy duplicate rows have been cleaned up.
+  const canonicalComponents: CheeseComponent[] = [];
+  const targetComponentsByKey = new Map<string, CheeseComponent>();
+  for (const component of next.components) {
+    const key = looseIngredientKey(component.ingredient);
+    const canonical = key ? targetComponentsByKey.get(key) : undefined;
+    if (!canonical) {
+      canonicalComponents.push(component);
+      if (key) targetComponentsByKey.set(key, component);
+      continue;
+    }
+    if (!(canonical.lbs > 0) && component.lbs > 0) canonical.lbs = component.lbs;
+    if (!((canonical.ozPerPizza ?? 0) > 0) && (component.ozPerPizza ?? 0) > 0) {
+      canonical.ozPerPizza = component.ozPerPizza;
+    }
+    if (!((canonical.sharePct ?? 0) > 0) && (component.sharePct ?? 0) > 0) {
+      canonical.sharePct = component.sharePct;
+    }
+    changed = true;
+  }
+  next.components = canonicalComponents;
   for (const src of sources) {
     // Field-level blank fills.
     if (!next.shredderSetting.trim() && src.shredderSetting.trim()) {
@@ -874,17 +897,14 @@ export function backfillCheeseRecipeFromMergedSources(
       changed = true;
     }
     // Component rows: fill matched rows' blank numbers, append missing rows.
-    const byKey = new Map<string, CheeseComponent>();
-    for (const c of next.components) {
-      const key = looseIngredientKey(c.ingredient);
-      if (key && !byKey.has(key)) byKey.set(key, c);
-    }
+    const byKey = targetComponentsByKey;
     for (const sc of src.components) {
       const key = looseIngredientKey(sc.ingredient);
       if (!key) continue;
       const tc = byKey.get(key);
       if (!tc) {
         const added: CheeseComponent = { ingredient: sc.ingredient, lbs: sc.lbs };
+        if ((sc.ozPerPizza ?? 0) > 0) added.ozPerPizza = sc.ozPerPizza;
         if ((sc.sharePct ?? 0) > 0) added.sharePct = sc.sharePct;
         next.components.push(added);
         byKey.set(key, added);
@@ -893,6 +913,10 @@ export function backfillCheeseRecipeFromMergedSources(
       }
       if (!(tc.lbs > 0) && sc.lbs > 0) {
         tc.lbs = sc.lbs;
+        changed = true;
+      }
+      if (!((tc.ozPerPizza ?? 0) > 0) && (sc.ozPerPizza ?? 0) > 0) {
+        tc.ozPerPizza = sc.ozPerPizza;
         changed = true;
       }
       if (!((tc.sharePct ?? 0) > 0) && (sc.sharePct ?? 0) > 0) {

@@ -45,7 +45,7 @@
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Production-line canvas](production-line-canvas-reference.md) — physical line is right-to-left, App 4 feeds the two-wide freezer, then wrapper/packaging; tray and lane-width rules are captured.
 - [Merge deny, history, and tombstones](merge-deny-and-change-history.md) + [merge-tombstones](merge-tombstones.md) — denied pairs, undo history, tombstones, and un-delete stamps preserve safe cross-device master-data merges.
-- [runTest Expo-web quirks](runtest-expo-web-quirks.md) + [headless e2e fallback](headless-e2e-fallback.md) + [rendered verification](render-verify-and-runtest-cleanup.md) — RN Alert no-op, 10-iteration cap; when runTest is flaky, self-drive headless Chromium vs $REPLIT_DEV_DOMAIN or render real components under vitest+jsdom; clean stray runTest users.
+- [Browser test reliability](runtest-expo-web-quirks.md) + [phone overrides](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — use fallback when runTest flakes; reapply controlled values after reload; clean stray users.
 - [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — one fail-safe grounding path; keyed nudges are deduped while all-staff Q&A stays separate from manager-only optimize.
 - [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
 - [Voice AI](voice-ask-input.md) + [voice-ask-output.md] + [voice-commands.md) — speech controls hide when unsupported; commands reuse existing handlers and preserve web/mobile parity.
@@ -62,7 +62,6 @@
 - [Saved spec reconcile](saved-spec-reconcile.md) + [hash reuse](spec-import-hash-reuse.md) + [prune matching](saved-spec-snapshot-prune.md) — current recipes get deterministic diffs; re-imports reuse parses only while the parse version matches.
 - [Premix sheet import](premix-import.md) — premix .xlsx → Mixes (deterministic parse lib, AI name-only matcher); per-mix include/exclude review; invalidate `["mixes"]` after commit; web+mobile parity.
 - [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
-- [Scheduled recipe-setup warning](scheduled-recipe-check.md) + [move runs](schedule-move.md) — manager card flags runs missing a profile; per-run move MUST key on run id, not list index.
 - [Scheduled-day safety](scheduled-day-client-date.md) + [response validation](scheduled-day-response-validation.md) — key sync by client date and reject 401/error envelopes before hydration.
 - [AI model routing + streaming](ai-model-routing-and-streaming.md) — pickModel is the only model source; vi.mock MUST export pickModel/AI_MODELS or routes 502; ask/recipe SSE opt-in.
 - [Merge category tabs](merge-category-tabs.md) — 6-tab scoped merge picker; full-universe (AI suggest) vs scoped-universe (pickers) split; Brand/Flavor is its own merge path; mobile Mixes always empty, empty-state below tabs not early-return.
@@ -143,7 +142,6 @@
 - [Pinned pnpm after baseline refresh](pinned-pnpm-after-refresh.md) — a newer packageManager pin can make the installed pnpm shim recurse; use the exact pinned launcher with CI mode to reconcile modules.
 - [Schedule move canonical writes](schedule-move-canonical-writes.md) — moves built from canonical reads must not reuse partial-sync snapshot markers; reject fallback responses before source cleanup.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
-- [Browser test reliability](runtest-expo-web-quirks.md) + [phone overrides](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — use fallback when runTest flakes; reapply controlled values after reload.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
 - [Validation roots](skill-catalog-ci-roots.md) + [Shell lint](shell-lint-inventory.md) — missing platform roots warn; editable skills and maintained scripts shell utilities remain covered.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
@@ -157,3 +155,4 @@
 - [Container image migration split](container-image-migration.md) — Render pre-deploy runs inside the pulled image; slim runtimes need a scoped migration payload while full migration stays a separate target.
 - [Inline skill path references](inline-skill-path-references.md) — validate only whitespace-free file-like inline paths; resolve skill resources locally and explicit project prefixes from the repository root.
 - [Dough correction browser fixture](dough-correction-browser-fixture.md) — live-run tabs can rehydrate or mount lazily; assert active-tab UI and inspect actual `/api/sync/today` payloads.
+- [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.

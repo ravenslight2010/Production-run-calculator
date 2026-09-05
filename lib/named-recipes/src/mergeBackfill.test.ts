@@ -147,4 +147,48 @@ describe("backfillNamedRecipeFromMergedSources", () => {
     });
     expect(backfillNamedRecipeFromMergedSources(target, [source])).toBeNull();
   });
+
+  it("canonicalizes equivalent Dough and Sauce component rows and is repeat-safe", () => {
+    const doughTarget = rec({
+      name: "Dough",
+      components: [
+        { ingredient: "King Arthur Flour", lbs: 0 },
+        { ingredient: "Flour, King Arthur", lbs: 40 },
+      ],
+    });
+    const sauceTarget = rec({
+      name: "Sauce",
+      components: [{ ingredient: "Tomato's Crushed", lbs: 12 }],
+    });
+    const doughSource = rec({
+      name: "Old Dough",
+      components: [
+        { ingredient: "Arthur King Flour", lbs: 99 },
+        { ingredient: "Salt", lbs: 1 },
+        { ingredient: "Salt", lbs: 2 },
+      ],
+    });
+    const sauceSource = rec({
+      name: "Old Sauce",
+      components: [
+        { ingredient: "Crushed Tomato", lbs: 99 },
+        { ingredient: "Oregano", lbs: 0.5 },
+        { ingredient: "Oregano", lbs: 1 },
+      ],
+    });
+
+    const dough = backfillNamedRecipeFromMergedSources(doughTarget, [doughSource]);
+    const sauce = backfillNamedRecipeFromMergedSources(sauceTarget, [sauceSource]);
+
+    expect(dough!.components).toEqual([
+      { ingredient: "King Arthur Flour", lbs: 40 },
+      { ingredient: "Salt", lbs: 1 },
+    ]);
+    expect(sauce!.components).toEqual([
+      { ingredient: "Tomato's Crushed", lbs: 12 },
+      { ingredient: "Oregano", lbs: 0.5 },
+    ]);
+    expect(backfillNamedRecipeFromMergedSources(dough!, [doughSource])).toBeNull();
+    expect(backfillNamedRecipeFromMergedSources(sauce!, [sauceSource])).toBeNull();
+  });
 });

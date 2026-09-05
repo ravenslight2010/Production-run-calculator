@@ -71,6 +71,7 @@ import {
   SEA_SALT_MIX_TARGETS,
 } from "./seaSaltHeal";
 import { planIngredientDuplicateMerges } from "./ingredientDuplicateHeal";
+import { loadSourceLibraryReconciliationPlan } from "./sourceLibraryReconciliationHeal";
 
 // One-time data heals, applied at boot (best-effort, after listen — like
 // seedRoles). Each heal claims its marker row in data_heals FIRST, inside the
@@ -3737,6 +3738,7 @@ export async function runDataHeals(): Promise<void> {
   await runAug19SavedSpecProfileRepairV2();
   await runFreshDeviceRunContaminationCleanup();
   await runResolvedIncidentWorkflowReconciliation();
+  await runSourceLibraryReconciliationHeal();
 }
 
 const INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID =
@@ -4959,6 +4961,13 @@ export async function runProfileNameLinkStubPurge(): Promise<void> {
       .returning({ id: dataHealsTable.id });
     if (claimed.length === 0) return;
 
+    // Recipe references are text fields rather than foreign keys. Serialize
+    // profile/day writes with the scan and deletes so a writer that already
+    // holds a row lock commits before we decide whether a recipe is orphaned.
+    // This also covers another API replica serving while this one starts.
+    await tx.execute(sql`LOCK TABLE ${brandProfilesTable} IN SHARE ROW EXCLUSIVE MODE`);
+    await tx.execute(sql`LOCK TABLE ${dailySyncTable} IN SHARE ROW EXCLUSIVE MODE`);
+
     // Latest snapshot names per scope+brand+flavor (newest sheet wins).
     const sheets = await tx
       .select()
@@ -5020,7 +5029,6 @@ export async function runProfileNameLinkStubPurge(): Promise<void> {
     const profiles = await tx.select().from(brandProfilesTable).for("update");
     let correctedProfiles = 0;
     let skippedStarted = 0;
-    const correctedValues = new Map<string, Record<string, unknown>>(); // key\0scope → values
     for (const p of profiles) {
       const profKey = `${p.scope}\u0000${ciName(p.brand)}\u0000${ciName(p.flavor)}`;
       const snap = snapByProfile.get(profKey);
@@ -5059,10 +5067,12 @@ export async function runProfileNameLinkStubPurge(): Promise<void> {
         .set({ values, updatedAtMs: stamp })
         .where(and(eq(brandProfilesTable.key, p.key), eq(brandProfilesTable.scope, p.scope)));
       correctedProfiles++;
-      correctedValues.set(`${p.key}\u0000${p.scope}`, values);
     }
 
-    // Collect live profile references (using the CORRECTED values) per scope.
+    // Collect every persisted recipe-name reference (using corrected profile
+    // values) per scope. Historical and started run snapshots are immutable,
+    // but their text links must still keep a zero-value recipe from being
+    // deleted out from under production history.
     const doughRefs = new Set<string>();
     const sauceRefs = new Set<string>();
     const slotRefs = new Set<string>(); // cheese recipes + mixes (applicator slots)
@@ -5082,14 +5092,29 @@ export async function runProfileNameLinkStubPurge(): Promise<void> {
         if (n) slotRefs.add(`${scope}\u0000${n}`);
       }
     };
-    for (const p of profiles) {
-      const healed = correctedValues.get(`${p.key}\u0000${p.scope}`);
-      addRefs(p.scope, healed ?? (p.values as Record<string, unknown>));
+    // Re-read after profile correction and immediately before selecting purge
+    // candidates. Under the table locks this is the final committed reference
+    // set that can exist for the duration of the conditional deletes.
+    const finalProfiles = await tx.select().from(brandProfilesTable);
+    const finalDays = await tx.select().from(dailySyncTable);
+    for (const p of finalProfiles) {
+      addRefs(p.scope, p.values as Record<string, unknown>);
       addRefs(p.scope, p.crustValues as Record<string, unknown>);
+    }
+    for (const day of finalDays) {
+      const data = day.data as Record<string, unknown> | null;
+      const runValues =
+        data?.runValues && typeof data.runValues === "object" && !Array.isArray(data.runValues)
+          ? (data.runValues as Record<string, unknown>)
+          : {};
+      for (const values of Object.values(runValues)) {
+        if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+        addRefs(day.scope, values as Record<string, unknown>);
+      }
     }
 
     // Orphaned zero-value stub purge. A stub has NO non-zero component amount;
-    // an orphan additionally has no live profile reference to its name.
+    // an orphan additionally has no profile or production-run reference.
     const num = (v: unknown): number => {
       const n = Number(v);
       return Number.isFinite(n) ? n : 0;
@@ -5746,25 +5771,39 @@ export async function runWorkbookImportStubPurge(): Promise<void> {
       .returning({ id: dataHealsTable.id });
     if (claimed.length === 0) return;
 
-    // Profile writes name their app-slot recipes but cannot have a foreign key
-    // to those text names. Block concurrent writes through the reference scan
-    // and deletes so a newly live recipe cannot be mistaken for an orphan.
+    // Profile and day-state writes name app-slot recipes but cannot have a
+    // foreign key to those text names. Block concurrent writes through the
+    // reference scan and deletes so a referenced recipe cannot be mistaken for
+    // an orphan, including when only immutable production history names it.
     await tx.execute(sql`LOCK TABLE ${brandProfilesTable} IN SHARE ROW EXCLUSIVE MODE`);
+    await tx.execute(sql`LOCK TABLE ${dailySyncTable} IN SHARE ROW EXCLUSIVE MODE`);
     const profiles = await tx.select().from(brandProfilesTable);
+    const days = await tx.select().from(dailySyncTable);
     const slotRefs = new Set<string>();
+    const addSlotRefs = (scope: string, values: unknown) => {
+      if (!values || typeof values !== "object" || Array.isArray(values)) return;
+      for (const field of [
+        "app1CheeseRecipeName",
+        "app2CheeseRecipeName",
+        "app3CheeseRecipeName",
+        "app4CheeseRecipeName",
+      ]) {
+        const name = ciName((values as Record<string, unknown>)[field]);
+        if (name) slotRefs.add(`${scope}\u0000${name}`);
+      }
+    };
     for (const profile of profiles) {
       for (const values of [profile.values, profile.crustValues]) {
-        if (!values || typeof values !== "object") continue;
-        for (const field of [
-          "app1CheeseRecipeName",
-          "app2CheeseRecipeName",
-          "app3CheeseRecipeName",
-          "app4CheeseRecipeName",
-        ]) {
-          const name = ciName((values as Record<string, unknown>)[field]);
-          if (name) slotRefs.add(`${profile.scope}\u0000${name}`);
-        }
+        addSlotRefs(profile.scope, values);
       }
+    }
+    for (const day of days) {
+      const data = day.data as Record<string, unknown> | null;
+      const runValues =
+        data?.runValues && typeof data.runValues === "object" && !Array.isArray(data.runValues)
+          ? (data.runValues as Record<string, unknown>)
+          : {};
+      for (const values of Object.values(runValues)) addSlotRefs(day.scope, values);
     }
 
     const num = (value: unknown): number => {
@@ -5814,5 +5853,245 @@ export async function runWorkbookImportStubPurge(): Promise<void> {
       .set({ result })
       .where(eq(dataHealsTable.id, WORKBOOK_IMPORT_STUB_PURGE_ID));
     logger.info({ heal: WORKBOOK_IMPORT_STUB_PURGE_ID, ...result }, "Data heal applied");
+  });
+}
+
+// ── Approved source-library reconciliation (2026-08-26) ─────────────────────
+// The attached audit is the reviewed authority. This heal intentionally does
+// not infer replacements from today's pool: only automatic proposals whose
+// audited id AND name still identify the live row may overwrite workbook-owned
+// fields. A manager rename is therefore a stale guard and is left untouched.
+const SOURCE_LIBRARY_RECONCILIATION_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
+const SOURCE_LIBRARY_RECONCILIATION_FROM_DATE = "2026-08-26";
+const SOURCE_LINK_FIELDS = [
+  "doughRecipeName",
+  "frontlineRecipeName",
+  "app1CheeseRecipeName",
+  "app2CheeseRecipeName",
+  "app3CheeseRecipeName",
+  "app4CheeseRecipeName",
+] as const;
+
+const reconciliationName = (value: unknown) => String(value ?? "").trim().toLowerCase();
+const reconciliationZeroComponents = (components: unknown) =>
+  Array.isArray(components) && components.every((component) => {
+    if (!component || typeof component !== "object") return true;
+    const row = component as Record<string, unknown>;
+    return ["lbs", "ozPerPizza", "perPizza"].every((key) => {
+      const value = Number(row[key] ?? 0);
+      return !Number.isFinite(value) || value === 0;
+    });
+  });
+
+export async function runSourceLibraryReconciliationHeal(): Promise<void> {
+  // Parsing before the transaction is read-only and fails closed if the
+  // checked-in evidence was accidentally altered. The plan itself contains no
+  // database data and no full records are logged.
+  const plan = loadSourceLibraryReconciliationPlan();
+  await db.transaction(async (tx) => {
+    const claimed = await tx.insert(dataHealsTable)
+      .values({ id: SOURCE_LIBRARY_RECONCILIATION_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // These locks make the reference scan + repoint + conditional deletes one
+    // serialization point with ordinary profile/day writes.
+    await tx.execute(sql`LOCK TABLE ${brandProfilesTable} IN SHARE ROW EXCLUSIVE MODE`);
+    await tx.execute(sql`LOCK TABLE ${dailySyncTable} IN SHARE ROW EXCLUSIVE MODE`);
+    await tx.execute(sql`LOCK TABLE ${specImportAliasesTable} IN SHARE ROW EXCLUSIVE MODE`);
+
+    const byTable = <T extends { table: string }>(table: string) =>
+      [...plan.replacements, ...plan.links].filter((proposal) => proposal.table === table);
+    const doughTargets = byTable("dough_recipes");
+    const sauceTargets = byTable("sauce_recipes");
+    const cheeseTargets = [...byTable("cheese_recipes"), ...plan.allZeroStubs];
+    const mixTargets = byTable("mixes");
+    const selectLocked = async <T extends { id: any }>(table: any, targets: Array<{ before?: { id: string }; id?: string }>) =>
+      targets.length === 0 ? [] as T[] : await tx.select().from(table)
+        .where(and(eq(table.scope, "live"), inArray(table.id, [...new Set(targets.map((target) => target.before?.id ?? target.id!))])))
+        .for("update") as T[];
+    // A Drizzle transaction owns one pg client. Keep these lock reads
+    // sequential: issuing concurrent queries on that client is deprecated and
+    // risks making lock acquisition order harder to reason about.
+    const doughRows = await selectLocked<any>(doughRecipesTable, doughTargets);
+    const sauceRows = await selectLocked<any>(sauceRecipesTable, sauceTargets);
+    const cheeseRows = await selectLocked<any>(cheeseRecipesTable, cheeseTargets);
+    const mixRows = await selectLocked<any>(mixesTable, mixTargets);
+    const canonicalStubRows = await tx.select().from(cheeseRecipesTable).where(and(
+      eq(cheeseRecipesTable.scope, "live"),
+      inArray(cheeseRecipesTable.id, plan.allZeroStubs.map((stub) => stub.canonicalId)),
+    )).for("update");
+
+    const rowFor = (rows: any[], proposal: { before: { id: string; name: string } }) =>
+      rows.find((row) => row.id === proposal.before.id && row.name === proposal.before.name);
+    let replaced = 0;
+    for (const proposal of plan.replacements) {
+      const after = proposal.after;
+      if (proposal.table === "dough_recipes") {
+        const row = rowFor(doughRows, proposal); if (!row) continue;
+        await tx.update(doughRecipesTable).set({
+          components: after.components as any, doughballVariants: after.doughballVariants as any,
+          doughballWeightOz: after.doughballWeightOz as number, doughballsPerTray: after.doughballsPerTray as number,
+          updatedAt: new Date(),
+        }).where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, "live"))); replaced++;
+      } else if (proposal.table === "sauce_recipes") {
+        const row = rowFor(sauceRows, proposal); if (!row) continue;
+        await tx.update(sauceRecipesTable).set({
+          // This report owns only components for sauce rows. Do not turn
+          // absent fields into undefined/null manager data.
+          components: after.components as any, updatedAt: new Date(),
+        }).where(and(eq(sauceRecipesTable.id, row.id), eq(sauceRecipesTable.scope, "live"))); replaced++;
+      } else if (proposal.table === "cheese_recipes") {
+        const row = rowFor(cheeseRows, proposal); if (!row) continue;
+        await tx.update(cheeseRecipesTable).set({
+          components: after.components as any, brand: after.brand as string, flavors: after.flavors as string[],
+          shredderSetting: after.shredderSetting as string, cellulose: after.cellulose as string,
+          notes: after.notes as string, updatedAt: new Date(),
+        }).where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, "live"))); replaced++;
+      } else {
+        const row = rowFor(mixRows, proposal); if (!row) continue;
+        await tx.update(mixesTable).set({
+          components: after.components as any, brand: after.brand as string, flavor: after.flavor as string,
+          batchSize: after.batchSize as number, daysEarly: after.daysEarly as number,
+          ...(typeof after.notes === "string" ? { notes: after.notes } : {}),
+          updatedAt: new Date(),
+        }).where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, "live"))); replaced++;
+      }
+    }
+
+    // Link sources point to the exact current live display name, not the
+    // report's historic spelling. It also supplies the map used below to
+    // repair persisted profile/run name links.
+    const names = new Map<string, string>();
+    const key = (table: string, name: unknown) => `${table}\u0000${reconciliationName(name)}`;
+    let aliasesInserted = 0;
+    const aliases = await tx.select().from(specImportAliasesTable)
+      .where(eq(specImportAliasesTable.scope, "live")).for("update");
+    for (const proposal of plan.links) {
+      const rows = proposal.table === "cheese_recipes" ? cheeseRows : mixRows;
+      const row = rowFor(rows, proposal);
+      if (!row) continue;
+      const sourceName = String(proposal.after.sourceName);
+      names.set(key(proposal.table, sourceName), row.name);
+      const existing = aliases.some((alias) =>
+        alias.kind === "appType" && alias.context == null &&
+        reconciliationName(alias.externalName) === reconciliationName(sourceName) &&
+        reconciliationName(alias.canonicalName) === reconciliationName(row.name));
+      if (!existing) {
+        await tx.insert(specImportAliasesTable).values({
+          scope: "live", kind: "appType", externalName: sourceName, canonicalName: row.name, context: null,
+        });
+        aliasesInserted++;
+      }
+    }
+    // The three audited importer stubs are links too: their source spelling
+    // must resolve to the separately audited canonical row before the stub can
+    // be removed.
+    for (const stub of plan.allZeroStubs) {
+      const canonical = canonicalStubRows.find((row) =>
+        row.id === stub.canonicalId && row.name === stub.canonicalName);
+      if (!canonical) continue;
+      names.set(key("cheese_recipes", stub.name), canonical.name);
+      const existing = aliases.some((alias) =>
+        alias.kind === "appType" && alias.context == null &&
+        reconciliationName(alias.externalName) === reconciliationName(stub.name) &&
+        reconciliationName(alias.canonicalName) === reconciliationName(canonical.name));
+      if (!existing) {
+        await tx.insert(specImportAliasesTable).values({
+          scope: "live", kind: "appType", externalName: stub.name, canonicalName: canonical.name, context: null,
+        });
+        aliasesInserted++;
+      }
+    }
+    const replacementRows: Array<[string, any[]]> = [
+      ["dough_recipes", doughRows], ["sauce_recipes", sauceRows],
+      ["cheese_recipes", cheeseRows], ["mixes", mixRows],
+    ];
+    for (const proposal of plan.replacements) {
+      const row = rowFor(replacementRows.find(([table]) => table === proposal.table)![1], proposal);
+      if (row) names.set(key(proposal.table, proposal.before.name), row.name);
+    }
+    const repoint = (values: Record<string, unknown>) => {
+      let changed = false;
+      for (const field of SOURCE_LINK_FIELDS) {
+        const table = field === "doughRecipeName" ? "dough_recipes" :
+          field === "frontlineRecipeName" ? "sauce_recipes" : undefined;
+        const candidates = table ? [names.get(key(table, values[field]))] :
+          [names.get(key("cheese_recipes", values[field])), names.get(key("mixes", values[field]))];
+        const canonical = candidates.find(Boolean);
+        if (canonical && values[field] !== canonical) { values[field] = canonical; changed = true; }
+      }
+      return changed;
+    };
+    const profiles = await tx.select().from(brandProfilesTable)
+      .where(eq(brandProfilesTable.scope, "live")).for("update");
+    let repointedProfiles = 0;
+    for (const profile of profiles) {
+      const values = { ...(profile.values ?? {}) } as Record<string, unknown>;
+      const crustValues = { ...(profile.crustValues ?? {}) } as Record<string, unknown>;
+      const valuesChanged = repoint(values);
+      const crustValuesChanged = repoint(crustValues);
+      if (!valuesChanged && !crustValuesChanged) continue;
+      await tx.update(brandProfilesTable).set({
+        values, crustValues, updatedAtMs: Math.max((profile.updatedAtMs ?? 0) + 1, Date.now()),
+      }).where(and(eq(brandProfilesTable.key, profile.key), eq(brandProfilesTable.scope, "live")));
+      repointedProfiles++;
+    }
+
+    const days = await tx.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), gte(dailySyncTable.date, SOURCE_LIBRARY_RECONCILIATION_FROM_DATE),
+    )).for("update");
+    // History is never edited, but it is still a reference and must protect a
+    // purported stub from deletion.
+    const allLiveDays = await tx.select().from(dailySyncTable)
+      .where(eq(dailySyncTable.scope, "live")).for("update");
+    let repointedRuns = 0;
+    for (const day of days) {
+      const data = { ...(day.data as Record<string, unknown>) };
+      const runs = ((data.dayState as Record<string, unknown> | undefined)?.runs ?? data.runs) as unknown;
+      const runValues = data.runValues as Record<string, Record<string, unknown>> | undefined;
+      if (!Array.isArray(runs) || !runValues || typeof runValues !== "object") continue;
+      const stamps = { ...((data.runValuesUpdatedAt as Record<string, unknown>) ?? {}) };
+      let changed = false;
+      for (const run of runs) {
+        if (!run || typeof run !== "object") continue;
+        const id = String((run as Record<string, unknown>).id ?? "");
+        if (!id || (run as Record<string, unknown>).startedAt != null || !runValues[id]) continue;
+        const values = { ...runValues[id] };
+        if (!repoint(values)) continue;
+        const stamp = Math.max(Number(stamps[id] ?? values.valuesUpdatedAtMs ?? 0) + 1, Date.now());
+        values.valuesUpdatedAtMs = stamp; runValues[id] = values; stamps[id] = stamp;
+        changed = true; repointedRuns++;
+      }
+      if (changed) await tx.update(dailySyncTable).set({
+        data: { ...data, runValues, runValuesUpdatedAt: stamps }, updatedAt: new Date(),
+      }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, "live")));
+    }
+
+    // Re-read after the repoints: deletion decisions must reflect the actual
+    // post-repair references, not the stale objects selected before updates.
+    const postProfiles = await tx.select().from(brandProfilesTable)
+      .where(eq(brandProfilesTable.scope, "live")).for("update");
+    const postDays = await tx.select().from(dailySyncTable)
+      .where(eq(dailySyncTable.scope, "live")).for("update");
+    const referenced = new Set<string>();
+    for (const profile of postProfiles) for (const values of [profile.values, profile.crustValues]) {
+      for (const field of SOURCE_LINK_FIELDS) referenced.add(reconciliationName((values as Record<string, unknown>)[field]));
+    }
+    for (const day of postDays) {
+      const runValues = (day.data as Record<string, unknown>).runValues as Record<string, Record<string, unknown>> | undefined;
+      for (const values of Object.values(runValues ?? {})) for (const field of SOURCE_LINK_FIELDS) referenced.add(reconciliationName(values[field]));
+    }
+    let deletedStubs = 0;
+    for (const stub of plan.allZeroStubs) {
+      const row = cheeseRows.find((candidate) => candidate.id === stub.id && candidate.name === stub.name);
+      if (!row || !reconciliationZeroComponents(row.components) || referenced.has(reconciliationName(row.name))) continue;
+      await tx.delete(cheeseRecipesTable).where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, "live")));
+      deletedStubs++;
+    }
+    const result = { replacements: replaced, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs };
+    await tx.update(dataHealsTable).set({ result }).where(eq(dataHealsTable.id, SOURCE_LIBRARY_RECONCILIATION_HEAL_ID));
+    logger.info({ heal: SOURCE_LIBRARY_RECONCILIATION_HEAL_ID, ...result }, "Data heal applied");
   });
 }
