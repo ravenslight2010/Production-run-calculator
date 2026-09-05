@@ -70,7 +70,7 @@ describe("auto-track suppression for case/skid counters", () => {
     });
 
     // elapsedBatchSec = 30 min → expectedCasesRaw = floor(10min*100/12) = 83 with
-    // 20min freezerTime deducted. At t0 the hook seeds from prevExpected=-1.
+    // 20min Freeze tunnel time deducted. At t0 the hook seeds from prevExpected=-1.
     const elapsed = 30 * 60;
     const v = makeV({ skidsCompleted: 1, casesOnCurrentSkid: 20 });
 
@@ -131,7 +131,7 @@ describe("auto-track suppression for case/skid counters", () => {
       batchesReady: 2,
     });
 
-    const elapsed = 30 * 60; // 30 min elapsed, 20 min freezer → 10 min output
+    const elapsed = 30 * 60; // 30 min elapsed, 20 min tunnel → 10 min output
     const v = makeV();
 
     const { result, rerender } = renderHook(

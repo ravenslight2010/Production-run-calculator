@@ -1684,7 +1684,7 @@ describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is
     // (ACTIVE_VALUES: ppm > 0, freezerTime = 30 min → casesInFreezer grows)
     await act(async () => { vi.advanceTimersByTime(60_000); });
 
-    // The "+N in freezer" element must be present and non-zero
+    // The "+N in Freeze tunnel" element must be present and non-zero
     const freezerEl = getByTestId("glance-cases-freezer");
     expect(freezerEl).toBeTruthy();
     const freezerText = freezerEl.textContent ?? "";

@@ -1023,7 +1023,7 @@ export default function SetupProfileEditor({
                     )}
                     <div className="grid grid-cols-2 gap-3">
                       <NumField control={form.control} name="speedAdjustment" label="Speed Adjustment" />
-                      <NumField control={form.control} name="freezerTime" label="Freezer Time (min)" />
+                      <NumField control={form.control} name="freezerTime" label="Freeze Tunnel Time (min)" />
                     </div>
                     <Separator className="opacity-30" />
                     <div className="grid grid-cols-2 gap-3">

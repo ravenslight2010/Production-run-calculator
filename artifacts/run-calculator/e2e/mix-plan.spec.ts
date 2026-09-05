@@ -53,6 +53,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { requireIsolatedTestDatabase } from "./isolation";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,25 +65,8 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-
 async function closeOnboardingIfVisible(page: Page): Promise<void> {
-  const welcome = page.getByRole("dialog", {
-    name: /welcome to production run calculator/i,
-  });
-  if (!(await welcome.isVisible().catch(() => false))) return;
-
-  const seen = page
-    .waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-      { timeout: 10_000 },
-    )
-    .catch(() => undefined);
-  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-  const response = await seen;
-  if (response) await expect(response.status()).toBe(200);
-  await expect(welcome).toBeHidden({ timeout: 10_000 });
+  await dismissOnboardingIfPresent(page);
 }
 
 async function waitForAppAfterNavigation(page: Page): Promise<void> {
@@ -112,39 +99,39 @@ async function signUpAndDismissOnboarding(
   username: string,
   password: string,
 ): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
+  await signUpAndHandleOnboarding(page, username, password, {
+    signupCode: SIGNUP_CODE,
+    waitForApp: async (currentPage) => {
+      await currentPage
+        .locator('[data-testid="tab-run"]')
+        .waitFor({ state: "attached", timeout: 25_000 });
+    },
+    afterSignUp: async (currentPage) => {
+      await currentPage.waitForTimeout(300);
 
-  await waitForAppAfterNavigation(page);
-
-  await page.waitForTimeout(300);
-
-  // A newly-created account can have the initial run only in React state until
-  // the first form interaction. Direct-fixture tests need a durable local
-  // baseline before they mutate run-calc-day and reload.
-  await page.evaluate((user) => {
-    if (localStorage.getItem("run-calc-day")) return;
-    const runId = `e2e-bootstrap-run-${user}`;
-    localStorage.setItem("run-calc-day", JSON.stringify({
-      runs: [{ id: runId, brand: "", flavor: "", seeded: false }],
-      currentIndex: 0,
-      date: new Date().toISOString().slice(0, 10),
-      // Today's resetAt is also the server's auth boundary. Keep this
-      // same-day fixture at the stable baseline instead of manufacturing a
-      // future reset that can invalidate the account's just-issued session.
-      resetAt: 0,
-      substitutions: [],
-      substitutionLog: [],
-      stagedItems: {},
-      prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
-    }));
-    localStorage.setItem(`run-calc-run-${runId}`, JSON.stringify({}));
-  }, username);
+      // A newly-created account can have the initial run only in React state
+      // until the first form interaction. Direct-fixture tests need a durable
+      // local baseline before they mutate run-calc-day and reload.
+      await currentPage.evaluate((user) => {
+        if (localStorage.getItem("run-calc-day")) return;
+        const runId = `e2e-bootstrap-run-${user}`;
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{ id: runId, brand: "", flavor: "", seeded: false }],
+          currentIndex: 0,
+          date: new Date().toISOString().slice(0, 10),
+          // Today's resetAt is also the server's auth boundary. Keep this
+          // same-day fixture at the stable baseline instead of manufacturing a
+          // future reset that can invalidate the account's just-issued session.
+          resetAt: 0,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+          prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
+        }));
+        localStorage.setItem(`run-calc-run-${runId}`, JSON.stringify({}));
+      }, username);
+    },
+  });
 }
 
 async function goToMixes(page: Page): Promise<void> {
@@ -2793,6 +2780,12 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   test("mix plan collapses to empty when all runs in a shift are ended", async ({
     page,
   }) => {
+    // This journey intentionally starts and finishes two live runs. On the
+    // proxied release preview, the sync/authentication round-trips can put
+    // the final navigation just over the suite's 60-second default; keep the
+    // assertion bounded without weakening any individual wait.
+    test.setTimeout(90_000);
+
     const suffix = uid();
     const username = `user_${suffix}`;
     const mixId1 = `all-ended-mix-a-${suffix}`;

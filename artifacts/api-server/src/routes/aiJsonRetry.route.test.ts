@@ -23,6 +23,7 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { setAiRateLimitBackoffMsForTests, AI_RATE_LIMITED_MESSAGE } from "../lib/aiJsonRetry";
+import { clearAiResultCacheForTests } from "../lib/aiResultCache";
 
 // Queue-based mock of the OpenAI chat client: each call shifts the next reply
 // off `queue`; when the queue is empty (e.g. the advisory reviewer's extra
@@ -103,7 +104,8 @@ afterAll(async () => {
 
 let userCounter = 0;
 let prevBackoff: number;
-beforeEach(() => {
+beforeEach(async () => {
+  await clearAiResultCacheForTests();
   mock.queue = [];
   mock.shouldThrow = false;
   mock.shouldThrow429 = false;
@@ -186,14 +188,14 @@ describe("bounded retry on malformed model output (first malformed, second good)
 
   it("/ai/match-import retries once and returns the good second matches", async () => {
     const good = JSON.stringify({
-      brandMatches: [{ candidate: "Lowe's", match: "Lowes" }],
+      brandMatches: [{ candidate: "Unknown Brand", match: "Lowes" }],
       flavorMatches: [],
     });
     mock.queue = [TRUNCATED_REPLY, good];
     const res = await post("/ai/match-import", {
       brands: ["Lowes"],
       brandFlavors: { Lowes: ["Pepperoni"] },
-      unmatchedBrands: ["Lowe's"],
+      unmatchedBrands: ["Unknown Brand"],
       unmatchedFlavors: [],
     });
     expect(res.status).toBe(200);
@@ -205,13 +207,13 @@ describe("bounded retry on malformed model output (first malformed, second good)
 
   it("/ai/match-premix retries once and returns the good second matches", async () => {
     const good = JSON.stringify({
-      matches: [{ name: "Lowes Pepperoni Mix", brand: "Lowes", flavor: "Pepperoni" }],
+      matches: [{ name: "Lowes Mystery Mix", brand: "Lowes", flavor: "Pepperoni" }],
     });
     mock.queue = [TRUNCATED_REPLY, good];
     const res = await post("/ai/match-premix", {
       brands: ["Lowes"],
       brandFlavors: { Lowes: ["Pepperoni"] },
-      unmatchedNames: ["Lowes Pepperoni Mix"],
+      unmatchedNames: ["Lowes Mystery Mix"],
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { matches: Array<{ brand: string }> };
@@ -386,19 +388,23 @@ describe("shared retry semantics (pinned once — same helper on every route)", 
     expect(mock.queue).toHaveLength(1);
   });
 
-  it("still 502s immediately on a provider error (no retry of thrown calls)", async () => {
+  it("returns a clear no-AI state immediately on a provider error", async () => {
     mock.shouldThrow = true;
     const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: unknown[]; aiStatus: string };
+    expect(body.suggestions).toHaveLength(0);
+    expect(body.aiStatus).toBe("unavailable");
     expect(mock.mainCalls).toBe(1);
   });
 
-  it("retries a 429 rate-limit rejection once, then returns HTTP 429 with a friendly message", async () => {
+  it("retries a 429 rate-limit rejection once, then returns a no-AI state", async () => {
     mock.shouldThrow429 = true;
     const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe(AI_RATE_LIMITED_MESSAGE);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: unknown[]; aiStatus: string };
+    expect(body.suggestions).toHaveLength(0);
+    expect(body.aiStatus).toBe("unavailable");
     // A 429 rejection is free, so exactly one retry happens (2 attempts total).
     expect(mock.mainCalls).toBe(2);
   });
@@ -407,6 +413,29 @@ describe("shared retry semantics (pinned once — same helper on every route)", 
     mock.queue = ['{"suggestions":[]}'];
     const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
     expect(res.status).toBe(200);
+    expect(mock.mainCalls).toBe(1);
+  });
+
+  it("serves unchanged merge-suggestion input from cache without another provider call", async () => {
+    const request = { names: ["Mozzarella", "Mozz"] };
+    mock.queue = [JSON.stringify({
+      suggestions: [{ target: "Mozzarella", sources: ["Mozz"], reason: "abbreviation" }],
+    })];
+
+    const first = await post("/ai/suggest-merges", request);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as Record<string, unknown>;
+    expect(mock.mainCalls).toBe(1);
+
+    mock.queue = [JSON.stringify({
+      suggestions: [{ target: "Mozzarella", sources: [], reason: "different answer" }],
+    })];
+    const second = await post("/ai/suggest-merges", request);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({
+      ...firstBody,
+      generatedAt: expect.any(Number),
+    });
     expect(mock.mainCalls).toBe(1);
   });
 });

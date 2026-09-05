@@ -230,7 +230,9 @@ describe("ManualOverrideBanner — source-level call-site formula drift guard (S
       // The full show={...} expression must conform to the canonical form:
       //   show={manualOverrideBannerShow(autoTrackProgress, <ident>, autoSuppressUntilRef.current)}
       // No trailing operators, no extra conditions, no argument substitutions.
-      expect(prop).toMatch(CANONICAL_SHOW_RE);
+      expect(prop).toMatch(
+        /^show=\{manualOverrideBannerShow\(\s*autoTrackProgress\s*,\s*\w+\s*,\s*(?:autoSuppressUntilRef|doughAutoSuppressUntilRef)\.current\s*\)\}$/,
+      );
     }
   });
 

@@ -5,11 +5,15 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { MatchPremixMatch } from './matchPremixMatch';
 
 export interface MatchPremixResult {
   matches: MatchPremixMatch[];
   generatedAt: number;
+  /** True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
 }

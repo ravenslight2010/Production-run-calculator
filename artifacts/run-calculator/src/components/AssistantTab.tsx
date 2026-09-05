@@ -37,6 +37,7 @@ import {
   type OptimizeCategory,
   type OptimizeImpact,
   type OptimizeAction,
+  type OptimizeResult,
   requestOptimize,
   optimizeErrorMessage,
 } from "../aiOptimize";
@@ -57,8 +58,10 @@ import {
 import {
   type ForecastInput,
   type ForecastPlan,
+  type ForecastResult,
   type ForecastConfidence,
   type ForecastAccuracyInput,
+  type ForecastAccuracyResult,
   type ForecastAccuracyReview,
   type ForecastAccuracyProductStatus,
   type ForecastAccuracyTrend,
@@ -85,6 +88,7 @@ import {
 import { fetchConversationHistory, type ConversationTurn } from "../aiMemory";
 import { useMe } from "../useRole";
 import ReviewBadge from "./ReviewBadge";
+import AiStatusNotice from "./AiStatusNotice";
 
 const CATEGORY_META: Record<
   OptimizeCategory,
@@ -1117,6 +1121,7 @@ function SummarySection({
 
         {result && (
           <div className="space-y-3" data-testid="summary-result">
+            <AiStatusNotice status={result.aiStatus} feature="AI recap" />
             <p className="text-sm leading-relaxed text-foreground" data-testid="summary-text">
               {result.summary}
             </p>
@@ -1235,6 +1240,7 @@ function AnomalySection({
 
         {result && (
           <div className="space-y-3" data-testid="anomaly-result">
+            <AiStatusNotice status={result.aiStatus} feature="AI anomaly narration" />
             {result.summary && (
               <p className="text-sm leading-relaxed text-foreground" data-testid="anomaly-text">
                 {result.summary}
@@ -1369,6 +1375,7 @@ function ScheduleSection({
 
         {result && (
           <div className="space-y-3" data-testid="schedule-result">
+            <AiStatusNotice status={result.aiStatus} feature="AI schedule narration" />
             {result.summary && (
               <p className="text-sm leading-relaxed text-foreground" data-testid="schedule-text">
                 {result.summary}
@@ -1465,9 +1472,7 @@ function ForecastSection({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<
-    { forecast: ForecastPlan | null; forecasts?: ForecastPlan[]; note?: string; generatedAt: number } | null
-  >(null);
+  const [result, setResult] = useState<ForecastResult | null>(null);
   // Track which day plans the manager has already opened in the schedule, keyed
   // by the plan's targetDate so each day in a multi-day horizon applies once.
   const [appliedDates, setAppliedDates] = useState<Set<string>>(new Set());
@@ -1575,6 +1580,7 @@ function ForecastSection({
               <span>{error}</span>
             </div>
           )}
+          <AiStatusNotice status={result?.aiStatus} feature="AI forecast" />
         </CardContent>
       </Card>
 
@@ -1693,14 +1699,7 @@ function AccuracySection({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<
-    {
-      reviews: ForecastAccuracyReview[];
-      trend: ForecastAccuracyTrend;
-      note?: string;
-      generatedAt: number;
-    } | null
-  >(null);
+  const [result, setResult] = useState<ForecastAccuracyResult | null>(null);
 
   async function review() {
     setLoading(true);
@@ -1759,6 +1758,7 @@ function AccuracySection({
               <span>{error}</span>
             </div>
           )}
+          <AiStatusNotice status={result?.aiStatus} feature="AI forecast accuracy" />
         </CardContent>
       </Card>
 
@@ -1923,9 +1923,7 @@ export default function AssistantTab({
   const canUseAiTools = hasCapability("use-ai-tools");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<
-    { recommendations: OptimizeRecommendation[]; note?: string; generatedAt: number } | null
-  >(null);
+  const [result, setResult] = useState<OptimizeResult | null>(null);
 
   async function analyze() {
     setLoading(true);
@@ -2011,6 +2009,7 @@ export default function AssistantTab({
               <span>{error}</span>
             </div>
           )}
+          <AiStatusNotice status={result?.aiStatus} feature="AI optimization" />
         </CardContent>
       </Card>
 

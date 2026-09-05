@@ -54,6 +54,16 @@ export function resetSauceBarrelEntry(runId: string): void {
   });
 }
 
+/** Mirror canonical form values into the tab-surviving UI register. */
+export function mirrorSauceBarrelProgress(
+  runId: string,
+  progress: Pick<SauceBarrelEntry, "barrelsMade" | "lastBarrelNetSec">,
+): void {
+  const entry = getSauceBarrelEntry(runId);
+  entry.barrelsMade = Math.max(0, Math.floor(progress.barrelsMade));
+  entry.lastBarrelNetSec = Math.max(0, progress.lastBarrelNetSec);
+}
+
 /**
  * Exposed for integration tests ONLY — do not use in production code paths.
  * Lets tests inspect the live store state to verify that React remounts

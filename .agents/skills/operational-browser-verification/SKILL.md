@@ -20,6 +20,8 @@ Trigger this skill when the requested verification involves one or more of:
 - navigation, browser back, reload, cold boot, local-storage/server reconciliation,
   or state that must survive a page refresh;
 - confirming the application and its backend start cleanly before testing or release.
+- live-station run switching/reload where Packaging, Sauce, or Frontline
+  automatic counters must remain attached to the correct run.
 
 Do not use it as a substitute for:
 
@@ -100,6 +102,28 @@ uses Clerk or another special authentication path.
    users when the repository's e2e conventions allow it.
 
 ## Core operational checks
+
+### Live-station switch and reload
+
+Use one bounded journey, not a broad production simulation:
+
+1. Use the repository's reusable authenticated browser fixture when available;
+   otherwise document deterministic API/DB setup, manager capability, scope,
+   and cleanup in the required plan. Do not invent a second auth harness.
+2. Seed two same-day runs: A running with known Packaging, Sauce, and one
+   Frontline applicator counter; B pending with staged Dough but zero completion.
+3. Open A at one live station, wait for one eligible automatic acknowledgement,
+   then switch to B while a controlled A acknowledgement is delayed.
+4. Verify B displays zero Packaging/Sauce/applicator completion while preserving
+   its staged Dough. Start B and verify its cadence begins from B's own anchors,
+   with no immediate pre-Start catch-up.
+5. Reload at the explicit desktop or 390×844 viewport under assessment. Verify
+   the selected run, counters, and lifecycle remain canonical. Corroborate with
+   the date-scoped sync response; inspect browser and backend logs.
+
+This browser journey proves observable handoff and reload behavior. Server
+claim ownership and delayed-promise fencing still require their focused
+unit/integration tests.
 
 ### Manager action queue
 

@@ -1,6 +1,6 @@
 // Manage Lists → Die Defaults — manager editor for per-die line-setting
 // defaults. Each die type gets the five pre-fill values (crusts/cycle, cycle
-// speed, speed adjustment, freezer time, extra case buffer). Saving stores a
+// speed, speed adjustment, freeze tunnel time, extra case buffer). Saving stores a
 // factory-wide override on the server; "Reset" removes it so the die falls
 // back to the app's built-in defaults (7"/11"/12"/Argus map). Values are
 // blank-fill pre-fills only — changing them never rewrites existing runs.
@@ -24,7 +24,7 @@ const FIELDS: { key: keyof DieLineDefaults; label: string; step: string; optiona
   { key: "crustsPerCycle", label: "Crusts / Cycle", step: "1" },
   { key: "cycleSpeed", label: "Cycle Speed", step: "0.1" },
   { key: "speedAdjustment", label: "Speed Adjustment", step: "0.05" },
-  { key: "freezerTime", label: "Freezer Time (min)", step: "1" },
+  { key: "freezerTime", label: "Freeze Tunnel Time (min)", step: "1" },
   { key: "casesPerLayer", label: "Extra Case Buffer", step: "1" },
   { key: "preTunnelMin", label: "Pre-tunnel (min)", step: "0.5", optional: true },
   { key: "postTunnelMin", label: "Post-tunnel (min)", step: "0.5", optional: true },

@@ -29,6 +29,29 @@ messages remain in place.
 | Performance protection tests | not separately run in baseline | 15 passed / 3 files | Passed |
 | Typecheck | not separately run in baseline | passed | Passed |
 
+### Master-data polling evidence
+
+The master-data polling change has a deterministic request/byte harness in
+`src/masterData.test.ts`. It mounts ingredient, mix, cheese, dough, and sauce
+consumers together, uses a 375-byte normalized bootstrap fixture, and records
+each response's UTF-8 byte count. The old column is the equivalent behavior
+from five independent observers; the new column is the shared observer. The
+idle and hidden rows are counts during the corresponding quiet window, not
+startup requests.
+
+| Session | Before: requests / response bytes | After: requests / response bytes | Result |
+| --- | ---: | ---: | --- |
+| Active, one 60 s interval | 5 / 1,875 | 1 / 375 | 80% fewer requests and bytes |
+| Idle after 3 minutes | 1 every 5 min / 375 per request | 0 / 0 | Cached lists remain mounted |
+| Hidden/background | 0 / 0 (background intervals already disabled) | 0 / 0 | No bootstrap polling |
+| First activity / foreground return | 5 observer refreshes / 1,875 | 1 / 375 | One deduplicated wake refresh |
+
+The test also verifies that all five consumers observe the canonical
+`masterDataBootstrap` cache and that a manager-returned list updates that cache
+immediately. This evidence intentionally covers only the bootstrap endpoint;
+live sync, SSE, clocks, auto-track, notifications, and sensitive operational
+polls are outside the optimization.
+
 The main chunk reduction is modest because other management importers still
 share some workbook dependencies, but the complete run/spec workflow is now
 requested only by workbook actions rather than by calculator startup.

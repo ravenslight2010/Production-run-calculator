@@ -1,10 +1,12 @@
 ---
-name: Packaging pause clock handoff
-description: How automatic packaging progress crosses from a continued-tunnel pause back to the normal run clock.
+name: Packaging pause and resume flow
+description: Physical downstream drain and refill rules for packaging auto tracking across Press pauses and Freeze-tunnel choices.
 ---
 
-During a pause where the tunnel continues, packaging progress is calculated from elapsed pause time. On Resume, that clock must reconcile its final positive increment exactly once and then re-base to normal net production elapsed time.
+Pause stops the Press, not the whole line. If the Freeze tunnel keeps running, all in-flight product drains through Packaging. If it is selected to stop, it first accepts all pre-tunnel product, stops full, and Packaging empties.
 
-**Why:** Normal run elapsed time intentionally excludes the pause. Comparing it directly with the pause-relative packaging baseline makes subsequent normal increments appear negative, which stalls packaging until normal time eventually catches up.
+Resume never creates an immediate packaging catch-up. A tunnel left running uses the complete new-run fill sequence before Packaging restarts. A stopped tunnel remains full, so Resume waits for pre-tunnel refill and Wrapper/Packaging refill but skips tunnel fill.
 
-**How to apply:** Preserve the continued-tunnel policy as the condition for pause-time packaging. Retain the last active pause-clock reading plus wall-clock endpoint, honor suppression/manual register rejection, and always switch the expected-case baseline to the normal clock after the one-time reconciliation. Do not advance dough counters during this phase.
+**Why:** The canvas reflects a physical Press → pre-tunnel → Freeze tunnel → Wrapper/Packaging flow. Treating Pause or Resume as one global switch freezes output too soon or fabricates an immediate burst.
+
+**How to apply:** Derive tracking permission from the shared line-phase model. Rebase zero-based pause and normal clocks at transitions, start from a full case interval, preserve manual/sync guards, and never advance dough counters during downstream-only drain.

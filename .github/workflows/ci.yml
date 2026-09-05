@@ -13,6 +13,9 @@ jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    # Covers workspace typechecks plus catalog and routine scripts checks;
+    # observed runs fit within the bounded release typecheck budget.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -28,10 +31,15 @@ jobs:
         run: pnpm run check:skill-catalog
       - name: Test skill catalog contract
         run: pnpm --filter @workspace/scripts run test:skill-catalog
+      - name: Run routine scripts tests
+        run: pnpm --filter @workspace/scripts run test
 
   test:
     name: Unit tests (web + libs)
     runs-on: ubuntu-latest
+    # The broad web and shared-library sweep is slower than release's
+    # explicitly sharded package gates, but normally completes well below this.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -48,9 +56,30 @@ jobs:
         # smaller, explicit set of high-value library gates.
         run: pnpm -r --filter "./lib/**" --if-present test
 
+  test-release-concurrency:
+    name: Release concurrency fixture tests
+    runs-on: ubuntu-latest
+    # Fixture-only validation should stay short while allowing cold installs.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version is read from the "packageManager" field in package.json
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate calibration history fixtures
+        # Keep this fixture-only regression check separate from the disposable
+        # Postgres calibration lane and the production release-gate inventory.
+        run: pnpm --filter @workspace/scripts run test:release-concurrency
+
   test-db:
     name: API tests (Postgres)
     runs-on: ubuntu-latest
+    # Match the standard release-check job ceiling for the full API suite.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16-alpine
@@ -86,10 +115,44 @@ jobs:
       - name: Run API server tests
         run: pnpm --filter @workspace/api-server test
 
+  schema-safe-rollback:
+    name: Schema-safe application rollback rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Rehearse application rollback on forward schema
+        run: pnpm run check:schema-safe-rollback
+      - name: Summarize rollback rehearsal evidence
+        if: always()
+        run: |
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f rollback-rehearsal-report.md ]]; then
+            cat rollback-rehearsal-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain rollback rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-safe-rollback-rehearsal
+          path: rollback-rehearsal-report.md
+          if-no-files-found: error
+          retention-days: 14
+
 
   security-audit:
     name: Security audit (prod deps)
     runs-on: ubuntu-latest
+    # Includes dependency installation and a network-bound audit with a
+    # bounded cap so registry stalls cannot hold a runner indefinitely.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       # pnpm version is read from the "packageManager" field in package.json
@@ -109,6 +172,9 @@ jobs:
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    # Allows both cached multi-stage image builds while bounding registry or
+    # build-service stalls.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -125,7 +191,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + push api image (schema + runtime)
+      - name: Build + push api runtime image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -135,6 +201,19 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/runcalc-api:latest
             ghcr.io/${{ github.repository_owner }}/runcalc-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build + push api migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api-migrate
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:latest
+            ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -154,6 +233,8 @@ jobs:
   build:
     name: Build (web + API)
     runs-on: ubuntu-latest
+    # Includes dependency installation and both production bundles.
+    timeout-minutes: 20
     env:
       # vite.config.ts requires both PORT and BASE_PATH at config-load time;
       # PORT is unused for the static build output but must be present.

@@ -56,6 +56,7 @@ export const mockSetAutoTrackProgress: UseAutoTrackReturn["setAutoTrackProgress"
 /** Exported so stability-contract tests can pin it via the explicit-chain assertion.
  *  Also exported for any future test that needs to mutate the suppression ref directly. */
 export const mockAutoSuppressUntilRef: UseAutoTrackReturn["autoSuppressUntilRef"] = { current: 0 as number };
+export const mockDoughAutoSuppressUntilRef: UseAutoTrackReturn["doughAutoSuppressUntilRef"] = { current: 0 as number };
 
 /** Exported so stability-contract tests can pin it via the explicit-chain assertion. */
 export const mockFireAutoTrackNow: UseAutoTrackReturn["fireAutoTrackNow"] = vi.fn();
@@ -76,6 +77,7 @@ export function useAutoTrack(): UseAutoTrackReturn {
     setAutoTrackProgress: mockSetAutoTrackProgress,
     autoTrackSuggestion:  null,
     autoSuppressUntilRef: mockAutoSuppressUntilRef,
+    doughAutoSuppressUntilRef: mockDoughAutoSuppressUntilRef,
     fireAutoTrackNow:     mockFireAutoTrackNow,
     tickDueRefs:          mockAutoTrackTickRefs,
     isDoughTimerPaused:   false,

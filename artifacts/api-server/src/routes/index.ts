@@ -48,6 +48,7 @@ import importHistoryRouter from "./importHistory";
 import actionItemsRouter from "./actionItems";
 import masterDataHealthRouter from "./masterDataHealth";
 import masterDataBootstrapRouter from "./masterDataBootstrap";
+import fieldChecksRouter from "./fieldChecks";
 
 const router: IRouter = Router();
 
@@ -76,6 +77,7 @@ router.use(syncRouter);
 router.use(inventoryRouter);
 router.use(aiRouter);
 router.use(incidentsRouter);
+router.use(fieldChecksRouter);
 router.use(importAliasesRouter);
 router.use(fillMissingValuesRouter);
 router.use(ingredientBatchWeightsRouter);

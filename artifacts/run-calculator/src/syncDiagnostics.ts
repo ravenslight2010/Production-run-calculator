@@ -3,6 +3,7 @@ import {
   nextActionForAttention,
   type AttentionState,
 } from "./attentionStates";
+import { emitFieldCheckSignal } from "./fieldChecks";
 export type SyncDiagnosticKind =
   | "connected"
   | "local"
@@ -112,6 +113,13 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
     localStorage.setItem(key(event.date), JSON.stringify(events));
   } catch {
     // Diagnostics must never interfere with production persistence.
+  }
+  if (event.kind === "ack") {
+    emitFieldCheckSignal("sync-acknowledgment", "success");
+  } else if (event.kind === "failure" || event.kind === "stale") {
+    emitFieldCheckSignal("sync-acknowledgment", "failure");
+  } else if (event.kind === "peer" || event.kind === "merge") {
+    emitFieldCheckSignal("cross-device-convergence", "success");
   }
   return next;
 }

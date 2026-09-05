@@ -21,6 +21,18 @@
         {"name": "records deferral", "description": "Audit notes identify the managed guide and why it was deferred."}
       ],
       "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "An uploaded Codex authoring bundle contains useful advice about concise instructions and resource organization, plus provider-only OpenAI metadata generators, marketplace setup, credential discovery, and restart instructions. Improve the editable project skill-creator without replacing its existing evaluation workflow.",
+      "expected_output": "The source is reviewed first; only portable authoring principles are incorporated; project maintenance/evaluation behavior and skill identity remain intact; provider-only mechanics are omitted.",
+      "assertions": [
+        {"name": "reviews external source first", "description": "Uses the external import workflow to assess provenance, license, ownership, and compatibility before editing."},
+        {"name": "harvests portable guidance", "description": "Incorporates concise writing, progressive disclosure, resource organization, validation integrity, and degree-of-freedom guidance."},
+        {"name": "excludes provider mechanics", "description": "Does not activate OpenAI metadata generators, marketplace/plugin behavior, credential discovery, home-directory conventions, or restart instructions."},
+        {"name": "preserves repository workflow", "description": "Keeps the project-owned skill identity and existing maintenance, evaluation, and packaging process."}
+      ],
+      "files": []
     }
   ]
 }

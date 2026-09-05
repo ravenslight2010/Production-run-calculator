@@ -76,6 +76,18 @@ export function requireCapability(capability: Capability) {
   return requireCapabilities([capability], "all");
 }
 
+/**
+ * Apply after requireCapability when an action is a literal manager attestation,
+ * not merely a permission that a custom or supervisory role may hold.
+ */
+export function requireManagerRole(req: Request, res: Response, next: NextFunction): void {
+  if (req.role !== "manager") {
+    res.status(403).json({ error: "Manager role required" });
+    return;
+  }
+  next();
+}
+
 /** Gate a shared operational read surface that is valid for either role. */
 export function requireAnyCapability(capabilities: readonly Capability[]) {
   return requireCapabilities(capabilities, "any");

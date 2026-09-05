@@ -13,19 +13,19 @@ interface NotifCalc {
   /** Cases already cased on the floor (skids done + current skid). */
   casesCompleted: number;
   /**
-   * In-tunnel model count: cases the press has already made that are still
-   * traveling through the tunnel/freezer (pressed, not yet packaged).
+   * Live Freeze tunnel WIP: cases the press has already made that are still
+   * traveling through the tunnel (pressed, not yet packaged).
    */
   casesInFreezer: number;
   /**
-   * Cases still to be PRESSED — cased product plus live freezer contents count
+   * Cases still to be PRESSED — cased product plus live Freeze tunnel contents count
    * as done. This is the warehouse staging basis: frontline stages at 2 skids
    * left, packaging at 1 skid left.
    */
   pressCasesLeft: number;
   /**
    * True when the press has made all cases needed for this run (cased + in
-   * freezer ≥ casesNeeded). Once true, the dough crew switches to the next run
+   * Freeze tunnel WIP ≥ casesNeeded). Once true, the dough crew switches to the next run
    * so no further dough batch-due alerts should fire for the current run.
    */
   pressDone: boolean;
@@ -203,7 +203,7 @@ export function shouldEscalateToBrowser(): boolean {
  *  - 15 minutes remaining before end of run
  *  - Each dough-batch cycle boundary
  *  - Run time complete
- *  - Freezer drain complete (post-run)
+ *  - Freeze tunnel drain complete (post-run)
  */
 export function useNotifications({
   runStatus,
@@ -240,8 +240,8 @@ export function useNotifications({
   // timer genuinely counted down from a positive value.
   const runWasTimedRef = useRef<string>("");
   // Runs we've actually watched drain (remainMs > 0 observed at least once). Only
-  // these may later fire the "freezer empty" alert. Without this, selecting or
-  // scrolling to an already-long-ended run — whose freezer drained ages ago, so
+  // these may later fire the "Freeze tunnel empty" alert. Without this, selecting or
+  // scrolling to an already-long-ended run — whose tunnel drained ages ago, so
   // remainMs is already 0 — fired the alert immediately on every completed run.
   const freezerDrainingRef = useRef<Set<string>>(new Set());
   const freezerDoneNotifRef = useRef<Set<string>>(new Set());
@@ -303,11 +303,11 @@ export function useNotifications({
       notifiedRunRef.current = runId;
       const fire = () => {
         // The press finishes in ~15 min, but product keeps exiting the
-        // freezer tunnel for the full freezer time after that — tell the
+        // Freeze tunnel for the full configured tunnel time after that — tell the
         // crew when the line is actually clear, not just when the press stops.
         const freezerMin = Number(v.freezerTime) || 0;
         const freezerNote = freezerMin > 0
-          ? ` Freezer keeps emptying until ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}.`
+          ? ` Freeze tunnel keeps emptying until ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}.`
           : "";
         showAppNotification("⏰ 15 minutes left", {
           body: `${runLabel(currentRun)} — wrap up and prepare for end of run.${freezerNote}`,
@@ -323,7 +323,7 @@ export function useNotifications({
   // Warehouse stages the NEXT run in two steps ahead of the switchover:
   //  • FRONTLINE at 2 skids left at the press
   //  • PACKAGING at 1 skid left at the press
-  // "Left at the press" = casesNeeded − cased − live freezer contents
+  // "Left at the press" = casesNeeded − cased − live Freeze tunnel contents
   // (pressCasesLeft) — the freezer's product is already made, so it counts as
   // done. Runs smaller than 2 skids total trip the frontline threshold
   // immediately at start, and the message tells warehouse to stage 2+ runs
@@ -486,29 +486,29 @@ export function useNotifications({
     }
   }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.adjustedTimeSec, calc.ppm]);
 
-  // ── Freezer drain complete alert ───────────────────────────────────────────
+  // ── Freeze tunnel drain complete alert ─────────────────────────────────────
   useEffect(() => {
     if (runStatus !== "ended" || !currentRun?.endedAt) return;
     const freezerMs = Number(v.freezerTime) * 60000;
     if (freezerMs <= 0) return;
     const runId = currentRun.id;
-    // Short-circuit: if this run's freezer is already done and latched, skip
+    // Short-circuit: if this run's Freeze tunnel is already done and latched, skip
     // the remainMs computation on every subsequent nowTime tick.
     if (freezerDoneNotifRef.current.has(runId)) return;
     const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
     if (remainMs > 0) { freezerDrainingRef.current.add(runId); return; }
-    // Only fire if we actually watched this run's freezer drain down — not when
+    // Only fire if we actually watched this run's tunnel drain down — not when
     // selecting/scrolling to an already-drained completed run.
     if (!freezerDrainingRef.current.has(runId)) return;
     freezerDoneNotifRef.current.add(runId);
     // Turned off by this user: the run is already latched above, so
-    // re-enabling later never fires a stale "freezer empty".
+    // re-enabling later never fires a stale "Freeze tunnel empty".
     if (!isNotifEnabled(prefsRef.current, "freezerEmpty")) return;
     navigator.vibrate?.([200, 100, 200]);
     if (!shouldEscalateToBrowser()) return;
     if (getBrowserNotificationCapability().state === "granted") {
-      showAppNotification("❄️ Freezer empty", {
-        body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
+      showAppNotification("❄️ Freeze tunnel empty", {
+        body: `${runLabel(currentRun)} — Freeze tunnel is clear, ready for next run.`,
         icon: "/icons/icon-192.png",
         tag: `freezer-done-${runId}`,
       });

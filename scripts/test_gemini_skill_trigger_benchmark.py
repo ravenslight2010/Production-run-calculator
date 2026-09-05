@@ -41,6 +41,41 @@ class Fixture:
 
 
 class GeminiBenchmarkTests(unittest.TestCase):
+    def test_generator_covers_editable_skill_inventory_with_canonical_identities(self):
+        root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as directory:
+            generated = Path(directory) / "benchmark.json"
+            report = Path(directory) / "benchmark.md"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(root / "scripts" / "skill_trigger_benchmark.py"),
+                    "--write", str(generated),
+                    "--report", str(report),
+                ],
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            payload = json.loads(generated.read_text())
+            expected = {
+                path.parent.name
+                for skill_root in (root / ".agents" / "skills", root / ".local" / "custom_skills")
+                for path in skill_root.glob("*/SKILL.md")
+            }
+            actual = {skill["name"] for skill in payload["skills"]}
+            self.assertEqual(actual, expected)
+            self.assertTrue(all(skill["metadata_name"] == skill["name"] for skill in payload["skills"]))
+            self.assertTrue(all(
+                skill["name"] == skill["name"].lower()
+                and "_" not in skill["name"]
+                and " " not in skill["name"]
+                for skill in payload["skills"]
+            ))
+            self.assertIn(f"Skills: **{len(expected)}**", report.read_text())
+
     def test_checked_in_benchmark_preserves_provider_boundaries(self):
         root = Path(__file__).resolve().parents[1]
         corpus_payload = json.loads((root / "skill-trigger-benchmark.json").read_text())

@@ -196,7 +196,7 @@ export type StaffMember = {
   tourCompleted: boolean;
   // Whether Floor Mode (the idle big-numbers monitor) is enabled for this
   // user. Per-user (not device-local) so the preference follows them across
-  // devices. Defaults on.
+  // devices. Defaults off for new accounts.
   floorModeEnabled: boolean;
   // Per-alert push-notification preferences: alert kind → enabled. A MISSING
   // key means that alert is ON (default), so newly added alert kinds are
@@ -376,7 +376,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     name: user?.username ?? null,
     onboardingSeen: user?.onboardingSeen ?? false,
     tourCompleted: user?.tourCompleted ?? false,
-    floorModeEnabled: user?.floorModeEnabled ?? true,
+    floorModeEnabled: user?.floorModeEnabled ?? false,
     notificationPrefs: user?.notificationPrefs ?? {},
     sandbox: user?.sandbox ?? false,
     sandboxCopiedAt: copiedAt ? copiedAt.toISOString() : null,

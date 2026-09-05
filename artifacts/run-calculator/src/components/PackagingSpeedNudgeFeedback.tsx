@@ -24,7 +24,7 @@ function statusMessage(status: Exclude<PackagingSpeedNudgeFeedbackStatus, null>)
         0,
         Math.ceil(status.requiredOutputSec - status.elapsedOutputSec),
       );
-      return `Need ${secondsLeft} more second${secondsLeft === 1 ? "" : "s"} of post-freezer output before checking line speed.`;
+      return `Need ${secondsLeft} more second${secondsLeft === 1 ? "" : "s"} of post-tunnel output before checking line speed.`;
     }
     case "correction-size":
       return `This ${status.correctionCases}-case ${status.direction} correction needs ${status.correctionCasesNeeded} cases to suggest a speed on its own. Make one more correction in the same direction instead.`;

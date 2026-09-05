@@ -3,7 +3,7 @@ name: state-accuracy-check
 description: >
   Verify that timers, counters, and live state remain accurate and consistent
   after modifying LiveRunContext, useAutoTrack, autosave logic, press/freezer
-  math, dough supply, or pause/resume handling. Use this skill whenever you
+  math, dough supply, Frontline/Sauce cadence, or pause/resume handling. Use this skill whenever you
   touch any of those areas to prevent silent accuracy regressions from shipping.
   Triggers on changes to: LiveRunContext.tsx, useAutoTrack.ts, home.tsx autosave
   effect, press-done / pressCasesLeft math, dough tray/batch supply logic,
@@ -18,6 +18,7 @@ Use this skill **before completing any task** that touches:
 - The autosave `useEffect([v])` block in `artifacts/run-calculator/src/pages/home.tsx`
 - Press/freezer math (`pressCasesLeft`, `pressDone`, `casesInFreezer`)
 - Dough supply counters (`traysOnLine`, `batchesReady`, auto-track tick effects)
+- Sauce barrels and Frontline applicator batches (cadence, anchors, caps, claims)
 - Run pause/resume handlers (`pausedAt`, stoppage recording, `runStatus` transitions)
 - SSE sync receive or `form.reset()` call sites
 
@@ -32,7 +33,7 @@ counter rebase and timing math.
 
 ---
 
-## Six Accuracy Categories
+## Seven Accuracy Categories
 
 ### 1. Clock Isolation
 
@@ -113,7 +114,44 @@ counter rebase and timing math.
 
 ---
 
-### 5. SSE/Sync Counter Drift
+### 5. Frontline and Sauce Auto-Track
+
+**Where:** `useAutoTrack.ts` — Sauce/applicator net-time effects and
+`commitAutomatic`; `LiveRunContext.tsx` — pending-run isolation and
+`elapsedBatchSec`.
+
+**Policy:** Packaging completion, Sauce barrels, and Frontline applicator
+batches are zero for a selected unstarted run. Staged Dough may exist before
+Start. Start rebases Sauce/applicator anchors for that run; it does not inherit
+the previous run's completion or replay pending wall time.
+
+**What to verify:**
+- Sauce cadence is `effectiveBarrelLbs × 16 ÷ sauceOzPerPizza ÷ ppm × 60`.
+  Applicator cadence uses that slot's effective recipe/batch lbs and oz/pizza.
+  Preserve fractional seconds in due times and anchors; do not round cadence.
+- One accepted claim advances one barrel/batch. Applicators stop at
+  `ceil(required batches)`; Sauce stops at press completion or next-run prep.
+- Carry overdue fractional cadence through the persisted net-time anchor and
+  claim one sequenced event at a time; never floor away the remainder or fold
+  several physical barrels/batches into one mutation.
+- Mix/lb-only or invalid applicator rows do not claim. Each valid applicator
+  slot has independent cadence, anchor, correction generation, and cap.
+- Manual correction suppression blocks applicator claims. Correction-generation
+  changes invalidate in-flight Sauce/applicator acknowledgements and rebase the
+  persisted anchor.
+- Paused, pending, and ended runs emit no Sauce/applicator claims. The Packaging
+  freezer-drain exception applies only to cases/skids, never these channels.
+- Claim ownership includes run ID plus lifecycle generation. After switching
+  runs, a delayed acknowledgement, retry, catch, or `finally` from run A must
+  not write run B's form or clear run B's pending channel.
+- On pending → running, first use the selected run's zero/owned counters and
+  persisted anchors. Do not count pre-Start time or inherit another run's refs.
+- Run the focused applicator hook, pending-progress isolation, and provider
+  tests whenever any of these fields or lifecycle gates change.
+
+---
+
+### 6. SSE/Sync Counter Drift
 
 **Where:** `home.tsx` — SSE receive handler, `form.reset()` call sites, `schedulePush` debounce, `lastLocalEditRef`
 
@@ -129,7 +167,7 @@ counter rebase and timing math.
 
 ---
 
-### 6. Press-Done Model
+### 7. Press-Done Model
 
 **Where:** `LiveRunContext.tsx` — `pressCasesLeft`, `pressDone` in the `calc` useMemo; `useAutoTrack.ts` — `doughFeedComplete`; `useNotifications` — two-stage switchover latches; `home.tsx` — next-run pre-seed effect
 
@@ -222,6 +260,6 @@ When the form is not yet settled for the new run AND its values differ from the 
 
 - Web auto-track lives in `useAutoTrack.ts` (hook). Mobile auto-track lives in the `RunContext.tsx` auto-track effect.
 - Mobile has `useRunClock()` (separate clock context). Web has `LiveRunContext` + module-level `calcRef`. These serve the same isolation purpose but are not the same code.
-- Press-done model (`pressCasesLeft`, `pressDone`) is **web-only** as of 2026-07-10. Mobile still uses time-based `expectedCasesRaw` for the feed-complete gate. When porting, apply all six invariants above to mobile's RunContext.
+- Press-done model (`pressCasesLeft`, `pressDone`) is **web-only** as of 2026-07-10. Mobile still uses time-based `expectedCasesRaw` for the feed-complete gate. When porting, apply all seven invariants above to mobile's RunContext.
 - `suggestedDoughStaging()` is a shared export from `useAutoTrack.ts` on web; mobile has a verbatim copy in `RunContext.tsx`. Keep them identical whenever the formula changes.
 - Manual-edit suppression window: both platforms use **1 minute** (`AUTO_SUPPRESS_MS = 1 * 60 * 1000` constant on web, `suppressAutoTrack()` sets `Date.now() + 1 * 60 * 1000` on mobile). Any new auto-tracked field must arm suppression on BOTH platforms in the same handler.

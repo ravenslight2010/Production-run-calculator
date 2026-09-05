@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { currentScope } from "../lib/requestScope";
 import {
@@ -32,7 +32,7 @@ import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
-import { aiCostLimit } from "../middlewares/costLimitMiddleware";
+import { aiCostLimit, chargeAiCost } from "../middlewares/costLimitMiddleware";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
   buildOptimizePrompt,
@@ -48,6 +48,7 @@ import {
 } from "./aiFillMissing";
 import {
   buildMatchImportPrompt,
+  resolveDeterministicMatchImport,
   sanitizeMatchImport,
   validateMatchImportBody,
 } from "./aiMatchImport";
@@ -59,6 +60,7 @@ import {
 } from "./aiParseSpecSheet";
 import {
   buildMatchPremixPrompt,
+  resolveDeterministicMatchPremix,
   sanitizeMatchPremix,
   validateMatchPremixBody,
 } from "./aiMatchPremix";
@@ -124,6 +126,7 @@ import {
   forecastTargetDates,
   validateForecastBody,
   FORECAST_MIN_RUNS,
+  type ForecastPlanOut,
 } from "./aiForecast";
 import { verifyForecastHistory } from "./aiForecastVerify";
 import {
@@ -160,6 +163,12 @@ import {
   formatAccuracyGrounding,
 } from "./forecastAccuracy";
 import { reviewSuggestions } from "./aiReviewer";
+import {
+  AI_RESULT_CACHE_TTL_MS,
+  fingerprintAiOperation,
+  getOrCreateAiResult,
+  type AiCacheLoadResult,
+} from "../lib/aiResultCache";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 import {
   loadFacilityKnowledge,
@@ -171,9 +180,92 @@ import {
 
 const router: IRouter = Router();
 
-// Every /api/ai route passes through the facility's weighted cost budget before
-// its route-specific request limiter or handler can call an AI provider.
-router.use("/ai", aiCostLimit);
+// Stable, non-conversational routes can look up their sanitized result before
+// charging the weighted provider budget. They still pass through their own
+// request/abuse limiter below. The other routes retain the original global
+// charge-before-handler behavior.
+const CACHEABLE_AI_PATHS = new Set([
+  "/forecast",
+  "/summary",
+  "/spec-reconcile",
+  "/mix-reconcile",
+  "/match-import",
+  "/match-premix",
+  "/suggest-merges",
+]);
+router.use("/ai", (req, res, next) => {
+  if (CACHEABLE_AI_PATHS.has(req.path)) {
+    // Preserve the pre-cache behavior for the clearly invalid empty requests
+    // used by the auth/cost guard: they are charged before capability gating,
+    // but valid requests still defer charging until validation, grounding, and
+    // the cache miss owner.
+    if (isObject(req.body) && Object.keys(req.body).length === 0) {
+      aiCostLimit(req, res, next);
+      return;
+    }
+    next();
+    return;
+  }
+  aiCostLimit(req, res, next);
+});
+
+class AiCostLimitError extends Error {
+  constructor() {
+    super("AI cost limit exceeded");
+    this.name = "AiCostLimitError";
+  }
+}
+
+function finishAiCostLimitResponse(res: Response): void {
+  // The miss owner may already have written the detailed limiter response.
+  // Concurrent waiters share that error but still need their own response.
+  if (!res.headersSent) {
+    res.status(429).json({ error: "AI cost limit exceeded" });
+  }
+}
+
+class AiResponseError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly error: string,
+  ) {
+    super(error);
+    this.name = "AiResponseError";
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function cachedAiResponse<T>(
+  req: Request,
+  res: Response,
+  opts: {
+    operation: string;
+    model: string;
+    system: string;
+    user: string;
+    validate: (value: unknown) => value is T;
+    load: () => Promise<AiCacheLoadResult<T>>;
+    ttlMs?: number;
+  },
+): Promise<{ value: T; hit: boolean }> {
+  const key = fingerprintAiOperation(opts);
+  return getOrCreateAiResult({
+    operation: opts.operation,
+    key,
+    ttlMs: opts.ttlMs ?? AI_RESULT_CACHE_TTL_MS,
+    validate: opts.validate,
+    log: req.log,
+    load: async () => {
+      // This is deliberately inside getOrCreateAiResult's in-flight owner:
+      // cache hits and concurrent waiters do not consume provider budget.
+      if (!(await chargeAiCost(req, res))) throw new AiCostLimitError();
+      return opts.load();
+    },
+  });
+}
 
 // Cost/abuse guard for the paid AI endpoint: per-user fixed window. Matches the
 // photo-intake endpoint's posture (10 requests / minute).
@@ -349,6 +441,24 @@ router.post(
       return;
     }
 
+    // An empty live day has no operational recommendations to calculate or
+    // review. Keep the endpoint useful without turning an empty state into a
+    // paid model request.
+    if (
+      validation.data.runs.length === 0 &&
+      (validation.data.scheduledRuns?.length ?? 0) === 0 &&
+      (validation.data.historyRuns?.length ?? 0) === 0
+    ) {
+      res.json({
+        recommendations: [],
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        note: "No production data is available to optimize yet.",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
     const { system, user } = buildOptimizePrompt(validation.data);
     const userPrompt = await groundPromptWithMemory(req.log, user);
 
@@ -365,8 +475,14 @@ router.post(
       });
       content = response.choices[0]?.message?.content ?? "";
     } catch (err) {
-      req.log.error({ err }, "ai-optimize call failed");
-      res.status(502).json({ error: "AI provider error" });
+      req.log.error({ err }, "ai-optimize call failed; returning no-AI state");
+      res.json({
+        recommendations: [],
+        aiGenerated: false,
+        aiStatus: "unavailable",
+        note: "AI optimization is unavailable. No recommendations were applied.",
+        generatedAt: Date.now(),
+      });
       return;
     }
 
@@ -375,7 +491,13 @@ router.post(
       raw = JSON.parse(content);
     } catch {
       req.log.warn({ content: content.slice(0, 200) }, "ai-optimize non-JSON response");
-      res.json({ recommendations: [], generatedAt: Date.now() });
+      res.json({
+        recommendations: [],
+        aiGenerated: false,
+        aiStatus: "unavailable",
+        note: "AI returned no usable optimization recommendations.",
+        generatedAt: Date.now(),
+      });
       return;
     }
 
@@ -855,33 +977,90 @@ router.post(
             currentProfiles: toCurrentReconcileProfiles(validation.data),
           });
 
+    // There is nothing to narrate when both deterministic comparisons are
+    // clean. Return the authoritative empty diff without loading memory or
+    // spending an AI call.
+    if (discrepancies.length === 0 && profileDiscrepancies.length === 0) {
+      res.json({
+        specSheetId: validation.data.specSheetId,
+        discrepancies,
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
     // Advisory plain-language summary. Fail-safe: any AI error still returns the
     // deterministic discrepancies (with an empty summary) rather than a 502.
-    let summary = "";
+    const model = pickModel("full");
+    let cachedSpecBody: {
+      specSheetId: number;
+      discrepancies: typeof discrepancies;
+      summary?: string;
+    };
     try {
       const { system, user } = buildSpecReconcilePrompt(label, discrepancies, profileDiscrepancies);
       const grounded = await groundPromptWithMemory(req.log, user, {
         facilityDomains: ["ingredient", "general"],
       });
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: grounded },
-        ],
+      const cached = await cachedAiResponse(req, res, {
+        operation: "spec-reconcile",
+        model,
+        system,
+        user: grounded,
+        validate: (value): value is typeof cachedSpecBody =>
+          isObject(value) &&
+          typeof value.specSheetId === "number" &&
+          Array.isArray(value.discrepancies) &&
+          value.discrepancies.every(isObject) &&
+          typeof value.summary === "string",
+        load: async () => {
+          try {
+            const response = await openai.chat.completions.create({
+              model,
+              max_completion_tokens: 2048,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: grounded },
+              ],
+            });
+            const nextSummary = sanitizeSpecReconcileSummary(
+              response.choices[0]?.message?.content ?? "",
+            );
+            const value = {
+              specSheetId: validation.data.specSheetId,
+              discrepancies,
+              ...(nextSummary ? { summary: nextSummary } : {}),
+            };
+            return { value, cacheable: !!nextSummary };
+          } catch (err) {
+            req.log.error({ err }, "ai-spec-reconcile summary call failed");
+            return {
+              value: {
+                specSheetId: validation.data.specSheetId,
+                discrepancies,
+              },
+              cacheable: false,
+            };
+          }
+        },
       });
-      summary = sanitizeSpecReconcileSummary(response.choices[0]?.message?.content ?? "");
+      cachedSpecBody = cached.value;
     } catch (err) {
-      req.log.error({ err }, "ai-spec-reconcile summary call failed");
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
+        return;
+      }
+      throw err;
     }
 
     res.json({
-      specSheetId: validation.data.specSheetId,
-      discrepancies,
+      ...cachedSpecBody!,
+      aiGenerated: !!cachedSpecBody!.summary,
+      aiStatus: cachedSpecBody!.summary ? "enriched" : "unavailable",
       generatedAt: Date.now(),
-      ...(summary ? { summary } : {}),
     });
   },
 );
@@ -908,10 +1087,21 @@ router.post(
 
     const discrepancies = toMixDiscrepancies(validation.data);
 
+    if (discrepancies.length === 0) {
+      res.json({
+        discrepancies,
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
     // Advisory plain-language summary. Fail-safe: any AI error still returns a
     // (empty) summary rather than a 502 — the deterministic diff already lives
     // on the client.
-    let summary = "";
+    const model = pickModel("full");
+    let cachedMixBody: { summary?: string };
     try {
       const { system, user } = buildMixReconcilePrompt(
         validation.data.label ?? "",
@@ -920,23 +1110,51 @@ router.post(
       const grounded = await groundPromptWithMemory(req.log, user, {
         facilityDomains: ["ingredient", "general"],
       });
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: grounded },
-        ],
+      const cached = await cachedAiResponse(req, res, {
+        operation: "mix-reconcile",
+        model,
+        system,
+        user: grounded,
+        validate: (value): value is typeof cachedMixBody =>
+          isObject(value) && typeof value.summary === "string",
+        load: async () => {
+          try {
+            const response = await openai.chat.completions.create({
+              model,
+              max_completion_tokens: 2048,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: grounded },
+              ],
+            });
+            const nextSummary = sanitizeMixReconcileSummary(
+              response.choices[0]?.message?.content ?? "",
+            );
+            return {
+              value: nextSummary ? { summary: nextSummary } : {},
+              cacheable: !!nextSummary,
+            };
+          } catch (err) {
+            req.log.error({ err }, "ai-mix-reconcile summary call failed");
+            return { value: {}, cacheable: false };
+          }
+        },
       });
-      summary = sanitizeMixReconcileSummary(response.choices[0]?.message?.content ?? "");
+      cachedMixBody = cached.value;
     } catch (err) {
-      req.log.error({ err }, "ai-mix-reconcile summary call failed");
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
+        return;
+      }
+      throw err;
     }
 
     res.json({
+      ...cachedMixBody!,
+      aiGenerated: !!cachedMixBody!.summary,
+      aiStatus: cachedMixBody!.summary ? "enriched" : "unavailable",
       generatedAt: Date.now(),
-      ...(summary ? { summary } : {}),
     });
   },
 );
@@ -1205,7 +1423,7 @@ router.post(
     // AI call entirely so an app left open overnight doesn't burn the cost cap
     // polling for nothing.
     if (!isDayActive(validation.data) && flaggedAtRisk.length === 0 && lowStock.length === 0) {
-      res.json({ alert: null, generatedAt: Date.now() });
+      res.json({ alert: null, aiStatus: "deterministic", generatedAt: Date.now() });
       return;
     }
 
@@ -1217,34 +1435,92 @@ router.post(
     );
     const userPrompt = await groundPromptWithMemory(req.log, user);
 
-    let content = "";
+    type ProactiveCacheBody = {
+      alert: ReturnType<typeof sanitizeProactiveAlert>["alert"];
+      note?: string;
+      aiStatus: "enriched" | "unavailable";
+    };
+    let cachedProactiveBody: ProactiveCacheBody;
+    const model = pickModel("full");
     try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
+      const cached = await cachedAiResponse<ProactiveCacheBody>(req, res, {
+        operation: "proactive-alert",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is ProactiveCacheBody =>
+          isObject(value) &&
+          "alert" in value &&
+          (value.alert === null || isObject(value.alert)) &&
+          (value.note === undefined || typeof value.note === "string") &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
+        load: async () => {
+          let content = "";
+          try {
+            const response = await openai.chat.completions.create({
+              model,
+              max_completion_tokens: 2048,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: userPrompt },
+              ],
+            });
+            content = response.choices[0]?.message?.content ?? "";
+          } catch (err) {
+            req.log.error({ err }, "ai-proactive-alert call failed; using no-AI state");
+            return {
+              value: {
+                alert: null,
+                note: "AI is unavailable. Deterministic stock and production checks remain available.",
+                aiStatus: "unavailable" as const,
+              },
+              // Cache the bounded no-AI state for this unchanged risk snapshot.
+              cacheable: true,
+            };
+          }
+
+          let raw: unknown;
+          try {
+            raw = JSON.parse(content);
+          } catch {
+            req.log.warn({ content: content.slice(0, 200) }, "ai-proactive-alert non-JSON response");
+            return {
+              value: {
+                alert: null,
+                note: "AI returned no usable alert. Deterministic checks remain available.",
+                aiStatus: "unavailable" as const,
+              },
+              cacheable: true,
+            };
+          }
+
+          const { alert, note } = sanitizeProactiveAlert(raw, validation.data);
+          return {
+            value: {
+              alert,
+              ...(note ? { note } : {}),
+              aiStatus: "enriched" as const,
+            },
+            cacheable: true,
+          };
+        },
       });
-      content = response.choices[0]?.message?.content ?? "";
+      cachedProactiveBody = cached.value;
     } catch (err) {
-      req.log.error({ err }, "ai-proactive-alert call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
+      if (err instanceof AiCostLimitError) {
+        res.json({
+          alert: null,
+          aiStatus: "unavailable",
+          note: "AI cost limit reached. Deterministic checks remain available.",
+          generatedAt: Date.now(),
+        });
+        return;
+      }
+      throw err;
     }
 
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-proactive-alert non-JSON response");
-      res.json({ alert: null, generatedAt: Date.now() });
-      return;
-    }
-
-    const { alert, note } = sanitizeProactiveAlert(raw, validation.data);
+    const { alert, note } = cachedProactiveBody;
 
     // Record notable triggers back through the shared facility-memory write path
     // (best-effort) so the watcher's timing improves over time. A write failure
@@ -1265,6 +1541,7 @@ router.post(
 
     res.json({
       alert,
+      aiStatus: cachedProactiveBody.aiStatus,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
@@ -1381,6 +1658,9 @@ router.post(
     if (agg.totalRuns < FORECAST_MIN_RUNS) {
       res.json({
         forecast: null,
+        forecasts: [],
+        aiGenerated: false,
+        aiStatus: "deterministic",
         generatedAt: Date.now(),
         note: "Not enough production history yet to forecast. Finish a few days of runs and try again.",
       });
@@ -1413,77 +1693,116 @@ router.post(
     const { system, user } = buildForecastPrompt(validation.data, accuracyGrounding);
     const userPrompt = appendCorrectionsBlock(appendFacilityMemoryBlock(user, knowledge), corrections);
 
-    // A malformed reply here is user-visible data loss (the manager gets no
-    // forecast at all), so retry once before falling back to the empty result.
-    const result = await fetchModelJsonWithRetry({
-      label: "ai-forecast",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("full"),
-          // Multi-day plans produce proportionally more output; give the longer
-          // horizons more room while keeping a sane ceiling.
-          max_completion_tokens: targetDates.length > 1 ? 8192 : 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "AI provider error");
-        res.status(failure.status).json({ error: failure.error });
+    const model = pickModel("full");
+    type ForecastResponseBody = {
+      forecast: ForecastPlanOut | null;
+      forecasts: ForecastPlanOut[];
+      aiGenerated: boolean;
+      aiStatus: "deterministic" | "enriched" | "unavailable";
+      note?: string;
+    };
+    let cachedForecastBody: ForecastResponseBody;
+    try {
+      const cached = await cachedAiResponse<ForecastResponseBody>(req, res, {
+        operation: "forecast",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is ForecastResponseBody =>
+          isObject(value) &&
+          Array.isArray(value.forecasts) &&
+          value.forecasts.every(isObject) &&
+          "forecast" in value &&
+          (value.forecast === null || isObject(value.forecast)) &&
+          value.aiGenerated === true &&
+          value.aiStatus === "enriched",
+        load: async () => {
+          // A malformed reply is user-visible data loss, so retain the existing
+          // bounded retry and only cache a successfully sanitized plan.
+          const result = await fetchModelJsonWithRetry({
+            label: "ai-forecast",
+            log: req.log,
+            call: async () => {
+              const response = await openai.chat.completions.create({
+                model,
+                max_completion_tokens: targetDates.length > 1 ? 8192 : 4096,
+                response_format: { type: "json_object" },
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: userPrompt },
+                ],
+              });
+              return response.choices[0]?.message?.content ?? "";
+            },
+          });
+          if (!result.ok) {
+            if (result.reason === "provider" || result.reason === "rate-limited") {
+              const failure = aiCallFailureHttp(result, "AI provider error");
+              throw new AiResponseError(failure.status, failure.error);
+            }
+            return {
+              value: {
+                forecast: null,
+                forecasts: [],
+                aiGenerated: false,
+                aiStatus: "unavailable",
+                note: "AI forecasting is unavailable. No forecast was produced.",
+              },
+              cacheable: false,
+            };
+          }
+
+          const { forecasts, note } = sanitizeForecasts(result.raw, targetDates);
+          const value: ForecastResponseBody = {
+            forecast: forecasts[0] ?? null,
+            forecasts,
+            aiGenerated: true,
+            aiStatus: "enriched",
+            ...(note ? { note } : {}),
+          };
+
+          // Only trusted, server-verifiable history may update shared memory.
+          const historyVerified = await verifyForecastHistory(
+            validation.data.history,
+            currentScope(),
+            req.log,
+          );
+          if (forecasts.length && historyVerified) {
+            void recordFacilityKnowledge(
+              forecasts.map((plan) => ({
+                domain: "forecast",
+                key: `plan:${plan.targetDate}`,
+                fact: formatForecastFact(plan),
+                source: "demand-forecaster",
+              })),
+            ).catch((err) => {
+              req.log.error({ err }, "failed to record forecast to facility memory");
+            });
+          }
+          return { value, cacheable: forecasts.length > 0 || !!note };
+        },
+      });
+      cachedForecastBody = cached.value;
+    } catch (err) {
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
         return;
       }
-      res.json({ forecast: null, forecasts: [], generatedAt: Date.now() });
-      return;
-    }
-    const raw: unknown = result.raw;
-
-    const { forecasts, note } = sanitizeForecasts(raw, targetDates);
-
-    // Record each produced day's plan back through the shared facility-memory
-    // write path (best-effort) so future forecasts — and any later accuracy
-    // review — can reference what was predicted for this kind of day. A write
-    // failure must never break the response, so swallow errors.
-    //
-    // Security: `validation.data.history` is entirely client-controlled, and the
-    // model is told to echo its brand/flavor names verbatim, so a fabricated
-    // history flows straight into what gets persisted here — poisoning the
-    // shared pool every other AI feature trusts. Reconcile the submitted
-    // history against the server's own authoritative daily_sync records before
-    // writing back; an unverifiable/fabricated history still gets its forecast
-    // returned to the caller, it just isn't trusted into shared memory.
-    const historyVerified = await verifyForecastHistory(
-      validation.data.history,
-      currentScope(),
-      req.log,
-    );
-    if (forecasts.length && historyVerified) {
-      void recordFacilityKnowledge(
-        forecasts.map((plan) => ({
-          domain: "forecast",
-          key: `plan:${plan.targetDate}`,
-          fact: formatForecastFact(plan),
-          source: "demand-forecaster",
-        })),
-      ).catch((err) => {
-        req.log.error({ err }, "failed to record forecast to facility memory");
-      });
+      if (err instanceof AiResponseError) {
+        res.json({
+          forecast: null,
+          forecasts: [],
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI forecasting is unavailable. No forecast was produced.",
+          generatedAt: Date.now(),
+        });
+        return;
+      }
+      throw err;
     }
 
-    res.json({
-      // forecast (singular) stays populated with the first day's plan for
-      // backward compatibility with older clients; forecasts carries every day.
-      forecast: forecasts[0] ?? null,
-      forecasts,
-      generatedAt: Date.now(),
-      ...(note ? { note } : {}),
-    });
+    res.json({ ...cachedForecastBody!, generatedAt: Date.now() });
   },
 );
 
@@ -1521,6 +1840,7 @@ router.post(
         stats,
         generatedAt: Date.now(),
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
@@ -1534,50 +1854,69 @@ router.post(
       allowPrivilegedFacilityDomains: false,
     });
 
-    let content = "";
+    const model = pickModel("full");
+    let cachedSummaryBody: {
+      summary: string;
+      stats: typeof stats;
+      aiGenerated: boolean;
+    };
     try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 1024,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
+      const cached = await cachedAiResponse(req, res, {
+        operation: "summary",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is typeof cachedSummaryBody =>
+          isObject(value) &&
+          typeof value.summary === "string" &&
+          isObject(value.stats) &&
+          typeof value.aiGenerated === "boolean",
+        load: async () => {
+          let content = "";
+          try {
+            const response = await openai.chat.completions.create({
+              model,
+              max_completion_tokens: 1024,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: userPrompt },
+              ],
+            });
+            content = response.choices[0]?.message?.content ?? "";
+          } catch (err) {
+            req.log.error({ err }, "ai-summary call failed; using deterministic fallback");
+            return { value: { summary: fallback, stats, aiGenerated: false }, cacheable: false };
+          }
+
+          let raw: unknown;
+          try {
+            raw = JSON.parse(content);
+          } catch {
+            req.log.warn({ contentLength: content.length }, "ai-summary non-JSON response");
+            return { value: { summary: fallback, stats, aiGenerated: false }, cacheable: false };
+          }
+
+          const narrated = sanitizeSummary(raw);
+          return {
+            value: { summary: narrated ?? fallback, stats, aiGenerated: narrated != null },
+            cacheable: narrated != null,
+          };
+        },
       });
-      content = response.choices[0]?.message?.content ?? "";
+      cachedSummaryBody = cached.value;
     } catch (err) {
-      // Fail-safe: AI provider error still returns a usable deterministic recap.
-      req.log.error({ err }, "ai-summary call failed; using deterministic fallback");
-      res.json({
-        summary: fallback,
-        stats,
-        generatedAt: Date.now(),
-        aiGenerated: false,
-      });
-      return;
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
+        return;
+      }
+      throw err;
     }
 
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-summary non-JSON response");
-      res.json({
-        summary: fallback,
-        stats,
-        generatedAt: Date.now(),
-        aiGenerated: false,
-      });
-      return;
-    }
-
-    const narrated = sanitizeSummary(raw);
     res.json({
-      summary: narrated ?? fallback,
-      stats,
+      ...cachedSummaryBody!,
       generatedAt: Date.now(),
-      aiGenerated: narrated != null,
+      aiStatus: cachedSummaryBody!.aiGenerated ? "enriched" : "unavailable",
     });
   },
 );
@@ -1623,13 +1962,19 @@ router.post(
         summary: "",
         note: "Not enough run history yet to spot anomalies.",
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
 
     // Nothing drifted → skip the AI call entirely. Cheap and honest.
     if (result.anomalies.length === 0) {
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({
+        ...baseResponse,
+        summary: "",
+        aiGenerated: false,
+        aiStatus: "deterministic",
+      });
       return;
     }
 
@@ -1657,7 +2002,12 @@ router.post(
     } catch (err) {
       // Fail-safe: AI provider error still returns the deterministic anomalies.
       req.log.error({ err }, "ai-anomalies call failed; returning anomalies without narration");
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({
+        ...baseResponse,
+        summary: "",
+        aiGenerated: false,
+        aiStatus: "unavailable",
+      });
       return;
     }
 
@@ -1666,7 +2016,12 @@ router.post(
       raw = JSON.parse(content);
     } catch {
       req.log.warn({ content: content.slice(0, 200) }, "ai-anomalies non-JSON response");
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({
+        ...baseResponse,
+        summary: "",
+        aiGenerated: false,
+        aiStatus: "unavailable",
+      });
       return;
     }
 
@@ -1675,6 +2030,7 @@ router.post(
       ...baseResponse,
       summary: narrated ?? "",
       aiGenerated: narrated != null,
+      aiStatus: narrated != null ? "enriched" : "unavailable",
     });
   },
 );
@@ -1728,6 +2084,7 @@ router.post(
         summary: "",
         note: "Not enough runs to reorder.",
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
@@ -1737,6 +2094,7 @@ router.post(
         summary: "",
         note: "Runs are already in a good order.",
         aiGenerated: false,
+        aiStatus: "deterministic",
       });
       return;
     }
@@ -1762,7 +2120,7 @@ router.post(
         { err },
         "ai-schedule-optimize call failed; returning order without narration",
       );
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({ ...baseResponse, summary: "", aiGenerated: false, aiStatus: "unavailable" });
       return;
     }
 
@@ -1774,7 +2132,7 @@ router.post(
         { content: content.slice(0, 200) },
         "ai-schedule-optimize non-JSON response",
       );
-      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      res.json({ ...baseResponse, summary: "", aiGenerated: false, aiStatus: "unavailable" });
       return;
     }
 
@@ -1783,6 +2141,7 @@ router.post(
       ...baseResponse,
       summary: narrated ?? "",
       aiGenerated: narrated != null,
+      aiStatus: narrated != null ? "enriched" : "unavailable",
     });
   },
 );
@@ -1954,100 +2313,205 @@ router.post(
       return;
     }
 
-    const { system, user } = buildMatchImportPrompt(validation.data);
+    const deterministic = resolveDeterministicMatchImport(validation.data);
+    const deterministicMatches = deterministic.resolved;
+    const unresolved = deterministic.unresolved;
+    if (
+      unresolved.unmatchedBrands.length === 0 &&
+      unresolved.unmatchedFlavors.length === 0 &&
+      (unresolved.unmatchedIngredients ?? []).length === 0 &&
+      (unresolved.unmatchedAppTypes ?? []).length === 0 &&
+      (unresolved.unmatchedPepTypes ?? []).length === 0
+    ) {
+      res.json({
+        ...deterministicMatches,
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
+    const { system, user } = buildMatchImportPrompt(unresolved);
     const userPrompt = await groundPromptWithMemory(req.log, user, {
       correctionDomains: ["brand", "flavor"],
     });
 
-    // A malformed reply here is user-visible data loss (an Excel import loses
-    // all its name matches), so retry once before the empty fallback.
-    const result = await fetchModelJsonWithRetry({
-      label: "ai-match-import",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("cheap"),
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "AI provider error");
-        res.status(failure.status).json({ error: failure.error });
+    type MatchImportCacheBody = {
+      brandMatches: unknown[];
+      flavorMatches: unknown[];
+      ingredientMatches: unknown[];
+      appTypeMatches: unknown[];
+      pepTypeMatches: unknown[];
+      aiStatus: "enriched" | "unavailable";
+      note?: string;
+    };
+    let cachedMatchBody: MatchImportCacheBody;
+    const model = pickModel("cheap");
+    try {
+      const cached = await cachedAiResponse<MatchImportCacheBody>(req, res, {
+        operation: "match-import",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is MatchImportCacheBody =>
+          isObject(value) &&
+          Array.isArray(value.brandMatches) &&
+          Array.isArray(value.flavorMatches) &&
+          Array.isArray(value.ingredientMatches) &&
+          Array.isArray(value.appTypeMatches) &&
+          Array.isArray(value.pepTypeMatches) &&
+          value.brandMatches.every(isObject) &&
+          value.flavorMatches.every(isObject) &&
+          value.ingredientMatches.every(isObject) &&
+          value.appTypeMatches.every(isObject) &&
+          value.pepTypeMatches.every(isObject) &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
+        load: async () => {
+          const result = await fetchModelJsonWithRetry({
+            label: "ai-match-import",
+            log: req.log,
+            call: async () => {
+              const response = await openai.chat.completions.create({
+                model,
+                max_completion_tokens: 4096,
+                response_format: { type: "json_object" },
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: userPrompt },
+                ],
+              });
+              return response.choices[0]?.message?.content ?? "";
+            },
+          });
+          if (!result.ok) {
+            if (result.reason === "provider" || result.reason === "rate-limited") {
+              const failure = aiCallFailureHttp(result, "AI provider error");
+              throw new AiResponseError(failure.status, failure.error);
+            }
+            return {
+              value: {
+                brandMatches: [],
+                flavorMatches: [],
+                ingredientMatches: [],
+                appTypeMatches: [],
+                pepTypeMatches: [],
+                aiStatus: "unavailable",
+              },
+              cacheable: false,
+            };
+          }
+
+          const raw = result.raw;
+          const rawIsValidShape =
+            isObject(raw) &&
+            Array.isArray(raw.brandMatches) &&
+            Array.isArray(raw.flavorMatches) &&
+            Array.isArray(raw.ingredientMatches) &&
+            Array.isArray(raw.appTypeMatches) &&
+            Array.isArray(raw.pepTypeMatches);
+          const {
+            brandMatches,
+            flavorMatches,
+            ingredientMatches,
+            appTypeMatches,
+            pepTypeMatches,
+            note,
+          } = sanitizeMatchImport(raw, unresolved);
+          const verdicts = await reviewSuggestions({
+            featureLabel: "spreadsheet name matches to existing saved names",
+            instructions:
+              "Flag any match where the imported name is likely NOT the same real-world item as the matched saved name (a wrong or coincidental match). Approve matches that clearly refer to the same item.",
+            items: [
+              ...brandMatches.map((m, i) => ({
+                id: `brand-${i}`,
+                text: `Imported brand "${m.candidate}" matched to saved "${m.match}"`,
+              })),
+              ...flavorMatches.map((m, i) => ({
+                id: `flavor-${i}`,
+                text: `Imported flavor "${m.candidate}" (brand ${m.brand}) matched to saved "${m.match}"`,
+              })),
+              ...ingredientMatches.map((m, i) => ({
+                id: `ingredient-${i}`,
+                text: `Imported ${m.kind} ingredient "${m.candidate}" matched to saved "${m.match}"`,
+              })),
+              ...appTypeMatches.map((m, i) => ({
+                id: `app-${i}`,
+                text: `Imported applicator type "${m.candidate}" matched to saved "${m.match}"`,
+              })),
+              ...pepTypeMatches.map((m, i) => ({
+                id: `pep-${i}`,
+                text: `Imported pepperoni type "${m.candidate}" matched to saved "${m.match}"`,
+              })),
+            ],
+            log: req.log,
+          });
+          const value: MatchImportCacheBody = {
+            brandMatches: [
+              ...deterministicMatches.brandMatches,
+              ...brandMatches.map((m, i) => {
+                const v = verdicts.get(`brand-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            flavorMatches: [
+              ...deterministicMatches.flavorMatches,
+              ...flavorMatches.map((m, i) => {
+                const v = verdicts.get(`flavor-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            ingredientMatches: [
+              ...deterministicMatches.ingredientMatches,
+              ...ingredientMatches.map((m, i) => {
+                const v = verdicts.get(`ingredient-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            appTypeMatches: [
+              ...deterministicMatches.appTypeMatches,
+              ...appTypeMatches.map((m, i) => {
+                const v = verdicts.get(`app-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            pepTypeMatches: [
+              ...deterministicMatches.pepTypeMatches,
+              ...pepTypeMatches.map((m, i) => {
+                const v = verdicts.get(`pep-${i}`);
+                return v ? { ...m, review: v } : m;
+              }),
+            ],
+            aiStatus: "enriched",
+            ...(note ? { note } : {}),
+          };
+          return { value, cacheable: rawIsValidShape };
+        },
+      });
+      cachedMatchBody = cached.value;
+    } catch (err) {
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
         return;
       }
-      res.json({ brandMatches: [], flavorMatches: [], generatedAt: Date.now() });
-      return;
+      if (err instanceof AiResponseError) {
+        res.json({
+          ...deterministicMatches,
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI matching is unavailable; deterministic matches were retained for review.",
+          generatedAt: Date.now(),
+        });
+        return;
+      }
+      throw err;
     }
-    const raw: unknown = result.raw;
-
-    const { brandMatches, flavorMatches, ingredientMatches, appTypeMatches, pepTypeMatches, note } =
-      sanitizeMatchImport(raw, validation.data);
-
-    const verdicts = await reviewSuggestions({
-      featureLabel: "spreadsheet name matches to existing saved names",
-      instructions:
-        "Flag any match where the imported name is likely NOT the same real-world item as the matched saved name (a wrong or coincidental match). Approve matches that clearly refer to the same item.",
-      items: [
-        ...brandMatches.map((m, i) => ({
-          id: `brand-${i}`,
-          text: `Imported brand "${m.candidate}" matched to saved "${m.match}"`,
-        })),
-        ...flavorMatches.map((m, i) => ({
-          id: `flavor-${i}`,
-          text: `Imported flavor "${m.candidate}" (brand ${m.brand}) matched to saved "${m.match}"`,
-        })),
-        ...ingredientMatches.map((m, i) => ({
-          id: `ingredient-${i}`,
-          text: `Imported ${m.kind} ingredient "${m.candidate}" matched to saved "${m.match}"`,
-        })),
-        ...appTypeMatches.map((m, i) => ({
-          id: `app-${i}`,
-          text: `Imported applicator type "${m.candidate}" matched to saved "${m.match}"`,
-        })),
-        ...pepTypeMatches.map((m, i) => ({
-          id: `pep-${i}`,
-          text: `Imported pepperoni type "${m.candidate}" matched to saved "${m.match}"`,
-        })),
-      ],
-      log: req.log,
-    });
-    const reviewedBrands = brandMatches.map((m, i) => {
-      const v = verdicts.get(`brand-${i}`);
-      return v ? { ...m, review: v } : m;
-    });
-    const reviewedFlavors = flavorMatches.map((m, i) => {
-      const v = verdicts.get(`flavor-${i}`);
-      return v ? { ...m, review: v } : m;
-    });
-    const reviewedIngredients = ingredientMatches.map((m, i) => {
-      const v = verdicts.get(`ingredient-${i}`);
-      return v ? { ...m, review: v } : m;
-    });
-    const reviewedAppTypes = appTypeMatches.map((m, i) => {
-      const v = verdicts.get(`app-${i}`);
-      return v ? { ...m, review: v } : m;
-    });
-    const reviewedPepTypes = pepTypeMatches.map((m, i) => {
-      const v = verdicts.get(`pep-${i}`);
-      return v ? { ...m, review: v } : m;
-    });
 
     res.json({
-      brandMatches: reviewedBrands,
-      flavorMatches: reviewedFlavors,
-      ingredientMatches: reviewedIngredients,
-      appTypeMatches: reviewedAppTypes,
-      pepTypeMatches: reviewedPepTypes,
+      ...cachedMatchBody!,
+      aiGenerated: cachedMatchBody!.aiStatus === "enriched",
+      aiStatus: cachedMatchBody!.aiStatus,
       generatedAt: Date.now(),
-      ...(note ? { note } : {}),
     });
   },
 );
@@ -2261,58 +2725,115 @@ router.post(
       return;
     }
 
-    const { system, user } = buildMatchPremixPrompt(validation.data);
+    const deterministic = resolveDeterministicMatchPremix(validation.data);
+    if (deterministic.unresolvedNames.length === 0) {
+      res.json({
+        matches: deterministic.matches,
+        aiGenerated: false,
+        aiStatus: "deterministic",
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+
+    const aiInput = { ...validation.data, unmatchedNames: deterministic.unresolvedNames };
+    const { system, user } = buildMatchPremixPrompt(aiInput);
     const userPrompt = await groundPromptWithMemory(req.log, user, {
       correctionDomains: ["brand", "flavor"],
     });
 
-    // A malformed reply here is user-visible data loss (a premix import loses
-    // all its product matches), so retry once before the empty fallback.
-    const result = await fetchModelJsonWithRetry({
-      label: "ai-match-premix",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("cheap"),
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "AI provider error");
-        res.status(failure.status).json({ error: failure.error });
+    type MatchPremixCacheBody = {
+      matches: unknown[];
+      aiStatus: "enriched" | "unavailable";
+    };
+    let cachedPremixBody: MatchPremixCacheBody;
+    const model = pickModel("cheap");
+    try {
+      const cached = await cachedAiResponse(req, res, {
+        operation: "match-premix",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is MatchPremixCacheBody =>
+          isObject(value) &&
+          Array.isArray(value.matches) &&
+          value.matches.every(isObject) &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
+        load: async () => {
+          const result = await fetchModelJsonWithRetry({
+            label: "ai-match-premix",
+            log: req.log,
+            call: async () => {
+              const response = await openai.chat.completions.create({
+                model,
+                max_completion_tokens: 4096,
+                response_format: { type: "json_object" },
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: userPrompt },
+                ],
+              });
+              return response.choices[0]?.message?.content ?? "";
+            },
+          });
+          if (!result.ok) {
+            if (result.reason === "provider" || result.reason === "rate-limited") {
+              const failure = aiCallFailureHttp(result, "AI provider error");
+              throw new AiResponseError(failure.status, failure.error);
+            }
+            return {
+              value: { matches: [], aiStatus: "unavailable" as const },
+              cacheable: false,
+            };
+          }
+          const raw = result.raw;
+          const rawIsValidShape = isObject(raw) && Array.isArray(raw.matches);
+          const matches = sanitizeMatchPremix(raw, aiInput);
+          const verdicts = await reviewSuggestions({
+            featureLabel: "premix product names matched to existing saved brand/flavor products",
+            instructions:
+              "Flag any match where the imported premix name is likely NOT the same real-world product as the matched saved brand/flavor (a wrong or coincidental match). Approve matches that clearly refer to the same product.",
+            items: matches.map((m, i) => ({
+              id: `match-${i}`,
+              text: `Imported premix "${m.name}" matched to saved brand "${m.brand}"${m.flavor ? ` flavor "${m.flavor}"` : ""}`,
+            })),
+            log: req.log,
+          });
+          const value: MatchPremixCacheBody = {
+            matches: matches.map((m, i) => {
+              const v = verdicts.get(`match-${i}`);
+              return v ? { ...m, review: v } : m;
+            }),
+            aiStatus: "enriched",
+          };
+          return { value, cacheable: rawIsValidShape };
+        },
+      });
+      cachedPremixBody = cached.value;
+    } catch (err) {
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
         return;
       }
-      res.json({ matches: [], generatedAt: Date.now() });
-      return;
+      if (err instanceof AiResponseError) {
+        res.json({
+          matches: deterministic.matches,
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI matching is unavailable; deterministic matches were retained for review.",
+          generatedAt: Date.now(),
+        });
+        return;
+      }
+      throw err;
     }
-    const raw: unknown = result.raw;
 
-    const matches = sanitizeMatchPremix(raw, validation.data);
-
-    const verdicts = await reviewSuggestions({
-      featureLabel: "premix product names matched to existing saved brand/flavor products",
-      instructions:
-        "Flag any match where the imported premix name is likely NOT the same real-world product as the matched saved brand/flavor (a wrong or coincidental match). Approve matches that clearly refer to the same product.",
-      items: matches.map((m, i) => ({
-        id: `match-${i}`,
-        text: `Imported premix "${m.name}" matched to saved brand "${m.brand}"${m.flavor ? ` flavor "${m.flavor}"` : ""}`,
-      })),
-      log: req.log,
+    res.json({
+      matches: [...deterministic.matches, ...(cachedPremixBody?.matches ?? [])],
+      aiGenerated: cachedPremixBody?.aiStatus === "enriched",
+      aiStatus: cachedPremixBody?.aiStatus,
+      generatedAt: Date.now(),
     });
-    const reviewedMatches = matches.map((m, i) => {
-      const v = verdicts.get(`match-${i}`);
-      return v ? { ...m, review: v } : m;
-    });
-
-    res.json({ matches: reviewedMatches, generatedAt: Date.now() });
   },
 );
 
@@ -2349,65 +2870,107 @@ router.post(
       correctionDomains: ["ingredient", "die"],
     });
 
-    // A malformed reply here is user-visible data loss (the user asked for
-    // merge suggestions and gets none), so retry once before the empty fallback.
-    const result = await fetchModelJsonWithRetry({
-      label: "ai-suggest-merges",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("cheap"),
-          max_completion_tokens: 16384,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "provider" || result.reason === "rate-limited") {
-        const failure = aiCallFailureHttp(result, "AI provider error");
-        res.status(failure.status).json({ error: failure.error });
+    type MergeCacheBody = {
+      suggestions: unknown[];
+      aiStatus: "enriched" | "unavailable";
+      note?: string;
+    };
+    let cachedMergeBody: MergeCacheBody;
+    const model = pickModel("cheap");
+    try {
+      const cached = await cachedAiResponse<MergeCacheBody>(req, res, {
+        operation: "suggest-merges",
+        model,
+        system,
+        user: userPrompt,
+        validate: (value): value is MergeCacheBody =>
+          isObject(value) &&
+          Array.isArray(value.suggestions) &&
+          value.suggestions.every(isObject) &&
+          (value.aiStatus === "enriched" || value.aiStatus === "unavailable") &&
+          (value.note === undefined || typeof value.note === "string"),
+        load: async () => {
+          const result = await fetchModelJsonWithRetry({
+            label: "ai-suggest-merges",
+            log: req.log,
+            call: async () => {
+              const response = await openai.chat.completions.create({
+                model,
+                max_completion_tokens: 16384,
+                response_format: { type: "json_object" },
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: userPrompt },
+                ],
+              });
+              return response.choices[0]?.message?.content ?? "";
+            },
+          });
+          if (!result.ok) {
+            if (result.reason === "provider" || result.reason === "rate-limited") {
+              const failure = aiCallFailureHttp(result, "AI provider error");
+              throw new AiResponseError(failure.status, failure.error);
+            }
+            return {
+              value: { suggestions: [], aiStatus: "unavailable" as const },
+              cacheable: false,
+            };
+          }
+          const raw = result.raw;
+          const rawIsValidShape = isObject(raw) && Array.isArray(raw.suggestions);
+          const suggestions = filterKnownMerges(
+            sanitizeSuggestMerges(raw, validation.data.names),
+            corrections,
+          );
+          const note =
+            isObject(raw) && typeof raw.note === "string"
+              ? raw.note.trim().slice(0, 500)
+              : "";
+          const verdicts = await reviewSuggestions({
+            featureLabel: "proposed ingredient-name merges (folding duplicates into one canonical name)",
+            instructions:
+              "Flag any group that would merge names which are actually DIFFERENT products or ingredients (a merge that loses a real distinction). Approve groups that are clearly the same item spelled differently.",
+            items: suggestions.map((s, i) => ({
+              id: `merge-${i}`,
+              text: `Merge [${s.sources.join(", ")}] into "${s.target}"${s.reason ? ` — ${s.reason}` : ""}`,
+            })),
+            log: req.log,
+          });
+          const value: MergeCacheBody = {
+            suggestions: suggestions.map((s, i) => {
+              const v = verdicts.get(`merge-${i}`);
+              return v ? { ...s, review: v } : s;
+            }),
+            aiStatus: "enriched",
+            ...(note ? { note } : {}),
+          };
+          return { value, cacheable: rawIsValidShape };
+        },
+      });
+      cachedMergeBody = cached.value;
+    } catch (err) {
+      if (err instanceof AiCostLimitError) {
+        finishAiCostLimitResponse(res);
         return;
       }
-      res.json({ suggestions: [], generatedAt: Date.now() });
-      return;
+      if (err instanceof AiResponseError) {
+        res.json({
+          suggestions: [],
+          aiGenerated: false,
+          aiStatus: "unavailable",
+          note: "AI merge suggestions are unavailable. No changes were applied.",
+          generatedAt: Date.now(),
+        });
+        return;
+      }
+      throw err;
     }
-    const raw: unknown = result.raw;
-
-    // Deterministic post-filter: drop any source→target pair that already has
-    // a confirmed correction, so known renames never re-appear as suggestions.
-    const suggestions = filterKnownMerges(
-      sanitizeSuggestMerges(raw, validation.data.names),
-      corrections,
-    );
-    const note =
-      raw && typeof raw === "object" && typeof (raw as { note?: unknown }).note === "string"
-        ? (raw as { note: string }).note.trim().slice(0, 500)
-        : "";
-
-    const verdicts = await reviewSuggestions({
-      featureLabel: "proposed ingredient-name merges (folding duplicates into one canonical name)",
-      instructions:
-        "Flag any group that would merge names which are actually DIFFERENT products or ingredients (a merge that loses a real distinction). Approve groups that are clearly the same item spelled differently.",
-      items: suggestions.map((s, i) => ({
-        id: `merge-${i}`,
-        text: `Merge [${s.sources.join(", ")}] into "${s.target}"${s.reason ? ` — ${s.reason}` : ""}`,
-      })),
-      log: req.log,
-    });
-    const reviewed = suggestions.map((s, i) => {
-      const v = verdicts.get(`merge-${i}`);
-      return v ? { ...s, review: v } : s;
-    });
 
     res.json({
-      suggestions: reviewed,
+      ...cachedMergeBody!,
+      aiGenerated: cachedMergeBody!.aiStatus === "enriched",
+      aiStatus: cachedMergeBody!.aiStatus,
       generatedAt: Date.now(),
-      ...(note ? { note } : {}),
     });
   },
 );

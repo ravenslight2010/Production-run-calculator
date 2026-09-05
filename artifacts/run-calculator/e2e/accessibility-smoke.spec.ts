@@ -6,6 +6,10 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
+import {
+  dismissOnboardingIfPresent,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const testUsernames = new Set<string>();
 
@@ -199,77 +203,64 @@ async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
   await assertKeyboardTraversal(page, `${screen} at 200% zoom`, 4);
 }
 
-async function signUp(page: Page): Promise<void> {
+async function signUp(page: Page, role: "manager" | "supervisor" = "manager"): Promise<void> {
   const username = uniqueTestId("a11y");
   testUsernames.add(username);
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill("AccessibilitySmoke123!");
-  await page.locator("#confirm").fill("AccessibilitySmoke123!");
-  await page.locator("#accessCode").fill(signupCode());
-  const signupResponse = page.waitForResponse(
-    (response) => response.url().includes("/api/auth/sign-up"),
-  );
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  const response = await signupResponse;
-  expect(response.status(), "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
-  expect(response.status(), "isolated sign-up should not be rejected").toBeLessThan(300);
-
-  // Keep this browser fixture independent of stale role seeds in disposable
-  // databases. Every import entry point below requires the manager's full
-  // capability set, including AI, inventory, and profile management.
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must be configured for a11y smoke tests.");
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    const user = await db.query<{ id: string }>(
-      "SELECT id FROM users WHERE username = $1",
-      [username],
-    );
-    const userId = user.rows[0]?.id;
-    expect(userId, "isolated sign-up did not create a database user").toBeTruthy();
-    await db.query(
-      "INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager') " +
-        "ON CONFLICT (user_id) DO UPDATE SET role = 'manager'",
-      [userId],
-    );
-    await db.query(
-      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-      [JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "edit-production-rules",
-        "approve-password-resets",
-        "review-incidents",
-        "use-ai-tools",
-        "manage-factory-settings",
-        "manage-profiles",
-      ])],
-    );
-  } finally {
-    await db.end().catch(() => {});
-  }
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 60_000 });
-  await page.waitForTimeout(500);
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  await welcome.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
-  if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
-  } else {
-    // A delayed onboarding overlay can render after the tab is attached.
-    // Escape is harmless when it is absent and closes that overlay when it is
-    // present, leaving the authenticated shell available to the smoke checks.
-    await page.keyboard.press("Escape");
-  }
-  await page.keyboard.press("Escape");
+  await signUpAndHandleOnboarding(page, username, "AccessibilitySmoke123!", {
+    signupCode: signupCode(),
+    waitForApp: async (currentPage) => {
+      await currentPage.locator('[data-testid="tab-run"]').waitFor({
+        state: "attached",
+        timeout: 60_000,
+      });
+    },
+    afterSignUp: async (currentPage) => {
+      // Keep this browser fixture independent of stale role seeds in
+      // disposable databases. Every import entry point below requires the
+      // manager's full capability set.
+      if (!process.env.DATABASE_URL) {
+        throw new Error("DATABASE_URL must be configured for a11y smoke tests.");
+      }
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      try {
+        await db.connect();
+        const user = await db.query<{ id: string }>(
+          "SELECT id FROM users WHERE username = $1",
+          [username],
+        );
+        const userId = user.rows[0]?.id;
+        expect(userId, "isolated sign-up did not create a database user").toBeTruthy();
+        await db.query(
+          "INSERT INTO user_roles (user_id, role) VALUES ($1, $2) " +
+            "ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role",
+          [userId, role],
+        );
+        if (role === "manager") {
+          await db.query(
+            "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+            [JSON.stringify([
+              "manage-staff",
+              "manage-inventory",
+              "edit-production-rules",
+              "approve-password-resets",
+              "review-incidents",
+              "use-ai-tools",
+              "manage-factory-settings",
+              "manage-profiles",
+            ])],
+          );
+        }
+      } finally {
+        await db.end().catch(() => {});
+      }
+      await currentPage.waitForTimeout(500);
+      await currentPage.keyboard.press("Escape");
+      if (role !== "manager") {
+        await currentPage.reload({ waitUntil: "domcontentloaded" });
+        await currentPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      }
+    },
+  });
 }
 
 test.afterAll(async () => {
@@ -359,11 +350,11 @@ async function openSettings(page: Page): Promise<Locator> {
 }
 
 async function dismissUnexpectedDialog(page: Page): Promise<void> {
-  const getStarted = page.getByRole("dialog").last().getByRole("button", { name: "Get started", exact: true });
+  const welcome = page.getByRole("dialog").last();
+  const getStarted = welcome.getByRole("button", { name: "Get started", exact: true });
   await getStarted.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
-    await expect(getStarted).toBeHidden();
+    await dismissOnboardingIfPresent(page, { dialog: () => welcome, button: getStarted });
   }
   const dialogs = page.getByRole("dialog");
   for (let index = 0; index < await dialogs.count(); index += 1) {
@@ -516,6 +507,39 @@ test.describe("accessibility smoke", () => {
       screen: "cheese import dialog",
       file: invalidWorkbook,
     });
+    await dismissUnexpectedDialog(page);
+
+    // Field checks are a browser-observed summary. This manager journey runs at
+    // desktop, tablet, and phone widths in the a11y project and verifies that
+    // managers retain the physical-device attestation controls.
+    await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Reported issues", exact: true }).click();
+    const fieldChecks = page.getByTestId("field-checks-panel");
+    await expect(fieldChecks).toBeVisible();
+    await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
+    await expect(fieldChecks.getByText("Authenticated app startup and home bundle timing.", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toBeVisible();
+    await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(3);
+    await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
+    await assertKeyboardTraversal(page, "reported issues field checks", 8);
+  });
+
+  test("supervisors can review field checks without physical-device attestation controls", async ({ page }) => {
+    await signUp(page, "supervisor");
+
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Reported issues", exact: true }).click();
+    const fieldChecks = page.getByTestId("field-checks-panel");
+    await expect(fieldChecks).toBeVisible();
+    await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
+    await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toHaveCount(0);
+    await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(0);
+    await expect(fieldChecks.getByRole("button", { name: "Fail", exact: true })).toHaveCount(0);
+    await expect(fieldChecks.getByRole("button", { name: "Incomplete", exact: true })).toHaveCount(0);
   });
 
 });

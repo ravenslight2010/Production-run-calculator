@@ -51,6 +51,7 @@ import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
+import { consumeSauceBarrelInTransaction } from "./inventory";
 export { detectConflicts } from "../lib/syncConflict";
 
 const router: IRouter = Router();
@@ -611,6 +612,18 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
             .for("update");
           const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
           if (applied.outcome === "accepted") {
+             if (applied.inventoryConsumption?.kind === "sauce-barrel") {
+               const consumption = applied.inventoryConsumption;
+               await consumeSauceBarrelInTransaction(
+                 tx,
+                 consumption.runId,
+                 consumption.barrelIndex,
+                 consumption.itemKey,
+                 consumption.qty,
+                 true,
+                 consumption.eventId,
+               );
+             }
             if (existing) {
               await tx.update(dailySyncTable)
                 .set({ data: applied.data as any, updatedAt: new Date() })

@@ -16,4 +16,9 @@ export const AutoTrackClaimChannel = {
   'batch-consume': 'batch-consume',
   'batch-produce': 'batch-produce',
   hopper: 'hopper',
+  'sauce-barrel': 'sauce-barrel',
+  'app1-batch': 'app1-batch',
+  'app2-batch': 'app2-batch',
+  'app3-batch': 'app3-batch',
+  'app4-batch': 'app4-batch',
 } as const;

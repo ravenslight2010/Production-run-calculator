@@ -26,6 +26,7 @@ import { fetchMixes, saveMixes } from "./mixes";
 import { fetchSavedPremixSheets } from "./savedPremixSheets";
 import { fetchSavedSpecSheets } from "./savedSpecSheets";
 import { inventoryClientId } from "./inventoryShared";
+import type { AiStatus } from "./aiStatus";
 
 export type MixReconcileView = {
   source: "premix" | "spec";
@@ -34,6 +35,7 @@ export type MixReconcileView = {
   items: MixReconcileItem[];
   generatedAt: number;
   summary?: string;
+  aiStatus?: AiStatus;
 };
 
 function authHeaders(json = false): Record<string, string> {
@@ -65,19 +67,22 @@ function toWire(discrepancies: MixDiscrepancy[]): MixDiscrepancy[] {
  * discrepancies. Fail-safe: returns an empty summary on any error rather than
  * throwing, because the deterministic list is what actually matters.
  */
-async function narrate(label: string, discrepancies: MixDiscrepancy[]): Promise<string> {
-  if (discrepancies.length === 0) return "";
+async function narrate(
+  label: string,
+  discrepancies: MixDiscrepancy[],
+): Promise<{ summary: string; aiStatus?: AiStatus }> {
+  if (discrepancies.length === 0) return { summary: "", aiStatus: "deterministic" };
   try {
     const res = await fetch("/api/ai/mix-reconcile", {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ label, discrepancies: toWire(discrepancies) }),
     });
-    if (!res.ok) return "";
-    const data = (await res.json()) as { summary?: string };
-    return data.summary ?? "";
+    if (!res.ok) return { summary: "" };
+    const data = (await res.json()) as { summary?: string; aiStatus?: AiStatus };
+    return { summary: data.summary ?? "", aiStatus: data.aiStatus };
   } catch {
-    return "";
+    return { summary: "" };
   }
 }
 
@@ -90,14 +95,15 @@ export async function reconcilePremixSheet(
   const sheet = sheets.find((s) => s.id === sheetId);
   const sheetMixes: Mix[] = sheet?.data ?? [];
   const { discrepancies, items } = reconcileMixesWithPremixSheet({ currentMixes, sheetMixes });
-  const summary = await narrate(label, discrepancies);
+  const narration = await narrate(label, discrepancies);
   return {
     source: "premix",
     label,
     discrepancies,
     items,
     generatedAt: Date.now(),
-    ...(summary ? { summary } : {}),
+    ...(narration.summary ? { summary: narration.summary } : {}),
+    ...(narration.aiStatus ? { aiStatus: narration.aiStatus } : {}),
   };
 }
 
@@ -110,14 +116,15 @@ export async function reconcileSpecSheetMixes(
   const sheet = sheets.find((s) => s.id === sheetId);
   const specProducts = specImportToMixProducts(sheet?.data);
   const { discrepancies, items } = reconcileMixesWithSpec({ currentMixes, specProducts });
-  const summary = await narrate(label, discrepancies);
+  const narration = await narrate(label, discrepancies);
   return {
     source: "spec",
     label,
     discrepancies,
     items,
     generatedAt: Date.now(),
-    ...(summary ? { summary } : {}),
+    ...(narration.summary ? { summary: narration.summary } : {}),
+    ...(narration.aiStatus ? { aiStatus: narration.aiStatus } : {}),
   };
 }
 

@@ -9,6 +9,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
+import { signUpAndHandleOnboarding } from "./onboarding";
 import {
   AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS,
   MANAGEMENT_PERFORMANCE_BUDGETS,
@@ -50,24 +51,16 @@ function safePath(url: string): string {
 }
 
 async function signUp(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#confirm").fill(PASSWORD);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
   const response = page.waitForResponse((candidate) =>
     candidate.url().includes("/api/auth/sign-up"),
   );
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-  expect((await response).status(), "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
-  expect((await response).status(), "isolated sign-up should not be rejected").toBeLessThan(300);
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await getStarted.click();
-  }
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    onboarding: { visibilityTimeout: 2_000 },
+  });
+  const signupStatus = (await response).status();
+  expect(signupStatus, "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
+  expect(signupStatus, "isolated sign-up should not be rejected").toBeLessThan(300);
   await page.keyboard.press("Escape");
 }
 
@@ -290,7 +283,7 @@ test("keeps role-management controls unavailable to a non-manager on the staff r
     throw new Error("STAFF_SIGNUP_CODE must be configured for non-manager staff authorization e2e.");
   }
 
-  const username = uniqueTestId("e2e_staff_authorization");
+  const username = uniqueTestId("e2e_authenticated_slow_network");
   const roleName = uniqueTestId("e2e_reset_approver");
   testUsernames.add(username);
   testRoleNames.add(roleName);
@@ -378,7 +371,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
     });
   });
 
-  const username = uniqueTestId("e2e_management_performance");
+  const username = uniqueTestId("e2e_authenticated_slow_network");
   testUsernames.add(username);
   const staffChunkRequests: string[] = [];
   const apiEvidence: ApiEvidence[] = [];
@@ -437,7 +430,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   await expect.poll(() => staffChunkRequests.length).toBe(1);
 
   await expect.poll(async () => {
-    const diagnostics = await capturedDiagnostics(page);
+  const diagnostics = await capturedDiagnostics(page);
     return diagnostics.filter((entry) =>
       entry.name === "management:staff-chunk-load" ||
       entry.name === "management:staff-surface-commit" ||
@@ -489,27 +482,18 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
       durationMs: Math.round(durationMs * 100) / 100,
     }));
   const evidence = {
-    diagnostics: report,
-    budgets: budgetByName,
-    staffChunkRequests: staffChunkRequests.length,
-    apiRequests: apiEvidence,
-    apiSummary: {
-      requestCount: apiEvidence.length,
-      slowestMs: apiEvidence.reduce((slowest, request) => Math.max(slowest, request.durationMs), 0),
-      staffNavigationRequestCount: staffApiEvidence.length,
-      staffNavigationSlowestMs: staffApiEvidence.reduce(
-        (slowest, request) => Math.max(slowest, request.durationMs),
-        0,
-      ),
-      note: "API timings are recorded separately from browser chunk and surface timings; a visit over budget with low staff-navigation API timings points to client or runner contention.",
-    },
-    console: consoleOutput,
-    environment: {
-      baseURL: new URL(testInfo.project.use.baseURL ?? "http://unknown").origin,
-      browser: testInfo.project.name,
-      setup: "isolated account and facility created; manager role authorized",
-    },
-    classification: overBudget.length === 0 ? "pass" : "application-regression",
+    networkProfile: { latencyMs: 400, downloadKbps: 500, uploadKbps: 500 },
+    authenticatedVisitMs: Math.round(runReadyMs * 100) / 100,
+    budgetMs: AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs,
+    homeChunkRequests,
+    homeChunkDiagnostic: homeChunkDiagnostic
+      ? { name: homeChunkDiagnostic.name, durationMs: homeChunkDiagnostic.durationMs, kind: homeChunkDiagnostic.kind }
+      : null,
+    chunkLoadFailure: failureDiagnostic
+      ? { name: failureDiagnostic.name, durationMs: failureDiagnostic.durationMs, kind: failureDiagnostic.kind }
+      : null,
+    failedResources,
+    setup: "isolated account and facility created; manager role authorized",
   };
   await testInfo.attach("calculator-authenticated-startup.png", {
     body: await page.screenshot({ fullPage: true }),

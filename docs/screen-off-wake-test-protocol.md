@@ -11,7 +11,7 @@
 
 | Requirement | Notes |
 |---|---|
-| Device | Any Android tablet or iPad running Chrome / Safari (or Chrome DevTools device emulation) |
+| Device | A physical Android tablet or iPad running Chrome / Safari |
 | App | Web app deployed or running locally — logged in as a **manager** account |
 | Clean state | No active run when the session begins |
 | Run setup | cycleSpeed = **30**, crustsPerCycle = **2** (ppm = 60), pizzasPerCase = **6**, freezerTime = **5 min**, casesPerSkid = **10**, casesNeeded = **200** |
@@ -49,7 +49,7 @@ At t = 20 min from start:
 | 3 | Click **START RUN** | Note the exact start time (HH:MM:SS) |
 | 4 | Confirm the run is active (PAUSE RUN / STOP RUN buttons appear) | — |
 | 5 | Note the case counter display — should read **0** | Record: `baseline_cases = 0` |
-| 6 | **Lock the screen or close the app for ≥ 15 minutes** | Tablet power button; or navigate away / use Chrome "Task Manager" to suspend; or use Chrome DevTools → More Tools → Performance monitor → CPU throttle while switching tabs |
+| 6 | **Lock the screen or close the app for ≥ 15 minutes** | Use the physical device power button or OS app switcher |
 | 7 | Wake the screen / return to the app tab | Note the exact clock time |
 | 8 | Observe the case counter for **one tick** (≤ 2 s) | The counter must jump immediately after wake |
 
@@ -90,9 +90,10 @@ At t = 20 min from start:
 
 ---
 
-## Scenario C — Device emulation via Chrome DevTools (no physical screen-off)
+## Scenario C — Browser-only regression aid (not hardware evidence)
 
 Use this approach in a desktop browser when a physical tablet is not available.
+Its result must remain browser-observed and must not be recorded as a hardware confirmation.
 
 1. Open Chrome DevTools (F12) → **Application** tab → **Service Workers** → tick "Offline" (or use Network → Offline preset). This is NOT a real screen-off but simulates the page losing activity.
 
@@ -152,10 +153,30 @@ applied; do not tap Stop a second time.
 
 ---
 
+## Hardware-only guided checks
+
+Run these on a physical Android phone, Android tablet, or iPad. Use a clean
+training or idle screen and do not start, edit, pause, or stop a production run.
+
+1. **Touch accuracy:** Tap the normal navigation and non-destructive setup
+   controls once each. Pass only when the intended control responds without an
+   adjacent control activating.
+2. **Keyboard clearance:** Open ordinary text and number inputs. Pass only when
+   the focused input and its label remain visible above the physical on-screen
+   keyboard without changing saved production values.
+3. **OS process-kill recovery:** With no unsaved production work, fully close
+   the app from the OS app switcher and reopen it. Pass only when authentication
+   and the previously saved screen state recover without a crash or blank page.
+
+Immediately record each result in **Reported issues → Field checks**. The stored
+confirmation is intentionally limited to device category, protocol version,
+Pass/Fail/Incomplete outcome, and timestamp. Browser-observed checks remain a
+separate evidence source and cannot create hardware confirmations.
+
 ## Result recording template
 
 ```
-Protocol version: 2026-08 (foreground recovery)
+Protocol version: 2026-09
 Device: _______________________________
 Browser: _______________________________
 App URL: _______________________________
@@ -208,7 +229,7 @@ Notes: _______________________________
 - **A1**: Case counter jumps to the full expected value on first wake (≥ 90 cases for 15-min screen-off).  
 - **A4**: Second wake delta ≥ 40 cases in a single tick (not capped at 2).  
 - **B1**: Paused run counter is exactly unchanged after wake.  
-- **C** (or A4): A DevTools-simulated 30-s screen-off produces ≥ 5-case single-tick delta (not 2).
+- **C** (or A4): A DevTools-simulated 30-s screen-off produces ≥ 5-case single-tick delta (not 2). Scenario C is browser evidence only.
 - **D1–D5**: A single Stop tap is visible, run-bound, safely resolved, and retained across reload/peer sync.
 
 ---
@@ -223,3 +244,15 @@ verify the arithmetic in an isolated JSDOM environment:
 - **Test 8** (`paused run: counter stays frozen on wake`) — Same clock advance while paused → counter stays at 16.
 
 This protocol confirms those same invariants hold in a real browser's tab-lifecycle events.
+
+## Field verification boundary
+
+The Production Run Calculator passively records browser-observed evidence for
+startup, foreground recovery, sync acknowledgements, peer convergence, reload
+boot, online recovery, PWA update readiness, and bounded performance timing.
+That evidence appears in the manager **Reported issues → Field checks** panel
+and is scoped to the current facility. It is intentionally not a replacement
+for this protocol: touch accuracy, keyboard clearance, screen-off behavior, and
+OS process-kill recovery remain **Unsupported** until a person confirms them
+with guided physical-device steps. The observer never taps controls, changes
+run data, or creates synthetic production state.

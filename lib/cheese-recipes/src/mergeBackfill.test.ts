@@ -150,4 +150,29 @@ describe("backfillCheeseRecipeFromMergedSources", () => {
     expect(out!.brand).toBe("A");
     expect(out!.flavors).toEqual([]);
   });
+
+  it("collapses target and source duplicate components without clobbering values", () => {
+    const target = recipe({
+      name: "Blend",
+      components: [
+        { ingredient: "Cow's Romano", lbs: 3, sharePct: 0 },
+        { ingredient: "Romano Cows", lbs: 9, ozPerPizza: 0.4, sharePct: 20 },
+      ],
+    });
+    const source = recipe({
+      name: "Old Blend",
+      components: [
+        { ingredient: "Cows Romano", lbs: 99, ozPerPizza: 2, sharePct: 99 },
+        { ingredient: "Mozzarella, Part Skim", lbs: 10 },
+        { ingredient: "Part Skim Mozzarella", lbs: 20 },
+      ],
+    });
+
+    const out = backfillCheeseRecipeFromMergedSources(target, [source]);
+    expect(out!.components).toEqual([
+      { ingredient: "Cow's Romano", lbs: 3, ozPerPizza: 0.4, sharePct: 20 },
+      { ingredient: "Mozzarella, Part Skim", lbs: 10 },
+    ]);
+    expect(backfillCheeseRecipeFromMergedSources(out!, [source])).toBeNull();
+  });
 });

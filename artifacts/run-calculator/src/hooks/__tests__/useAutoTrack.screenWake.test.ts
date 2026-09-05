@@ -532,7 +532,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       }));
     });
 
-    // Release, then advance beyond a normal case period. With no freezer drain
+    // Release, then advance beyond a normal case period. With no Freeze tunnel drain
     // inventory, the ended run must remain frozen.
     foregroundBarrierRef.current = false;
     act(() => {

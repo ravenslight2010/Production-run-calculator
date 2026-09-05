@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { ScheduleMetrics } from './scheduleMetrics';
 
 export interface ScheduleOptimizeResponse {
@@ -23,4 +24,5 @@ export interface ScheduleOptimizeResponse {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
+  aiStatus: AiStatus;
 }

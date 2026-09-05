@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { MatchImportBrandMatch } from './matchImportBrandMatch';
 import type { MatchImportFlavorMatch } from './matchImportFlavorMatch';
 import type { MatchImportIngredientMatch } from './matchImportIngredientMatch';
@@ -20,6 +21,9 @@ export interface MatchImportResult {
   /** Confident matches for imported pepperoni type names. Optional. */
   pepTypeMatches?: MatchImportNameMatch[];
   generatedAt: number;
+  /** True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
 }

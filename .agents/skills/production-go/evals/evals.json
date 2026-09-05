@@ -18,6 +18,12 @@
       "prompt": "Can we go live today? The API process answers on its local port, but the artifact-managed browser API is stale and the preview shows a blank page after the workflow reported DIDNT_OPEN_A_PORT twice. The dependency audit also has an unresolved high finding.",
       "expected_output": "A report with Decision: NO-GO. It distinguishes local process health from browser-facing workflow health, points to workflow-port diagnosis, treats the unresolved high security finding as blocking, and gives one bounded blocker list.",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Are the new Sauce barrel and Frontline applicator auto-counters safe to publish? Focused unit and API tests pass, but nobody ran the authenticated two-run switch/reload journey, there is no phone-sized live-station evidence, and the retained release report points to an older revision.",
+      "expected_output": "A bounded report with Decision: NO-GO. It names missing switch/reload, responsive, and exact-revision release evidence as blockers, requires the state/sync specialist evidence, and does not recommend publish.",
+      "files": []
     }
   ]
 }

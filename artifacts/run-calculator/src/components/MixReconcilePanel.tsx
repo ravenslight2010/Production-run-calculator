@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateMasterDataSlice } from "../masterData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,7 @@ import {
   type MixReconcileView,
 } from "@/mixReconcile";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import AiStatusNotice from "@/components/AiStatusNotice";
 
 function fmtDate(ms: number): string {
   try {
@@ -150,7 +152,7 @@ export default function MixReconcilePanel({
     setBusyKey(`apply-${item.mixId}`);
     try {
       await applyMixReconcileItem(item);
-      await qc.invalidateQueries({ queryKey: ["mixes"] });
+      await invalidateMasterDataSlice(qc, "mixes");
       setAppliedIds((prev) => new Set(prev).add(item.mixId));
     } catch (err) {
       setResultError(err instanceof Error ? err.message : "Couldn't apply that fix. Refresh and review it again.");
@@ -280,6 +282,7 @@ export default function MixReconcilePanel({
         )}
 
         {resultError ? <p className="text-sm text-destructive">{resultError}</p> : null}
+        <AiStatusNotice status={result?.aiStatus} feature="AI reconciliation" />
 
         {result ? (
           <div

@@ -1,12 +1,13 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
   formatCatalogReport,
   main,
+  MAX_EDITABLE_LINES,
   scanSkillCatalog,
   type DuplicateAllowlistEntry,
   type SkillRoot,
@@ -62,6 +63,48 @@ test("rejects malformed metadata, invalid names, and overlong editable bodies", 
   assert.ok(report.failures >= 3);
 });
 
+test("project skill-creator keeps advanced guidance behind a local reference", async () => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const report = await scanSkillCatalog({
+    projectRoot,
+    roots: [roots[0]],
+    duplicateAllowlist: [],
+  });
+  const skill = report.skills.find((item) => item.name === "skill-creator");
+
+  assert.ok(skill, "expected the project-authored skill-creator guide");
+  assert.ok(
+    skill.lineCount <= MAX_EDITABLE_LINES,
+    `skill-creator/SKILL.md has ${skill.lineCount} lines; expected at most ${MAX_EDITABLE_LINES}`,
+  );
+
+  const skillPath = join(projectRoot, skill.path);
+  const advancedReference = "references/advanced-workflows.md";
+  const content = await readFile(skillPath, "utf8");
+  assert.ok(content.includes(advancedReference), `expected ${advancedReference} to remain referenced`);
+  assert.ok((await readFile(join(dirname(skillPath), advancedReference), "utf8")).length > 0);
+});
+
+test("rejects a custom skill whose frontmatter name does not match its directory", async () => {
+  const root = await fixture();
+  await addSkill(
+    root,
+    ".local/custom_skills",
+    "inventory-audit",
+    "body\n",
+    "name: inventory-review\ndescription: present",
+  );
+  const report = await scanSkillCatalog({ projectRoot: root, roots });
+  const skill = report.skills.find((item) => item.path.endsWith("/inventory-audit/SKILL.md"));
+
+  assert.equal(report.failures, 1);
+  assert.deepEqual(skill?.findings.map((item) => item.code), ["name_directory_mismatch"]);
+  assert.match(
+    formatCatalogReport(report),
+    /FAIL .*inventory-audit\/SKILL\.md.*name must match directory 'inventory-audit'/,
+  );
+});
+
 test("finds broken local markdown targets but ignores external links", async () => {
   const root = await fixture();
   await addSkill(
@@ -73,6 +116,38 @@ test("finds broken local markdown targets but ignores external links", async () 
   const report = await scanSkillCatalog({ projectRoot: root, roots });
   const skill = report.skills.find((item) => item.name === "reference-skill");
   assert.deepEqual(skill?.findings.map((item) => item.code), ["broken_local_reference"]);
+});
+
+test("finds broken inline resource paths without treating commands or examples as files", async () => {
+  const root = await fixture();
+  const skillDirectory = join(root, ".agents/skills", "reference-skill");
+  await mkdir(join(skillDirectory, "references"), { recursive: true });
+  await writeFile(join(skillDirectory, "references", "existing.md"), "fixture reference\n");
+  await mkdir(join(root, "scripts"), { recursive: true });
+  await writeFile(join(root, "scripts", "existing.mts"), "fixture script\n");
+  await addSkill(
+    root,
+    ".agents/skills",
+    "reference-skill",
+    [
+      "Read `references/existing.md` and `scripts/existing.mts`.",
+      "The missing guide is `references/missing.md`.",
+      "Run `pnpm run scripts/missing.mts` or visit `https://example.com/missing`.",
+      "The directory label `references/` and this fenced example should not be checked.",
+      "```text",
+      "`references/fenced-missing.md`",
+      "```",
+      "",
+    ].join("\n"),
+  );
+  const report = await scanSkillCatalog({ projectRoot: root, roots });
+  const skill = report.skills.find((item) => item.name === "reference-skill");
+
+  assert.deepEqual(
+    skill?.findings.map((item) => item.code),
+    ["broken_local_reference"],
+  );
+  assert.equal(skill?.findings[0]?.line, 6);
 });
 
 test("allows an intentional duplicate only with an explicit routing record", async () => {

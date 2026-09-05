@@ -40,8 +40,8 @@ if (typeof window !== "undefined" && "Notification" in window) {
 
 // ── Fixed epoch ───────────────────────────────────────────────────────────────
 const T0 = 1_700_000_000_000;
-// Run ended 30 minutes ago; freezerTime = 10 min.
-// Freezer drains at endedAt + 10 * 60_000.
+// Run ended 30 minutes ago; freezerTime = 10 min of Freeze tunnel time.
+// Freeze tunnel drains at endedAt + 10 * 60_000.
 // With endedAt = T0 - 30 * 60_000, drain completes at T0 - 20 * 60_000.
 // So nowTime = T0 is well past drain — but we won't observe draining unless
 // we first render with nowTime < drain time.
@@ -158,7 +158,7 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
   // vibrate fires synchronously BEFORE `if ("Notification" in window)`, so it
   // fires even when Notification is absent.
 
-  it("does NOT crash when the freezer drains with NO Notification API", () => {
+  it("does NOT crash when the Freeze tunnel drains with NO Notification API", () => {
     // Critical regression guard: the effect fires vibrate normally but must NOT
     // throw when reaching `if ("Notification" in window && ...)`.
     // Removing the guard would cause a ReferenceError in jsdom.
@@ -182,7 +182,7 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
   });
 
-  it("fires vibrate exactly once when the freezer finishes draining", () => {
+  it("fires vibrate exactly once when the Freeze tunnel finishes draining", () => {
     const run = makeRun();
 
     // Phase 1: mid-drain observation — adds runId to freezerDrainingRef.
@@ -200,7 +200,8 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
 
     vibrateMock.mockClear();
 
-    // Phase 3: another tick past drain — already latched in freezerDoneNotifRef,
+    // Phase 3: another tick past drain — already latched in freezerDoneNotifRef
+    // (the compatibility-preserved internal ref for tunnel completion),
     // must NOT fire again.
     act(() => {
       rerender(makeParams(DRAIN_DONE_AT + 2_000, { currentRun: run }));
@@ -209,7 +210,7 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
   });
 
   it("does NOT fire when scrolling to an already-drained run (never observed draining)", () => {
-    // This is the key guard: if we navigate to a completed run whose freezer
+    // This is the key guard: if we navigate to a completed run whose Freeze tunnel
     // drained long ago (remainMs was never > 0 in our session), the alert
     // must NOT fire — freezerDrainingRef is empty for this runId.
     const run = makeRun();
@@ -277,7 +278,8 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
     });
     expect(vibrateMock).not.toHaveBeenCalled();
 
-    // Phase 3: re-enable pref — runId is already in freezerDoneNotifRef, must NOT fire.
+    // Phase 3: re-enable pref — runId is already in freezerDoneNotifRef,
+    // the compatibility-preserved internal ref for tunnel completion, must NOT fire.
     act(() => {
       rerender(makeParams(DRAIN_DONE_AT + 2_000, { currentRun: run, prefs: undefined }));
     });
@@ -302,9 +304,9 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
     await act(async () => { await Promise.resolve(); });
 
     expect(notifCtor).toHaveBeenCalledOnce();
-    expect(notifCtor.mock.calls[0][0]).toBe("❄️ Freezer empty");
+    expect(notifCtor.mock.calls[0][0]).toBe("❄️ Freeze tunnel empty");
     const opts = notifCtor.mock.calls[0][1] as NotificationOptions;
-    expect(opts.body).toMatch(/freezer is clear/i);
+    expect(opts.body).toMatch(/Freeze tunnel is clear/i);
     expect(opts.tag).toBe(`freezer-done-${run.id}`);
   });
 

@@ -324,6 +324,26 @@ describe("useNotifications — behind-pace alert (no Notification API)", () => {
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
   });
 
+  it("keeps the fired latch set after the in-app banner is dismissed", () => {
+    const run = makeRun({ startedAt: T0 });
+
+    const { rerender, result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, { currentRun: run }),
+    });
+
+    act(() => {
+      rerender(makeArmParams(EVAL_TICK, { currentRun: run }));
+    });
+    expect(result.current.showPaceAlert).toBe(true);
+
+    act(() => {
+      result.current.setShowPaceAlert(false);
+      rerender(makeArmParams(EVAL_TICK + 1_000, { currentRun: run }));
+    });
+    expect(result.current.showPaceAlert).toBe(false);
+    expect(vibrateMock).toHaveBeenCalledOnce();
+  });
+
   // ── 9. Pace stays in-app even when browser notifications are available ─────
   it("does not call the Notification constructor for behind pace", async () => {
     const notifCtor = injectNotificationStub("granted");

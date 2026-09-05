@@ -9,7 +9,7 @@ Give one authoritative release decision, not an open-ended list of possible
 future work. This skill composes with the repository's detailed
 `.agents/skills/release-checklist/SKILL.md`; read and follow that checklist for
 the commands and surface-specific gates. Also read
-`.local/custom_skills/review-before-shipping/SKILL.md` for shipping,
+`.local/custom_skills/review-before-shipping` for shipping,
 authorization, dependency, privacy, and deployment-fit gates.
 Use `release-checklist` for evidence gathering even when the user asks only for
 the decision; do not substitute this report for the checklist's required gates.
@@ -64,7 +64,7 @@ The decision has five separate dimensions:
    evidence when the checklist says the surface requires it.
 4. Apply the shipping review. If a fresh security scan is requested or is
    needed to establish current security evidence, use
-   `.local/skills/security-scan/SKILL.md` and run all three scanners; one scanner
+   `.local/skills/security-scan` and run all three scanners; one scanner
    error is itself missing evidence. Treat unresolved high/critical findings as
    NO-GO.
 5. Check generated-client freshness explicitly whenever API contracts or
@@ -73,9 +73,14 @@ The decision has five separate dimensions:
 6. Answer each operational warning from the checklist. Identify live-data
    effects of heals, additive schema and migration implications, sync recovery
    evidence, disposable-database proof, and rollback/post-merge ownership.
+7. If Frontline applicator, Sauce barrel, automatic claim coordination, or
+   pending-run progress changed, require current state-accuracy, sync-invariant,
+   focused API/client, bounded switch/reload, desktop + 390×844 responsive, and
+   revision-bound evidence. Any missing item is NO-GO; a generic smoke pass or
+   unit-only result is not a substitute.
 
 If a workflow reports `DIDNT_OPEN_A_PORT`, a timeout, or a blank preview, read
-`.local/skills/debug-workflow-ports-issues/SKILL.md` before attempting another
+`.local/skills/debug-workflow-ports-issues` before attempting another
 restart. A healthy local server does not prove the browser-facing workflow is
 healthy.
 

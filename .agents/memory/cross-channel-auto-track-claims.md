@@ -7,4 +7,15 @@ A run can have multiple automatic timer channels due together, and different cha
 
 **Why:** A single per-run value stamp advances for every channel. Without a server-authoritative accepted-write marker shared through canonical responses and peer broadcasts, one tab cannot distinguish a peer timer event from an operator correction; either legitimate due movement is lost or a manual correction is overwritten.
 
-**How to apply:** Any future coordinated channel or counter must publish its accepted canonical stamp, preserve signed movement when queued behind another automatic event, and omit that marker when ordinary/manual writes invalidate coordination.
+**How to apply:** Any future coordinated channel or counter must publish its accepted canonical stamp, preserve signed movement when queued behind another automatic event, and omit that marker when ordinary/manual writes invalidate coordination. Keep each channel's `nextDueAt` in one declared clock domain (wall milliseconds or pause-aware net seconds); manual invalidation must reset, not cross domains. For side effects tied to an accepted claim, use the stable event identity as the idempotency key rather than a corrected display count.
+
+Capture run identity when dispatching asynchronous claims. After a run switch,
+every completion path—including retry/error cleanup—must ignore the old claim;
+otherwise a late response can write into the shared form or clear the new run's
+same-channel pending marker. Pending runs may keep staged Dough, but Packaging,
+Sauce, and Frontline completion stay zero until Start and then rebase from that
+run's own anchors.
+
+**Why:** The form and channel-pending registry are shared across selected runs,
+so guarding only the successful value write does not protect retry and cleanup
+paths from cross-run contamination.

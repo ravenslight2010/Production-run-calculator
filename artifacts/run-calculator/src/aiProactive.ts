@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { InventoryApiError, inventoryClientId } from "./inventoryShared";
 import { saveFacilityKnowledge } from "./aiMemory";
 import type { OptimizeInput } from "./aiOptimize";
+import type { AiStatus } from "./aiStatus";
 
 // ── Types (mirror the OpenAPI /ai/proactive-alert contract) ──────────────────
 export type ProactiveCategory = "run" | "break" | "efficiency";
@@ -39,6 +40,7 @@ export type ProactiveAlertResult = {
   alert: ProactiveAlert | null;
   generatedAt: number;
   note?: string;
+  aiStatus?: AiStatus;
 };
 
 // Defaults used when the server settings can't be loaded (best-effort). Managers
@@ -215,6 +217,7 @@ async function recordDismissal(alert: ProactiveAlert): Promise<void> {
 export type UseProactiveAlert = {
   alert: ProactiveAlert | null;
   dismiss: () => void;
+  aiStatus: AiStatus | null;
 };
 
 // Poll while `enabled`, surfacing at most one alert at a time with client-side
@@ -230,6 +233,7 @@ export function useProactiveAlert(args: {
 }): UseProactiveAlert {
   const { enabled, buildInput } = args;
   const [alert, setAlert] = useState<ProactiveAlert | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
 
   // Refs so the polling closure always sees the latest values without
   // re-subscribing the interval on every render.
@@ -253,6 +257,7 @@ export function useProactiveAlert(args: {
       // best-effort poll; ignore rate-limit / network / provider errors
       return;
     }
+    setAiStatus(result.aiStatus ?? null);
     const next = result.alert;
     if (!next) return;
     // Don't re-trigger the alert already on screen.
@@ -266,6 +271,7 @@ export function useProactiveAlert(args: {
   useEffect(() => {
     if (!enabled) {
       setAlert(null);
+      setAiStatus(null);
       return;
     }
     let cancelled = false;
@@ -313,5 +319,5 @@ export function useProactiveAlert(args: {
     setAlert(null);
   }, []);
 
-  return { alert, dismiss };
+  return { alert, dismiss, aiStatus };
 }

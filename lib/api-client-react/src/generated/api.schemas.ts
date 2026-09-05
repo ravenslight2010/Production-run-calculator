@@ -5,6 +5,18 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * Whether the response is deterministic-only, AI-enriched, or missing AI narration
+ */
+export type AiStatus = typeof AiStatus[keyof typeof AiStatus];
+
+
+export const AiStatus = {
+  deterministic: 'deterministic',
+  enriched: 'enriched',
+  unavailable: 'unavailable',
+} as const;
+
 export type AutoTrackMutationField = typeof AutoTrackMutationField[keyof typeof AutoTrackMutationField];
 
 
@@ -13,6 +25,21 @@ export const AutoTrackMutationField = {
   casesOnCurrentSkid: 'casesOnCurrentSkid',
   traysOnLine: 'traysOnLine',
   batchesReady: 'batchesReady',
+  sauceBarrelsMade: 'sauceBarrelsMade',
+  sauceBarrelAnchorNetSec: 'sauceBarrelAnchorNetSec',
+  sauceBarrelCorrectionGeneration: 'sauceBarrelCorrectionGeneration',
+  app1BatchesMade: 'app1BatchesMade',
+  app1BatchAnchorNetSec: 'app1BatchAnchorNetSec',
+  app1BatchCorrectionGeneration: 'app1BatchCorrectionGeneration',
+  app2BatchesMade: 'app2BatchesMade',
+  app2BatchAnchorNetSec: 'app2BatchAnchorNetSec',
+  app2BatchCorrectionGeneration: 'app2BatchCorrectionGeneration',
+  app3BatchesMade: 'app3BatchesMade',
+  app3BatchAnchorNetSec: 'app3BatchAnchorNetSec',
+  app3BatchCorrectionGeneration: 'app3BatchCorrectionGeneration',
+  app4BatchesMade: 'app4BatchesMade',
+  app4BatchAnchorNetSec: 'app4BatchAnchorNetSec',
+  app4BatchCorrectionGeneration: 'app4BatchCorrectionGeneration',
 } as const;
 
 export interface AutoTrackMutation {
@@ -46,6 +73,11 @@ export const AutoTrackClaimChannel = {
   'batch-consume': 'batch-consume',
   'batch-produce': 'batch-produce',
   hopper: 'hopper',
+  'sauce-barrel': 'sauce-barrel',
+  'app1-batch': 'app1-batch',
+  'app2-batch': 'app2-batch',
+  'app3-batch': 'app3-batch',
+  'app4-batch': 'app4-batch',
 } as const;
 
 export interface AutoTrackClaim {
@@ -77,7 +109,7 @@ export interface AutoTrackClaim {
   baseUpdatedAt: number;
   /** @minimum 0 */
   correctionGeneration?: number;
-  /** @maxItems 2 */
+  /** @maxItems 3 */
   mutations: AutoTrackMutation[];
 }
 
@@ -1442,6 +1474,9 @@ export interface SpecReconcileResult {
   /** Advisory plain-language summary; absent/empty when the AI is unavailable */
   summary?: string;
   generatedAt: number;
+  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 export interface MixComponentSpec {
@@ -1582,6 +1617,9 @@ export interface MixReconcileResult {
   /** Advisory plain-language summary; absent/empty when the AI is unavailable */
   summary?: string;
   generatedAt: number;
+  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 export interface MixAssistMix {
@@ -1642,6 +1680,7 @@ export interface ProactiveAlertResult {
   /** The single nudge to surface now, or null when nothing applies */
   alert: ProactiveAlert | null;
   generatedAt: number;
+  aiStatus: AiStatus;
   /** Optional message when no alert could be produced */
   note?: string;
 }
@@ -1728,6 +1767,9 @@ export interface ForecastResult {
   /** One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon. */
   forecasts?: ForecastPlan[];
   generatedAt: number;
+  /** True when the AI produced a forecast; false when no forecast was produced */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Explanation when no forecast could responsibly be produced */
   note?: string;
 }
@@ -1820,6 +1862,7 @@ export interface SummaryResult {
   generatedAt: number;
   /** True when the AI narrated; false when the deterministic fallback was used */
   aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 export type OperationalReportInputScope = typeof OperationalReportInputScope[keyof typeof OperationalReportInputScope];
@@ -2095,6 +2138,7 @@ export interface AnomalyResult {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 /**
@@ -2172,6 +2216,7 @@ export interface ScheduleOptimizeResponse {
   generatedAt: number;
   /** True when the AI narrated; false otherwise */
   aiGenerated: boolean;
+  aiStatus: AiStatus;
 }
 
 /**
@@ -3608,6 +3653,9 @@ export interface SuggestMergesResult {
   suggestions: MergeSuggestion[];
   /** Epoch ms when the suggestions were generated */
   generatedAt: number;
+  /** True when the AI supplied merge suggestions; false for unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional brief overall comment from the model */
   note?: string;
 }
@@ -3818,6 +3866,9 @@ export interface MatchImportResult {
   /** Confident matches for imported pepperoni type names. Optional. */
   pepTypeMatches?: MatchImportNameMatch[];
   generatedAt: number;
+  /** True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
 }
@@ -3849,8 +3900,220 @@ export interface MatchPremixMatch {
 export interface MatchPremixResult {
   matches: MatchPremixMatch[];
   generatedAt: number;
+  /** True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+}
+
+export type FieldCheckObservationInputCheckName = typeof FieldCheckObservationInputCheckName[keyof typeof FieldCheckObservationInputCheckName];
+
+
+export const FieldCheckObservationInputCheckName = {
+  startup: 'startup',
+  'foreground-recovery': 'foreground-recovery',
+  'sync-acknowledgment': 'sync-acknowledgment',
+  'cross-device-convergence': 'cross-device-convergence',
+  'reload-persistence': 'reload-persistence',
+  'offline-recovery': 'offline-recovery',
+  'pwa-update-handoff': 'pwa-update-handoff',
+  performance: 'performance',
+} as const;
+
+export type FieldCheckObservationInputOutcome = typeof FieldCheckObservationInputOutcome[keyof typeof FieldCheckObservationInputOutcome];
+
+
+export const FieldCheckObservationInputOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export type FieldCheckObservationInputDeviceCategory = typeof FieldCheckObservationInputDeviceCategory[keyof typeof FieldCheckObservationInputDeviceCategory];
+
+
+export const FieldCheckObservationInputDeviceCategory = {
+  'desktop-chrome': 'desktop-chrome',
+  'desktop-safari': 'desktop-safari',
+  'desktop-firefox': 'desktop-firefox',
+  'mobile-chrome': 'mobile-chrome',
+  'mobile-safari': 'mobile-safari',
+  'tablet-browser': 'tablet-browser',
+  'other-browser': 'other-browser',
+} as const;
+
+export type FieldCheckObservationInputMetrics = {[key: string]: number};
+
+export interface FieldCheckObservationInput {
+  /**
+     * @minLength 8
+     * @maxLength 160
+     */
+  observationId: string;
+  checkName: FieldCheckObservationInputCheckName;
+  /** @maxLength 20 */
+  checkVersion: string;
+  outcome: FieldCheckObservationInputOutcome;
+  observedAt: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  appBuild: string;
+  deviceCategory: FieldCheckObservationInputDeviceCategory;
+  metrics: FieldCheckObservationInputMetrics;
+}
+
+export interface FieldCheckObservationBatch {
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  observations: FieldCheckObservationInput[];
+}
+
+export interface FieldCheckIngestResult {
+  /** @minimum 0 */
+  accepted: number;
+  /** @minimum 0 */
+  duplicate: number;
+}
+
+export type HardwareFieldCheckConfirmationCheckName = typeof HardwareFieldCheckConfirmationCheckName[keyof typeof HardwareFieldCheckConfirmationCheckName];
+
+
+export const HardwareFieldCheckConfirmationCheckName = {
+  'touch-accuracy': 'touch-accuracy',
+  'keyboard-clearance': 'keyboard-clearance',
+  'process-kill-recovery': 'process-kill-recovery',
+} as const;
+
+export type HardwareFieldCheckConfirmationCheckVersion = typeof HardwareFieldCheckConfirmationCheckVersion[keyof typeof HardwareFieldCheckConfirmationCheckVersion];
+
+
+export const HardwareFieldCheckConfirmationCheckVersion = {
+  '2026-09': '2026-09',
+} as const;
+
+export type HardwareFieldCheckConfirmationOutcome = typeof HardwareFieldCheckConfirmationOutcome[keyof typeof HardwareFieldCheckConfirmationOutcome];
+
+
+export const HardwareFieldCheckConfirmationOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export type HardwareFieldCheckConfirmationDeviceCategory = typeof HardwareFieldCheckConfirmationDeviceCategory[keyof typeof HardwareFieldCheckConfirmationDeviceCategory];
+
+
+export const HardwareFieldCheckConfirmationDeviceCategory = {
+  'android-phone': 'android-phone',
+  'android-tablet': 'android-tablet',
+  ipad: 'ipad',
+} as const;
+
+export interface HardwareFieldCheckConfirmation {
+  checkName: HardwareFieldCheckConfirmationCheckName;
+  checkVersion: HardwareFieldCheckConfirmationCheckVersion;
+  outcome: HardwareFieldCheckConfirmationOutcome;
+  observedAt: string;
+  deviceCategory: HardwareFieldCheckConfirmationDeviceCategory;
+}
+
+export type FieldCheckFailureOutcome = typeof FieldCheckFailureOutcome[keyof typeof FieldCheckFailureOutcome];
+
+
+export const FieldCheckFailureOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export type FieldCheckFailureMetrics = {[key: string]: number};
+
+export interface FieldCheckFailure {
+  outcome: FieldCheckFailureOutcome;
+  observedAt: string;
+  appBuild: string;
+  deviceCategory: string;
+  metrics: FieldCheckFailureMetrics;
+}
+
+export type FieldCheckSummaryStatus = typeof FieldCheckSummaryStatus[keyof typeof FieldCheckSummaryStatus];
+
+
+export const FieldCheckSummaryStatus = {
+  healthy: 'healthy',
+  collecting: 'collecting',
+  'needs-review': 'needs-review',
+  unsupported: 'unsupported',
+} as const;
+
+export type FieldCheckSummaryObservedBy = typeof FieldCheckSummaryObservedBy[keyof typeof FieldCheckSummaryObservedBy];
+
+
+export const FieldCheckSummaryObservedBy = {
+  browser: 'browser',
+  hardware: 'hardware',
+} as const;
+
+/**
+ * @nullable
+ */
+export type FieldCheckSummaryIssueStatus = typeof FieldCheckSummaryIssueStatus[keyof typeof FieldCheckSummaryIssueStatus] | null;
+
+
+export const FieldCheckSummaryIssueStatus = {
+  open: 'open',
+  recovered: 'recovered',
+} as const;
+
+export interface FieldCheckSummary {
+  name: string;
+  label: string;
+  status: FieldCheckSummaryStatus;
+  observedBy: FieldCheckSummaryObservedBy;
+  evidence: string;
+  /** @nullable */
+  expiresHours: number | null;
+  /** @nullable */
+  lastSuccessfulAt: string | null;
+  /** @nullable */
+  lastObservedAt: string | null;
+  recentFailures: FieldCheckFailure[];
+  failureCount: number;
+  incompleteCount: number;
+  actionable: boolean;
+  /** @nullable */
+  issueStatus: FieldCheckSummaryIssueStatus;
+}
+
+export type FieldChecksReportScope = typeof FieldChecksReportScope[keyof typeof FieldChecksReportScope];
+
+
+export const FieldChecksReportScope = {
+  current_facility: 'current facility',
+} as const;
+
+export type FieldChecksReportOverallStatus = typeof FieldChecksReportOverallStatus[keyof typeof FieldChecksReportOverallStatus];
+
+
+export const FieldChecksReportOverallStatus = {
+  healthy: 'healthy',
+  collecting: 'collecting',
+  'needs-review': 'needs-review',
+  unsupported: 'unsupported',
+} as const;
+
+export interface FieldChecksReport {
+  version: string;
+  scope: FieldChecksReportScope;
+  generatedAt: string;
+  checks: FieldCheckSummary[];
+  overallStatus: FieldChecksReportOverallStatus;
+  actionableCount: number;
 }
 
 /**

@@ -1071,6 +1071,24 @@ export function backfillNamedRecipeFromMergedSources(
       ? target.doughballVariants.map((v) => ({ ...v }))
       : undefined,
   };
+  // Keep the first target row as the canonical display row, while using later
+  // equivalent target rows only to fill its blanks.  A prior merge may have
+  // left these twins behind, so doing this before folding sources makes the
+  // operation convergent as well as preventing another source-only append.
+  const canonicalComponents: NamedRecipeComponent[] = [];
+  const targetComponentsByKey = new Map<string, NamedRecipeComponent>();
+  for (const component of next.components) {
+    const key = looseMergeIngredientKey(component.ingredient);
+    const canonical = key ? targetComponentsByKey.get(key) : undefined;
+    if (!canonical) {
+      canonicalComponents.push(component);
+      if (key) targetComponentsByKey.set(key, component);
+      continue;
+    }
+    if (!(canonical.lbs > 0) && component.lbs > 0) canonical.lbs = component.lbs;
+    changed = true;
+  }
+  next.components = canonicalComponents;
   for (const src of sources) {
     if (!next.notes.trim() && src.notes.trim()) {
       next.notes = src.notes;
@@ -1117,11 +1135,7 @@ export function backfillNamedRecipeFromMergedSources(
         changed = true;
       }
     }
-    const byKey = new Map<string, NamedRecipeComponent>();
-    for (const c of next.components) {
-      const key = looseMergeIngredientKey(c.ingredient);
-      if (key && !byKey.has(key)) byKey.set(key, c);
-    }
+    const byKey = targetComponentsByKey;
     for (const sc of src.components) {
       const key = looseMergeIngredientKey(sc.ingredient);
       if (!key) continue;

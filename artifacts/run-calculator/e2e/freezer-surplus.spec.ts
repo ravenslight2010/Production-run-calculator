@@ -87,6 +87,7 @@ async function seedRuns(page: Page, fixture: Fixture): Promise<void> {
         skidsCompleted: 5,
         casesOnCurrentSkid: 0,
         pizzasPerCase: 1,
+        freezerTime: 20,
       };
       const futureValues = {
         casesNeeded: 500,
@@ -218,15 +219,49 @@ for (const viewport of [
       await page.getByTestId("tab-packaging").click();
       const confirmPanel = page.getByTestId("freezer-surplus-confirm");
       await expect(confirmPanel).toBeVisible();
+
+      for (const invalidValue of ["", "1.5", "0", "-1"]) {
+        await confirmPanel.getByLabel("Excess finished cases").fill(invalidValue);
+        await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
+        await expect(confirmPanel).toBeVisible();
+        await expect(confirmPanel.getByRole("status")).toContainText(
+          "Enter a positive whole number of excess cases.",
+        );
+      }
+
+      let rejectedPost = false;
+      await page.route("**/api/freezer-surplus", async (route) => {
+        if (route.request().method() === "POST" && !rejectedPost) {
+          rejectedPost = true;
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: "Freezer surplus save rejected for browser recovery check.",
+            }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
       await confirmPanel.getByLabel("Excess finished cases").fill("20");
       await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
-      await expect(confirmPanel).toContainText(/Added 20 cases as a new freezer lot dated/);
-
-      const lot = await db.query<{ id: string }>(
-        "SELECT id FROM freezer_surplus_lots WHERE brand = 'Freezer E2E' ORDER BY created_at DESC LIMIT 1",
+      await expect(confirmPanel).toBeVisible();
+      await expect(confirmPanel.getByRole("alert")).toContainText(
+        "Freezer surplus save rejected for browser recovery check.",
       );
-      expect(lot.rows).toHaveLength(1);
-      fixture.lotId = lot.rows[0].id;
+      expect(rejectedPost).toBe(true);
+
+      await page.unroute("**/api/freezer-surplus");
+      await confirmPanel.getByRole("button", { name: "Confirm surplus", exact: true }).click();
+      await expect(confirmPanel).toBeHidden();
+
+      const lots = await db.query<{ id: string }>(
+        "SELECT id FROM freezer_surplus_lots WHERE brand = 'Freezer E2E' ORDER BY created_at DESC",
+      );
+      expect(lots.rows).toHaveLength(1);
+      fixture.lotId = lots.rows[0].id;
 
       await page.getByTestId("tab-warehouse").click();
       const warehousePanel = page.getByTestId("freezer-surplus-warehouse");
@@ -237,6 +272,36 @@ for (const viewport of [
       await expect(futureRun).toContainText("Still to produce 500");
       await futureRun.getByRole("button", { name: "Choose pull", exact: true }).click();
       await futureRun.getByLabel(/Cases from freezer lot dated/).fill("12");
+
+      let rejectedAllocationPut = false;
+      await page.route("**/api/freezer-surplus/allocations/**", async (route) => {
+        if (route.request().method() === "PUT" && !rejectedAllocationPut) {
+          rejectedAllocationPut = true;
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: "Freezer pull save rejected for browser recovery check.",
+            }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await futureRun.getByRole("button", { name: "Confirm pull", exact: true }).click();
+      await expect(futureRun).toBeVisible();
+      await expect(futureRun).toContainText("Original target 500");
+      await expect(futureRun).toContainText("Carried in 0");
+      await expect(futureRun).toContainText("Still to produce 500");
+      await expect(futureRun.getByLabel(/Cases from freezer lot dated/)).toHaveValue("12");
+      await expect(futureRun.getByRole("button", { name: "Close pull", exact: true })).toBeVisible();
+      await expect(warehousePanel.getByRole("alert")).toContainText(
+        "Freezer pull save rejected for browser recovery check.",
+      );
+      expect(rejectedAllocationPut).toBe(true);
+
+      await page.unroute("**/api/freezer-surplus/allocations/**");
       await futureRun.getByRole("button", { name: "Confirm pull", exact: true }).click();
 
       await expect(futureRun).toContainText("Original target 500");

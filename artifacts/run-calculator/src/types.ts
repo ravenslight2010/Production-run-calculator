@@ -27,6 +27,8 @@ export const formSchema = z.object({
   cycleSpeed: z.coerce.number().min(0).default(0),
   speedAdjustment: z.coerce.number().min(0.01).default(1.0),
   approxLineSpeed: z.coerce.number().min(0).default(0),
+  // Compatibility-preserved field name. This is the total physical Freeze
+  // tunnel line time, not warehouse freezer storage time.
   freezerTime: z.coerce.number().min(0).default(0),
   pizzasPerCase: z.coerce.number().min(0).default(0),
   casesPerSkid: z.coerce.number().min(0).default(0),
@@ -50,14 +52,31 @@ export const formSchema = z.object({
   carryOverDone: z.boolean().default(false),
   sauceOzPerPizza: z.coerce.number().min(0).default(0),
   sauceBarrelLbs: z.coerce.number().min(0).default(0),
+  // Canonical, synchronized sauce production register. UI-only alert latches
+  // remain in sauceBarrelStore; these values participate in auto-track claims.
+  sauceBarrelsMade: z.coerce.number().min(0).default(0),
+  sauceBarrelAnchorNetSec: z.coerce.number().min(0).default(0),
+  sauceBarrelCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app1OzPerPizza: z.coerce.number().min(0).default(0),
   app1BatchLbs: z.coerce.number().min(0).default(0),
+  app1BatchesMade: z.coerce.number().min(0).default(0),
+  app1BatchAnchorNetSec: z.coerce.number().min(0).default(0),
+  app1BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app2OzPerPizza: z.coerce.number().min(0).default(0),
   app2BatchLbs: z.coerce.number().min(0).default(0),
+  app2BatchesMade: z.coerce.number().min(0).default(0),
+  app2BatchAnchorNetSec: z.coerce.number().min(0).default(0),
+  app2BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app3OzPerPizza: z.coerce.number().min(0).default(0),
   app3BatchLbs: z.coerce.number().min(0).default(0),
+  app3BatchesMade: z.coerce.number().min(0).default(0),
+  app3BatchAnchorNetSec: z.coerce.number().min(0).default(0),
+  app3BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app4OzPerPizza: z.coerce.number().min(0).default(0),
   app4BatchLbs: z.coerce.number().min(0).default(0),
+  app4BatchesMade: z.coerce.number().min(0).default(0),
+  app4BatchAnchorNetSec: z.coerce.number().min(0).default(0),
+  app4BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   pep1Sticks: z.coerce.number().min(0).default(0),
   pep1OzPerPizza: z.coerce.number().min(0).default(0),
   pep1BatchLbs: z.coerce.number().min(0).default(0),
@@ -113,7 +132,7 @@ export const formSchema = z.object({
   skidStacking: z.string().default(""),
   gripSheets: z.string().default("none"),
   slipSheets: z.string().default("no"),
-  // Line tunnel stage timings — split the total line time (freezerTime) into
+  // Line tunnel stage timings — split the total Freeze tunnel time (freezerTime) into
   // three physically distinct segments.  Default 2.5 min each (the factory
   // standard pre/post dwell).  A one-time boot heal writes 2.5 into any
   // existing profile that still has 0 stored from before this default was set.
@@ -121,6 +140,7 @@ export const formSchema = z.object({
   postTunnelMin: z.coerce.number().min(0).default(2.5),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.
+  // Compatibility-preserved override field name for the Freeze tunnel time.
   tempFreezerTime: z.coerce.number().min(0).default(0),
   tempCrustsPerCycle: z.coerce.number().min(0).default(0),
   tempCycleSpeed: z.coerce.number().min(0).default(0),
@@ -179,14 +199,29 @@ export const DEFAULT_VALUES: FormValues = {
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
+  sauceBarrelsMade: 0,
+  sauceBarrelAnchorNetSec: 0,
+  sauceBarrelCorrectionGeneration: 0,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
+  app1BatchesMade: 0,
+  app1BatchAnchorNetSec: 0,
+  app1BatchCorrectionGeneration: 0,
   app2OzPerPizza: 0,
   app2BatchLbs: 0,
+  app2BatchesMade: 0,
+  app2BatchAnchorNetSec: 0,
+  app2BatchCorrectionGeneration: 0,
   app3OzPerPizza: 0,
   app3BatchLbs: 0,
+  app3BatchesMade: 0,
+  app3BatchAnchorNetSec: 0,
+  app3BatchCorrectionGeneration: 0,
   app4OzPerPizza: 0,
   app4BatchLbs: 0,
+  app4BatchesMade: 0,
+  app4BatchAnchorNetSec: 0,
+  app4BatchCorrectionGeneration: 0,
   pep1Sticks: 0,
   pep1OzPerPizza: 0,
   pep1BatchLbs: 0,
@@ -296,6 +331,14 @@ export type CrustField = (typeof CRUST_FIELDS)[number];
 export const PROGRESS_FIELDS = [
   "skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady",
 ] as const;
+
+// Physical dough staging is arranged as three tray sections. These values are
+// advisory only: traysOnLine remains one aggregate persisted counter because
+// existing runs do not record which section holds each tray.
+export const DOUGH_TRAY_SECTION_CAPACITY = 20;
+export const DOUGH_TRAY_SECTION_COUNT = 3;
+export const DOUGH_TRAY_ADVISORY_TOTAL =
+  DOUGH_TRAY_SECTION_CAPACITY * DOUGH_TRAY_SECTION_COUNT;
 
 export type Stoppage = {
   id: string;
@@ -418,7 +461,8 @@ export type SyncPayload = {
   autoTrackCoordination?: {
     version: 1;
     runs: Record<string, Partial<Record<
-      "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper",
+       "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper"
+       | "sauce-barrel" | "app1-batch" | "app2-batch" | "app3-batch" | "app4-batch",
       {
         generation: string;
         sequence: number;

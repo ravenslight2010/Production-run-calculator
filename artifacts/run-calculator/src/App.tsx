@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   lazy,
   Suspense,
   type ReactNode,
@@ -25,6 +26,14 @@ import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { recordPerformance } from "./performanceDiagnostics";
+import { MasterDataPolling } from "./masterData";
+import { emitFieldCheckSignal, FieldVerificationObserver } from "./fieldChecks";
+import { WEB_BUILD_ID } from "./buildIdentity";
+import {
+  getAutomaticUpdateReloadSafety,
+  startUpdateReloadIdleTracking,
+  subscribeAutomaticUpdateReloadSafety,
+} from "./updateReloadSafety";
 
 const queryClient = new QueryClient();
 
@@ -56,9 +65,11 @@ function HomeGate() {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
   return isAuthenticated ? (
-    <Suspense fallback={null}>
-      <LazyHome />
-    </Suspense>
+    <MasterDataPolling>
+      <Suspense fallback={null}>
+        <LazyHome />
+      </Suspense>
+    </MasterDataPolling>
   ) : <Landing />;
 }
 
@@ -88,6 +99,16 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const stopUpdateWatchRef = useRef<(() => void) | undefined>(undefined);
   const registrationRef = useRef<ServiceWorkerRegistration | undefined>(undefined);
   const [activatedUpdateReady, setActivatedUpdateReady] = useState(false);
+  const calculatorSafe = useSyncExternalStore(
+    subscribeAutomaticUpdateReloadSafety,
+    getAutomaticUpdateReloadSafety,
+    () => false,
+  );
+  const [updateIdle, setUpdateIdle] = useState(false);
+  const updateIdleRef = useRef(false);
+  const automaticReloadGenerationRef = useRef(0);
+  const automaticReloadStartedRef = useRef(false);
+  const workerReloadIntentRef = useRef<(() => boolean) | null>(null);
   const onRegisteredSW = useCallback(
     (
       _serviceWorkerUrl: string,
@@ -117,6 +138,7 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
         onStateChange = () => {
           if (worker.state === "installed" && isUpdate) {
             setActivatedUpdateReady(true);
+            emitFieldCheckSignal("pwa-update-handoff", "success");
           }
         };
         worker.addEventListener("statechange", onStateChange);
@@ -136,17 +158,58 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
-  } = useRegisterSW({ onRegisteredSW });
+  } = useRegisterSW({
+    onRegisteredSW,
+    onNeedReload: () => {
+      const canReload = workerReloadIntentRef.current;
+      workerReloadIntentRef.current = null;
+      // A skipWaiting worker can emit "controlling" during discovery. That is
+      // never permission to navigate: only a manual action or the verified
+      // safe-idle handoff installs an explicit reload intent.
+      if (canReload?.()) window.location.reload();
+    },
+  });
   const { toast } = useToast();
   const toastedRef = useRef(false);
-  const handleUpdateAndReload = useCallback(
-    () =>
-      updateAndReload(
-        registrationRef.current,
-        updateServiceWorker,
-        () => window.location.reload(),
-      ),
+  const activateWaitingWorker = useCallback(
+    async (_reloadPage = true, canReload: () => boolean = () => true) => {
+      workerReloadIntentRef.current = canReload;
+      try {
+        await updateServiceWorker(false);
+      } catch (error) {
+        if (workerReloadIntentRef.current === canReload) {
+          workerReloadIntentRef.current = null;
+        }
+        throw error;
+      }
+    },
     [updateServiceWorker],
+  );
+  const handleUpdateAndReload = useCallback(
+    () => {
+      emitFieldCheckSignal("pwa-update-handoff", "success");
+      return updateAndReload(
+        registrationRef.current,
+        activateWaitingWorker,
+        () => window.location.reload(),
+      );
+    },
+    [activateWaitingWorker],
+  );
+  const handleAutomaticUpdateAndReload = useCallback(
+    (generation: number) => {
+      emitFieldCheckSignal("pwa-update-handoff", "success");
+      return updateAndReload(
+        registrationRef.current,
+        activateWaitingWorker,
+        () => window.location.reload(),
+        () =>
+          automaticReloadGenerationRef.current === generation
+          && getAutomaticUpdateReloadSafety()
+          && updateIdleRef.current,
+      );
+    },
+    [activateWaitingWorker],
   );
 
   useEffect(() => {
@@ -157,6 +220,38 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       stopUpdateWatchRef.current = undefined;
     };
   }, []);
+
+  useEffect(() => {
+    const updateReady = needRefresh || activatedUpdateReady;
+    updateIdleRef.current = false;
+    setUpdateIdle(false);
+    automaticReloadGenerationRef.current += 1;
+    if (!updateReady || !calculatorSafe) return;
+
+    return startUpdateReloadIdleTracking((idle) => {
+      updateIdleRef.current = idle;
+      if (!idle) automaticReloadGenerationRef.current += 1;
+      setUpdateIdle(idle);
+    });
+  }, [activatedUpdateReady, calculatorSafe, needRefresh]);
+
+  useEffect(() => {
+    const updateReady = needRefresh || activatedUpdateReady;
+    if (!updateReady || !updateIdle || !calculatorSafe) return;
+    if (automaticReloadStartedRef.current) return;
+
+    const generation = automaticReloadGenerationRef.current;
+    automaticReloadStartedRef.current = true;
+    void handleAutomaticUpdateAndReload(generation).finally(() => {
+      automaticReloadStartedRef.current = false;
+    });
+  }, [
+    activatedUpdateReady,
+    calculatorSafe,
+    handleAutomaticUpdateAndReload,
+    needRefresh,
+    updateIdle,
+  ]);
 
   useEffect(() => {
     if ((!needRefresh && !activatedUpdateReady) || toastedRef.current) return;
@@ -206,6 +301,7 @@ function App() {
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
+            <FieldVerificationObserver appBuild={WEB_BUILD_ID} />
             <AppRoutes />
           </AuthProvider>
           </ErrorBoundaryWithRecovery>

@@ -10,9 +10,11 @@ classification, and bounded coverage gaps, see
 | --- | --- | --- |
 | `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
+| `playwright.ai-outage-phone.config.ts` | isolated manager account, non-destructive | runs the AI outage reviewability journey at a Pixel 5 viewport, or against physical Android Chrome when `PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT` is set; no global setup; the account is removed in `afterAll` |
 | `playwright.a11y.config.ts` | isolated sandbox, non-destructive | no global setup; axe scans public and sandbox-authenticated screens without deleting live-day data |
 | `playwright.visual.config.ts` | isolated account, non-destructive | no global setup; the visual suite creates unique accounts and removes them in `afterAll` |
 | `playwright.management-performance.config.ts` | isolated account, non-destructive | authenticated startup and deferred staff-management budgets; created accounts are removed in `afterAll` |
+| `playwright.dough-correction.config.ts` | isolated manager account, non-destructive | responsive Dough correction, temporary pause, and resume; the spec owns today's sync-row cleanup and removes the account in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.pwa-morning.config.ts` | isolated account, disposable database | tablet-sized stale-day → one sign-in → mount-time rollover smoke; attaches request and browser-log evidence |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
@@ -66,7 +68,15 @@ global setup:
 ```sh
 pnpm --filter @workspace/run-calculator run test:pwa-handoff
 pnpm --filter @workspace/run-calculator run test:e2e:phone
+pnpm --filter @workspace/run-calculator run test:e2e:ai-outage:phone
 pnpm --filter @workspace/run-calculator run test:e2e:a11y
+```
+
+Run the same AI outage reviewability journey on a connected physical Android
+Chrome device. The command fails closed when no device endpoint is configured:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:ai-outage:phone:device
 ```
 
 Run the authenticated startup budget guard separately from the destructive
@@ -75,6 +85,14 @@ main config:
 ```sh
 E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
   pnpm --filter @workspace/run-calculator run test:e2e:management-performance
+```
+
+Run the isolated manager Dough correction/resume regression with a disposable or
+explicitly approved test database:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:dough-correction
 ```
 
 Run the recurring cross-device smoke matrix before release checks. It is a
@@ -117,7 +135,7 @@ rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
-The main config enumerates 112 cases and retains
+The main config enumerates 115 cases and retains
 `release-evidence/browser-full/FINAL-REPORT.md` after a real full-suite run.
 The report includes the revision, completion counts, total duration, and
 per-file test-result durations. Discovery (`--list`) and focused runs do not

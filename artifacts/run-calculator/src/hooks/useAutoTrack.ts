@@ -13,28 +13,36 @@ interface AutoTrackCalc {
   batchesNeeded: number;
   /**
    * True once the press has made everything the run needs — cased product
-   * plus live freezer contents ≥ casesNeeded. Count-based (real packaging
-   * count + freezer model), NOT an elapsed-time estimate: this is what stops
+   * plus live Freeze tunnel contents ≥ casesNeeded. Count-based (real packaging
+   * count + tunnel model), NOT an elapsed-time estimate: this is what stops
    * the dough counters, because from this moment the dough crew is working on
    * the NEXT run's dough.
    */
   pressDone: boolean;
   /**
-   * Live freezer-tunnel contents in cases (the pure computeCasesInFreezer
-   * model). During the post-End freezer drain this is the ONLY source of
-   * case-tick increments: cased count grows exactly by what EXITED the tunnel
-   * since the last tick, so product moves from "in freezer" to "done" without
+   * Live Freeze tunnel contents in cases (the pure computeCasesInFreezer
+   * model). During the post-End tunnel drain this is the ONLY source of
+    * case-tick increments: cased count grows exactly by what EXITED the tunnel
+    * since the last tick, so product moves from "in Freeze tunnel" to "done" without
    * double-counting and the count can never exceed what was pressed.
    */
   casesInFreezer: number;
+  /** Seconds per sauce barrel; 0/invalid disables the sauce channel. */
+  sauceDepletionSec?: number;
+  app1Batches?: number;
+  app2Batches?: number;
+  app3Batches?: number;
+  app4Batches?: number;
 }
 
 /**
  * Suggested dough staging for a run — the same numbers the "Suggest" button
  * applies to the Trays on Line / Batches Ready steppers. Derived from the
- * CURRENT deficit (traysNeeded/batchesNeeded), capped to the stepper maxes
- * (74 trays / 3 batches) and to a sane staging quantity (40 trays). Kept at
- * verbatim parity with mobile RunContext's suggestedDoughStaging.
+ * CURRENT deficit (traysNeeded/batchesNeeded), capped to a sane staging
+ * quantity (40 trays / 3 batches). This suggestion is not a persisted tray
+ * capacity: traysOnLine remains an uncapped aggregate so automatic tracking
+ * never discards valid staged dough. Kept at verbatim parity with mobile
+ * RunContext's suggestedDoughStaging.
  */
 export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
 
@@ -44,7 +52,7 @@ export function suggestedDoughStaging(
 ): SuggestedDoughStagingReturn {
   return {
     trays: traysNeeded > 0
-      ? Math.min(74, Math.max(1, Math.round(Math.min(40, traysNeeded))))
+      ? Math.max(1, Math.round(Math.min(40, traysNeeded)))
       : null,
     batches: batchesNeeded > 0
       ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, batchesNeeded))))
@@ -59,6 +67,17 @@ interface AutoTrackValues {
   freezerTime: number;
   traysOnLine: number;
   batchesReady: number;
+  sauceBarrelsMade: number;
+  sauceBarrelAnchorNetSec: number;
+  sauceBarrelCorrectionGeneration: number;
+  app1Type: string; app1OzPerPizza: number; app1BatchLbs: number; app1CheeseRecipe: Array<{ lbs: number }>;
+  app1BatchesMade: number; app1BatchAnchorNetSec: number; app1BatchCorrectionGeneration: number;
+  app2Type: string; app2OzPerPizza: number; app2BatchLbs: number; app2CheeseRecipe: Array<{ lbs: number }>;
+  app2BatchesMade: number; app2BatchAnchorNetSec: number; app2BatchCorrectionGeneration: number;
+  app3Type: string; app3OzPerPizza: number; app3BatchLbs: number; app3CheeseRecipe: Array<{ lbs: number }>;
+  app3BatchesMade: number; app3BatchAnchorNetSec: number; app3BatchCorrectionGeneration: number;
+  app4Type: string; app4OzPerPizza: number; app4BatchLbs: number; app4CheeseRecipe: Array<{ lbs: number }>;
+  app4BatchesMade: number; app4BatchAnchorNetSec: number; app4BatchCorrectionGeneration: number;
 }
 
 export type AutoTrackChannel =
@@ -67,10 +86,20 @@ export type AutoTrackChannel =
   | "tray-produce"
   | "batch-consume"
   | "batch-produce"
-  | "hopper";
+  | "hopper"
+  | "sauce-barrel"
+  | "app1-batch"
+  | "app2-batch"
+  | "app3-batch"
+  | "app4-batch";
 
 export type AutoTrackMutation = {
-  field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady";
+  field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady"
+    | "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration"
+    | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
+    | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
+    | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
+    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -111,8 +140,10 @@ interface AutoTrackParams {
   endedAt?: number | null;
   /** Line-stage signal for packaging-only drain after a pause. */
   packagingDrainActive?: boolean;
-  /** Wall-clock seconds since the pause, used only for packaging drain output. */
+  /** Seconds of actual packaging output during the pause. */
   packagingDrainElapsedSec?: number;
+  /** False while a resumed line is refilling toward Wrapper/Packaging. */
+  packagingAutoTrackActive?: boolean;
 
   nowTime: Date;
 
@@ -152,6 +183,12 @@ interface AutoTrackParams {
 
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   /**
+   * Manual-edit suppression for the dough pipeline. This is intentionally
+   * separate from the packaging ref so a dough correction never pauses
+   * case/skid tracking.
+   */
+  externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
+  /**
    * Persists the independently synced packaging register before a case/skid
    * auto-write lands in the form. Returning false fences a tick that raced a
    * newly adopted manual-override deadline.
@@ -179,6 +216,8 @@ interface AutoTrackParams {
 
   autoTrackRebaseAfterBlock?: boolean;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  /** Stop sauce completion once dough hands off to the next unstarted run. */
+  nextRunPrepActive?: boolean;
 }
 
 interface AutoTrackResult {
@@ -193,6 +232,7 @@ interface AutoTrackResult {
     batches: number | null;
   } | null;
   autoSuppressUntilRef: React.MutableRefObject<number>;
+  doughAutoSuppressUntilRef: React.MutableRefObject<number>;
   /**
    * Restart the requested auto-track countdown(s) from their full cadence.
    * A scoped resume must not re-arm unrelated production timers or write a
@@ -216,7 +256,7 @@ interface AutoTrackResult {
   /** True while the dough-timer independent pause is active. */
   isDoughTimerPaused: boolean;
   /** Freeze mixer/hopper countdown displays and suppress dough tick writes. */
-  pauseDoughTimers: () => void;
+  pauseDoughTimers: (durationMs?: number) => void;
   /** Restart dough countdowns from full duration and clear the paused state. */
   resumeDoughTimers: () => void;
   /** Server event acknowledgement state for accessible status messaging. */
@@ -319,6 +359,7 @@ export function useAutoTrack({
   endedAt = null,
   packagingDrainActive = false,
   packagingDrainElapsedSec = 0,
+  packagingAutoTrackActive = true,
   nowTime,
   elapsedBatchSec,
   calc,
@@ -327,6 +368,7 @@ export function useAutoTrack({
   machine,
   disabled = false,
   externalAutoSuppressRef,
+  externalDoughAutoSuppressRef,
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
@@ -334,17 +376,24 @@ export function useAutoTrack({
   // original boolean barrier. Home opts out explicitly for unchanged pulls.
   autoTrackRebaseAfterBlock = true,
   claimAutoTrackEvent,
+  nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
   // When set, tray/batch production and consumption ticks are suppressed
   // without affecting cases/skids or the global auto-track toggle.
   const doughTimerPausedRef = useRef<number>(0);
+  // Non-zero only for a timed correction pause. A manual pause leaves this at
+  // zero and waits for the operator's explicit Resume timers action.
+  const doughTimerResumeAtRef = useRef<number>(0);
   const [isDoughTimerPaused, setIsDoughTimerPaused] = useState(false);
   const internalAutoSuppressRef = useRef<number>(0);
+  const internalDoughAutoSuppressRef = useRef<number>(0);
   // Prefer caller's ref so that suppression latches written by UI consumers
   // (e.g. Home's autoSuppressUntilRef) are seen by this hook's write loop.
   const autoSuppressUntilRef = externalAutoSuppressRef ?? internalAutoSuppressRef;
+  const doughAutoSuppressUntilRef =
+    externalDoughAutoSuppressRef ?? internalDoughAutoSuppressRef;
   // Per-counter "next tick due at" wall-clock timestamps (ms). 0 = fire on the
   // next tick (fresh baseline / forced resume).
   const caseNextDueMsRef = useRef<number>(0);
@@ -409,19 +458,46 @@ export function useAutoTrack({
   // tick, so deltaCases is then ≈ 1 case.
   const formResetSkippedRef = useRef<boolean>(false);
   const caseClaimRetryRef = useRef<boolean>(false);
-  // A paused packaging drain measures output from its own pause-relative
-  // clock. Retain that clock's most recent reading so Resume can reconcile
-  // the final partial interval before switching back to the normal run clock.
-  const packagingDrainElapsedSecRef = useRef<number>(0);
-  const packagingDrainWallMsRef = useRef<number>(0);
   const previousPackagingDrainActiveRef = useRef(false);
+  const previousPackagingAutoTrackActiveRef = useRef(packagingAutoTrackActive);
+  const previousPackagingClockMsRef = useRef(nowTime.getTime());
+  const packagingClockRollbackUntilMsRef = useRef<number | null>(null);
   const previousRunStatusRef = useRef<RunStatus | null>(null);
   const resumeRearmPendingRef = useRef(false);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
+  // Claims for different channels can become due in the same render. Keep
+  // them FIFO so the later claim is built from the first acknowledgement's
+  // form values instead of racing the shared run-value stamp.
+  const coordinationClaimQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [coordinationPendingCount, setCoordinationPendingCount] = useState(0);
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
+  // Net-elapsed seconds (not a wall-clock display due time) for sauce claims.
+  const sauceNextDueNetSecRef = useRef(0);
+  const appNextDueNetSecRefs = {
+    app1: useRef(0),
+    app2: useRef(0),
+    app3: useRef(0),
+    app4: useRef(0),
+  };
+  const coordinationIdentity =
+    `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
+  const coordinationIdentityRef = useRef(coordinationIdentity);
+  coordinationIdentityRef.current = coordinationIdentity;
+  const dueRefForChannel = (channel: AutoTrackChannel) => {
+    if (channel === "case") return caseNextDueMsRef;
+    if (channel === "tray-consume") return trayNextDueMsRef;
+    if (channel === "tray-produce") return trayProdNextDueMsRef;
+    if (channel === "batch-consume") return batchNextDueMsRef;
+    if (channel === "batch-produce") return batchProdNextDueMsRef;
+    if (channel === "sauce-barrel") return sauceNextDueNetSecRef;
+    if (channel === "app1-batch") return appNextDueNetSecRefs.app1;
+    if (channel === "app2-batch") return appNextDueNetSecRefs.app2;
+    if (channel === "app3-batch") return appNextDueNetSecRefs.app3;
+    if (channel === "app4-batch") return appNextDueNetSecRefs.app4;
+    return hopperProdNextDueMsRef;
+  };
 
   useEffect(() => {
     const adopt = (event: Event) => {
@@ -441,17 +517,7 @@ export function useAutoTrack({
         const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
         if (state.generation !== generation) {
           coordinationSequenceRef.current[channel] = 0;
-          const dueRef = channel === "case"
-            ? caseNextDueMsRef
-            : channel === "tray-consume"
-              ? trayNextDueMsRef
-              : channel === "tray-produce"
-                ? trayProdNextDueMsRef
-                : channel === "batch-consume"
-                  ? batchNextDueMsRef
-                  : channel === "batch-produce"
-                    ? batchProdNextDueMsRef
-                    : hopperProdNextDueMsRef;
+          const dueRef = dueRefForChannel(channel);
           dueRef.current = state.nextDueAt;
           continue;
         }
@@ -459,17 +525,7 @@ export function useAutoTrack({
           coordinationSequenceRef.current[channel] ?? 0,
           state.sequence,
         );
-        const dueRef = channel === "case"
-          ? caseNextDueMsRef
-          : channel === "tray-consume"
-            ? trayNextDueMsRef
-            : channel === "tray-produce"
-              ? trayProdNextDueMsRef
-              : channel === "batch-consume"
-                ? batchNextDueMsRef
-                : channel === "batch-produce"
-                  ? batchProdNextDueMsRef
-                  : hopperProdNextDueMsRef;
+        const dueRef = dueRefForChannel(channel);
         dueRef.current = state.nextDueAt;
       }
     };
@@ -552,18 +608,24 @@ export function useAutoTrack({
     batchSeededRef.current = false;
     drainFreezerRef.current = -1;
     formResetSkippedRef.current = false;
-    packagingDrainElapsedSecRef.current = 0;
-    packagingDrainWallMsRef.current = 0;
     previousPackagingDrainActiveRef.current = false;
+    previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
+    sauceNextDueNetSecRef.current = 0;
+    appNextDueNetSecRefs.app1.current = 0;
+    appNextDueNetSecRefs.app2.current = 0;
+    appNextDueNetSecRefs.app3.current = 0;
+    appNextDueNetSecRefs.app4.current = 0;
     setCoordinationPendingCount(0);
     setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
     doughTimerPausedRef.current = 0;
+    doughTimerResumeAtRef.current = 0;
+    doughAutoSuppressUntilRef.current = 0;
     setIsDoughTimerPaused(false);
-  }, []);
+  }, [doughAutoSuppressUntilRef]);
 
   const rearmCaseTimer = useCallback((nowMs: number) => {
     const timing = getAutoTrackTiming(
@@ -587,6 +649,8 @@ export function useAutoTrack({
     // Rebase every dough channel at the same instant. Consumption anchors are
     // cleared so the first completed interval cannot replay paused elapsed time.
     doughTimerPausedRef.current = 0;
+    doughTimerResumeAtRef.current = 0;
+    doughAutoSuppressUntilRef.current = 0;
     setIsDoughTimerPaused(false);
     trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
     batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
@@ -630,6 +694,23 @@ export function useAutoTrack({
       if (typeof values.batchesReady === "number") {
         form.setValue("batchesReady", values.batchesReady, { shouldDirty: true });
       }
+      if (typeof values.sauceBarrelsMade === "number") {
+        form.setValue("sauceBarrelsMade", values.sauceBarrelsMade, { shouldDirty: true });
+      }
+      if (typeof values.sauceBarrelAnchorNetSec === "number") {
+        form.setValue("sauceBarrelAnchorNetSec", values.sauceBarrelAnchorNetSec, { shouldDirty: true });
+      }
+      if (typeof values.sauceBarrelCorrectionGeneration === "number") {
+        form.setValue("sauceBarrelCorrectionGeneration", values.sauceBarrelCorrectionGeneration, { shouldDirty: true });
+      }
+      (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
+        const made = values[`${slot}BatchesMade` as keyof FormValues];
+        const anchor = values[`${slot}BatchAnchorNetSec` as keyof FormValues];
+        const generation = values[`${slot}BatchCorrectionGeneration` as keyof FormValues];
+        if (typeof made === "number") form.setValue(`${slot}BatchesMade` as keyof FormValues, made as never, { shouldDirty: true });
+        if (typeof anchor === "number") form.setValue(`${slot}BatchAnchorNetSec` as keyof FormValues, anchor as never, { shouldDirty: true });
+        if (typeof generation === "number") form.setValue(`${slot}BatchCorrectionGeneration` as keyof FormValues, generation as never, { shouldDirty: true });
+      });
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
     if (!claimAutoTrackEvent) {
@@ -638,81 +719,113 @@ export function useAutoTrack({
     }
     if (coordinationPendingRef.current.has(channel)) return;
 
-    const sequence = (coordinationSequenceRef.current[channel] ?? 0) + 1;
-    const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
-    const eventId = coordinationRetryEventRef.current[channel]
-      ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
-    coordinationRetryEventRef.current[channel] = eventId;
+    const claimIdentity = coordinationIdentity;
+    const correctionMutation = mutations.find((mutation) =>
+      mutation.field === "sauceBarrelCorrectionGeneration" || mutation.field.endsWith("BatchCorrectionGeneration"),
+    );
     coordinationPendingRef.current.add(channel);
     setCoordinationPendingCount(coordinationPendingRef.current.size);
-    setCoordinationDelayed(false);
-    void claimAutoTrackEvent({
-      version: 1,
-      runId,
-      channel,
-      generation,
-      sequence,
-      eventId,
-      dueAt,
-      nextDueAt,
-      // Home replaces this placeholder with its last adopted canonical stamp.
-      baseUpdatedAt: 0,
-      mutations,
-    }).then((result) => {
-      // A concurrent channel or peer may have advanced the shared run-value
-      // stamp after this claim was queued. Treat that canonical conflict like
-      // a failed claim so the catch path retries from the newly adopted values
-      // instead of accepting the unchanged server value and waiting for the
-      // next production interval.
-      if (result.outcome === "conflict") {
-        throw new Error("Automatic tracking claim conflicted with a newer value");
-      }
-      coordinationSequenceRef.current[channel] = Math.max(
-        coordinationSequenceRef.current[channel] ?? 0,
-        result.state.sequence,
-      );
-      const dueRef = channel === "case"
-        ? caseNextDueMsRef
-        : channel === "tray-consume"
-          ? trayNextDueMsRef
-          : channel === "tray-produce"
-            ? trayProdNextDueMsRef
-            : channel === "batch-consume"
-              ? batchNextDueMsRef
-              : channel === "batch-produce"
-                ? batchProdNextDueMsRef
-                : hopperProdNextDueMsRef;
-      dueRef.current = result.state.nextDueAt;
-      coordinationRetryEventRef.current[channel] = undefined;
-      applyValues(result.values);
-    }).catch(() => {
-      const dueRef = channel === "case"
-        ? caseNextDueMsRef
-        : channel === "tray-consume"
-          ? trayNextDueMsRef
-          : channel === "tray-produce"
-            ? trayProdNextDueMsRef
-            : channel === "batch-consume"
-              ? batchNextDueMsRef
-              : channel === "batch-produce"
-                ? batchProdNextDueMsRef
-                : hopperProdNextDueMsRef;
-      dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
-      // A failed coordinated case claim did not actually apply the mutation.
-      // Re-baseline so the next tick retries the same absolute catch-up rather
-      // than mistaking the unchanged form value for an external reset.
-      if (channel === "case") {
-        lastExpectedCasesRef.current = -1;
-        formResetSkippedRef.current = false;
-        caseClaimRetryRef.current = true;
-      }
-      setCoordinationDelayed(true);
-    }).finally(() => {
-      coordinationPendingRef.current.delete(channel);
-      setCoordinationPendingCount(coordinationPendingRef.current.size);
-    });
+    const queuedClaim = coordinationClaimQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        // A new run may have been selected while this claim waited behind an
+        // older channel. resetBookkeeping() clears the old pending marker; do
+        // not send the stale queued event into the new run.
+        if (coordinationIdentityRef.current !== claimIdentity) return;
+
+        const sequence = (coordinationSequenceRef.current[channel] ?? 0) + 1;
+        const generation = claimIdentity;
+        const eventId = coordinationRetryEventRef.current[channel]
+          ?? `${sequence}:${channel}:${crypto.randomUUID()}`.slice(0, 160);
+        // Rebase simple counter mutations at send time. A same-tick tray
+        // acknowledgement can update the form before the queued batch claim
+        // starts; sending the original `from` would make that second claim
+        // stale even though it touches a different dough counter.
+        const claimMutations = correctionMutation
+          ? mutations
+          : mutations.map((mutation) => {
+              const from = Number(form.getValues(mutation.field as keyof FormValues)) || 0;
+              const delta = mutation.to - mutation.from;
+              return {
+                ...mutation,
+                from,
+                to: Math.max(0, Math.round((from + delta) * 100) / 100),
+              };
+            });
+        const correctionGeneration = correctionMutation?.from;
+        coordinationRetryEventRef.current[channel] = eventId;
+        setCoordinationDelayed(false);
+        try {
+          const result = await claimAutoTrackEvent({
+            version: 1,
+            runId,
+            channel,
+            generation,
+            sequence,
+            eventId,
+            dueAt,
+            nextDueAt,
+            // Home replaces this placeholder with its last adopted canonical stamp.
+            baseUpdatedAt: 0,
+            correctionGeneration,
+            mutations: claimMutations,
+          });
+          // The hook shares one form across selected runs. A response from the
+          // previously selected run must not write into the new run or advance
+          // its coordination bookkeeping.
+          if (coordinationIdentityRef.current !== claimIdentity) return;
+          // A manual correction can happen while this request is in flight. Its
+          // incremented generation is the local authority until that snapshot
+          // reaches the server, so never let the older acknowledgement restore
+          // the pre-correction made count or net-time anchor.
+          if (
+            correctionMutation
+            && Number(form.getValues(correctionMutation.field as keyof FormValues)) !== correctionMutation.from
+          ) {
+            coordinationRetryEventRef.current[channel] = undefined;
+            return;
+          }
+          // A concurrent channel or peer may have advanced the shared run-value
+          // stamp after this claim was queued. Treat that canonical conflict like
+          // a failed claim so the catch path retries from the newly adopted values
+          // instead of accepting the unchanged server value and waiting for the
+          // next production interval.
+          if (result.outcome === "conflict") {
+            throw new Error("Automatic tracking claim conflicted with a newer value");
+          }
+          coordinationSequenceRef.current[channel] = Math.max(
+            coordinationSequenceRef.current[channel] ?? 0,
+            result.state.sequence,
+          );
+          const dueRef = dueRefForChannel(channel);
+          dueRef.current = result.state.nextDueAt;
+          coordinationRetryEventRef.current[channel] = undefined;
+          applyValues(result.values);
+        } catch {
+          if (coordinationIdentityRef.current !== claimIdentity) return;
+          const dueRef = dueRefForChannel(channel);
+          dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
+          // A failed coordinated case claim did not actually apply the mutation.
+          // Re-baseline so the next tick retries the same absolute catch-up
+          // rather than mistaking the unchanged form value for an external reset.
+          if (channel === "case") {
+            lastExpectedCasesRef.current = -1;
+            formResetSkippedRef.current = false;
+            caseClaimRetryRef.current = true;
+          }
+          setCoordinationDelayed(true);
+        } finally {
+          // A new run may already have an in-flight claim on this same channel.
+          // Only the owner that inserted the pending marker may remove it.
+          if (coordinationIdentityRef.current !== claimIdentity) return;
+          coordinationPendingRef.current.delete(channel);
+          setCoordinationPendingCount(coordinationPendingRef.current.size);
+        }
+      });
+    coordinationClaimQueueRef.current = queuedClaim.then(() => {}, () => {});
   }, [
     claimAutoTrackEvent,
+    coordinationIdentity,
     endedAt,
     form,
     onPackagingProgressAutoAdvance,
@@ -723,8 +836,13 @@ export function useAutoTrack({
 
   // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
   // Does not affect the cases/skids counter or the global auto-track toggle.
-  const pauseDoughTimers = useCallback(() => {
-    doughTimerPausedRef.current = Date.now();
+  const pauseDoughTimers = useCallback((durationMs?: number) => {
+    const nowMs = Date.now();
+    doughTimerPausedRef.current = nowMs;
+    doughTimerResumeAtRef.current =
+      typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0
+        ? nowMs + durationMs
+        : 0;
     setIsDoughTimerPaused(true);
   }, []);
 
@@ -733,45 +851,6 @@ export function useAutoTrack({
   const resumeDoughTimers = useCallback(() => {
     rearmDoughTimers(Date.now());
   }, [rearmDoughTimers]);
-
-  const applyPackagingCaseIncrement = useCallback((increment: number) => {
-    const wholeIncrement = Math.floor(Math.max(0, increment));
-    const cps = v.casesPerSkid;
-    if (wholeIncrement <= 0 || cps <= 0) return;
-
-    const curTotal =
-      (Number(form.getValues("skidsCompleted")) || 0) * cps +
-      (Number(form.getValues("casesOnCurrentSkid")) || 0);
-    const target = curTotal + wholeIncrement;
-    // Never pull a value down below what the operator already has on the floor.
-    const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-    if (newTotal === curTotal) return;
-
-    const nextSkids = Math.floor(newTotal / cps);
-    const nextCases = Math.round(newTotal % cps);
-    const dueAt = Date.now();
-    const periodMs = getAutoTrackTiming(
-      calc.ppm,
-      v.pizzasPerCase,
-      calc.perTray,
-      calc.perBatch,
-      machine,
-    ).caseMs || 1000;
-    commitAutomatic("case", dueAt, dueAt + periodMs, [
-      { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-      { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-    ]);
-  }, [
-    calc.perBatch,
-    calc.perTray,
-    calc.ppm,
-    commitAutomatic,
-    form,
-    machine,
-    v.casesNeeded,
-    v.casesPerSkid,
-    v.pizzasPerCase,
-  ]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
@@ -837,64 +916,128 @@ export function useAutoTrack({
     }
   }, [autoTrackProgress, nowTime, rearmCaseTimer, rearmDoughTimers, resetBookkeeping]);
 
-  // The normal run clock deliberately excludes paused time. A continued-tunnel
-  // pause instead uses a pause-relative packaging clock, so the two baselines
-  // cannot be compared directly after Resume. Reconcile the unfinished drain
-  // interval once, then switch the shared case baseline to the normal clock.
+  // A speed adjustment changes every line-demand cadence. Re-arm active
+  // countdowns from the edit instant so an old due timestamp cannot make the
+  // next tick fire at the previous speed. The initial ref baseline preserves
+  // the established first-tick behavior on mount.
+  const timingBasisRef = useRef({
+    ppm: calc.ppm,
+    pizzasPerCase: v.pizzasPerCase,
+    perTray: calc.perTray,
+    perBatch: calc.perBatch,
+    spinSec: machine?.spinSec ?? 0,
+    hopperSec: machine?.hopperSec ?? 0,
+  });
+  useEffect(() => {
+    const nextBasis = {
+      ppm: calc.ppm,
+      pizzasPerCase: v.pizzasPerCase,
+      perTray: calc.perTray,
+      perBatch: calc.perBatch,
+      spinSec: machine?.spinSec ?? 0,
+      hopperSec: machine?.hopperSec ?? 0,
+    };
+    const previous = timingBasisRef.current;
+    const changed =
+      previous.ppm !== nextBasis.ppm
+      || previous.pizzasPerCase !== nextBasis.pizzasPerCase
+      || previous.perTray !== nextBasis.perTray
+      || previous.perBatch !== nextBasis.perBatch
+      || previous.spinSec !== nextBasis.spinSec
+      || previous.hopperSec !== nextBasis.hopperSec;
+    timingBasisRef.current = nextBasis;
+    if (changed && runStatus === "running") {
+      const nowMs = Date.now();
+      rearmCaseTimer(nowMs);
+      rearmDoughTimers(nowMs);
+    }
+  }, [
+    calc.perBatch,
+    calc.perTray,
+    calc.ppm,
+    machine?.hopperSec,
+    machine?.spinSec,
+    rearmCaseTimer,
+    rearmDoughTimers,
+    runStatus,
+    v.pizzasPerCase,
+  ]);
+
+  // Pause output and ordinary production use different clocks. Baseline each
+  // clock at the physical transition and always start from a full case period:
+  // entering a drain must not compare its zero-based clock with the run clock,
+  // and Resume must not replay paused output as an immediate catch-up.
   useEffect(() => {
     const wasPackagingDrainActive = previousPackagingDrainActiveRef.current;
-    const resumedFromPackagingDrain =
-      wasPackagingDrainActive && runStatus === "running" && !packagingDrainActive;
-
-    if (packagingDrainActive) {
-      packagingDrainElapsedSecRef.current = Math.max(0, packagingDrainElapsedSec);
-      packagingDrainWallMsRef.current = nowTime.getTime();
-    }
-
-    if (resumedFromPackagingDrain) {
-      const finalDrainExpected =
-        packagingDrainWallMsRef.current > 0 && v.pizzasPerCase > 0
-          ? Math.floor(
-            ((packagingDrainElapsedSecRef.current
-              + Math.max(0, Date.now() - packagingDrainWallMsRef.current) / 1000)
-              * calc.ppm)
-              / (v.pizzasPerCase * 60),
-          )
-          : -1;
-      const previousDrainExpected = lastExpectedCasesRef.current;
-      const suppressed = Date.now() < autoSuppressUntilRef.current;
-      if (
-        finalDrainExpected >= 0
-        && previousDrainExpected >= 0
-        && !suppressed
-        && !autoTrackBlockedRef?.current
-        && !autoTrackBlocked
-        && !disabled
-        && autoTrackProgress
-      ) {
-        applyPackagingCaseIncrement(finalDrainExpected - previousDrainExpected);
-      }
-
-      // Re-base even when an automatic write is suppressed or rejected. That
-      // keeps the pause interval from replaying once normal tracking resumes.
+    if (packagingDrainActive && !wasPackagingDrainActive) {
       lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
-      packagingDrainElapsedSecRef.current = 0;
-      packagingDrainWallMsRef.current = 0;
+      rearmCaseTimer(nowTime.getTime());
+    } else if (wasPackagingDrainActive && !packagingDrainActive) {
+      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+      rearmCaseTimer(nowTime.getTime());
     }
 
     previousPackagingDrainActiveRef.current = packagingDrainActive;
   }, [
-    applyPackagingCaseIncrement,
-    autoTrackBlocked,
-    autoTrackProgress,
     autoTrackSuggestion?.expectedCasesRaw,
-    calc.ppm,
-    disabled,
     nowTime,
     packagingDrainActive,
-    packagingDrainElapsedSec,
+    rearmCaseTimer,
+  ]);
+
+  // While a resumed line is filling toward Packaging, keep the ordinary clock
+  // baseline current without writing. When Packaging becomes physically ready,
+  // start one complete case interval from that transition.
+  useEffect(() => {
+    const wasActive = previousPackagingAutoTrackActiveRef.current;
+    const nowMs = nowTime.getTime();
+    // A phase transition caused by a normal one-second clock tick represents
+    // the line physically becoming ready for packaging, so its first case
+    // should start on a fresh cadence. A large jump is a screen-off/wake
+    // reconciliation: the line may have crossed the phase boundary while the
+    // display was asleep, and re-arming here would discard the legitimate
+    // hidden-time catch-up.
+    const clockJumpedWhileHidden =
+      nowMs > previousPackagingClockMsRef.current + 2_000;
+    const clockMovedBackward =
+      nowMs + 2_000 < previousPackagingClockMsRef.current;
+    if (clockMovedBackward) {
+      // A wall-clock correction must not turn the later correction back into
+      // production time. Keep the existing production baseline and postpone
+      // the next case until the clock has caught up to the old instant.
+      packagingClockRollbackUntilMsRef.current = previousPackagingClockMsRef.current;
+      rearmCaseTimer(nowMs);
+    } else if (
+      packagingClockRollbackUntilMsRef.current !== null
+      && nowMs < packagingClockRollbackUntilMsRef.current
+    ) {
+      rearmCaseTimer(nowMs);
+    } else {
+      packagingClockRollbackUntilMsRef.current = null;
+      if (runStatus === "running" && !packagingAutoTrackActive) {
+        if (!clockJumpedWhileHidden) {
+          lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+          rearmCaseTimer(nowMs);
+        }
+      } else if (
+        runStatus === "running"
+        && packagingAutoTrackActive
+        && !wasActive
+      ) {
+        if (!clockJumpedWhileHidden) {
+          lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+          rearmCaseTimer(nowMs);
+        }
+      }
+    }
+    previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
+    previousPackagingClockMsRef.current = nowMs;
+  }, [
+    autoTrackSuggestion?.expectedCasesRaw,
+    nowTime,
+    packagingAutoTrackActive,
+    rearmCaseTimer,
     runStatus,
-    v.pizzasPerCase,
   ]);
 
   // Clear the independent dough-timer pause whenever the run becomes globally
@@ -971,14 +1114,179 @@ export function useAutoTrack({
     resetBookkeeping,
   ]);
 
+  const previousSauceCorrectionGenerationRef = useRef(v.sauceBarrelCorrectionGeneration);
+  useEffect(() => {
+    const cadence = Number(calc.sauceDepletionSec) || 0;
+    const anchor = Math.max(0, Number(v.sauceBarrelAnchorNetSec) || 0);
+    sauceNextDueNetSecRef.current =
+      Number.isFinite(cadence) && cadence > 0 ? anchor + cadence : 0;
+    if (previousSauceCorrectionGenerationRef.current !== v.sauceBarrelCorrectionGeneration) {
+      // Manual corrections invalidate the server channel generation. Restart
+      // its sequence and discard any failed pre-correction event identity.
+      coordinationSequenceRef.current["sauce-barrel"] = 0;
+      coordinationRetryEventRef.current["sauce-barrel"] = undefined;
+      previousSauceCorrectionGenerationRef.current = v.sauceBarrelCorrectionGeneration;
+    }
+  }, [
+    calc.sauceDepletionSec,
+    v.sauceBarrelAnchorNetSec,
+    v.sauceBarrelCorrectionGeneration,
+  ]);
+
+  // Sauce uses the same sequenced claim protocol as every other automatic
+  // counter. Its due values are net-run seconds, so pauses consume no sauce.
+  // A claim is exactly one barrel; successful form adoption triggers the next
+  // overdue identity rather than folding a screen-off gap into one mutation.
+  useEffect(() => {
+    if (
+      !claimAutoTrackEvent ||
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      runStatus !== "running" ||
+      calc.pressDone ||
+      nextRunPrepActive
+    ) return;
+    const cadence = Number(calc.sauceDepletionSec) || 0;
+    if (!Number.isFinite(cadence) || cadence <= 0 || !Number.isFinite(elapsedBatchSec)) return;
+    const anchor = Math.max(0, Number(v.sauceBarrelAnchorNetSec) || 0);
+    const dueAtNetSec = sauceNextDueNetSecRef.current > 0
+      ? sauceNextDueNetSecRef.current
+      : anchor + cadence;
+    if (elapsedBatchSec < dueAtNetSec) return;
+    const currentCount = Math.max(0, Number(v.sauceBarrelsMade) || 0);
+    const correctionGeneration = Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0);
+    sauceNextDueNetSecRef.current = dueAtNetSec;
+    commitAutomatic("sauce-barrel", dueAtNetSec, dueAtNetSec + cadence, [
+      { field: "sauceBarrelsMade", from: currentCount, to: currentCount + 1 },
+      { field: "sauceBarrelAnchorNetSec", from: anchor, to: dueAtNetSec },
+      { field: "sauceBarrelCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
+    ]);
+  }, [
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    calc.pressDone,
+    calc.sauceDepletionSec,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    endedAt,
+    nextRunPrepActive,
+    runGeneration,
+    runId,
+    runStatus,
+    v.sauceBarrelAnchorNetSec,
+    v.sauceBarrelCorrectionGeneration,
+    v.sauceBarrelsMade,
+  ]);
+
+  // Persisted anchors are the authoritative rebase points. In particular, a
+  // manual +/- may happen while a prior automatic event is due: resetting this
+  // slot's due time to the new anchor prevents that stale event from writing
+  // the old anchor back after the suppression fence expires.
+  useEffect(() => {
+    (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
+      const values = v as FormValues;
+      const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
+      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
+      const batchLbs = recipeLbs > 0
+        ? recipeLbs
+        : Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0;
+      const ounces = Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0;
+      const cadence = batchLbs > 0 && ounces > 0 && calc.ppm > 0
+        ? (batchLbs * 16 / ounces / calc.ppm) * 60
+        : 0;
+      const channel = `${slot}-batch` as AutoTrackChannel;
+      dueRefForChannel(channel).current = cadence > 0
+        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + cadence
+        : 0;
+    });
+  }, [calc.ppm, v]);
+
+  // Applicator batches use the same provider-owned, net-production clock as
+  // Sauce. Each slot has its own effective batch and therefore its own cadence;
+  // this deliberately does not use the dough batch cadence or add controls to
+  // mix/lb-only rows.
+  useEffect(() => {
+    if (
+      !claimAutoTrackEvent ||
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      runStatus !== "running" ||
+      calc.pressDone ||
+      Date.now() < autoSuppressUntilRef.current ||
+      !Number.isFinite(elapsedBatchSec)
+    ) return;
+    const formValues = v as FormValues;
+    const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
+      const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
+      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
+      const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : Number(formValues[`${slot}BatchLbs` as keyof FormValues]);
+      const ouncesPerPizza = Number(formValues[`${slot}OzPerPizza` as keyof FormValues]);
+      const required = Number(calc[`${slot}Batches`]);
+      return {
+        slot,
+        channel: `${slot}-batch` as AutoTrackChannel,
+        madeField: `${slot}BatchesMade` as keyof FormValues,
+        anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
+        correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
+        valid: !!String(formValues[`${slot}Type` as keyof FormValues]).trim() &&
+          !String(formValues[`${slot}Type` as keyof FormValues]).trim().toLowerCase().includes("mix") &&
+          effectiveBatchLbs > 0 && ouncesPerPizza > 0 && required > 0 && calc.ppm > 0,
+        cadence: effectiveBatchLbs > 0 && ouncesPerPizza > 0 && calc.ppm > 0
+          ? (effectiveBatchLbs * 16 / ouncesPerPizza / calc.ppm) * 60
+          : 0,
+        required,
+      };
+    });
+    for (const slot of slots) {
+      if (!slot.valid || !Number.isFinite(slot.cadence) || slot.cadence <= 0) continue;
+      const made = Math.max(0, Number(formValues[slot.madeField]) || 0);
+      const anchor = Math.max(0, Number(formValues[slot.anchorField]) || 0);
+      const correctionGeneration = Math.max(0, Number(formValues[slot.correctionField]) || 0);
+      const dueAt = dueRefForChannel(slot.channel).current || anchor + slot.cadence;
+      // At most one sequenced event is claimed at a time. The canonical
+      // acknowledgement advances the persisted anchor, then this effect claims
+      // the next overdue fractional cadence without losing accumulated time.
+      if (elapsedBatchSec < dueAt || made >= Math.ceil(slot.required)) continue;
+      dueRefForChannel(slot.channel).current = dueAt;
+      commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
+        { field: slot.madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(slot.required), made + 1) },
+        { field: slot.anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
+        { field: slot.correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+      ]);
+    }
+  }, [
+    autoSuppressUntilRef,
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    calc,
+    claimAutoTrackEvent,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    runStatus,
+    v,
+  ]);
+
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
+    const caseTrackingActive =
+      (runStatus === "running" && packagingAutoTrackActive)
+      || drainActive
+      || packagingDrainActive;
+    const doughTrackingActive = runStatus === "running";
     if (
       autoTrackBlockedRef?.current
       || autoTrackBlocked
       || disabled
       || !autoTrackProgress
-      || !(runStatus === "running" || drainActive || packagingDrainActive)
+      || (!caseTrackingActive && !doughTrackingActive)
       || !autoTrackSuggestion
     ) return;
 
@@ -987,10 +1295,20 @@ export function useAutoTrack({
     // but do not write — the operator is taking over. Bookkeeping still
     // advances so the window expiring never causes a catch-up jump that wipes
     // the operator's manual edit.
-    const suppressed = Date.now() < autoSuppressUntilRef.current;
+    const caseSuppressed = Date.now() < autoSuppressUntilRef.current;
+    // Keep legacy packaging/manual suppression behavior for Dough while
+    // allowing a Dough-only correction to leave case tracking untouched.
+    const doughSuppressed =
+      Date.now() < doughAutoSuppressUntilRef.current
+      || Date.now() < autoSuppressUntilRef.current;
 
     // ── Cases (and skids, derived from the same total): tick once per case. ──
-    if (calc.ppm > 0 && v.pizzasPerCase > 0 && nowMs >= caseNextDueMsRef.current) {
+    if (
+      caseTrackingActive
+      && calc.ppm > 0
+      && v.pizzasPerCase > 0
+      && nowMs >= caseNextDueMsRef.current
+    ) {
       const casePeriodMs = clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000);
       const prevExpected = lastExpectedCasesRef.current;
       // Baseline the incremental delta off the UNCLAMPED total so the count keeps
@@ -1002,21 +1320,21 @@ export function useAutoTrack({
       const expectedCases = autoTrackSuggestion.expectedCases;
       caseNextDueMsRef.current = nowMs + casePeriodMs;
       lastExpectedCasesRef.current = expectedRaw;
-      // Freezer baseline advances on EVERY case tick (even suppressed / while
+      // Freeze tunnel baseline advances on EVERY case tick (even suppressed / while
       // running) so the drain delta is always measured from the latest tunnel
       // state — a suppression window expiring or the running→ended transition
       // never causes a catch-up jump.
       const prevFreezer = drainFreezerRef.current;
       drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
 
-      if (!suppressed) {
+      if (!caseSuppressed) {
         const cps = v.casesPerSkid;
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
           (Number(form.getValues("casesOnCurrentSkid")) || 0);
         if (drainActive || packagingDrainActive) {
-          // Ended runs use the freezer WIP drop. During a paused packaging
-          // drain, freezer WIP is intentionally frozen at pause, so use the
+          // Ended runs use the Freeze tunnel WIP drop. During a paused packaging
+          // drain, tunnel WIP is intentionally frozen at pause, so use the
           // pause-relative stage clock instead. Both paths baseline first,
           // preventing reload/sync adoption from replaying old output.
           const exited = packagingDrainActive
@@ -1096,7 +1414,7 @@ export function useAutoTrack({
     // Trays / batches: incremental decrement, each at its own cadence.
     // Works after page reloads and naturally handles mid-run replenishments.
     // Stop once the press has made everything the run needs — COUNT-based
-    // (cased product + live freezer contents ≥ casesNeeded, via calc.pressDone),
+    // (cased product + live Freeze tunnel contents ≥ casesNeeded, via calc.pressDone),
     // not an elapsed-time estimate. When the line runs slower or faster than
     // the configured speed, the real counts are what decide when dough stops
     // moving for this run; from that moment the dough crew is on the NEXT run.
@@ -1121,6 +1439,17 @@ export function useAutoTrack({
       }
     }
 
+    // A timed manual correction pause ends by re-arming every dough channel.
+    // Return without writing in this render so the next clock tick starts from
+    // a clean, full cadence and cannot replay the paused interval.
+    if (
+      doughTimerPausedRef.current > 0
+      && doughTimerResumeAtRef.current > 0
+      && nowMs >= doughTimerResumeAtRef.current
+    ) {
+      rearmDoughTimers(nowMs);
+      return;
+    }
     if (doughTimerPausedRef.current > 0) return;
 
     // ── Trays: count up while dough is still being pressed, down as the line
@@ -1154,7 +1483,7 @@ export function useAutoTrack({
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
       } else if (nowMs >= trayProdNextDueMsRef.current) {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
-        if (!suppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
+        if (!doughSuppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
           delta += 1;
         }
       }
@@ -1170,7 +1499,7 @@ export function useAutoTrack({
           : trayPeriodMs / 60000;
         trayNextDueMsRef.current = nowMs + trayPeriodMs;
         trayLastMsRef.current = nowMs;
-        if (!suppressed && !doughFeedComplete) {
+        if (!doughSuppressed && !doughFeedComplete) {
           // First tray tick of a run where the operator never entered staged
           // dough (counter still 0): seed the suggested staging (the same number
           // the "Suggest" button applies) so the counter has real stock to track
@@ -1198,11 +1527,10 @@ export function useAutoTrack({
       }
 
       if (!traySeededThisTick && delta !== 0) {
-        // Production never pushes past the stepper max (74) — but must never
-        // clamp an already-higher value DOWN either.
-        let next = v.traysOnLine + delta;
-        if (delta > 0) next = Math.min(next, Math.max(v.traysOnLine, 74));
-        next = Math.max(0, next);
+        // traysOnLine is the aggregate across all physical tray sections.
+        // Section capacity is advisory in the UI, so production must not stop
+        // or rewrite this count at an arbitrary display threshold.
+        const next = Math.max(0, v.traysOnLine + delta);
         if (next !== v.traysOnLine) {
           commitAutomatic(delta > 0 ? "tray-produce" : "tray-consume", nowMs, delta > 0
             ? trayProdNextDueMsRef.current
@@ -1233,7 +1561,7 @@ export function useAutoTrack({
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
       } else if (nowMs >= batchProdNextDueMsRef.current) {
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
-        if (!suppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
+        if (!doughSuppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
           delta += 1;
         }
       }
@@ -1246,7 +1574,7 @@ export function useAutoTrack({
           : batchPeriodMs / 60000;
         batchNextDueMsRef.current = nowMs + batchPeriodMs;
         batchLastMsRef.current = nowMs;
-        if (!suppressed && !doughFeedComplete) {
+        if (!doughSuppressed && !doughFeedComplete) {
           // Same one-shot seed as trays: an untouched 0 counter gets the
           // suggested staging on its first tick so it has stock to track.
           if (!batchSeededRef.current) {
@@ -1302,6 +1630,7 @@ export function useAutoTrack({
     setAutoTrackProgress,
     autoTrackSuggestion,
     autoSuppressUntilRef,
+    doughAutoSuppressUntilRef,
     fireAutoTrackNow,
     tickDueRefs: tickDueRefsRef.current,
     isDoughTimerPaused,

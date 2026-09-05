@@ -7,7 +7,11 @@ type WaitingServiceWorkerRegistration = Pick<
   removeEventListener?: ServiceWorkerRegistration["removeEventListener"];
 };
 
-type ActivateWaitingWorker = (reloadPage?: boolean) => Promise<void> | void;
+type CanReload = () => boolean;
+type ActivateWaitingWorker = (
+  reloadPage?: boolean,
+  canReload?: CanReload,
+) => Promise<void> | void;
 
 export const WORKER_INSTALL_TIMEOUT_MS = 5_000;
 
@@ -98,9 +102,10 @@ export async function updateAndReload(
   registration: WaitingServiceWorkerRegistration | undefined,
   activateWaitingWorker: ActivateWaitingWorker | undefined,
   reload: () => void,
+  canReload: CanReload = () => true,
 ): Promise<void> {
   if (!registration) {
-    reload();
+    if (canReload()) reload();
     return;
   }
 
@@ -110,14 +115,22 @@ export async function updateAndReload(
     updatePromise,
   );
 
-  if (canActivateWaitingWorker && registration.waiting && activateWaitingWorker) {
+  if (
+    canReload()
+    && canActivateWaitingWorker
+    && registration.waiting
+    && activateWaitingWorker
+  ) {
     try {
-      await activateWaitingWorker(true);
+      // The PWA registration owns the eventual "controlling" event. Give that
+      // event the live guard so it, rather than update detection, owns the only
+      // reload and can cancel if work becomes unsafe during activation.
+      await activateWaitingWorker(false, canReload);
       return;
     } catch {
       // If activation fails, give the user the browser's normal reload path.
     }
   }
 
-  reload();
+  if (canReload()) reload();
 }

@@ -2,7 +2,12 @@ import type { FormValues } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
-import { fetchWithDiagnostics } from "./performanceDiagnostics";
+import {
+  fetchDiagnosticIngestion,
+  fetchWithDiagnostics,
+  type DiagnosticIngestionTransportName,
+} from "./performanceDiagnostics";
+import type { AiStatus } from "./aiStatus";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -528,7 +533,10 @@ function isSessionProbePath(path: string): boolean {
   return path === "/me" || path.startsWith("/auth/");
 }
 
-async function api<T>(path: string, opts?: RequestInit): Promise<T> {
+async function api<T>(
+  path: string,
+  opts?: RequestInit,
+): Promise<T> {
   const requestEpoch = authRequestEpoch;
   const res = await fetchWithDiagnostics(`/api${path}`, {
     ...opts,
@@ -538,6 +546,14 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
       ...(opts?.headers ?? {}),
     },
   });
+  return parseApiResponse<T>(path, res, requestEpoch);
+}
+
+async function parseApiResponse<T>(
+  path: string,
+  res: Response,
+  requestEpoch: number,
+): Promise<T> {
   if (!res.ok) {
     if (res.status === 401 && !isSessionProbePath(path)) {
       onUnauthorized?.(requestEpoch);
@@ -563,6 +579,21 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return null as T;
   return (await res.json()) as T;
+}
+
+function diagnosticIngestionApi<T>(
+  transportName: DiagnosticIngestionTransportName,
+  opts: RequestInit,
+): Promise<T> {
+  const requestEpoch = authRequestEpoch;
+  return fetchDiagnosticIngestion(transportName, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": clientId,
+      ...(opts.headers ?? {}),
+    },
+  }).then((res) => parseApiResponse<T>(`[diagnostic:${transportName}]`, res, requestEpoch));
 }
 
 export type CreateItemBody = {
@@ -1180,10 +1211,11 @@ export const consumeSauceBarrel = (
   barrelIndex: number,
   itemKey: string,
   qty: number,
+  eventId?: string,
 ) =>
   api<{ applied: boolean; consumed: number }>("/inventory/consume-sauce-barrel", {
     method: "POST",
-    body: JSON.stringify({ runId, barrelIndex, itemKey, qty }),
+    body: JSON.stringify({ runId, barrelIndex, itemKey, qty, eventId }),
   });
 
 // ── Locations (named storage) + transfers ────────────────────────────────────
@@ -1325,7 +1357,7 @@ export type Incident = {
 // Report a problem (or auto-submit a crash) and get back a plain-language
 // diagnosis + workaround. Allowed for any signed-in user.
 export const reportIncident = (body: ReportIncidentBody) =>
-  api<IncidentDiagnosis>("/incidents", {
+  diagnosticIngestionApi<IncidentDiagnosis>("incidents", {
     method: "POST",
     body: JSON.stringify({
       ...body,
@@ -1333,8 +1365,98 @@ export const reportIncident = (body: ReportIncidentBody) =>
     }),
   });
 
-// Manager-only review endpoints.
+export type FieldCheckObservationInput = {
+  observationId: string;
+  checkName: string;
+  checkVersion: string;
+  outcome: "success" | "failure" | "incomplete";
+  observedAt: string;
+  appBuild: string;
+  deviceCategory:
+    | "desktop-chrome"
+    | "desktop-safari"
+    | "desktop-firefox"
+    | "mobile-chrome"
+    | "mobile-safari"
+    | "tablet-browser"
+    | "android-phone"
+    | "android-tablet"
+    | "ipad"
+    | "other-browser";
+  metrics?: Record<string, number>;
+};
+
+export const submitFieldCheckObservations = async (
+  observations: FieldCheckObservationInput[],
+): Promise<{ accepted: number; duplicate: number }> => {
+  // This intentionally does not use api(): field-check collection is
+  // best-effort telemetry and a stale session must not trigger the app's
+  // sign-out flow or interrupt production work.
+  const res = await fetchDiagnosticIngestion("fieldCheckObservations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-client-id": clientId },
+    body: JSON.stringify({ observations }),
+  });
+  if (!res.ok) {
+    const retryAfterSeconds = Number(res.headers.get("Retry-After"));
+    const error = new Error(`Field-check submission failed (${res.status})`) as Error & {
+      retryAfterMs?: number;
+    };
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      error.retryAfterMs = Math.min(120_000, Math.max(1_000, retryAfterSeconds * 1_000));
+    }
+    throw error;
+  }
+  return (await res.json()) as { accepted: number; duplicate: number };
+};
+
+export type FieldCheckFailure = {
+  outcome: "success" | "failure" | "incomplete";
+  observedAt: string;
+  appBuild: string;
+  deviceCategory: string;
+  metrics: Record<string, number>;
+};
+export type FieldCheckSummary = {
+  name: string;
+  label: string;
+  status: "healthy" | "collecting" | "needs-review" | "unsupported";
+  observedBy: "browser" | "hardware";
+  evidence: string;
+  expiresHours: number | null;
+  lastSuccessfulAt: string | null;
+  lastObservedAt: string | null;
+  recentFailures: FieldCheckFailure[];
+  failureCount: number;
+  incompleteCount: number;
+  actionable: boolean;
+  issueStatus: "open" | "recovered" | null;
+};
+export type FieldChecksReport = {
+  version: string;
+  scope: "current facility";
+  generatedAt: string;
+  checks: FieldCheckSummary[];
+  overallStatus: "healthy" | "collecting" | "needs-review" | "unsupported";
+  actionableCount: number;
+};
+
+// Incident and field-check review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
+export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
+export const confirmHardwareFieldCheck = (body: {
+  checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+  checkVersion: "2026-09";
+  outcome: "success" | "failure" | "incomplete";
+  observedAt: string;
+  deviceCategory: "android-phone" | "android-tablet" | "ipad";
+}) => diagnosticIngestionApi<{ accepted: number; duplicate: number }>(
+  "hardwareConfirmations",
+  {
+    method: "POST",
+    body: JSON.stringify(body),
+  },
+);
 export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
 export const fetchActionableIncidentCount = () => api<{ count: number }>("/incidents/actionable-count");
@@ -1369,6 +1491,7 @@ export type IncidentClustersResult = {
   note?: string;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 export const requestIncidentClusters = (lookbackDays?: number) =>
   api<IncidentClustersResult>("/ai/incident-clusters", {
@@ -1408,6 +1531,7 @@ export type AnomalyResult = {
   note?: string;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 export const requestAnomalies = (
   today: AnomalyRunInput[],
@@ -1451,6 +1575,7 @@ export type ScheduleOptimizeResult = {
   note?: string;
   generatedAt: number;
   aiGenerated: boolean;
+  aiStatus?: AiStatus;
 };
 export const requestScheduleOptimize = (
   runs: ScheduleRunInput[],

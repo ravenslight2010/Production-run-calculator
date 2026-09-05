@@ -18,7 +18,8 @@ Requires:
   - credentials that can push origin/main
   - when push.main.requireSigned=true, a working Git commit-signing setup
 
-The command runs `pnpm run typecheck` before creating the commit.
+The command runs `pnpm run check:workflows` and `pnpm run typecheck` before
+creating the commit.
 EOF
 }
 
@@ -143,6 +144,11 @@ if git show-ref --verify --quiet refs/remotes/origin/main; then
     fi
     fail "could not verify whether the push would be fast-forward"
   fi
+fi
+
+printf 'Running validation: pnpm run check:workflows\n'
+if ! pnpm run check:workflows; then
+  fail "validation failed; no commit or push was made"
 fi
 
 printf 'Running validation: pnpm run typecheck\n'

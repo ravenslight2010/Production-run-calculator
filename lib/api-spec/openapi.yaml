@@ -3710,6 +3710,78 @@ paths:
         "400":
           description: Invalid input
 
+  /field-checks/observations:
+    post:
+      operationId: submitFieldCheckObservations
+      tags: [incidents]
+      summary: Submit passive browser field-check observations
+      description: >-
+        Stores bounded, authenticated, facility-scoped observations from normal
+        staff use. Observations are deduplicated by observationId and never call
+        an AI provider or modify production data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldCheckObservationBatch"
+      responses:
+        "202":
+          description: Observations accepted or already recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldCheckIngestResult"
+        "400":
+          description: Invalid or oversized observations
+        "429":
+          description: Too many requests
+
+  /field-checks:
+    get:
+      operationId: getFieldChecks
+      tags: [incidents]
+      summary: Get manager field-check health
+      description: >-
+        Returns deterministic health rollups for passive browser evidence and
+        explicit unsupported states for hardware-only checks.
+      responses:
+        "200":
+          description: Field-check health for the current facility
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldChecksReport"
+        "403":
+          description: Incident review capability required
+
+  /field-checks/hardware-confirmations:
+    post:
+      operationId: confirmHardwareFieldCheck
+      tags: [incidents]
+      summary: Record a guided physical-device check
+      description: >-
+        Records a manager-confirmed hardware observation separately from passive
+        browser evidence. The request accepts only the bounded device category,
+        protocol version, outcome, timestamp, and hardware check name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HardwareFieldCheckConfirmation"
+      responses:
+        "201":
+          description: Hardware confirmation recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldCheckIngestResult"
+        "400":
+          description: Invalid hardware confirmation
+        "403":
+          description: Incident review capability required
+
   /incidents:
     post:
       operationId: reportIncident
@@ -4336,13 +4408,37 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    AiStatus:
+      type: string
+      enum: [deterministic, enriched, unavailable]
+      description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
+
     AutoTrackMutation:
       type: object
       required: [field, from, to]
       properties:
         field:
           type: string
-          enum: [skidsCompleted, casesOnCurrentSkid, traysOnLine, batchesReady]
+          enum:
+            - skidsCompleted
+            - casesOnCurrentSkid
+            - traysOnLine
+            - batchesReady
+            - sauceBarrelsMade
+            - sauceBarrelAnchorNetSec
+            - sauceBarrelCorrectionGeneration
+            - app1BatchesMade
+            - app1BatchAnchorNetSec
+            - app1BatchCorrectionGeneration
+            - app2BatchesMade
+            - app2BatchAnchorNetSec
+            - app2BatchCorrectionGeneration
+            - app3BatchesMade
+            - app3BatchAnchorNetSec
+            - app3BatchCorrectionGeneration
+            - app4BatchesMade
+            - app4BatchAnchorNetSec
+            - app4BatchCorrectionGeneration
         from: { type: number, minimum: 0, maximum: 1000000 }
         to: { type: number, minimum: 0, maximum: 1000000 }
     AutoTrackClaim:
@@ -4353,7 +4449,7 @@ components:
         runId: { type: string, minLength: 1, maxLength: 160 }
         channel:
           type: string
-          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper]
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch]
         generation: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1, maximum: 10000000 }
         eventId: { type: string, minLength: 1, maxLength: 160 }
@@ -4363,7 +4459,7 @@ components:
         correctionGeneration: { type: integer, minimum: 0 }
         mutations:
           type: array
-          maxItems: 2
+          maxItems: 3
           items: { $ref: "#/components/schemas/AutoTrackMutation" }
     AutoTrackClaimRequest:
       type: object
@@ -6476,6 +6572,8 @@ components:
         - specSheetId
         - discrepancies
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         specSheetId:
           type: integer
@@ -6488,6 +6586,11 @@ components:
           description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     MixComponentSpec:
       type: object
@@ -6723,12 +6826,19 @@ components:
       type: object
       required:
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         summary:
           type: string
           description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     MixAssistMix:
       type: object
@@ -6818,6 +6928,7 @@ components:
       required:
         - alert
         - generatedAt
+        - aiStatus
       properties:
         alert:
           oneOf:
@@ -6826,6 +6937,8 @@ components:
           description: The single nudge to surface now, or null when nothing applies
         generatedAt:
           type: number
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional message when no alert could be produced
@@ -6953,6 +7066,8 @@ components:
       required:
         - forecast
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         forecast:
           oneOf:
@@ -6971,6 +7086,11 @@ components:
             $ref: "#/components/schemas/ForecastPlan"
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI produced a forecast; false when no forecast was produced
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Explanation when no forecast could responsibly be produced
@@ -7103,6 +7223,7 @@ components:
         - stats
         - generatedAt
         - aiGenerated
+        - aiStatus
       properties:
         summary:
           type: string
@@ -7114,6 +7235,8 @@ components:
         aiGenerated:
           type: boolean
           description: True when the AI narrated; false when the deterministic fallback was used
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     OperationalReportInput:
       type: object
@@ -7394,6 +7517,7 @@ components:
         - summary
         - generatedAt
         - aiGenerated
+        - aiStatus
       properties:
         anomalies:
           type: array
@@ -7414,6 +7538,8 @@ components:
         aiGenerated:
           type: boolean
           description: True when the AI narrated; false otherwise
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     ScheduleOptimizeRunInput:
       type: object
@@ -7514,6 +7640,7 @@ components:
         - summary
         - generatedAt
         - aiGenerated
+        - aiStatus
       properties:
         order:
           type: array
@@ -7541,6 +7668,8 @@ components:
         aiGenerated:
           type: boolean
           description: True when the AI narrated; false otherwise
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
 
     ForecastAccuracyInput:
       type: object
@@ -9926,6 +10055,8 @@ components:
       required:
         - suggestions
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         suggestions:
           type: array
@@ -9934,6 +10065,11 @@ components:
         generatedAt:
           type: number
           description: Epoch ms when the suggestions were generated
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied merge suggestions; false for unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional brief overall comment from the model
@@ -10311,6 +10447,8 @@ components:
         - brandMatches
         - flavorMatches
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         brandMatches:
           type: array
@@ -10337,6 +10475,11 @@ components:
             $ref: "#/components/schemas/MatchImportNameMatch"
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional message when no matches could be made
@@ -10390,6 +10533,8 @@ components:
       required:
         - matches
         - generatedAt
+        - aiGenerated
+        - aiStatus
       properties:
         matches:
           type: array
@@ -10397,9 +10542,189 @@ components:
             $ref: "#/components/schemas/MatchPremixMatch"
         generatedAt:
           type: number
+        aiGenerated:
+          type: boolean
+          description: True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
         note:
           type: string
           description: Optional message when no matches could be made
+
+    FieldCheckObservationBatch:
+      type: object
+      additionalProperties: false
+      required: [observations]
+      properties:
+        observations:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/FieldCheckObservationInput"
+
+    FieldCheckObservationInput:
+      type: object
+      additionalProperties: false
+      required:
+        - observationId
+        - checkName
+        - checkVersion
+        - outcome
+        - observedAt
+        - appBuild
+        - deviceCategory
+        - metrics
+      properties:
+        observationId:
+          type: string
+          minLength: 8
+          maxLength: 160
+        checkName:
+          type: string
+          enum:
+            - startup
+            - foreground-recovery
+            - sync-acknowledgment
+            - cross-device-convergence
+            - reload-persistence
+            - offline-recovery
+            - pwa-update-handoff
+            - performance
+        checkVersion:
+          type: string
+          maxLength: 20
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        appBuild:
+          type: string
+          minLength: 1
+          maxLength: 100
+        deviceCategory:
+          type: string
+          enum:
+            - desktop-chrome
+            - desktop-safari
+            - desktop-firefox
+            - mobile-chrome
+            - mobile-safari
+            - tablet-browser
+            - other-browser
+        metrics:
+          type: object
+          maxProperties: 8
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 10000000
+
+    FieldCheckIngestResult:
+      type: object
+      required: [accepted, duplicate]
+      properties:
+        accepted: { type: integer, minimum: 0 }
+        duplicate: { type: integer, minimum: 0 }
+
+    HardwareFieldCheckConfirmation:
+      type: object
+      additionalProperties: false
+      required: [checkName, checkVersion, outcome, observedAt, deviceCategory]
+      properties:
+        checkName:
+          type: string
+          enum: [touch-accuracy, keyboard-clearance, process-kill-recovery]
+        checkVersion:
+          type: string
+          enum: ["2026-09"]
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        deviceCategory:
+          type: string
+          enum: [android-phone, android-tablet, ipad]
+
+    FieldCheckFailure:
+      type: object
+      required: [outcome, observedAt, appBuild, deviceCategory, metrics]
+      properties:
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        appBuild: { type: string }
+        deviceCategory: { type: string }
+        metrics:
+          type: object
+          additionalProperties: { type: number }
+
+    FieldCheckSummary:
+      type: object
+      required:
+        - name
+        - label
+        - status
+        - observedBy
+        - evidence
+        - expiresHours
+        - lastSuccessfulAt
+        - lastObservedAt
+        - recentFailures
+        - failureCount
+        - incompleteCount
+        - actionable
+        - issueStatus
+      properties:
+        name: { type: string }
+        label: { type: string }
+        status:
+          type: string
+          enum: [healthy, collecting, needs-review, unsupported]
+        observedBy:
+          type: string
+          enum: [browser, hardware]
+        evidence: { type: string }
+        expiresHours: { type: [number, "null"] }
+        lastSuccessfulAt:
+          type: [string, "null"]
+          format: date-time
+        lastObservedAt:
+          type: [string, "null"]
+          format: date-time
+        recentFailures:
+          type: array
+          items: { $ref: "#/components/schemas/FieldCheckFailure" }
+        failureCount: { type: integer }
+        incompleteCount: { type: integer }
+        actionable: { type: boolean }
+        issueStatus:
+          type: [string, "null"]
+          enum: [open, recovered, null]
+
+    FieldChecksReport:
+      type: object
+      required: [version, scope, generatedAt, checks, overallStatus, actionableCount]
+      properties:
+        version: { type: string }
+        scope: { type: string, enum: [current facility] }
+        generatedAt:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/FieldCheckSummary" }
+        overallStatus:
+          type: string
+          enum: [healthy, collecting, needs-review, unsupported]
+        actionableCount: { type: integer }
 
     IncidentContext:
       type: object

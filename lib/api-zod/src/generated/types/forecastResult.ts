@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiStatus } from './aiStatus';
 import type { ForecastPlan } from './forecastPlan';
 
 export interface ForecastResult {
@@ -13,6 +14,9 @@ export interface ForecastResult {
   /** One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon. */
   forecasts?: ForecastPlan[];
   generatedAt: number;
+  /** True when the AI produced a forecast; false when no forecast was produced */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
   /** Explanation when no forecast could responsibly be produced */
   note?: string;
 }

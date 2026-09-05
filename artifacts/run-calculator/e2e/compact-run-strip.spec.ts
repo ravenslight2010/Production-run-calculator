@@ -22,6 +22,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers } from "./isolation";
+import { signUpAndHandleOnboarding } from "./onboarding";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,38 +55,20 @@ async function signUpAndDismissOnboarding(
   username: string,
   password: string,
 ): Promise<void> {
-  // Navigate directly to the sign-up route
-  await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
-
-  // Wait for the form to be interactive
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
-
-  await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
-
-  // Wait for the main app to load (Run tab appears in the DOM)
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-
-  // On first login a "Get Started" onboarding dialog ALWAYS auto-opens.
-  // It has a modal overlay (data-state="open") that intercepts ALL pointer
-  // events. Wait for the "Get started" button inside the dialog, then click
-  // it so the overlay clears before we interact with anything else.
-  const getStartedBtn = page.getByRole("button", { name: /^get.?started$/i });
-  await getStartedBtn.waitFor({ state: "visible", timeout: 10_000 });
-  await getStartedBtn.click();
-
-  // Wait for the modal overlay to fully exit before any further clicks.
-  const overlay = page.locator('[data-state="open"][aria-hidden="true"]');
-  await overlay.waitFor({ state: "detached", timeout: 5_000 }).catch(() => {
-    // overlay may already be gone; that's fine
+  await signUpAndHandleOnboarding(page, username, password, {
+    signupCode: SIGNUP_CODE,
+    onboarding: {
+      dialog: (currentPage) => currentPage.getByRole("dialog"),
+      visibilityTimeout: 10_000,
+      afterComplete: async (currentPage) => {
+        await currentPage
+          .locator('[data-state="open"][aria-hidden="true"]')
+          .waitFor({ state: "detached", timeout: 5_000 })
+          .catch(() => {});
+        await currentPage.waitForTimeout(300);
+      },
+    },
   });
-
-  // Small additional wait for any exit animation to complete
-  await page.waitForTimeout(300);
 }
 
 // ── test ─────────────────────────────────────────────────────────────────────

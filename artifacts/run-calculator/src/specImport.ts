@@ -2384,7 +2384,7 @@ export async function commitSpecImport(
 
   // Manager-stored per-die line-setting overrides (Manage Lists → Die
   // Defaults) so the import's blank-fill of crusts/cycle, speed, adjustment,
-  // freezer time, and cases/layer honors them; the built-in map is the
+  // Freeze tunnel time, and cases/layer honors them; the built-in map is the
   // fallback. Best-effort — a failed fetch never blocks the import.
   let dieLineDefaultOverrides: DieLineDefaultsOverrides | undefined;
   try {

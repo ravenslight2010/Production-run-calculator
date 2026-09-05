@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { Mix } from "@workspace/mixes";
 import { mergeMixUpdates } from "../mixes";
+import {
+  MASTER_DATA_QUERY_KEY,
+  updateMasterDataSlice,
+} from "../masterData";
 
 const MIXES_QUERY_KEY = ["mixes"] as const;
 
@@ -42,7 +46,7 @@ export function useOptimisticMixUpdates(items: Mix[], queryClient: QueryClient) 
   }, [items, pendingUpdates]);
 
   const patchCache = useCallback((updates: Mix[]) => {
-    queryClient.setQueryData<Mix[]>(MIXES_QUERY_KEY, (current) =>
+    updateMasterDataSlice(queryClient, "mixes", (current) =>
       mergeMixUpdates(current, updates),
     );
   }, [queryClient]);
@@ -56,7 +60,7 @@ export function useOptimisticMixUpdates(items: Mix[], queryClient: QueryClient) 
     patchCache([nextMix]);
     // Ignore a GET that started before this optimistic write. The overlay also
     // protects the Mix Plan if another refetch starts while the POST is slow.
-    void queryClient.cancelQueries({ queryKey: MIXES_QUERY_KEY });
+    void queryClient.cancelQueries({ queryKey: MASTER_DATA_QUERY_KEY });
   }, [patchCache, queryClient]);
 
   const acknowledgeSave = useCallback((optimisticMix: Mix, saved: Mix[]) => {
@@ -66,7 +70,7 @@ export function useOptimisticMixUpdates(items: Mix[], queryClient: QueryClient) 
     patchCache([persisted]);
     // Cancel a stale refetch that could otherwise land after the POST response
     // and undo the server-confirmed cache patch.
-    void queryClient.cancelQueries({ queryKey: MIXES_QUERY_KEY });
+    void queryClient.cancelQueries({ queryKey: MASTER_DATA_QUERY_KEY });
     setPendingUpdates((current) => {
       const next = new Map(current);
       // Keep the overlay until the observer sees the acknowledged value.

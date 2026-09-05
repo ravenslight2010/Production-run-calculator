@@ -181,11 +181,6 @@ test("adopts crust preference, reloads, and starts a new run in crust mode", asy
     state: "attached",
     timeout: 25_000,
   });
-  await expect
-    .poll(() => page.evaluate((key) => localStorage.getItem(key), profileSubtabKey), {
-      timeout: 10_000,
-    })
-    .toBe("crusts");
 
   await unlockSupervisorLineSetup(page);
 

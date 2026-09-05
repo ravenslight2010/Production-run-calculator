@@ -45,7 +45,7 @@ const GlanceOverlay = memo(function GlanceOverlay() {
             <p className="text-7xl font-black tabular-nums leading-none" data-testid="glance-cases-completed">{fmtComma(calc.casesCompleted)}</p>
             <p className="text-xl text-muted-foreground mt-1">of {fmtComma(v.casesNeeded)}</p>
             {calc.casesInFreezer > 0 && (
-              <p className="text-lg font-semibold text-sky-400 tabular-nums mt-1" data-testid="glance-cases-freezer">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+              <p className="text-lg font-semibold text-sky-400 tabular-nums mt-1" data-testid="glance-cases-freezer">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
             )}
             {v.casesNeeded > 0 && (
               <div className="mt-3 h-3 rounded-full bg-muted/30 overflow-hidden flex">
