@@ -7,7 +7,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { enhancedErrorMessages } from "./middlewares/errorMessagesEnhanced";
-import { observabilityMiddleware } from "./lib/observability";
+import { isHealthProbePath, observabilityMiddleware } from "./lib/observability";
 
 // CORS is scoped to known dev/preview origins plus any configured production
 // domains. The mobile app's expo-web preview is served from a separate
@@ -60,6 +60,15 @@ const app: Express = express();
 app.use(
   pinoHttp({
     logger,
+    customLogLevel(req, res, err) {
+      // Readiness intentionally returns 503 while startup is incomplete. It is
+      // a probe result, not an application request failure; health.ts records
+      // the bounded startup state separately.
+      if (isHealthProbePath(req.originalUrl ?? req.url ?? "")) return "silent";
+      if (err || res.statusCode >= 500) return "error";
+      if (res.statusCode >= 400) return "warn";
+      return "info";
+    },
     serializers: {
       req(req) {
         return {

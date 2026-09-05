@@ -7,6 +7,11 @@ import {
   clearCacheMaintenanceDiagnosticsForTests,
   recordCacheMaintenance,
 } from "../lib/observability";
+import {
+  beginStartup,
+  markStartupFailed,
+  resetStartupHealthForTests,
+} from "../lib/startupHealth";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(async () => []),
@@ -46,6 +51,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearCacheMaintenanceDiagnosticsForTests();
+  resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
   previousOpenAiKey = process.env.OPENAI_API_KEY;
@@ -84,5 +90,41 @@ describe("GET /healthz cache maintenance diagnostics", () => {
       recentErrorCount: 0,
     });
     expect(JSON.stringify(body.diagnostics)).not.toMatch(/prompt|result|cache.?key/i);
+  });
+});
+
+describe("startup probes", () => {
+  it("returns liveness without touching the database", async () => {
+    beginStartup(1_000);
+    const response = await fetch(`${baseUrl}/livez`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "ok",
+      probe: "liveness",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("returns a bounded 503 while startup is in progress or failed", async () => {
+    beginStartup(2_000);
+    let response = await fetch(`${baseUrl}/readyz`);
+    let body = await response.json() as { status: string; checks: Record<string, string> };
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      status: "starting",
+      checks: { startup: "error", database: "pending", dependencies: "pending" },
+    });
+
+    markStartupFailed("data_heals", "data_heals_failed", 2_500);
+    response = await fetch(`${baseUrl}/healthz`);
+    body = await response.json() as { status: string; checks: Record<string, string> };
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      status: "degraded",
+      checks: { startup: "error", database: "pending", dependencies: "pending" },
+    });
+    expect(JSON.stringify(body)).not.toMatch(/password|secret|database_url|stack/i);
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

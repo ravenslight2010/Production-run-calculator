@@ -44,6 +44,8 @@ function trackPendingSharedCacheMaintenance<T>(promise: Promise<T>): Promise<T> 
 }
 
 const OPERATION_NAMES: Array<[RegExp, string]> = [
+  [/^\/(?:api\/)?(?:healthz|readyz|livez)\/?$/, "health"],
+  [/^\/api\/?$/, "health"],
   [/\/sync(?:\/|$)/, "sync"],
   [/\/(?:ai|photo|quality|label|waste)/, "ai"],
   [/\/(?:inventory|ingredients|mixes)/, "inventory"],
@@ -52,6 +54,9 @@ const OPERATION_NAMES: Array<[RegExp, string]> = [
   [/\/(?:import|spec-sheet|shipping-guide|premix)/, "import"],
 ];
 
+export function isHealthProbePath(path: string): boolean {
+  return operationType(path) === "health";
+}
 export function operationType(path: string): string {
   return OPERATION_NAMES.find(([pattern]) => pattern.test(path))?.[1] ?? "request";
 }
@@ -457,6 +462,9 @@ export function observabilityMiddleware(req: Request, res: Response, next: NextF
   (req as Request & { correlationId?: string }).correlationId = correlationId;
 
   res.once("finish", () => {
+    // The health handler emits its own bounded health_check event. Avoid
+    // duplicating platform 503 polls as generic degraded operations.
+    if (isHealthProbePath(req.path)) return;
     const statusCode = res.statusCode;
     logOperation((req as Request & { log?: Logger }).log ?? logger, {
       correlationId,

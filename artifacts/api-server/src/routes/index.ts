@@ -50,6 +50,7 @@ import actionItemsRouter from "./actionItems";
 import masterDataHealthRouter from "./masterDataHealth";
 import masterDataBootstrapRouter from "./masterDataBootstrap";
 import fieldChecksRouter from "./fieldChecks";
+import { startupGate } from "../lib/startupGate";
 
 const router: IRouter = Router();
 
@@ -64,6 +65,11 @@ router.use(noStoreMiddleware);
 
 // Health check stays public so platform probes work without a session.
 router.use(healthRouter);
+
+// Do not allow application routes to run while roles/data heals are still
+// initializing. Health routes above remain reachable and report 503 instead of
+// making the platform wait for or authenticate against a partially ready API.
+router.use(startupGate);
 
 // Auth endpoints (sign-up/in/out) must be public — they are how a session is
 // established in the first place.

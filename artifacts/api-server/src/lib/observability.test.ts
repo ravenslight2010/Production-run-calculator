@@ -5,6 +5,7 @@ import {
   CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
   clearCacheMaintenanceDiagnosticsForTests,
   getCacheMaintenanceDiagnostics,
+  isHealthProbePath,
   operationType,
   recordCacheMaintenance,
   safeErrorCode,
@@ -22,6 +23,14 @@ describe("observability", () => {
     expect(operationType("/api/inventory/items/123")).toBe("inventory");
     expect(operationType("/api/ai/ask")).toBe("ai");
     expect(operationType("/api/unknown")).toBe("request");
+  });
+
+  it("classifies platform probes separately from application operations", () => {
+    expect(operationType("/api/readyz")).toBe("health");
+    expect(operationType("/api/healthz")).toBe("health");
+    expect(operationType("/api")).toBe("health");
+    expect(isHealthProbePath("/api/livez")).toBe(true);
+    expect(isHealthProbePath("/api/sync/today")).toBe(false);
   });
 
   it("only emits bounded machine-readable error codes", () => {
