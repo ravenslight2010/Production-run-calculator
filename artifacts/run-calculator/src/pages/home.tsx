@@ -610,6 +610,13 @@ import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
 import { loadWorkbookWorkflow } from "@/workbookWorkflow";
 import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
+import {
+  PENDING_DUPLICATE_REVIEW_SCAN,
+  loadPendingDuplicateReview,
+  pendingDuplicateReviewAfterResolution,
+  pendingDuplicateReviewAfterScan,
+  savePendingDuplicateReview,
+} from "@/pendingDuplicateReview";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { CameraFilePicker } from "@/components/CameraFilePicker";
@@ -669,6 +676,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -5306,6 +5314,14 @@ export default function Home() {
   // because counts intersect against the live list).
   const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
   const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
+  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
+  const [pendingDuplicateReviewCount, setPendingDuplicateReviewCount] = useState(() => {
+    try {
+      return loadPendingDuplicateReview(localStorage);
+    } catch {
+      return 0;
+    }
+  });
   const mergeSuggestRequestRef = useRef<{ generation: number; controller: AbortController | null }>({
     generation: 0,
     controller: null,
@@ -5329,6 +5345,25 @@ export default function Home() {
   // or merge flavors within one chosen brand.
   const [mergeBfMode, setMergeBfMode] = useState<"brands" | "flavors">("brands");
   const [mergeBfBrand, setMergeBfBrand] = useState("");
+
+  const persistPendingDuplicateReview = useCallback((count: number) => {
+    const next =
+      count === PENDING_DUPLICATE_REVIEW_SCAN
+        ? PENDING_DUPLICATE_REVIEW_SCAN
+        : Number.isFinite(count) && count > 0
+          ? Math.floor(count)
+          : 0;
+    setPendingDuplicateReviewCount(next);
+    try {
+      savePendingDuplicateReview(localStorage, next);
+    } catch {}
+  }, []);
+
+  const openPendingDuplicateReview = useCallback(() => {
+    setMergeFromImport(true);
+    setMergeCategory("ingredients");
+    setManageCategory("merge");
+  }, []);
 
   // Local (per-device) master-data change history for the undo trail.
   const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
@@ -5940,7 +5975,7 @@ export default function Home() {
   // "previously merged" aliases. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number> {
+  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number | null> {
     if (!fromImport) setMergeFromImport(false);
     // The import-triggered auto-scan always lands on (and scans) the
     // Ingredients tab — read from the closured `mergeFullUniverse` directly
@@ -5970,7 +6005,7 @@ export default function Home() {
         brands,
         { signal: controller.signal, forceRefresh },
       );
-      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return 0;
+      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
       setMergeSuggestions(suggestions);
       setMergeSuggestSelected(new Set());
       if (!usedAi && error) {
@@ -5983,11 +6018,11 @@ export default function Home() {
       }
       return suggestions.length;
     } catch (e) {
-      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return 0;
+      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
       setMergeSuggestions([]);
       setMergeSuggestSelected(new Set());
       setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
-      return 0;
+      return null;
     } finally {
       if (isCurrentMergeSuggestionRequest(generation, request.generation)) {
         request.controller = null;
@@ -6001,13 +6036,44 @@ export default function Home() {
   // the manager's back, and leaving the surface cancels any active request.
   useEffect(() => {
     if (manageCategory === "merge") {
-      void handleSuggestMerges();
+      void handleSuggestMerges().then((count) => {
+        if (mergeCategory === "ingredients" && pendingDuplicateReviewCount !== 0) {
+          persistPendingDuplicateReview(
+            pendingDuplicateReviewAfterScan(pendingDuplicateReviewCount, count),
+          );
+        }
+      });
     } else {
       mergeSuggestRequestRef.current.controller?.abort();
     }
     // The request snapshots the current merge scope when the surface opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manageCategory]);
+
+  // Recipe imports can introduce ingredient spellings that duplicate existing
+  // master data. Keep the success toast transient, but persist the review count
+  // so the Import tab still offers the existing non-destructive review later.
+  useEffect(() => {
+    if (mergeCheckRequest === 0) return;
+    persistPendingDuplicateReview(PENDING_DUPLICATE_REVIEW_SCAN);
+    setMergeCategory("ingredients");
+    setMergeFromImport(true);
+    void handleSuggestMerges(true).then((count) => {
+      const pendingCount = pendingDuplicateReviewAfterScan(PENDING_DUPLICATE_REVIEW_SCAN, count);
+      persistPendingDuplicateReview(pendingCount);
+      if (count === null || count <= 0) return;
+      toast({
+        title: "Possible duplicate ingredients",
+        description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
+        action: (
+          <ToastAction altText="Review duplicates" onClick={openPendingDuplicateReview}>
+            Review
+          </ToastAction>
+        ),
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeCheckRequest]);
 
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
@@ -6074,7 +6140,12 @@ export default function Home() {
       : isRecipeNameCategory
       ? await handleApplyRecipeNameMerge(mergeCategory as RecipeNameMergeCategory, sources, s.target)
       : await handleApplyMerge(sources, s.target);
-    if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    if (ok) {
+      setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+      if (mergeCategory === "ingredients" && mergeSuggestions.length <= 1) {
+        persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
+      }
+    }
     return ok;
   }
 
@@ -6086,15 +6157,26 @@ export default function Home() {
     const chosen = mergeSuggestions.filter((s) => mergeSuggestSelected.has(mergeSuggestKey(s)));
     if (chosen.length === 0 || mergeBatchBusy) return;
     setMergeBatchBusy(true);
+    let allChosenResolved = true;
     try {
       for (const s of chosen) {
         const ok = await applyMergeSuggestion(s);
-        if (!ok) break;
+        if (!ok) {
+          allChosenResolved = false;
+          break;
+        }
         setMergeSuggestSelected((prev) => {
           const next = new Set(prev);
           next.delete(mergeSuggestKey(s));
           return next;
         });
+      }
+      if (
+        allChosenResolved &&
+        mergeCategory === "ingredients" &&
+        chosen.length === mergeSuggestions.length
+      ) {
+        persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
       }
     } finally {
       setMergeBatchBusy(false);
@@ -6110,6 +6192,9 @@ export default function Home() {
     if (sources.length === 0) return;
     setMergeFromImport(false);
     setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    if (mergeCategory === "ingredients" && mergeSuggestions.length <= 1) {
+      persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
+    }
     const scope = mergeSuggestScope;
     try {
       await denyMerge(s.target, sources, scope.category, scope.brand);
@@ -12927,6 +13012,7 @@ export default function Home() {
       setSpecImportPrepared(null);
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
       // have re-rendered. Never blocks or fails the already-committed import.
+      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
@@ -16026,6 +16112,29 @@ export default function Home() {
                 {manageCategory === "import" && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
+                    {canManageInventory && pendingDuplicateReviewCount !== 0 && (
+                      <div
+                        className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between"
+                        data-testid="pending-duplicate-review"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">Possible duplicate ingredients</p>
+                          <p className="text-xs text-muted-foreground">
+                            {pendingDuplicateReviewCount === PENDING_DUPLICATE_REVIEW_SCAN
+                              ? "A recent import still needs a duplicate review."
+                              : `${pendingDuplicateReviewCount} group${pendingDuplicateReviewCount === 1 ? "" : "s"} from a recent import still need review.`}{" "}
+                            Nothing changes until you confirm a merge.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={openPendingDuplicateReview}
+                          className="w-full shrink-0 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 sm:w-auto"
+                        >
+                          Review duplicates
+                        </button>
+                      </div>
+                    )}
                     {(canManageProfiles || canManageInventory) && (
                       <ImportHistoryPanel
                         refreshSignal={sheetListSignal}
