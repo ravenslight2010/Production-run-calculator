@@ -119,3 +119,13 @@ Each entry includes:
 **Fix:** Restored the dual-path client: `replitKey || directKey` where `directKey = process.env.GOOGLE_API_KEY`. When only `GOOGLE_API_KEY` is set, the SDK's default base URL is used. When both are set, the Replit proxy path wins.
 
 **Context:** This is a re-apply of the 2026-08-30 fix that Replit's branch overwrote. Make sure future merges from Replit keep this fallback.
+
+## 2026-09-05 — Fix skill-catalog CI failure on platform-injected skill refs
+
+**File(s):** `.agents/skills/production-go/SKILL.md`
+
+**Problem:** The `Typecheck` CI job's `check:skill-catalog` step failed on `.agents/skills/production-go/SKILL.md` — three inline references to `.local/.../SKILL.md` (review-before-shipping, security-scan, debug-workflow-ports-issues) were flagged as broken local references. `.local/` roots are platform-injected and absent from GitHub checkouts by design (see `.agents/memory/skill-catalog-ci-roots.md`), so those paths cannot resolve in GitHub CI even though they exist in the Replit workspace.
+
+**Fix:** Converted the three references to directory-form paths (`.local/custom_skills/review-before-shipping`, `.local/skills/security-scan`, `.local/skills/debug-workflow-ports-issues`), matching the repo's established convention for platform-injected skill references (see `.agents/skills/README.md`, `skill-creator` skill).
+
+**Context:** Needed so the Replit merge (`PR #17 merge/replit-updates`) can pass the required Typecheck check. If Replit re-introduces `.../SKILL.md` refs into `.local/` paths, the skill catalog check will fail again in GitHub CI.
