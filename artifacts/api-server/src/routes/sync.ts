@@ -53,6 +53,7 @@ import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
 import { consumeSauceBarrelInTransaction } from "./inventory";
 export { detectConflicts } from "../lib/syncConflict";
+import { computeServerCalc } from "@workspace/live-calc";
 
 const router: IRouter = Router();
 
@@ -152,7 +153,16 @@ function clientToday(req: Request): string {
 // on a different local calendar day (behind/ahead of UTC) never receives another
 // day's state into its live view — the cross-date clobber this fix prevents.
 function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
-  const msg = `data: ${JSON.stringify({ data, senderId })}\n\n`;
+  // Compute server-side calc for the current run so clients can display
+  // authoritative values without doing the math themselves.
+  let serverCalc: unknown = null;
+  try {
+    const payload = data as { dayState?: { runs?: unknown[]; currentIndex?: number }; runValues?: Record<string, unknown>; packagingProgress?: Record<string, unknown> } | null;
+    if (payload?.dayState?.runs && payload.dayState.runs.length > 0) {
+      serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], []);
+    }
+  } catch { /* calc failure must not break the sync broadcast */ }
+  const msg = `data: ${JSON.stringify({ data, senderId, serverCalc })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
       try { client.res.write(msg); } catch {}

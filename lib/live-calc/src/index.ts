@@ -24,6 +24,7 @@ export interface CalcStoppage {
 
 /** Minimal RunMeta shape needed by the calc. */
 export interface CalcRunMeta {
+  id?: string;
   startedAt?: number;
   endedAt?: number;
   pausedAt?: number;
@@ -393,4 +394,60 @@ export function computeCalc(input: CalcInput): Calc {
     casesCompleted, paceStatus, paceDelta, catchUpPpm,
     perTray, perBatch, sauceEffBarrel,
   };
+}
+
+// ── Server-side computation ──────────────────────────────────────────────────
+// Computes calc for the current run from a SyncPayload-shaped object.
+// The server calls this after every sync merge and attaches the result to
+// SSE broadcasts so clients can display server-computed values.
+
+/** Minimal SyncPayload shape needed for server-side calc (untyped on server). */
+export interface ServerCalcSyncPayload {
+  dayState: {
+    runs: CalcRunMeta[];
+    currentIndex?: number;
+  };
+  runValues?: Record<string, Record<string, unknown>>;
+  packagingProgress?: Record<string, { skidsCompleted: number; casesOnCurrentSkid: number }>;
+}
+
+export interface ServerCalcResult {
+  runId: string;
+  calc: Calc;
+}
+
+/**
+ * Compute calc for the currently-active run from a SyncPayload.
+ * Returns null if there is no valid current run or its FormValues are missing.
+ */
+export function computeServerCalc(
+  payload: ServerCalcSyncPayload,
+  defaultPepTypes: string[],
+): ServerCalcResult | null {
+  const { runs, currentIndex = 0 } = payload.dayState;
+  const run = runs?.[currentIndex];
+  if (!run?.id) return null;
+  const rawValues = payload.runValues?.[run.id];
+  if (!rawValues || typeof rawValues !== "object") return null;
+
+  // The server stores raw FormValues; cast the needed fields.
+  const v = rawValues as unknown as CalcFormValues;
+  const packagingProgress = payload.packagingProgress?.[run.id];
+  const vEffective: CalcFormValues = {
+    ...v,
+    skidsCompleted: packagingProgress?.skidsCompleted ?? v.skidsCompleted,
+    casesOnCurrentSkid: packagingProgress?.casesOnCurrentSkid ?? v.casesOnCurrentSkid,
+  };
+
+  const doughSubTab = (run as { subTab?: string }).subTab ?? "dough";
+
+  const calc = computeCalc({
+    v: vEffective,
+    ve: vEffective, // Server uses the same FormValues for both (no temp overrides stored separately)
+    currentRun: run,
+    nowTimeMs: Date.now(),
+    doughSubTab,
+    defaultPepTypes,
+  });
+  return { runId: run.id, calc };
 }

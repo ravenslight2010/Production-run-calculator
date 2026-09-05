@@ -497,6 +497,7 @@ import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
+import type { Calc } from "@workspace/live-calc";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
 import { HomeStationTabs } from "../components/HomeStationTabs";
@@ -7414,6 +7415,7 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
+  const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
@@ -8488,6 +8490,7 @@ export default function Home() {
           reset?: boolean;
           resetEpoch?: number;
           initial?: boolean;
+          serverCalc?: { runId: string; calc: Calc } | null;
         };
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
@@ -8535,7 +8538,10 @@ export default function Home() {
             requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
           }
         }
-      } catch {}
+      
+        // Store server-computed calc for parity diagnostics and future auto-track use.
+        if (msg.serverCalc) serverCalcRef.current = msg.serverCalc;
+} catch {}
     };
     es.onerror = () => {
       recordSyncEvent("failure", isOnline ? "Live sync connection delayed; local changes are retained" : "Offline; local changes are retained");
