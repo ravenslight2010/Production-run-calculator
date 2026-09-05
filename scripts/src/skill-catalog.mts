@@ -74,6 +74,7 @@ export type FindingCode =
 export type SkillFinding = {
   code: FindingCode;
   line?: number;
+  documented?: boolean;
 };
 
 export type SkillRecord = {
@@ -98,14 +99,24 @@ export type CatalogReport = {
   roots: CatalogRootReport[];
   skills: SkillRecord[];
   allowedDuplicates: DuplicateAllowlistEntry[];
+  managedWarningBaseline: ManagedWarningBaselineEntry[];
   failures: number;
   warnings: number;
+  documentedWarnings: number;
+  undocumentedWarnings: number;
+};
+
+export type ManagedWarningBaselineEntry = {
+  path: string;
+  findings: Partial<Record<FindingCode, number>>;
+  reason: string;
 };
 
 export type ScanOptions = {
   projectRoot?: string;
   roots?: SkillRoot[];
   duplicateAllowlist?: DuplicateAllowlistEntry[];
+  managedWarningBaseline?: ManagedWarningBaselineEntry[];
 };
 
 type Frontmatter = {
@@ -402,6 +413,7 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
   const projectRoot = resolve(options.projectRoot ?? resolve(import.meta.dirname, "../.."));
   const roots = options.roots ?? DEFAULT_SKILL_ROOTS;
   const duplicateAllowlist = options.duplicateAllowlist ?? DEFAULT_DUPLICATE_ALLOWLIST;
+  const managedWarningBaseline = options.managedWarningBaseline ?? [];
   const rootReports: CatalogRootReport[] = [];
   const skills: SkillRecord[] = [];
 
@@ -461,6 +473,22 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
   }
 
   for (const skill of skills) {
+    if (skill.classification !== "managed") continue;
+    const baseline = managedWarningBaseline.find((entry) => entry.path === skill.path);
+    if (!baseline) continue;
+    const remaining = new Map(
+      Object.entries(baseline.findings) as [FindingCode, number][],
+    );
+    for (const item of skill.findings) {
+      const count = remaining.get(item.code) ?? 0;
+      if (count > 0) {
+        item.documented = true;
+        remaining.set(item.code, count - 1);
+      }
+    }
+  }
+
+  for (const skill of skills) {
     skill.status =
       skill.findings.length === 0
         ? "valid"
@@ -474,14 +502,30 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
   const warnings =
     rootReports.filter((root) => root.missing).length +
     skills.filter((skill) => skill.classification === "managed" && skill.findings.length > 0).length;
+  const documentedWarnings = skills.filter(
+    (skill) =>
+      skill.classification === "managed" &&
+      skill.findings.length > 0 &&
+      skill.findings.every((item) => item.documented),
+  ).length;
+  const undocumentedWarnings =
+    rootReports.filter((root) => root.missing).length +
+    skills.filter(
+      (skill) =>
+        skill.classification === "managed" &&
+        skill.findings.some((item) => !item.documented),
+    ).length;
 
   return {
     projectRoot,
     roots: rootReports,
     skills,
     allowedDuplicates,
+    managedWarningBaseline,
     failures,
     warnings,
+    documentedWarnings,
+    undocumentedWarnings,
   };
 }
 
@@ -508,7 +552,9 @@ function formatSkillFindings(skill: SkillRecord): string {
       if (item.code === "name_directory_mismatch") {
         return `name must match directory '${basename(dirname(skill.path))}'`;
       }
-      return `${FINDING_LABELS[item.code]}${item.line ? ` (line ${item.line})` : ""}`;
+      return `${FINDING_LABELS[item.code]}${item.line ? ` (line ${item.line})` : ""}${
+        item.documented ? " [documented managed warning]" : ""
+      }`;
     })
     .join(", ");
 }
@@ -531,7 +577,14 @@ export function formatCatalogReport(report: CatalogReport): string {
     }
   }
   for (const skill of report.skills) {
-    const status = skill.status === "valid" ? "PASS" : skill.status === "warning" ? "WARN" : "FAIL";
+    const status =
+      skill.status === "valid"
+        ? "PASS"
+        : skill.status === "warning"
+          ? skill.findings.every((item) => item.documented)
+            ? "KNOWN"
+            : "WARN"
+          : "FAIL";
     const detail = skill.findings.length > 0 ? ` — ${formatSkillFindings(skill)}` : "";
     const displayName =
       skill.name && skill.name.length <= MAX_SKILL_NAME_LENGTH && SKILL_NAME_PATTERN.test(skill.name)
@@ -557,7 +610,11 @@ export function formatCatalogReport(report: CatalogReport): string {
   }
   lines.push(
     "",
-    `Summary: ${report.skills.length} skill(s), ${report.failures} failure(s), ${report.warnings} warning(s).`,
+    `Summary: ${report.skills.length} skill(s), ${report.failures} failure(s), ${
+      report.warnings
+    } warning(s); ${report.documentedWarnings} documented managed warning(s), ${
+      report.undocumentedWarnings
+    } undocumented managed warning(s).`,
   );
   return `${lines.join("\n")}\n`;
 }
@@ -589,21 +646,70 @@ async function readAllowlist(path: string): Promise<DuplicateAllowlistEntry[]> {
   return entries as DuplicateAllowlistEntry[];
 }
 
+async function readManagedWarningBaseline(
+  path: string,
+): Promise<ManagedWarningBaselineEntry[]> {
+  const value: unknown = JSON.parse(await readFile(path, "utf8"));
+  const entries =
+    value &&
+    typeof value === "object" &&
+    Array.isArray((value as { managedWarnings?: unknown }).managedWarnings)
+      ? (value as { managedWarnings: unknown[] }).managedWarnings
+      : null;
+  if (!entries) {
+    throw new Error("managed warning baseline must contain a managedWarnings array");
+  }
+
+  const knownFindingCodes = new Set(Object.keys(FINDING_LABELS));
+  if (
+    !entries.every((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      const candidate = entry as Partial<ManagedWarningBaselineEntry>;
+      if (
+        typeof candidate.path !== "string" ||
+        typeof candidate.reason !== "string" ||
+        !candidate.reason.trim() ||
+        !candidate.findings ||
+        typeof candidate.findings !== "object" ||
+        Array.isArray(candidate.findings)
+      ) {
+        return false;
+      }
+      return Object.entries(candidate.findings).every(
+        ([code, count]) =>
+          knownFindingCodes.has(code) &&
+          typeof count === "number" &&
+          Number.isInteger(count) &&
+          count > 0,
+      );
+    })
+  ) {
+    throw new Error("managed warning baseline contains an invalid entry");
+  }
+  return entries as ManagedWarningBaselineEntry[];
+}
+
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../..");
 const DEFAULT_ALLOWLIST_PATH = resolve(REPOSITORY_ROOT, "skill-catalog-allowlist.json");
+const DEFAULT_MANAGED_WARNING_BASELINE_PATH = resolve(
+  REPOSITORY_ROOT,
+  "skill-catalog-managed-baseline.json",
+);
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   let projectRoot: string | undefined;
   let allowlistPath: string | undefined;
+  let managedWarningBaselinePath: string | undefined;
   let json = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--project-root") projectRoot = argv[++index];
     else if (argument === "--allowlist") allowlistPath = argv[++index];
+    else if (argument === "--managed-baseline") managedWarningBaselinePath = argv[++index];
     else if (argument === "--json") json = true;
     else if (argument === "--help" || argument === "-h") {
       console.log(
-        "Usage: check-skill-catalog [--project-root PATH] [--allowlist PATH] [--json]",
+        "Usage: check-skill-catalog [--project-root PATH] [--allowlist PATH] [--managed-baseline PATH] [--json]",
       );
       return 0;
     } else {
@@ -628,9 +734,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       throw error;
     }
   }
+  let managedWarningBaseline: ManagedWarningBaselineEntry[] = [];
+  const managedBaselineFile = managedWarningBaselinePath
+    ? resolve(resolvedProjectRoot, managedWarningBaselinePath)
+    : resolvedProjectRoot === REPOSITORY_ROOT
+      ? DEFAULT_MANAGED_WARNING_BASELINE_PATH
+      : resolve(resolvedProjectRoot, "skill-catalog-managed-baseline.json");
+  try {
+    managedWarningBaseline = await readManagedWarningBaseline(managedBaselineFile);
+  } catch (error) {
+    if (
+      !managedWarningBaselinePath &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      managedWarningBaseline = [];
+    } else {
+      throw error;
+    }
+  }
   const report = await scanSkillCatalog({
     projectRoot: resolvedProjectRoot,
     duplicateAllowlist,
+    managedWarningBaseline,
   });
   process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatCatalogReport(report));
   return report.failures > 0 ? 1 : 0;

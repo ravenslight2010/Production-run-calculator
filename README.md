@@ -127,8 +127,11 @@ roots. The catalog contract treats `.agents/skills` and
 `.local/custom_skills` as editable, and `.local/skills` and
 `.local/secondary_skills` as platform-managed. Editable skills must have valid
 kebab-case metadata, complete local references, and stay within the 500-line
-guidance; managed-root findings are reported as warnings because those files
-are platform-owned. The checker only follows local Markdown link targets in a
+guidance; managed-root findings are reported as non-blocking warnings because
+ those files are platform-owned. Reviewed managed findings are tracked in
+ `skill-catalog-managed-baseline.json`; new findings remain visibly
+ undocumented warnings instead of blending into the reviewed inventory. The
+ checker only follows local Markdown link targets in a
 skill folder (`SKILL.md`, `./`, `../`, `references/`, `scripts/`, or `assets/`)
 and ignores URLs, anchors, and other prose. Intentional cross-root duplicates
 belong in `skill-catalog-allowlist.json` with an explicit routing target.

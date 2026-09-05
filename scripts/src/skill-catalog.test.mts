@@ -182,6 +182,39 @@ test("managed findings warn without blocking and output excludes metadata payloa
   assert.ok(output.length < 2000);
 });
 
+test("managed baseline labels known findings without hiding additional findings", async () => {
+  const root = await fixture();
+  await addSkill(
+    root,
+    ".local/skills",
+    "managed-bad",
+    `${"line\n".repeat(MAX_EDITABLE_LINES + 1)}`,
+    "name: Not Valid\ndescription: present",
+  );
+  const report = await scanSkillCatalog({
+    projectRoot: root,
+    roots,
+    managedWarningBaseline: [
+      {
+        path: ".local/skills/managed-bad/SKILL.md",
+        findings: { line_limit_exceeded: 1 },
+        reason: "Fixture baseline.",
+      },
+    ],
+  });
+  const skill = report.skills.find((item) => item.name === "Not Valid");
+
+  assert.equal(report.failures, 0);
+  assert.equal(report.warnings, 1);
+  assert.equal(report.documentedWarnings, 0);
+  assert.equal(report.undocumentedWarnings, 1);
+  assert.equal(skill?.findings.find((item) => item.code === "line_limit_exceeded")?.documented, true);
+  assert.equal(skill?.findings.find((item) => item.code === "invalid_name")?.documented, undefined);
+  const output = formatCatalogReport(report);
+  assert.match(output, /WARN .*managed-bad/);
+  assert.match(output, /over 500-line limit \[documented managed warning\]/);
+});
+
 test("CLI accepts an isolated fixture project root without provider credentials", async () => {
   const root = await fixture();
   await addSkill(root, ".agents/skills", "cli-skill");
