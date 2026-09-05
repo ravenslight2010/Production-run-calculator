@@ -193,6 +193,65 @@ describe("LiveRunProvider — clock isolation", () => {
     expect(screen.getByTestId("speed-feedback-probe").getAttribute("data-has-nudge")).toBe("yes");
   });
 
+  it("uses adjusted dough PPM but keeps crust PPM independent of the dough multiplier", () => {
+    const doughValues: FormValues = {
+      ...DEFAULT_VALUES,
+      crustsPerCycle: 10,
+      cycleSpeed: 8,
+      speedAdjustment: 0.5,
+      doughBatchYield: 100,
+      doughballsPerTray: 50,
+      pizzasPerCase: 10,
+    };
+    const crustValues: FormValues = {
+      ...doughValues,
+      approxLineSpeed: 40,
+      speedAdjustment: 1.5,
+      crustsPerCase: 10,
+    };
+    let observed: { ppm: number; batchSec: number } | null = null;
+
+    function Probe() {
+      const { calc } = useLiveRun();
+      observed = { ppm: calc.ppm, batchSec: calc.timePerBatchSec };
+      return null;
+    }
+
+    function Provider({
+      values,
+      mode,
+    }: {
+      values: FormValues;
+      mode: "dough" | "crusts";
+    }) {
+      const form = useForm<FormValues>({ defaultValues: values });
+      return (
+        <LiveRunProvider
+          v={values}
+          ve={values}
+          runStatus="running"
+          currentRun={undefined}
+          currentRunId="speed-basis-run"
+          form={form}
+          dayState={{ runs: [], currentIndex: 0 }}
+          doughSubTab={mode}
+          upcomingRunLabels={[]}
+          prefs={undefined}
+          screenMode={null}
+          machine={{ spinSec: 45, hopperSec: 20 }}
+        >
+          <Probe />
+        </LiveRunProvider>
+      );
+    }
+
+    const { rerender } = render(<Provider values={doughValues} mode="dough" />);
+    expect(observed).toEqual({ ppm: 40, batchSec: 150 });
+
+    rerender(<Provider values={crustValues} mode="crusts" />);
+    expect(observed).toEqual({ ppm: 40, batchSec: 15 });
+  });
+
   it("a component that DOES call useLiveRun() IS re-rendered when the clock ticks (counter-proof)", async () => {
     let renderCount = 0;
 

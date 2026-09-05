@@ -19,6 +19,7 @@ import { inventoryClientId } from "./inventoryShared";
 import { loadHistory, loadRunValues } from "./storage";
 import { computeSummaryStats } from "./utils";
 import { withTempOverrides, type FormValues, type RunMeta } from "./types";
+import { computeEffectiveLineSpeed } from "./lineSpeed";
 
 // ─── Pure evaluation ────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ export interface FinishedRunStat {
    * aggregate keeps pause time in; this module deliberately does not.)
    */
   netMin: number;
-  /** Configured pizzas/minute = crustsPerCycle × cycleSpeed × speedAdjustment. */
+  /** Configured pizzas/minute from the run's mode-aware line-speed basis. */
   configuredPpm: number;
   /** Configured cycle speed (the setting a speed suggestion would change). */
   cycleSpeed: number;
@@ -332,8 +333,13 @@ export function statFromRun(meta: RunMeta, vals: FormValues): FinishedRunStat | 
     .reduce((a, s) => a + Math.max(0, (s.endedAt as number) - s.startedAt), 0);
   const netMin = (meta.endedAt - meta.startedAt - stoppedMs) / 60000;
   const cycleSpeed = Number(v.cycleSpeed) || 0;
-  const configuredPpm =
-    (Number(v.crustsPerCycle) || 0) * cycleSpeed * (Number(v.speedAdjustment) || 0);
+  const configuredPpm = computeEffectiveLineSpeed({
+    mode: meta.subTab === "crusts" ? "crusts" : "dough",
+    approxLineSpeed: v.approxLineSpeed,
+    crustsPerCycle: v.crustsPerCycle,
+    cycleSpeed: v.cycleSpeed,
+    speedAdjustment: v.speedAdjustment,
+  });
   if (pizzas <= 0 || netMin <= 0 || configuredPpm <= 0) return null;
   return {
     brand: meta.brand ?? "",

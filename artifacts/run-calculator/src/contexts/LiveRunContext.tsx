@@ -48,6 +48,7 @@ import {
   type PackagingSpeedNudgeFeedbackStatus,
 } from "../packagingSpeedNudge";
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
+import { computeEffectiveLineSpeed } from "../lineSpeed";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -239,12 +240,13 @@ export function LiveRunProvider({
   // ── Core production calc ─────────────────────────────────────────────────
   const calc = useMemo((): Calc => {
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
-    const ppm =
-      Math.round(
-        (doughSubTab === "crusts"
-          ? v.approxLineSpeed
-          : ve.crustsPerCycle * ve.cycleSpeed * v.speedAdjustment) * 100,
-      ) / 100;
+    const ppm = computeEffectiveLineSpeed({
+      mode: doughSubTab === "crusts" ? "crusts" : "dough",
+      approxLineSpeed: v.approxLineSpeed,
+      crustsPerCycle: ve.crustsPerCycle,
+      cycleSpeed: ve.cycleSpeed,
+      speedAdjustment: v.speedAdjustment,
+    });
 
     const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
 
@@ -300,7 +302,10 @@ export function LiveRunProvider({
 
     const casesOnLastSkid = Math.ceil(Math.max(0, v.casesPerSkid - casesOnLine));
 
-    const timePressHzSec = ppm > 0 ? (60 / ve.cycleSpeed) / v.speedAdjustment : 0;
+    const timePressHzSec =
+      doughSubTab !== "crusts" && ppm > 0 && ve.crustsPerCycle > 0
+        ? (ve.crustsPerCycle / ppm) * 60
+        : 0;
     const timePerTraySec = ppm > 0 ? (perTray / ppm) * 60 : 0;
     const timePerBatchSec = ppm > 0 ? (perBatch / ppm) * 60 : 0;
     const timePerSkidSec = ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;

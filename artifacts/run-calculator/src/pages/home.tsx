@@ -493,6 +493,7 @@ import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavi
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
+import { computeEffectiveLineSpeed } from "../lineSpeed";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 import {
   DepartmentProvider,
@@ -22229,14 +22230,13 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
 
     // Compute cases still in the tunnel for this run.
     const subTab = drainingRun.subTab ?? "dough";
-    const ppm =
-      Math.round(
-        (subTab === "crusts"
-          ? (Number(dv.approxLineSpeed) || 0)
-          : (Number(dv.crustsPerCycle) || 0) *
-            (Number(dv.cycleSpeed) || 0) *
-            (Number(dv.speedAdjustment) || 1)) * 100,
-      ) / 100;
+    const ppm = computeEffectiveLineSpeed({
+      mode: subTab === "crusts" ? "crusts" : "dough",
+      approxLineSpeed: Number(dv.approxLineSpeed),
+      crustsPerCycle: Number(dv.crustsPerCycle),
+      cycleSpeed: Number(dv.cycleSpeed),
+      speedAdjustment: Number(dv.speedAdjustment),
+    });
     const curFreezer = Math.max(0, Math.floor(computeCasesInFreezer({
       startedAt: drainingRun.startedAt ?? undefined,
       endedAt: drainingRun.endedAt ?? undefined,
@@ -25837,9 +25837,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                           {/* Expected cases by now — only for running current run */}
                           {isCurrent && run.startedAt && !run.endedAt && (() => {
                             const ev = withTempOverrides(vals);
-                            const ppm = ev.crustsPerCycle * ev.cycleSpeed * ev.speedAdjustment;
-                            const expectedCases = ppm > 0 && vals.pizzasPerCase > 0
-                              ? Math.floor(ppm * liveFreezerMin / vals.pizzasPerCase)
+                            const ppm = computeEffectiveLineSpeed({
+                              mode: run.subTab === "crusts" ? "crusts" : "dough",
+                              approxLineSpeed: ev.approxLineSpeed,
+                              crustsPerCycle: ev.crustsPerCycle,
+                              cycleSpeed: ev.cycleSpeed,
+                              speedAdjustment: ev.speedAdjustment,
+                            });
+                            const expectedCases = ppm > 0 && ev.pizzasPerCase > 0
+                              ? Math.floor(ppm * liveFreezerMin / ev.pizzasPerCase)
                               : 0;
                             return (
                               <div className="flex items-center justify-between bg-primary/10 border border-primary/25 rounded-lg px-4 py-2">

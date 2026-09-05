@@ -886,6 +886,53 @@ export function useAutoTrack({
     }
   }, [autoTrackProgress, nowTime, rearmCaseTimer, rearmDoughTimers, resetBookkeeping]);
 
+  // A speed adjustment changes every line-demand cadence. Re-arm active
+  // countdowns from the edit instant so an old due timestamp cannot make the
+  // next tick fire at the previous speed. The initial ref baseline preserves
+  // the established first-tick behavior on mount.
+  const timingBasisRef = useRef({
+    ppm: calc.ppm,
+    pizzasPerCase: v.pizzasPerCase,
+    perTray: calc.perTray,
+    perBatch: calc.perBatch,
+    spinSec: machine?.spinSec ?? 0,
+    hopperSec: machine?.hopperSec ?? 0,
+  });
+  useEffect(() => {
+    const nextBasis = {
+      ppm: calc.ppm,
+      pizzasPerCase: v.pizzasPerCase,
+      perTray: calc.perTray,
+      perBatch: calc.perBatch,
+      spinSec: machine?.spinSec ?? 0,
+      hopperSec: machine?.hopperSec ?? 0,
+    };
+    const previous = timingBasisRef.current;
+    const changed =
+      previous.ppm !== nextBasis.ppm
+      || previous.pizzasPerCase !== nextBasis.pizzasPerCase
+      || previous.perTray !== nextBasis.perTray
+      || previous.perBatch !== nextBasis.perBatch
+      || previous.spinSec !== nextBasis.spinSec
+      || previous.hopperSec !== nextBasis.hopperSec;
+    timingBasisRef.current = nextBasis;
+    if (changed && runStatus === "running") {
+      const nowMs = Date.now();
+      rearmCaseTimer(nowMs);
+      rearmDoughTimers(nowMs);
+    }
+  }, [
+    calc.perBatch,
+    calc.perTray,
+    calc.ppm,
+    machine?.hopperSec,
+    machine?.spinSec,
+    rearmCaseTimer,
+    rearmDoughTimers,
+    runStatus,
+    v.pizzasPerCase,
+  ]);
+
   // Pause output and ordinary production use different clocks. Baseline each
   // clock at the physical transition and always start from a full case period:
   // entering a drain must not compare its zero-based clock with the run clock,

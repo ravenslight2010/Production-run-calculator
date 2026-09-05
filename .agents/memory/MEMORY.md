@@ -9,6 +9,7 @@
 - [Packaging speed feedback scope](packaging-speed-feedback.md) — correction evidence is provider-owned so Packaging, Dough, and Sauce quick checks share one lifecycle across tab switches.
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
+- [Live line-speed timer rebase](live-line-speed-timer-rebase.md) — changing effective PPM must rebase active line-demand due timestamps; fixed mixer/hopper timings stay separate.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
 - [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
