@@ -1143,14 +1143,35 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         fullPage: true,
       });
 
+      let heldWakePulls = 0;
+      let releaseWakePull!: () => void;
+      const wakePullReleased = new Promise<void>((resolve) => {
+        releaseWakePull = resolve;
+      });
+      await page.route("**/api/sync/today**", async (route) => {
+        if (route.request().method() === "GET" && heldWakePulls === 0) {
+          heldWakePulls += 1;
+          await wakePullReleased;
+        }
+        await route.continue();
+      });
+
       await simulateScreenOff(page);
       const wakeAt = speedEditedAt + 12_000;
       await mockDateNow(page, wakeAt);
       await simulateWake(page);
+      const recoveryStatus = page.getByTestId("foreground-recovery-status");
+      await expect.poll(() => heldWakePulls, { timeout: 10_000 }).toBe(1);
+      await expect(recoveryStatus).toContainText("Still recovering");
+      await expect(recoveryStatus).toHaveAttribute("data-foreground-recovery-state", "recovering");
+      releaseWakePull();
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await expect(page.getByTestId("foreground-recovery-status"))
-        .toContainText("Production state recovered.", { timeout: 10_000 });
+      await expect(recoveryStatus)
+        .toContainText("Production state synchronized.", { timeout: 10_000 });
+      await expect(recoveryStatus)
+        .toHaveAttribute("data-foreground-recovery-state", "outcome");
+      await page.unroute("**/api/sync/today**");
 
       // Foreground reconciliation intentionally re-arms all live timers from
       // the wake instant. Hidden time must not be replayed with either the old
@@ -1181,7 +1202,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // the test still proves hidden time was not replayed on wake.
       const nextVisibleIntervalAt = wakeAt + 2_100;
       await mockDateNow(page, nextVisibleIntervalAt);
-      const recoveryStatus = page.getByTestId("foreground-recovery-status");
       const syncAckBeforeWake = await recoveryStatus.getAttribute("data-foreground-sync-ack");
       const wakeClaimChannels: string[] = [];
       const recordWakeClaim = (request: Request) => {
@@ -1547,7 +1567,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await checkingStatus;
       expect((await initialRecoveryResponse).status()).toBe(200);
       await expect(recoveryStatus)
-        .toContainText("Production state recovered.", { timeout: 20_000 });
+        .toContainText("Production state synchronized.", { timeout: 20_000 });
       // This scenario exercises manager-only profile/factory APIs. Other
       // screen-wake cases intentionally run as floor staff.
       // Browser time is deliberately fixed at 21:00 for this clock suite.
@@ -1677,7 +1697,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         const reloadResponse = await authoritativeReload;
         expect(reloadResponse.status()).toBe(200);
         await expect(reloadRecoveryStatus)
-          .toContainText("Production state recovered.", { timeout: 20_000 });
+          .toContainText("Production state synchronized.", { timeout: 20_000 });
         await sleepingPage.getByText("Ended", { exact: true }).first()
           .waitFor({ state: "visible", timeout: 15_000 });
         const stoppedAfterReload = await sleepingPage.evaluate(async () => {

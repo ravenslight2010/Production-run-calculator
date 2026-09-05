@@ -8736,8 +8736,8 @@ export default function Home() {
       showForegroundRecoveryNotice(
         "recovering",
         queuedStop
-          ? "Stop requested. Checking the current run state before applying it…"
-          : "Checking the current production state…",
+          ? "Still recovering: stop requested. Checking the current run state before applying it…"
+          : "Still recovering: checking the current production state…",
       );
       // Raise both the synchronous ref fence and its rendered companion before
       // the wake clock can publish hidden-time progress. A normal unchanged
@@ -8918,7 +8918,7 @@ export default function Home() {
                    );
                  }
                } else {
-                 showForegroundRecoveryNotice("outcome", "Production state recovered.");
+                  showForegroundRecoveryNotice("outcome", "Production state synchronized.");
                }
              foregroundSyncBarrierRef.current = false;
              // No-op if this wake did not adopt lifecycle state. If it did,
@@ -16919,10 +16919,14 @@ export default function Home() {
                 }`}
                 role="status"
                 aria-live="polite"
+                aria-atomic="true"
                 data-testid="foreground-recovery-status"
                 data-foreground-sync-ack={foregroundSyncAcknowledgement}
+                data-foreground-recovery-state={foregroundRecoveryNotice.kind}
               >
-                <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+                {foregroundRecoveryNotice.kind === "outcome"
+                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  : <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />}
                 <span className="min-w-0 flex-1">{foregroundRecoveryNotice.message}</span>
                 {foregroundRecoveryNotice.kind === "failed" && (
                   <button
