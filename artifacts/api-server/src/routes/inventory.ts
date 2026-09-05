@@ -66,13 +66,11 @@ import {
   validateRecordQualityCheckBody,
 } from "./qualityChecks";
 import {
-  buildWastePrompt,
   flagExpiringItems,
-  sanitizeWasteSuggestion,
   validateWasteInsightBody,
   type FlaggableItem,
 } from "./wasteInsight";
-import { groundPromptWithMemory, recordFacilityKnowledge } from "./aiMemoryContext";
+import { groundPromptWithMemory } from "./aiMemoryContext";
 import {
   ApplyCountObservationBody,
   CountObservationBody,
@@ -122,9 +120,9 @@ const photoRateStore =
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
 
-// The quality-check (vision) and waste-insight (text) AI endpoints get their own
-// cost caps so they can't starve each other or the stock-intake limiter. Same
-// per-user posture and Postgres-in-prod backing as the photo limiter above.
+// The quality-check (vision) endpoint gets its own cost cap so it can't starve
+// the stock-intake limiter. Waste insight retains a request limiter below, but
+// no longer uses the paid AI budget.
 const qualityRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
@@ -1103,18 +1101,12 @@ router.get(
   },
 );
 
-// AI expiry & waste insight. The server reads current inventory + the global
-// expiry-soon lead time and flags items that are expired or expiring soon
-// (pure logic in ./wasteInsight). When nothing is at risk it returns an empty
-// result WITHOUT calling the model (no cost for a no-op). Otherwise it asks the
-// model — grounded in facility memory ("waste"/"inventory") and the optional
-// upcoming-plan items — for a plain-language run-order suggestion to consume the
-// at-risk stock first. Advisory only: it never reorders runs or touches stock.
-// A best-effort note is recorded back to facility memory so the insight informs
-// future grounding; a write failure never fails the request.
+// Deterministic expiry/use-first view. The server reads current inventory and
+// the global expiry-soon lead time, then returns expired/expiring lots in
+// urgency order. The historical route and response fields remain compatible,
+// but there is no model call, generated advice, or facility-memory write.
 router.post(
   "/inventory/waste-insight",
-  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
@@ -1127,8 +1119,6 @@ router.post(
       res.status(validation.status).json({ error: validation.error });
       return;
     }
-    const plannedItems = validation.data.plannedItems ?? [];
-
     const settings = await loadSettings();
     const soonDays = settings.expirySoonDays ?? 7;
 
@@ -1159,68 +1149,10 @@ router.post(
     }));
     const flagged = flagExpiringItems(flaggable, soonDays);
 
-    // Nothing at risk → no AI call, no cost.
-    if (flagged.length === 0) {
-      res.json({ flagged: [], suggestion: null, generatedAt: Date.now() });
-      return;
-    }
-
-    const { system, user } = buildWastePrompt(flagged, plannedItems);
-    const groundedUser = await groundPromptWithMemory(req.log, user, {
-      facilityDomains: ["waste", "inventory"],
-    });
-
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 4096,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: groundedUser },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "waste-insight AI call failed");
-      res.json({
-        flagged,
-        suggestion: null,
-        generatedAt: Date.now(),
-        note: "Could not generate a suggestion right now. The flagged items above are still accurate.",
-      });
-      return;
-    }
-
-    const { suggestion, note } = sanitizeWasteSuggestion(content);
-
-    // Best-effort: remember that these items trended toward waste so future
-    // insights are grounded in it. Never let a memory write fail the request.
-    if (suggestion) {
-      try {
-        const topNames = flagged
-          .slice(0, 5)
-          .map((f) => f.name)
-          .join(", ");
-        await recordFacilityKnowledge([
-          {
-            domain: "waste",
-            key: `at-risk:${todayStr()}`,
-            fact: `On ${todayStr()}, at-risk stock flagged: ${topNames}. Suggested run-order: ${suggestion}`,
-            source: "waste-insight",
-          },
-        ]);
-      } catch (err) {
-        req.log.warn({ err }, "waste-insight memory write failed (non-fatal)");
-      }
-    }
-
     res.json({
       flagged,
-      suggestion: suggestion || null,
+      suggestion: null,
       generatedAt: Date.now(),
-      ...(note ? { note } : {}),
     });
   },
 );

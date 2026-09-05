@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { BarChart2, Download, Lock, Loader2, Share2, Sparkles } from "lucide-react";
-import { buildFallbackSummary, type OperationalReport } from "@workspace/day-summary";
-import { requestSummary, summaryErrorMessage, type SummaryInput } from "../aiSummary";
+import { BarChart2, Download, Lock, Loader2, Share2 } from "lucide-react";
+import type { OperationalReport } from "@workspace/day-summary";
+import type { SummaryInput } from "../aiSummary";
 import {
   operationalReportText,
   reportFilename,
@@ -31,8 +31,6 @@ export default function OperationalReportPanel({
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [report, setReport] = useState<OperationalReport | null>(null);
   const [busy, setBusy] = useState(false);
-  const [includeNarrative, setIncludeNarrative] = useState(false);
-  const [narrativeBusy, setNarrativeBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -51,46 +49,10 @@ export default function OperationalReportPanel({
       if (!response.ok) throw new Error("Report request failed");
       const authoritative = (await response.json()) as OperationalReport;
       setReport(authoritative);
-      if (includeNarrative) {
-        setNarrativeBusy(true);
-        try {
-          const narrativeInput: SummaryInput = {
-            ...input,
-            incidentCount: authoritative.incidents.value?.total,
-            wasteFlaggedCount: authoritative.inventory.value?.flaggedItems,
-          };
-          const result = await requestSummary(narrativeInput);
-          setReport({
-            ...authoritative,
-            narrative: {
-              text: result.summary,
-              source: result.aiGenerated ? "ai" : "deterministic",
-            },
-          });
-          setStatus(
-            result.aiGenerated
-              ? "Report ready. Optional AI narration is separated from the authoritative statistics."
-              : "Report ready. AI was unavailable, so deterministic fallback narration is shown separately.",
-          );
-        } catch (narrativeError) {
-          setReport({
-            ...authoritative,
-            narrative: {
-              text: buildFallbackSummary(authoritative.production),
-              source: "deterministic",
-            },
-          });
-          setStatus(`Report ready. Optional narration used a deterministic fallback: ${summaryErrorMessage(narrativeError)}`);
-        } finally {
-          setNarrativeBusy(false);
-        }
-      } else {
-        setStatus("Report ready. Statistics are authoritative and deterministic.");
-      }
+      setStatus("Report ready. Statistics are authoritative and deterministic.");
     } catch {
       setError("Couldn’t generate the report. Please try again.");
     } finally {
-      setNarrativeBusy(false);
       setBusy(false);
     }
   }
@@ -127,7 +89,7 @@ export default function OperationalReportPanel({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-4" data-testid="operational-report" aria-busy={busy || narrativeBusy}>
+    <div className="rounded-xl border border-border bg-card p-4 space-y-4" data-testid="operational-report" aria-busy={busy}>
       <div className="flex items-center gap-2">
         <BarChart2 className="w-5 h-5 text-primary" />
         <div>
@@ -149,17 +111,6 @@ export default function OperationalReportPanel({
         <button type="button" onClick={() => void generate()} disabled={busy || !date} className="h-9 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
           {busy ? <><Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> Building…</> : "Preview report"}
         </button>
-        <label className="flex min-h-9 items-center gap-2 text-xs font-semibold text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={includeNarrative}
-            onChange={(event) => setIncludeNarrative(event.target.checked)}
-            disabled={busy || narrativeBusy}
-            className="h-4 w-4 rounded border-border"
-          />
-          <Sparkles className="h-3.5 w-3.5 text-primary" />
-          Include optional narration
-        </label>
         {report && (
           <>
             <button type="button" onClick={download} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
@@ -200,15 +151,6 @@ export default function OperationalReportPanel({
           </div>
           {report.inventory.value?.historical && <p className="text-xs text-muted-foreground">Historical inventory events: {report.inventory.value.historical.availability === "available" && report.inventory.value.historical.value ? `${report.inventory.value.historical.value.totalEvents} total · ${report.inventory.value.historical.value.consumptionEvents} consumption · ${report.inventory.value.historical.value.wasteEvents} waste` : `Unavailable${report.inventory.value.historical.note ? ` — ${report.inventory.value.historical.note}` : ""}`}</p>}
           <p className="text-[11px] text-muted-foreground">{report.inventory.note}</p>
-          {report.narrative && (
-            <section className="rounded-lg border border-primary/30 bg-primary/5 p-3" data-testid="operational-report-narrative" aria-label="Optional report narration">
-              <p className="mb-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-primary">
-                <Sparkles className="h-3.5 w-3.5" /> Optional {report.narrative.source === "ai" ? "AI" : "deterministic"} narration
-              </p>
-              <p className="text-sm text-muted-foreground">{report.narrative.text}</p>
-              <p className="mt-2 text-[11px] text-muted-foreground">This narration is informational and does not change the authoritative statistics above.</p>
-            </section>
-          )}
         </div>
       )}
     </div>

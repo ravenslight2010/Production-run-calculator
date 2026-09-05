@@ -1038,8 +1038,7 @@ function tomorrowStr(): string {
 
 // Plain-language production recap, open to ALL staff (not manager-gated). Pick
 // Day (today's runs) or Week (recent history); the server computes the numbers
-// deterministically and the AI only narrates them. Read-only and fail-safe — if
-// the AI is unavailable a deterministic recap is shown instead. Informational.
+// and recap deterministically. Read-only and informational.
 function SummarySection({
   buildSummary,
 }: {
@@ -1121,7 +1120,6 @@ function SummarySection({
 
         {result && (
           <div className="space-y-3" data-testid="summary-result">
-            <AiStatusNotice status={result.aiStatus} feature="AI recap" />
             <p className="text-sm leading-relaxed text-foreground" data-testid="summary-text">
               {result.summary}
             </p>
@@ -1155,11 +1153,6 @@ function SummarySection({
                 </div>
               </div>
             )}
-            {!result.aiGenerated && (
-              <p className="text-[10px] text-muted-foreground">
-                Showing a computed recap (AI narration unavailable).
-              </p>
-            )}
           </div>
         )}
       </CardContent>
@@ -1180,10 +1173,8 @@ const ANOMALY_METRIC_LABEL: Record<string, string> = {
 };
 
 // Predictive-maintenance / anomaly check, open to ALL staff. Compares today's
-// finished runs against recent history; drift detection is deterministic
-// server-side and the AI only narrates flagged anomalies. Read-only and
-// fail-safe — if nothing drifted (or there's too little history) it says so, and
-// if the AI is unavailable the deterministic flags still show. Informational.
+// finished runs against recent history; drift detection and descriptions are
+// deterministic server-side. Read-only and informational.
 function AnomalySection({
   buildAnomaly,
 }: {
@@ -1240,7 +1231,6 @@ function AnomalySection({
 
         {result && (
           <div className="space-y-3" data-testid="anomaly-result">
-            <AiStatusNotice status={result.aiStatus} feature="AI anomaly narration" />
             {result.summary && (
               <p className="text-sm leading-relaxed text-foreground" data-testid="anomaly-text">
                 {result.summary}
@@ -1280,11 +1270,6 @@ function AnomalySection({
                 ))}
               </div>
             )}
-            {result.anomalies.length > 0 && !result.aiGenerated && (
-              <p className="text-[10px] text-muted-foreground">
-                Showing computed flags (AI narration unavailable).
-              </p>
-            )}
           </div>
         )}
       </CardContent>
@@ -1294,10 +1279,9 @@ function AnomalySection({
 
 // Manager-only schedule optimizer. The suggested run order (allergen runs
 // end-of-day, similar brand/die grouped to cut changeovers, factory sequence
-// rules honored) is computed deterministically server-side; the AI only narrates
-// it, and only when a strictly better order exists. Advisory: the manager taps
-// "Apply this order" to reorder today's runs (with an inline Undo) — nothing is
-// reordered without the explicit tap.
+// rules honored) is computed deterministically server-side. Advisory: the
+// manager taps "Apply this order" to reorder today's runs (with an inline Undo)
+// — nothing is reordered without the explicit tap.
 function ScheduleSection({
   buildSchedule,
   onApplySchedule,
@@ -1375,7 +1359,6 @@ function ScheduleSection({
 
         {result && (
           <div className="space-y-3" data-testid="schedule-result">
-            <AiStatusNotice status={result.aiStatus} feature="AI schedule narration" />
             {result.summary && (
               <p className="text-sm leading-relaxed text-foreground" data-testid="schedule-text">
                 {result.summary}
@@ -1422,11 +1405,6 @@ function ScheduleSection({
                   <Check className="w-4 h-4" />
                   Apply this order
                 </Button>
-                {!result.aiGenerated && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Showing computed order (AI narration unavailable).
-                  </p>
-                )}
               </>
             ) : null}
 

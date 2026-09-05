@@ -3,10 +3,7 @@ import {
   daysUntilExpiry,
   flagExpiringItems,
   validateWasteInsightBody,
-  buildWastePrompt,
-  sanitizeWasteSuggestion,
   MAX_PLANNED_ITEMS,
-  MAX_SUGGESTION_CHARS,
   type FlaggableItem,
 } from "./wasteInsight";
 
@@ -35,7 +32,6 @@ describe("daysUntilExpiry", () => {
     expect(daysUntilExpiry("2026-06-18", NOW)).toBe(-3);
   });
 });
-
 describe("flagExpiringItems", () => {
   it("flags items expiring within the window and ignores far-out ones", () => {
     const out = flagExpiringItems(
@@ -102,7 +98,7 @@ describe("flagExpiringItems", () => {
     expect(out.map((f) => f.key)).toEqual(["b", "c", "a"]);
   });
 });
-
+// End of deterministic waste insight tests.
 describe("validateWasteInsightBody", () => {
   it("accepts an empty/absent body", () => {
     expect(validateWasteInsightBody(undefined).ok).toBe(true);
@@ -139,79 +135,4 @@ describe("validateWasteInsightBody", () => {
     }
   });
 });
-
-describe("buildWastePrompt", () => {
-  it("lists flagged stock with expiry framing and asks for JSON", () => {
-    const { system, user } = buildWastePrompt([
-      {
-        key: "mozz",
-        name: "Mozzarella",
-        category: "ingredient",
-        unit: "cases",
-        status: "soon",
-        qtyAtRisk: 4,
-        earliestExpiration: "2026-06-23",
-        daysUntilExpiry: 2,
-      },
-    ]);
-    expect(user).toContain("Mozzarella");
-    expect(user).toContain("expires in 2d");
-    expect(user).toContain('"suggestion"');
-    expect(system.toLowerCase()).toContain("advisory");
-  });
-
-  it("includes planned items when provided", () => {
-    const { user } = buildWastePrompt(
-      [],
-      [{ key: "p", name: "16in Pepperoni", unit: "cases", category: "ingredient" }],
-    );
-    expect(user).toContain("16in Pepperoni");
-  });
-
-  it("shows expired framing for past-date items", () => {
-    const { user } = buildWastePrompt([
-      {
-        key: "x",
-        name: "Old Sauce",
-        category: "ingredient",
-        unit: "barrels",
-        status: "expired",
-        qtyAtRisk: 1,
-        earliestExpiration: "2026-06-18",
-        daysUntilExpiry: -3,
-      },
-    ]);
-    expect(user).toContain("expired 3d ago");
-  });
-});
-
-describe("sanitizeWasteSuggestion", () => {
-  it("returns empty for blank content", () => {
-    expect(sanitizeWasteSuggestion("")).toEqual({ suggestion: "" });
-  });
-
-  it("extracts suggestion and note from valid JSON", () => {
-    const out = sanitizeWasteSuggestion(
-      JSON.stringify({ suggestion: "Run pepperoni first", note: "uses soon-to-expire cheese" }),
-    );
-    expect(out.suggestion).toBe("Run pepperoni first");
-    expect(out.note).toBe("uses soon-to-expire cheese");
-  });
-
-  it("falls back to raw text when JSON is malformed", () => {
-    const out = sanitizeWasteSuggestion("just a plain sentence");
-    expect(out.suggestion).toBe("just a plain sentence");
-  });
-
-  it("clamps an overlong suggestion", () => {
-    const out = sanitizeWasteSuggestion(
-      JSON.stringify({ suggestion: "z".repeat(MAX_SUGGESTION_CHARS + 100) }),
-    );
-    expect(out.suggestion.length).toBeLessThanOrEqual(MAX_SUGGESTION_CHARS);
-  });
-
-  it("omits note when empty", () => {
-    const out = sanitizeWasteSuggestion(JSON.stringify({ suggestion: "do x", note: "" }));
-    expect(out.note).toBeUndefined();
-  });
-});
+// End of deterministic waste insight tests.

@@ -32,11 +32,9 @@ import {
   recordFacilityKnowledge,
 } from "./aiMemoryContext";
 import {
-  buildClustersPrompt,
   buildFallbackClusters,
   CLUSTER_MIN_INCIDENTS,
   DEFAULT_LOOKBACK_DAYS,
-  sanitizeClusterResponse,
   shapeIncidents,
   validateClustersBody,
 } from "./aiIncidentClusters";
@@ -201,10 +199,9 @@ router.post(
   },
 );
 
-// POST /ai/incident-clusters — manager-only root-cause clustering across the
-// incident log. The server reads the incidents itself, asks the AI to PROPOSE a
-// grouping, then verifies every id and recomputes counts deterministically.
-// Advisory, read-only, fail-safe (deterministic grouping when AI is unavailable).
+// POST /ai/incident-clusters — manager-only deterministic grouping across the
+// incident log. The historical /ai URL remains for client compatibility.
+// Advisory and read-only; groups are keyed by platform and screen.
 router.post(
   "/ai/incident-clusters",
   requireCapability("review-incidents"),
@@ -226,10 +223,9 @@ router.post(
         : DEFAULT_LOOKBACK_DAYS;
 
     const incidents = await listIncidents();
-    const { shaped, byId } = shapeIncidents(incidents, lookbackDays, Date.now());
+    const { shaped } = shapeIncidents(incidents, lookbackDays, Date.now());
 
-    // Too few to cluster — return an empty, honest result rather than spend a
-    // paid call inventing patterns out of one or two reports.
+    // Too few to cluster — return an empty, honest deterministic result.
     if (shaped.length < CLUSTER_MIN_INCIDENTS) {
       res.json({
         clusters: [],
@@ -244,31 +240,12 @@ router.post(
       return;
     }
 
-    const { system, user } = buildClustersPrompt(shaped);
-    let clusters = null;
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      });
-      const content = response.choices[0]?.message?.content ?? "";
-      clusters = sanitizeClusterResponse(JSON.parse(content), byId);
-    } catch (err) {
-      req.log.warn({ err }, "incident clustering failed; using deterministic fallback");
-    }
-
-    const aiGenerated = clusters !== null;
-    const finalClusters = clusters ?? buildFallbackClusters(shaped);
     res.json({
-      clusters: finalClusters,
+      clusters: buildFallbackClusters(shaped),
       totalIncidents: shaped.length,
       generatedAt: Date.now(),
-      aiGenerated,
+      aiGenerated: false,
+      aiStatus: "deterministic",
     });
   },
 );

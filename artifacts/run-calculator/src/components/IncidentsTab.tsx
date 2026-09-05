@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Lock,
   History,
-  Sparkles,
   Network,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,10 +38,9 @@ const SEVERITY_STYLE: Record<IncidentCluster["severity"], string> = {
   low: "bg-sky-500/15 text-sky-400",
 };
 
-// Manager-only AI root-cause clustering. On demand, asks the server to group the
-// incident log into recurring themes; advisory and read-only. The server falls
-// back to a deterministic grouping when the AI is unavailable, so this always
-// returns something useful. Mirrors the mobile ClustersPanel (replit.md parity).
+// Manager-only incident grouping. On demand, groups the incident log by the
+// deterministic platform/screen key; advisory and read-only. Mirrors the mobile
+// ClustersPanel (replit.md parity).
 function ClustersPanel({ disabled }: { disabled: boolean }) {
   const [result, setResult] = useState<IncidentClustersResult | null>(null);
   const find = useMutation({
@@ -58,7 +56,7 @@ function ClustersPanel({ disabled }: { disabled: boolean }) {
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">Find patterns</p>
             <p className="text-xs text-muted-foreground">
-              Group recurring reports & crashes into likely root causes. Advisory only.
+              Group recurring reports & crashes by screen and platform. Advisory only.
             </p>
           </div>
         </div>
@@ -71,15 +69,15 @@ function ClustersPanel({ disabled }: { disabled: boolean }) {
           {find.isPending ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           ) : (
-            <Sparkles className="w-4 h-4 mr-2" />
+            <Network className="w-4 h-4 mr-2" />
           )}
           {result ? "Refresh" : "Analyze"}
         </Button>
       </div>
 
-      {find.isError && (
+          {find.isError && (
         <p className="flex items-center gap-2 text-sm text-red-400">
-          <AlertTriangle className="w-4 h-4" /> Couldn't analyze the incident log.
+              <AlertTriangle className="w-4 h-4" /> Couldn't group the incident log.
         </p>
       )}
 
@@ -112,11 +110,6 @@ function ClustersPanel({ disabled }: { disabled: boolean }) {
                 )}
               </div>
             ))
-          )}
-          {!result.aiGenerated && !result.note && (
-            <p className="text-[11px] text-muted-foreground">
-              Showing a computed grouping (AI narration unavailable).
-            </p>
           )}
         </div>
       )}

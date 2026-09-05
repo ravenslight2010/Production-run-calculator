@@ -36,14 +36,6 @@ export function operationalReportText(report: OperationalReport): string {
       : "Historical inventory events: Unavailable",
   ];
 
-  if (report.narrative) {
-    lines.push(
-      "",
-      `OPTIONAL NARRATIVE (${report.narrative.source === "ai" ? "AI-GENERATED" : "DETERMINISTIC FALLBACK"}; NOT AUTHORITATIVE STATISTICS)`,
-      report.narrative.text,
-    );
-  }
-
   return lines.join("\n");
 }
 

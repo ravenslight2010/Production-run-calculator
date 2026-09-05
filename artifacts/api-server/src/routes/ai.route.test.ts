@@ -440,7 +440,7 @@ describe("AI reconciliation and proactive response contracts", () => {
     expect(mock.calls).toBe(0);
   });
 
-  it("returns a schema-valid enriched spec reconciliation", async () => {
+  it("returns the deterministic spec reconciliation without model narration", async () => {
     setSavedSpecSheet([
       {
         kind: "dough",
@@ -464,13 +464,13 @@ describe("AI reconciliation and proactive response contracts", () => {
         currentLbs: 50,
       }),
     ]);
-    expect(body.summary).toBe("Flour is five pounds under the imported spec.");
-    expect(body.aiGenerated).toBe(true);
-    expect(body.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(body.summary).toBe("");
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves the deterministic spec diff and labels provider failure unavailable", async () => {
+  it("preserves the deterministic spec diff when the provider would fail", async () => {
     setSavedSpecSheet([
       {
         kind: "dough",
@@ -485,13 +485,13 @@ describe("AI reconciliation and proactive response contracts", () => {
     const body = AiSpecReconcileResponse.parse(await res.json());
 
     expect(body.discrepancies).toHaveLength(1);
-    expect(body.summary).toBeUndefined();
+    expect(body.summary).toBe("");
     expect(body.aiGenerated).toBe(false);
-    expect(body.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves a non-JSON spec summary fallback as enriched narration", async () => {
+  it("ignores stale non-JSON spec narration", async () => {
     setSavedSpecSheet([
       {
         kind: "dough",
@@ -506,13 +506,13 @@ describe("AI reconciliation and proactive response contracts", () => {
     const body = AiSpecReconcileResponse.parse(await res.json());
 
     expect(body.discrepancies).toHaveLength(1);
-    expect(body.summary).toBe("The provider returned plain text.");
-    expect(body.aiGenerated).toBe(true);
-    expect(body.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(body.summary).toBe("");
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("accepts a cached spec result through the generated schema without calling the model", async () => {
+  it("does not read a stale cached spec narration", async () => {
     setSavedSpecSheet([
       {
         kind: "dough",
@@ -540,9 +540,9 @@ describe("AI reconciliation and proactive response contracts", () => {
     expect(res.status).toBe(200);
     const body = AiSpecReconcileResponse.parse(await res.json());
 
-    expect(body.summary).toBe("Cached reconciliation summary.");
-    expect(body.aiGenerated).toBe(true);
-    expect(body.aiStatus).toBe("enriched");
+    expect(body.summary).toBe("");
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
     expect(mock.calls).toBe(0);
   });
 
@@ -553,59 +553,59 @@ describe("AI reconciliation and proactive response contracts", () => {
 
     expect(body.aiGenerated).toBe(false);
     expect(body.aiStatus).toBe("deterministic");
-    expect(body.summary).toBeUndefined();
+    expect(body.summary).toBe("");
     expect(mock.calls).toBe(0);
   });
 
-  it("returns a schema-valid enriched mix reconciliation", async () => {
+  it("returns the deterministic mix reconciliation without model narration", async () => {
     mock.nextContent = JSON.stringify({ summary: "Mozzarella is below the premix amount." });
 
     const res = await postMixReconcile({ label: "Pepperoni sheet", discrepancies: [mixDiscrepancy] });
     expect(res.status).toBe(200);
     const body = AiMixReconcileResponse.parse(await res.json());
 
-    expect(body.summary).toBe("Mozzarella is below the premix amount.");
-    expect(body.aiGenerated).toBe(true);
-    expect(body.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(body.summary).toBe("");
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("labels a mix provider failure unavailable while returning a valid response", async () => {
+  it("returns a valid mix response when the provider would fail", async () => {
     mock.shouldThrow = true;
 
     const res = await postMixReconcile({ discrepancies: [mixDiscrepancy] });
     expect(res.status).toBe(200);
     const body = AiMixReconcileResponse.parse(await res.json());
 
-    expect(body.summary).toBeUndefined();
+    expect(body.summary).toBe("");
     expect(body.aiGenerated).toBe(false);
-    expect(body.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves a non-JSON mix summary fallback as enriched narration", async () => {
+  it("ignores stale non-JSON mix narration", async () => {
     mock.nextContent = "The provider returned plain text.";
 
     const res = await postMixReconcile({ discrepancies: [mixDiscrepancy] });
     expect(res.status).toBe(200);
     const body = AiMixReconcileResponse.parse(await res.json());
 
-    expect(body.summary).toBe("The provider returned plain text.");
-    expect(body.aiGenerated).toBe(true);
-    expect(body.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(body.summary).toBe("");
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("accepts a cached mix result through the generated schema without calling the model", async () => {
+  it("does not read a stale cached mix narration", async () => {
     mock.cachedValue = { summary: "Cached mix summary." };
 
     const res = await postMixReconcile({ discrepancies: [mixDiscrepancy] });
     expect(res.status).toBe(200);
     const body = AiMixReconcileResponse.parse(await res.json());
 
-    expect(body.summary).toBe("Cached mix summary.");
-    expect(body.aiGenerated).toBe(true);
-    expect(body.aiStatus).toBe("enriched");
+    expect(body.summary).toBe("");
+    expect(body.aiGenerated).toBe(false);
+    expect(body.aiStatus).toBe("deterministic");
     expect(mock.calls).toBe(0);
   });
 
@@ -1031,7 +1031,7 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic stats and reports unavailable when the provider throws", async () => {
+  it("preserves deterministic stats without calling the provider", async () => {
     mock.shouldThrow = true;
     const res = await postSummary(makeSummaryBody());
     expect(res.status).toBe(200);
@@ -1055,11 +1055,11 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     });
     expect(json.summary).toContain("73% attainment");
     expect(json.aiGenerated).toBe(false);
-    expect(json.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic stats and reports unavailable for unusable output", async () => {
+  it("preserves deterministic stats without reading model output", async () => {
     mock.nextContent = JSON.stringify({ summary: "   " });
     const res = await postSummary(makeSummaryBody({ date: "2026-06-19" }));
     expect(res.status).toBe(200);
@@ -1072,11 +1072,11 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
     });
     expect(json.summary).toContain("73% attainment");
     expect(json.aiGenerated).toBe(false);
-    expect(json.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic stats while labeling usable narration as enriched", async () => {
+  it("ignores stale model output and keeps the deterministic recap", async () => {
     mock.nextContent = JSON.stringify({
       summary: "Acme finished strongly while Beta needs attention.",
     });
@@ -1100,10 +1100,10 @@ describe("POST /ai/summary — deterministic and fallback glue", () => {
       wasteFlaggedCount: 2,
       hasData: true,
     });
-    expect(json.summary).toBe("Acme finished strongly while Beta needs attention.");
-    expect(json.aiGenerated).toBe(true);
-    expect(json.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(json.summary).toContain("73% attainment");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 });
 
@@ -1135,7 +1135,7 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
     expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic anomalies and reports unavailable when the provider throws", async () => {
+  it("preserves deterministic anomalies without calling the provider", async () => {
     mock.shouldThrow = true;
     const res = await postAnomalies(
       makeAnomalyBody({
@@ -1158,11 +1158,11 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
     ]);
     expect(json.summary).toBe("");
     expect(json.aiGenerated).toBe(false);
-    expect(json.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic anomalies and reports unavailable for unusable output", async () => {
+  it("preserves deterministic anomalies without reading model output", async () => {
     mock.nextContent = JSON.stringify({ summary: "   " });
     const res = await postAnomalies(
       makeAnomalyBody({
@@ -1185,11 +1185,11 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
     ]);
     expect(json.summary).toBe("");
     expect(json.aiGenerated).toBe(false);
-    expect(json.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("labels usable narration as enriched while retaining the deterministic anomalies", async () => {
+  it("ignores stale model output while retaining the deterministic anomalies", async () => {
     mock.nextContent = JSON.stringify({
       summary: "Acme Cheese is showing a meaningful production drift today.",
     });
@@ -1212,10 +1212,10 @@ describe("POST /ai/anomalies — deterministic and fallback glue", () => {
       expect.objectContaining({ metric: "stoppages", observed: 5 }),
       expect.objectContaining({ metric: "yield", observed: 50 }),
     ]);
-    expect(json.summary).toBe("Acme Cheese is showing a meaningful production drift today.");
-    expect(json.aiGenerated).toBe(true);
-    expect(json.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(json.summary).toBe("");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 });
 
@@ -1258,7 +1258,7 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
     expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic order and metrics when the provider throws", async () => {
+  it("preserves deterministic order and metrics without calling the provider", async () => {
     mock.shouldThrow = true;
     const res = await postScheduleOptimize(makeScheduleBody());
     expect(res.status).toBe(200);
@@ -1277,11 +1277,11 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
     });
     expect(json.summary).toBe("");
     expect(json.aiGenerated).toBe(false);
-    expect(json.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic order and metrics for unusable output", async () => {
+  it("preserves deterministic order and metrics without reading model output", async () => {
     mock.nextContent = JSON.stringify({ summary: "   " });
     const res = await postScheduleOptimize(makeScheduleBody({ runs: [
       {
@@ -1324,11 +1324,11 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
       changeovers: 2,
     });
     expect(json.aiGenerated).toBe(false);
-    expect(json.aiStatus).toBe("unavailable");
-    expect(mock.calls).toBe(1);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 
-  it("preserves deterministic order and metrics while labeling usable narration as enriched", async () => {
+  it("ignores stale model output while preserving deterministic order and metrics", async () => {
     mock.nextContent = JSON.stringify({
       summary: "Move the egg run later to reduce allergen risk.",
     });
@@ -1347,10 +1347,10 @@ describe("POST /ai/schedule-optimize — deterministic and fallback glue", () =>
       ruleViolations: 0,
       changeovers: 2,
     });
-    expect(json.summary).toBe("Move the egg run later to reduce allergen risk.");
-    expect(json.aiGenerated).toBe(true);
-    expect(json.aiStatus).toBe("enriched");
-    expect(mock.calls).toBe(1);
+    expect(json.summary).toBe("");
+    expect(json.aiGenerated).toBe(false);
+    expect(json.aiStatus).toBe("deterministic");
+    expect(mock.calls).toBe(0);
   });
 });
 

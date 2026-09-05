@@ -878,8 +878,8 @@ export type WasteInsightBody = {
   plannedItems?: CandidateItem[];
 };
 
-// Server flags expiring/expired stock and (when anything is at risk) asks the AI
-// for a run-order suggestion to consume it first. Advisory only.
+// Server flags expiring/expired stock in urgency order. The historical
+// suggestion field remains optional for response compatibility.
 export const wasteInsight = (body: WasteInsightBody = {}) =>
   api<WasteInsightResult>("/inventory/waste-insight", {
     method: "POST",

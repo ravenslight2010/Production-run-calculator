@@ -8,7 +8,7 @@ import {
   TIME_FORMAT_INSTRUCTION,
   type OptimizeInput,
 } from "./aiOptimize";
-import { MAX_FLAGGED_IN_PROMPT, type WasteFlaggedItem } from "./wasteInsight";
+import type { WasteFlaggedItem } from "./wasteInsight";
 
 // Proactive shift-floor watcher. Same input contract as /ai/optimize (the whole
 // live day), but a very different job: instead of a ranked list of advice the
@@ -32,6 +32,7 @@ export const PROACTIVE_MAX_INCIDENT_PATTERNS = 5;
 // Each grounded pattern's recommended-action hint is clamped to keep the section
 // compact.
 export const PROACTIVE_MAX_PATTERN_HINT_CHARS = 200;
+export const MAX_FLAGGED_IN_PROMPT = 100;
 
 // Factory-wide knobs that let a manager tune how aggressive the watcher is.
 // Bounds keep the cadence sane so a misconfig can't hammer the (cost-capped) AI

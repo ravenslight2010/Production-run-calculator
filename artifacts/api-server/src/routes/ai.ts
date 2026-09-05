@@ -17,8 +17,6 @@ import {
   toReconcileProfiles,
 } from "@workspace/spec-reconcile";
 import {
-  buildMixReconcilePrompt,
-  sanitizeMixReconcileSummary,
   toMixDiscrepancies,
   validateMixReconcileBody,
 } from "./aiMixReconcile";
@@ -113,8 +111,6 @@ import {
 } from "./aiRecipeAssistant";
 import { wantsEventStream, sseFrame, extractJsonStringField } from "./aiStream";
 import {
-  buildSpecReconcilePrompt,
-  sanitizeSpecReconcileSummary,
   toCurrentReconcileRecipes,
   toCurrentReconcileProfiles,
   validateSpecReconcileBody,
@@ -132,8 +128,6 @@ import { verifyForecastHistory } from "./aiForecastVerify";
 import {
   validateSummaryBody,
   toSummaryAggInput,
-  buildSummaryPrompt,
-  sanitizeSummary,
 } from "./aiSummary";
 import {
   aggregateDaySummary,
@@ -142,16 +136,12 @@ import {
 import {
   validateAnomalyBody,
   toAnomalyDetectInput,
-  buildAnomalyPrompt,
-  sanitizeAnomalySummary,
   detectAnomalies,
 } from "./aiAnomalies";
 import {
   validateScheduleBody,
   toScheduleRuns,
   toScheduleRules,
-  buildSchedulePrompt,
-  sanitizeScheduleSummary,
   optimizeSchedule,
 } from "./aiScheduleOptimize";
 import {
@@ -186,14 +176,25 @@ const router: IRouter = Router();
 // charge-before-handler behavior.
 const CACHEABLE_AI_PATHS = new Set([
   "/forecast",
-  "/summary",
-  "/spec-reconcile",
-  "/mix-reconcile",
   "/match-import",
   "/match-premix",
   "/suggest-merges",
 ]);
+// These routes retain their historical /ai URLs for client compatibility, but
+// their results are now entirely deterministic. Keep them out of the paid AI
+// cost limiter and result-cache path.
+const DETERMINISTIC_PATHS = new Set([
+  "/summary",
+  "/anomalies",
+  "/schedule-optimize",
+  "/spec-reconcile",
+  "/mix-reconcile",
+]);
 router.use("/ai", (req, res, next) => {
+  if (DETERMINISTIC_PATHS.has(req.path)) {
+    next();
+    return;
+  }
   if (CACHEABLE_AI_PATHS.has(req.path)) {
     // Preserve the pre-cache behavior for the clearly invalid empty requests
     // used by the auth/cost guard: they are charged before capability gating,
@@ -908,10 +909,10 @@ router.post(
 );
 
 // Cross-reference a saved spec sheet against the current recipe library. The
-// diff itself is deterministic (the shared @workspace/spec-reconcile lib runs
-// here AND on both clients), so the discrepancy list is always returned even if
-// the AI summary is unavailable. The AI only narrates the already-computed
-// discrepancies — it can't invent or miss one. Read-only; not manager-gated.
+// diff is deterministic (the shared @workspace/spec-reconcile lib runs here AND
+// on both clients), so the discrepancy list is authoritative. The historical
+// /ai URL remains for client compatibility; no model or generated summary is
+// involved. Read-only; not manager-gated.
 router.post(
   "/ai/spec-reconcile",
   rateLimit({
@@ -977,99 +978,21 @@ router.post(
             currentProfiles: toCurrentReconcileProfiles(validation.data),
           });
 
-    // There is nothing to narrate when both deterministic comparisons are
-    // clean. Return the authoritative empty diff without loading memory or
-    // spending an AI call.
-    if (discrepancies.length === 0 && profileDiscrepancies.length === 0) {
-      res.json({
-        specSheetId: validation.data.specSheetId,
-        discrepancies,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-        generatedAt: Date.now(),
-      });
-      return;
-    }
-
-    // Advisory plain-language summary. Fail-safe: any AI error still returns the
-    // deterministic discrepancies (with an empty summary) rather than a 502.
-    const model = pickModel("full");
-    let cachedSpecBody: {
-      specSheetId: number;
-      discrepancies: typeof discrepancies;
-      summary?: string;
-    };
-    try {
-      const { system, user } = buildSpecReconcilePrompt(label, discrepancies, profileDiscrepancies);
-      const grounded = await groundPromptWithMemory(req.log, user, {
-        facilityDomains: ["ingredient", "general"],
-      });
-      const cached = await cachedAiResponse(req, res, {
-        operation: "spec-reconcile",
-        model,
-        system,
-        user: grounded,
-        validate: (value): value is typeof cachedSpecBody =>
-          isObject(value) &&
-          typeof value.specSheetId === "number" &&
-          Array.isArray(value.discrepancies) &&
-          value.discrepancies.every(isObject) &&
-          typeof value.summary === "string",
-        load: async () => {
-          try {
-            const response = await openai.chat.completions.create({
-              model,
-              max_completion_tokens: 2048,
-              response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: system },
-                { role: "user", content: grounded },
-              ],
-            });
-            const nextSummary = sanitizeSpecReconcileSummary(
-              response.choices[0]?.message?.content ?? "",
-            );
-            const value = {
-              specSheetId: validation.data.specSheetId,
-              discrepancies,
-              ...(nextSummary ? { summary: nextSummary } : {}),
-            };
-            return { value, cacheable: !!nextSummary };
-          } catch (err) {
-            req.log.error({ err }, "ai-spec-reconcile summary call failed");
-            return {
-              value: {
-                specSheetId: validation.data.specSheetId,
-                discrepancies,
-              },
-              cacheable: false,
-            };
-          }
-        },
-      });
-      cachedSpecBody = cached.value;
-    } catch (err) {
-      if (err instanceof AiCostLimitError) {
-        finishAiCostLimitResponse(res);
-        return;
-      }
-      throw err;
-    }
-
     res.json({
-      ...cachedSpecBody!,
-      aiGenerated: !!cachedSpecBody!.summary,
-      aiStatus: cachedSpecBody!.summary ? "enriched" : "unavailable",
+      specSheetId: validation.data.specSheetId,
+      discrepancies,
+      summary: "",
+      aiGenerated: false,
+      aiStatus: "deterministic",
       generatedAt: Date.now(),
     });
   },
 );
 
-// Narrate the already-computed mix discrepancies. The deterministic diff (the
-// shared @workspace/mix-reconcile lib) runs on BOTH clients, so the client sends
-// the exact discrepancy list and the AI only summarizes it — it can't invent or
-// miss one. Read-only and fail-safe: any AI error returns an empty summary
-// rather than a 502. Not manager-gated (any signed-in user).
+// Return the already-computed mix discrepancies. The deterministic diff (the
+// shared @workspace/mix-reconcile lib) runs on both clients. The historical /ai
+// URL remains for client compatibility, but no model or generated summary is
+// involved. Not manager-gated (any signed-in user).
 router.post(
   "/ai/mix-reconcile",
   rateLimit({
@@ -1087,73 +1010,11 @@ router.post(
 
     const discrepancies = toMixDiscrepancies(validation.data);
 
-    if (discrepancies.length === 0) {
-      res.json({
-        discrepancies,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-        generatedAt: Date.now(),
-      });
-      return;
-    }
-
-    // Advisory plain-language summary. Fail-safe: any AI error still returns a
-    // (empty) summary rather than a 502 — the deterministic diff already lives
-    // on the client.
-    const model = pickModel("full");
-    let cachedMixBody: { summary?: string };
-    try {
-      const { system, user } = buildMixReconcilePrompt(
-        validation.data.label ?? "",
-        discrepancies,
-      );
-      const grounded = await groundPromptWithMemory(req.log, user, {
-        facilityDomains: ["ingredient", "general"],
-      });
-      const cached = await cachedAiResponse(req, res, {
-        operation: "mix-reconcile",
-        model,
-        system,
-        user: grounded,
-        validate: (value): value is typeof cachedMixBody =>
-          isObject(value) && typeof value.summary === "string",
-        load: async () => {
-          try {
-            const response = await openai.chat.completions.create({
-              model,
-              max_completion_tokens: 2048,
-              response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: system },
-                { role: "user", content: grounded },
-              ],
-            });
-            const nextSummary = sanitizeMixReconcileSummary(
-              response.choices[0]?.message?.content ?? "",
-            );
-            return {
-              value: nextSummary ? { summary: nextSummary } : {},
-              cacheable: !!nextSummary,
-            };
-          } catch (err) {
-            req.log.error({ err }, "ai-mix-reconcile summary call failed");
-            return { value: {}, cacheable: false };
-          }
-        },
-      });
-      cachedMixBody = cached.value;
-    } catch (err) {
-      if (err instanceof AiCostLimitError) {
-        finishAiCostLimitResponse(res);
-        return;
-      }
-      throw err;
-    }
-
     res.json({
-      ...cachedMixBody!,
-      aiGenerated: !!cachedMixBody!.summary,
-      aiStatus: cachedMixBody!.summary ? "enriched" : "unavailable",
+      discrepancies,
+      summary: "",
+      aiGenerated: false,
+      aiStatus: "deterministic",
       generatedAt: Date.now(),
     });
   },
@@ -1806,12 +1667,10 @@ router.post(
   },
 );
 
-// End-of-day / weekly production recap. Stats are computed deterministically
-// from the supplied runs (shared @workspace/day-summary lib); the model only
-// NARRATES them. Open to all signed-in staff (informational, like ask-the-day),
-// rate-limited per user. Fail-safe: any AI failure or unusable output falls back
-// to the deterministic plain-language summary built from the same stats, so the
-// caller always gets a usable recap. Read-only — never writes run data.
+// End-of-day / weekly production recap. Stats and the plain-language summary are
+// computed deterministically from the supplied runs (shared
+// @workspace/day-summary lib). The historical /ai URL remains for compatibility;
+// this endpoint never calls a model or writes run data.
 router.post(
   "/ai/summary",
   rateLimit({
@@ -1827,108 +1686,24 @@ router.post(
       return;
     }
 
-    // Deterministic stats first — these are what the UI shows and what the
-    // fallback recap is built from. The AI never sees raw run data beyond this.
+    // Deterministic stats and recap are the complete response.
     const stats = aggregateDaySummary(toSummaryAggInput(validation.data));
     const fallback = buildFallbackSummary(stats);
 
-    // Nothing to narrate: skip the AI call entirely and return the deterministic
-    // "no runs" recap. Honest and cheap.
-    if (!stats.hasData) {
-      res.json({
-        summary: fallback,
-        stats,
-        generatedAt: Date.now(),
-        aiGenerated: false,
-        aiStatus: "deterministic",
-      });
-      return;
-    }
-
-    const { system, user } = buildSummaryPrompt(stats);
-    // Open to all signed-in staff (see comment above), so exclude the
-    // privileged facility-memory domains (forecast/proactive-alerts) — same
-    // reasoning as /ai/ask. Corrections (name equivalences) are included by
-    // default via groundPromptWithMemory so the summary honors merges/renames.
-    const userPrompt = await groundPromptWithMemory(req.log, user, {
-      allowPrivilegedFacilityDomains: false,
-    });
-
-    const model = pickModel("full");
-    let cachedSummaryBody: {
-      summary: string;
-      stats: typeof stats;
-      aiGenerated: boolean;
-    };
-    try {
-      const cached = await cachedAiResponse(req, res, {
-        operation: "summary",
-        model,
-        system,
-        user: userPrompt,
-        validate: (value): value is typeof cachedSummaryBody =>
-          isObject(value) &&
-          typeof value.summary === "string" &&
-          isObject(value.stats) &&
-          typeof value.aiGenerated === "boolean",
-        load: async () => {
-          let content = "";
-          try {
-            const response = await openai.chat.completions.create({
-              model,
-              max_completion_tokens: 1024,
-              response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: system },
-                { role: "user", content: userPrompt },
-              ],
-            });
-            content = response.choices[0]?.message?.content ?? "";
-          } catch (err) {
-            req.log.error({ err }, "ai-summary call failed; using deterministic fallback");
-            return { value: { summary: fallback, stats, aiGenerated: false }, cacheable: false };
-          }
-
-          let raw: unknown;
-          try {
-            raw = JSON.parse(content);
-          } catch {
-            req.log.warn({ contentLength: content.length }, "ai-summary non-JSON response");
-            return { value: { summary: fallback, stats, aiGenerated: false }, cacheable: false };
-          }
-
-          const narrated = sanitizeSummary(raw);
-          return {
-            value: { summary: narrated ?? fallback, stats, aiGenerated: narrated != null },
-            cacheable: narrated != null,
-          };
-        },
-      });
-      cachedSummaryBody = cached.value;
-    } catch (err) {
-      if (err instanceof AiCostLimitError) {
-        finishAiCostLimitResponse(res);
-        return;
-      }
-      throw err;
-    }
-
     res.json({
-      ...cachedSummaryBody!,
+      summary: fallback,
+      stats,
       generatedAt: Date.now(),
-      aiStatus: cachedSummaryBody!.aiGenerated ? "enriched" : "unavailable",
+      aiGenerated: false,
+      aiStatus: "deterministic",
     });
   },
 );
 
 // Predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
 // stoppages vs. a per-product baseline) is computed deterministically from the
-// supplied runs (shared @workspace/anomaly lib); the model only NARRATES the
-// flagged anomalies — and only when at least one is flagged (no flags → no AI
-// call), mirroring the waste-insight posture. Open to all signed-in staff
-// (informational), rate-limited per user. Fail-safe: any AI failure or unusable
-// output returns the deterministic anomaly list with an empty narration.
-// Read-only — never writes run data.
+// supplied runs (shared @workspace/anomaly lib). The historical /ai URL remains
+// for compatibility; no model narration is involved.
 router.post(
   "/ai/anomalies",
   rateLimit({
@@ -1944,8 +1719,7 @@ router.post(
       return;
     }
 
-    // Deterministic detection first — this is what the UI shows. The AI never
-    // sees raw run data beyond the flagged anomalies.
+    // Deterministic detection is the complete result.
     const result = detectAnomalies(toAnomalyDetectInput(validation.data));
 
     const baseResponse = {
@@ -1955,7 +1729,7 @@ router.post(
       generatedAt: Date.now(),
     };
 
-    // Not enough history to judge anything → honest note, no AI call.
+    // Not enough history to judge anything → honest deterministic note.
     if (result.baselineRuns < 3) {
       res.json({
         ...baseResponse,
@@ -1967,83 +1741,21 @@ router.post(
       return;
     }
 
-    // Nothing drifted → skip the AI call entirely. Cheap and honest.
-    if (result.anomalies.length === 0) {
-      res.json({
-        ...baseResponse,
-        summary: "",
-        aiGenerated: false,
-        aiStatus: "deterministic",
-      });
-      return;
-    }
-
-    const { system, user } = buildAnomalyPrompt(result);
-    // Open to all signed-in staff (see comment above), so exclude the
-    // privileged facility-memory domains (forecast/proactive-alerts) — same
-    // reasoning as /ai/ask. Corrections included by default so anomaly
-    // narration honors factory-wide name equivalences.
-    const userPrompt = await groundPromptWithMemory(req.log, user, {
-      allowPrivilegedFacilityDomains: false,
-    });
-
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 1024,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      // Fail-safe: AI provider error still returns the deterministic anomalies.
-      req.log.error({ err }, "ai-anomalies call failed; returning anomalies without narration");
-      res.json({
-        ...baseResponse,
-        summary: "",
-        aiGenerated: false,
-        aiStatus: "unavailable",
-      });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-anomalies non-JSON response");
-      res.json({
-        ...baseResponse,
-        summary: "",
-        aiGenerated: false,
-        aiStatus: "unavailable",
-      });
-      return;
-    }
-
-    const narrated = sanitizeAnomalySummary(raw);
     res.json({
       ...baseResponse,
-      summary: narrated ?? "",
-      aiGenerated: narrated != null,
-      aiStatus: narrated != null ? "enriched" : "unavailable",
+      summary: "",
+      aiGenerated: false,
+      aiStatus: "deterministic",
     });
   },
 );
 
-// AI schedule-order suggestion. Given the runs planned for one day, the server
-// DETERMINISTICALLY proposes an ordering (allergen runs end-of-day, similar
+// Schedule-order suggestion. Given the runs planned for one day, the server
+// deterministically proposes an ordering (allergen runs end-of-day, similar
 // brand/die grouped to cut changeovers, factory sequence rules honored — shared
-// @workspace/schedule-optimize lib). The model only NARRATES the suggested
-// order, and only when a strictly better order exists (no improvement → no AI
-// call), mirroring the anomaly posture. Manager-gated (use-ai-tools) and
-// rate-limited per user. Fail-safe: any AI failure or unusable output returns
-// the deterministic suggested order with an empty narration. Read-only — never
-// writes the schedule; the manager applies it through the normal move path.
+// @workspace/schedule-optimize lib). The historical /ai URL remains for client
+// compatibility. Read-only — the manager applies the returned order through the
+// normal move path.
 router.post(
   "/ai/schedule-optimize",
   requireCapability("use-ai-tools"),
@@ -2060,8 +1772,7 @@ router.post(
       return;
     }
 
-    // Deterministic ordering first — this is what the UI shows. The AI never
-    // sees raw run data beyond the suggested order's FACTS block.
+    // Deterministic ordering and metrics are the complete result.
     const result = optimizeSchedule(
       toScheduleRuns(validation.data),
       toScheduleRules(validation.data),
@@ -2076,8 +1787,8 @@ router.post(
       generatedAt: Date.now(),
     };
 
-    // Fewer than 2 runs, or no strictly better order → skip the AI call
-    // entirely. Cheap and honest.
+    // Fewer than 2 runs, or no strictly better order → return a deterministic
+    // explanation without attempting to narrate it.
     if (result.ordered.length < 2) {
       res.json({
         ...baseResponse,
@@ -2099,49 +1810,11 @@ router.post(
       return;
     }
 
-    const { system, user } = buildSchedulePrompt(result);
-    const userPrompt = await groundPromptWithMemory(req.log, user);
-
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 1024,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      // Fail-safe: AI provider error still returns the deterministic order.
-      req.log.error(
-        { err },
-        "ai-schedule-optimize call failed; returning order without narration",
-      );
-      res.json({ ...baseResponse, summary: "", aiGenerated: false, aiStatus: "unavailable" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn(
-        { content: content.slice(0, 200) },
-        "ai-schedule-optimize non-JSON response",
-      );
-      res.json({ ...baseResponse, summary: "", aiGenerated: false, aiStatus: "unavailable" });
-      return;
-    }
-
-    const narrated = sanitizeScheduleSummary(raw);
     res.json({
       ...baseResponse,
-      summary: narrated ?? "",
-      aiGenerated: narrated != null,
-      aiStatus: narrated != null ? "enriched" : "unavailable",
+      summary: "",
+      aiGenerated: false,
+      aiStatus: "deterministic",
     });
   },
 );

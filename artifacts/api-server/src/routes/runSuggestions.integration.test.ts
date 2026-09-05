@@ -172,6 +172,7 @@ const OBSERVATION = {
 type ApiSuggestion = {
   id: string;
   status: string;
+  statsLine: string;
   narrative: string;
   followUpNote: string;
   observedValue: number;
@@ -184,14 +185,16 @@ async function list(userId: string): Promise<ApiSuggestion[]> {
 }
 
 describe("run suggestions lifecycle", () => {
-  it("staff observe creates a pending suggestion with the deterministic fallback narrative", async () => {
+  it("staff observe creates a pending suggestion with deterministic stats", async () => {
     const res = await req(STAFF, "POST", "/api/run-suggestions/observe", OBSERVATION);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; suggestion?: ApiSuggestion };
     expect(body.ok).toBe(true);
     expect(body.suggestion?.status).toBe("pending");
-    // AI is mocked to fail → deterministic fallback embeds the stats line.
-    expect(body.suggestion?.narrative).toContain(OBSERVATION.statsLine);
+    // New observations keep the compatibility narrative field empty; the
+    // deterministic stats line is the user-facing explanation.
+    expect(body.suggestion?.statsLine).toBe(OBSERVATION.statsLine);
+    expect(body.suggestion?.narrative).toBe("");
     const all = await list(STAFF);
     expect(all).toHaveLength(1);
   });

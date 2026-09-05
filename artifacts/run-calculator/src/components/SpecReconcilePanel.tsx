@@ -5,8 +5,8 @@
 // which recipes match the spec, which have ingredient discrepancies, which are not
 // covered by any spec sheet, and which spec recipes aren't in the library.
 //
-// Individual "AI summary" per sheet still calls /api/ai/spec-reconcile for a
-// plain-language narrative on top of the deterministic diff.
+// Individual sheet checks call the compatibility endpoint for the deterministic
+// diff; no model-written summary is needed.
 //
 // Mirrors the mobile section in artifacts/run-calculator-mobile/app/master-data.tsx
 // (replit.md parity).
@@ -43,7 +43,6 @@ import {
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
-import AiStatusNotice from "@/components/AiStatusNotice";
 
 function fmtDate(ms: number): string {
   try {
@@ -357,7 +356,7 @@ export default function SpecReconcilePanel({
         <p className="text-sm text-muted-foreground">
           The two most recent versions of each imported spec sheet are saved here, with
           the newest marked "Latest". Cross-reference all at once to see which recipes
-          match the spec, or check a single sheet for an AI-written plain-language summary.
+           match the spec, or check a single sheet for its deterministic differences.
         </p>
 
         {/* Stale sauce name warning — profiles whose frontlineRecipeName is a
@@ -540,7 +539,7 @@ export default function SpecReconcilePanel({
                         disabled={busyId !== null || checkingAll}
                         data-testid={`button-check-spec-${s.id}`}
                       >
-                        {busyId === s.id ? "Checking…" : "AI summary"}
+                        {busyId === s.id ? "Checking…" : "Check sheet"}
                       </Button>
                       <ConfirmDeleteButton
                         onConfirm={() => handleDelete(s.id)}
@@ -606,8 +605,6 @@ export default function SpecReconcilePanel({
         )}
 
         {resultError && <p className="text-sm text-destructive">{resultError}</p>}
-        <AiStatusNotice status={aiResult?.aiStatus} feature="AI reconciliation" />
-
         {combined && summaryCounts && (
           <div className="space-y-4 mt-2" data-testid="spec-reconcile-result">
             <div className="flex flex-wrap gap-2">
@@ -861,7 +858,7 @@ export default function SpecReconcilePanel({
             data-testid="spec-reconcile-result"
           >
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">AI summary</span>
+              <span className="text-sm font-medium">Sheet differences</span>
               {aiResult.discrepancies.length === 0 ? (
                 <Badge variant="secondary">Recipes match</Badge>
               ) : (
@@ -871,9 +868,6 @@ export default function SpecReconcilePanel({
                 </Badge>
               )}
             </div>
-            {aiResult.summary ? (
-              <p className="whitespace-pre-wrap text-sm">{aiResult.summary}</p>
-            ) : null}
             {aiResult.discrepancies.length > 0 ? (
               <ul className="space-y-1">
                 {aiResult.discrepancies.map((d, i) => (

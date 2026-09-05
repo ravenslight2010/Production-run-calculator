@@ -51,11 +51,12 @@ afterEach(() => {
 });
 
 describe("operational report sharing", () => {
-  it("formats scope, authoritative sections, unavailable values, and narration", () => {
+  it("formats scope, authoritative sections, and unavailable values", () => {
     const text = operationalReportText(report);
     expect(text).toContain("Period: 2026-08-29 to 2026-09-04");
     expect(text).toContain("Incidents: Unavailable — Incident history is unavailable.");
-    expect(text).toContain("OPTIONAL NARRATIVE (AI-GENERATED; NOT AUTHORITATIVE STATISTICS)");
+    expect(text).not.toContain("OPTIONAL NARRATIVE");
+    expect(text).not.toContain("One run remains unfinished.");
   });
 
   it("uses the clipboard when native sharing is unavailable", async () => {

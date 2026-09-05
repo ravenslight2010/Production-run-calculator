@@ -217,7 +217,7 @@ export default function RunInsightsCard({
                 <span className="text-muted-foreground font-normal"> · {current.dieType}</span>
               ) : null}
             </p>
-            <p className="text-sm">{current.narrative || current.statsLine}</p>
+            <p className="text-sm">{current.statsLine}</p>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="rounded-md bg-muted/50 px-2 py-1.5">
                 <p className="text-muted-foreground">Configured</p>

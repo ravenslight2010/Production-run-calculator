@@ -5,14 +5,8 @@ import userEvent from "@testing-library/user-event";
 import type { OperationalReport } from "@workspace/day-summary";
 import OperationalReportPanel from "./OperationalReportPanel";
 import { useMe } from "../useRole";
-import { requestSummary } from "../aiSummary";
 
 vi.mock("../useRole", () => ({ useMe: vi.fn() }));
-vi.mock("../aiSummary", () => ({
-  requestSummary: vi.fn(),
-  summaryErrorMessage: () => "narration unavailable",
-}));
-
 const report: OperationalReport = {
   scope: "day",
   date: "2026-09-04",
@@ -94,29 +88,4 @@ describe("OperationalReportPanel", () => {
     expect(screen.getByRole("status").textContent).toMatch(/authoritative and deterministic/i);
   });
 
-  it("keeps optional narration separate and labels its source", async () => {
-    vi.mocked(useMe).mockReturnValue({
-      me: null,
-      role: null,
-      capabilities: ["review-incidents"],
-      hasCapability: (cap) => cap === "review-incidents",
-      isManager: false,
-      isLoading: false,
-    });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => report,
-    }));
-    vi.mocked(requestSummary).mockResolvedValue({
-      summary: "One run remains unfinished.",
-      stats: report.production,
-      generatedAt: Date.now(),
-      aiGenerated: true,
-    });
-    renderPanel();
-    await userEvent.click(screen.getByLabelText(/Include optional narration/i));
-    await userEvent.click(screen.getByRole("button", { name: "Preview report" }));
-    expect((await screen.findByTestId("operational-report-narrative")).textContent).toContain("Optional AI narration");
-    expect(screen.getByText(/does not change the authoritative statistics/i)).toBeTruthy();
-  });
 });

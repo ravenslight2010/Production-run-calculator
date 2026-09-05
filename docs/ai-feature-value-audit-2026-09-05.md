@@ -3,7 +3,7 @@
 **Audit date:** 2026-09-05  
 **Scope:** Production Run Calculator and API Server  
 **Decision standard:** Skeptical review of operational necessity, unique value, overlap, cost, risk, maintenance burden, and removal independence  
-**Change status:** Documentation only. No production feature, prompt, model, permission, limit, persistence rule, or UI surface was changed.
+**Change status:** Phase 1 deterministic-workflow cleanup implemented. Production recap, anomaly, schedule ordering, reconciliation, expiry/use-first, incident grouping, and Run Insights no longer depend on model-written narration; compatibility fields remain where clients still read them.
 
 ## Executive decision
 
