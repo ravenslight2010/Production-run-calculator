@@ -385,20 +385,22 @@ async function waitForCaseCounterChange(
 }
 
 /** Set the measured machine times used by the live dough countdowns. */
-async function setMachineTimes(page: Page): Promise<void> {
-  const result = await page.evaluate(() => {
-    const values: Record<string, string> = {
+async function setMachineTimes(
+  page: Page,
+  values: Record<string, string> = {
       "input-mixerLowSec": "1",
       "input-mixerHighSec": "1",
       "input-hopperSec": "2",
-    };
+  },
+): Promise<void> {
+  const result = await page.evaluate((inputValues) => {
     const changed: string[] = [];
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value",
     )?.set;
     if (!setter) return changed;
-    for (const [testId, value] of Object.entries(values)) {
+    for (const [testId, value] of Object.entries(inputValues)) {
       const input = document.querySelector(
         `[data-testid="${testId}"]`,
       ) as HTMLInputElement | null;
@@ -409,7 +411,7 @@ async function setMachineTimes(page: Page): Promise<void> {
       changed.push(testId);
     }
     return changed;
-  });
+  }, values);
   expect(result, "machine timing inputs").toEqual([
     "input-mixerLowSec",
     "input-mixerHighSec",
@@ -1121,6 +1123,21 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         return snapshot.values.speedAdjustment;
       }, { timeout: 15_000 }).toBe(0.5);
 
+      // Keep this journey focused on line-speed cadence. Zero measured machine
+      // times prevent a separate mixer completion from adding a full batch at
+      // the same visible boundary.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await setMachineTimes(page, {
+        "input-mixerLowSec": "0",
+        "input-mixerHighSec": "0",
+        "input-hopperSec": "0",
+      });
+      await seedDoughCounters(page, { trays: 0, batches: 0 });
+      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await page.getByTestId("btn-resume-now").click();
+      await page.locator('[data-testid="tab-run"]').click();
+
       await page.screenshot({
         path: testInfo.outputPath("speed-adjustment-before-wake.png"),
         fullPage: true,
@@ -1132,6 +1149,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateWake(page);
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Production state recovered.", { timeout: 10_000 });
 
       // Foreground reconciliation intentionally re-arms all live timers from
       // the wake instant. Hidden time must not be replayed with either the old
@@ -1154,6 +1173,23 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         traysOnLine: 10,
         batchesReady: 2,
       });
+
+      // Advance exactly one visible 2-second dough interval after the
+      // foreground rebase. At the edited 30 PPM cadence, tray production and
+      // quarter-batch consumption each fire once (the old 60 PPM cadence
+      // would fire both twice). Keep this after the unchanged-counter check so
+      // the test still proves hidden time was not replayed on wake.
+      const nextVisibleIntervalAt = wakeAt + 2_100;
+      await mockDateNow(page, nextVisibleIntervalAt);
+      await page.waitForTimeout(1_100);
+      await expect.poll(
+        () => readDoughCounters(page),
+        { timeout: 10_000, message: "post-wake dough cadence did not use the edited speed" },
+      ).toEqual({
+        trays: 11,
+        batches: 1.75,
+      });
+
       const snapshot = await readLiveRunSnapshot(page);
       const values = snapshot.values;
       await page.locator('[data-testid="tab-run"]').click();
@@ -1165,11 +1201,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       );
       expect(casesCompleted, "the new speed has not reached the freezer exit yet").toBe(0);
       expect(values.speedAdjustment).toBe(0.5);
-      expect(values.traysOnLine).toBe(10);
-      expect(values.batchesReady).toBe(2);
+      expect(values.traysOnLine).toBe(11);
+      expect(values.batchesReady).toBe(1.75);
       const casesInFreezer = computeCasesInFreezer({
         startedAt: safeBaseMs,
-        now: wakeAt,
+        now: nextVisibleIntervalAt,
         ppm: 30,
         pizzasPerCase: 6,
         freezerTimeMin: 5,
@@ -1183,7 +1219,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const doughOnHand = Number(values.traysOnLine) * 2 + Number(values.batchesReady) * 4;
       const casesOnLine = computeCasesOnLine({
         startedAt: safeBaseMs,
-        now: wakeAt,
+        now: nextVisibleIntervalAt,
         ppm: 30,
         pizzasPerCase: 6,
         freezerTimeMin: 5,
@@ -1200,8 +1236,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await expect(page.getByTestId("output-trays-needed")).toHaveText(
         (doughDeficit / 2).toFixed(0),
       );
-      await expect(page.locator('input[name="traysOnLine"]')).toHaveValue("10");
-      await expect(page.locator('input[name="batchesReady"]')).toHaveValue("2");
+      await expect(page.locator('input[name="traysOnLine"]')).toHaveValue("11");
+      await expect(page.locator('input[name="batchesReady"]')).toHaveValue("1.75");
 
       await page.locator('[data-testid="tab-run"]').click();
       await expect(page.getByTestId("text-press-cases-left")).toContainText(`${pressCasesLeft} cases left`);
@@ -1213,7 +1249,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const finishSeconds = Math.round(adjustedFinishSec % 60);
       const expectedFinish = await page.evaluate((timestamp) =>
         new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }),
-      wakeAt + adjustedFinishSec * 1000);
+      nextVisibleIntervalAt + adjustedFinishSec * 1000);
       const finishPanels = await page.getByText("Est. Finish", { exact: true }).evaluateAll(
         (elements) => elements.map((element) => element.parentElement?.innerText ?? ""),
       );
