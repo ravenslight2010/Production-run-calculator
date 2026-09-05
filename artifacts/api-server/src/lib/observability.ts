@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
 import { cacheMaintenanceEventsTable, db } from "@workspace/db";
 import { logger } from "./logger";
+import type { StartupHealthSnapshot } from "./startupHealth";
 
 export type OperationOutcome = "success" | "error" | "degraded";
 export type CacheMaintenanceOutcome = "success" | "error";
@@ -492,4 +493,26 @@ export function recordStartupEvent(
     ...fields,
     startupEvent: event,
   });
+}
+
+type StartupWarningLogger = Pick<Logger, "warn">;
+
+export function recordStartupSlowWarning(
+  startup: StartupHealthSnapshot,
+  log: StartupWarningLogger = logger,
+): void {
+  try {
+    log.warn(
+      {
+        event: "startup_slow",
+        stage: startup.stage,
+        durationMs: Math.max(0, Math.round(startup.durationMs)),
+        outcome: "degraded",
+        errorCode: startup.failure?.errorCode ?? "initialization_in_progress",
+      },
+      "Startup initialization is taking longer than expected",
+    );
+  } catch {
+    // Observability is fail-safe. A broken warning logger must not affect boot.
+  }
 }

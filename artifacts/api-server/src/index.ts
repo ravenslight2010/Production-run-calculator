@@ -3,10 +3,13 @@ import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";
 import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
-import { recordStartupEvent } from "./lib/observability";
+import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import {
   beginStartup,
+  claimStartupSlowWarning,
+  getStartupHealth,
+  getStartupWarningThresholdMs,
   markStartupFailed,
   markStartupReady,
   markStartupStage,
@@ -151,6 +154,12 @@ async function initializeStartup(startedAt: number): Promise<void> {
 // must never infer a migration from its environment: replacing it with an
 // earlier runtime is an application rollback, not a schema rollback.
 beginStartup();
+const startupWarningTimer = setTimeout(() => {
+  if (claimStartupSlowWarning()) {
+    recordStartupSlowWarning(getStartupHealth());
+  }
+}, getStartupWarningThresholdMs());
+startupWarningTimer.unref();
 startServer().catch(() => {
   markStartupFailed("listen", "server_start_failed");
   logger.error({ stage: "listen", outcome: "degraded", errorCode: "server_start_failed" }, "API server failed to start");

@@ -16,11 +16,15 @@ export type StartupHealthSnapshot = {
   };
 };
 
+export const DEFAULT_STARTUP_WARNING_THRESHOLD_MS = 30_000;
+const MAX_STARTUP_WARNING_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
 type MutableStartupState = {
   phase: StartupPhase;
   stage: StartupStage | null;
   startedAtMs: number;
   completedAtMs?: number;
+  slowWarningEmitted: boolean;
   failure?: {
     stage: StartupStage;
     errorCode: string;
@@ -35,13 +39,25 @@ let state: MutableStartupState = {
   stage: null,
   startedAtMs: Date.now(),
   completedAtMs: Date.now(),
+  slowWarningEmitted: false,
 };
+
+export function getStartupWarningThresholdMs(
+  rawValue = process.env.STARTUP_WARNING_THRESHOLD_MS,
+): number {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_STARTUP_WARNING_THRESHOLD_MS;
+  }
+  return Math.min(MAX_STARTUP_WARNING_THRESHOLD_MS, Math.max(1, Math.round(parsed)));
+}
 
 export function beginStartup(nowMs = Date.now()): void {
   state = {
     phase: "starting",
     stage: null,
     startedAtMs: nowMs,
+    slowWarningEmitted: false,
   };
 }
 
@@ -66,6 +82,16 @@ export function markStartupFailed(
   state.failure = { stage, errorCode };
 }
 
+export function claimStartupSlowWarning(
+  nowMs = Date.now(),
+  thresholdMs = getStartupWarningThresholdMs(),
+): boolean {
+  if (state.phase !== "starting" || state.slowWarningEmitted) return false;
+  if (nowMs - state.startedAtMs < thresholdMs) return false;
+  state.slowWarningEmitted = true;
+  return true;
+}
+
 export function getStartupHealth(nowMs = Date.now()): StartupHealthSnapshot {
   const endMs = state.completedAtMs ?? nowMs;
   return {
@@ -82,5 +108,6 @@ export function resetStartupHealthForTests(): void {
     stage: null,
     startedAtMs: Date.now(),
     completedAtMs: Date.now(),
+    slowWarningEmitted: false,
   };
 }

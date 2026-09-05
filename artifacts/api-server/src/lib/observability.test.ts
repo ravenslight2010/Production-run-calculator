@@ -8,6 +8,7 @@ import {
   isHealthProbePath,
   operationType,
   recordCacheMaintenance,
+  recordStartupSlowWarning,
   safeErrorCode,
   safeQueueAgeMs,
 } from "./observability";
@@ -76,6 +77,51 @@ describe("observability", () => {
         { info: () => { throw new Error("logger unavailable"); } },
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it("emits one safe startup warning payload with the current stage", () => {
+    const warn = vi.fn();
+
+    recordStartupSlowWarning(
+      {
+        phase: "starting",
+        stage: "data_heals",
+        durationMs: 30_001.7,
+      },
+      { warn },
+    );
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        event: "startup_slow",
+        stage: "data_heals",
+        durationMs: 30_002,
+        outcome: "degraded",
+        errorCode: "initialization_in_progress",
+      },
+      "Startup initialization is taking longer than expected",
+    );
+    expect(JSON.stringify(warn.mock.calls[0])).not.toMatch(/password|secret|message|stack/i);
+  });
+
+  it("uses the existing safe startup failure category when available", () => {
+    const warn = vi.fn();
+
+    recordStartupSlowWarning(
+      {
+        phase: "starting",
+        stage: "seed_roles",
+        durationMs: 45_000,
+        failure: { stage: "seed_roles", errorCode: "seed_roles_failed" },
+      },
+      { warn },
+    );
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "seed_roles", errorCode: "seed_roles_failed" }),
+      "Startup initialization is taking longer than expected",
+    );
   });
 
   it("surfaces recurring cache maintenance failures once per rolling-window episode", async () => {

@@ -1,7 +1,10 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
   beginStartup,
+  claimStartupSlowWarning,
+  DEFAULT_STARTUP_WARNING_THRESHOLD_MS,
   getStartupHealth,
+  getStartupWarningThresholdMs,
   markStartupFailed,
   markStartupReady,
   markStartupStage,
@@ -46,5 +49,25 @@ describe("startup health state", () => {
       stage: "seed_roles",
       durationMs: 500,
     });
+  });
+
+  it("uses a bounded configurable warning threshold", () => {
+    expect(getStartupWarningThresholdMs()).toBe(DEFAULT_STARTUP_WARNING_THRESHOLD_MS);
+    expect(getStartupWarningThresholdMs("4_000")).toBe(DEFAULT_STARTUP_WARNING_THRESHOLD_MS);
+    expect(getStartupWarningThresholdMs("4000")).toBe(4_000);
+    expect(getStartupWarningThresholdMs("0")).toBe(DEFAULT_STARTUP_WARNING_THRESHOLD_MS);
+    expect(getStartupWarningThresholdMs("999999999999")).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it("claims the slow-start warning once while startup remains pending", () => {
+    beginStartup(4_000);
+    markStartupStage("data_heals");
+
+    expect(claimStartupSlowWarning(33_999, 30_000)).toBe(false);
+    expect(claimStartupSlowWarning(34_000, 30_000)).toBe(true);
+    expect(claimStartupSlowWarning(40_000, 30_000)).toBe(false);
+
+    markStartupReady(41_000);
+    expect(claimStartupSlowWarning(50_000, 30_000)).toBe(false);
   });
 });
