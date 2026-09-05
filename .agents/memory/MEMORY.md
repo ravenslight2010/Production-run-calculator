@@ -28,7 +28,7 @@
 - [Integration test DB binding](integration-test-db-binding.md) — in *.integration.test.ts, never statically import a module that pulls @workspace/db; the pool binds to DATABASE_URL at import, before beforeAll repoints it.
 - [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.
 - [Fill-missing assistant](fill-missing-assistant.md) + [shared lib](fill-missing-shared-lib.md) — source priority learned→profile→spec→default→AI; never auto-apply; record must carry subTab; pure logic in @workspace/fill-missing.
-- [Browser test reliability](runtest-expo-web-quirks.md) + [Web test harness](web-test-harness.md) — use fallbacks for browser flakes and keep web Vitest serialized with generous timeouts.
+- [Browser test reliability](runtest-expo-web-quirks.md) + [Web test harness](web-test-harness.md) + [Phone/browser test reliability](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — use fallbacks for browser flakes, reapply controlled values after reload, and keep web Vitest serialized with generous timeouts.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
 - [AI merge suggestions + learned aliases](merge-suggest.md) — AI dedupe assist + factory-wide learned merge memory; cost-guard must sanitize body (blank padding bypasses count cap); web+mobile parity.
 - [Spec-sheet Excel importer](spec-import.md) + [scale harness](spec-import-scale-harness.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool; run BOTH real-AI harnesses after model changes; prompt cells wrap under PROMPT_MAX_CELL_CHARS.
@@ -41,7 +41,6 @@
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Production-line canvas](production-line-canvas-reference.md) — physical line is right-to-left, App 4 feeds the two-wide freezer, then wrapper/packaging; tray and lane-width rules are captured.
 - [Merge deny, history, and tombstones](merge-deny-and-change-history.md) + [merge-tombstones](merge-tombstones.md) — denied pairs, undo history, tombstones, and un-delete stamps preserve safe cross-device master-data merges.
-- [Phone/browser test reliability](phone-e2e-form-overrides.md) + [headless fallback](headless-e2e-fallback.md) — reapply controlled values after reload, use fallbacks for flakes, and clean stray users.
 - [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — one fail-safe grounding path; keyed nudges are deduped while all-staff Q&A stays separate from manager-only optimize.
 - [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
 - [Voice AI](voice-ask-input.md) + [voice-ask-output.md] + [voice-commands.md) — speech controls hide when unsupported; commands reuse existing handlers and preserve web/mobile parity.
@@ -151,3 +150,10 @@
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
 - [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
 - [Retained AI cache boundary](retained-ai-cache-boundary.md) — cache only unresolved model suggestions; recompute and merge deterministic matches per request.
+- [LiveRunContext clock isolation](live-run-context-clock-isolation.md) + [Render clock split](render-clock-split.md) — keep live clock/calc/auto-track in the provider contexts; non-live screens snapshot calculations and Home must not hold nowTime.
+- [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) + [home.tsx render TDZ](home-render-tdz.md) + [HMR dual-context crash](hmr-context-split.md) — avoid generic JSX and render-time ref TDZs; provider files export only components so Fast Refresh does not split contexts.
+- [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
+- [Workspace declaration staleness](workspace-declaration-staleness.md) — composite package declarations can lag source and make valid workspace exports appear missing to artifact typechecks.
+- [Pinned pnpm after baseline refresh](pinned-pnpm-after-refresh.md) — a newer packageManager pin can make the installed pnpm shim recurse; use the exact pinned launcher with CI mode to reconcile modules.
+- [Inline skill path references](inline-skill-path-references.md) — validate only whitespace-free file-like inline paths; resolve skill resources locally and explicit project prefixes from the repository root.
+- [Browser request observers](browser-request-observer-query-strings.md) — passive Playwright request evidence should check pathname directly when production URLs carry query parameters.

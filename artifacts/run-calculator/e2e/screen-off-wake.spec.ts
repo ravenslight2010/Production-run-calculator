@@ -1294,6 +1294,205 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "offline wake waits for reconnect acknowledgement before sending tray and batch claims",
+    async ({ page }) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
+
+      // Establish the same known dough state used by the normal wake-claim
+      // journey. The speed edit is persisted before zeroing machine timings,
+      // so the reconnect case starts from the same clean cadence baseline.
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await page.getByTestId("btn-resume-now").click();
+      await page.locator('[data-testid="tab-run"]').click();
+      const lineSetupDetails = page.locator("details").filter({
+        has: page.locator("summary", { hasText: /line.?setup/i }),
+      }).first();
+      if (!(await lineSetupDetails.evaluate((element) => (element as HTMLDetailsElement).open))) {
+        await lineSetupDetails.locator("summary").click();
+      }
+      const speedInput = page.locator('[data-testid="input-speedAdjustment"]:visible').first();
+      await expect(speedInput).toBeVisible();
+      const speedEditedAt = safeBaseMs + 1_000;
+      await mockDateNow(page, speedEditedAt);
+      const speedPush = page.waitForRequest((request) => {
+        return request.method() === "PUT"
+          && new URL(request.url()).pathname.endsWith("/api/sync/today");
+      }, { timeout: 15_000 });
+      await speedInput.fill("0.5");
+      await speedPush;
+      await expect.poll(async () => {
+        const snapshot = await readLiveRunSnapshot(page);
+        return snapshot.values.speedAdjustment;
+      }, { timeout: 15_000 }).toBe(0.5);
+
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await setMachineTimes(page, {
+        "input-mixerLowSec": "0",
+        "input-mixerHighSec": "0",
+        "input-hopperSec": "0",
+      });
+      await seedDoughCounters(page, { trays: 0, batches: 0 });
+      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await page.getByTestId("btn-resume-now").click();
+      await page.locator('[data-testid="tab-run"]').click();
+      await expect.poll(async () => {
+        const snapshot = await readLiveRunSnapshot(page);
+        return {
+          speedAdjustment: snapshot.values.speedAdjustment,
+          traysOnLine: snapshot.values.traysOnLine,
+          batchesReady: snapshot.values.batchesReady,
+        };
+      }, { timeout: 15_000 }).toEqual({
+        speedAdjustment: 0.5,
+        traysOnLine: 10,
+        batchesReady: 2,
+      });
+
+      const recoveryStatus = page.getByTestId("foreground-recovery-status");
+      await expect(recoveryStatus).toBeVisible({ timeout: 15_000 });
+      const ackBeforeOffline = Number(
+        await recoveryStatus.getAttribute("data-foreground-sync-ack"),
+      );
+      expect(ackBeforeOffline, "initial foreground sync must be acknowledged").toBeGreaterThan(0);
+
+      let holdRecoveryPull = false;
+      let recoveryPullHeld = false;
+      let releaseRecoveryPull!: () => void;
+      const recoveryPullReleased = new Promise<void>((resolve) => {
+        releaseRecoveryPull = resolve;
+      });
+      let markRecoveryPullStarted!: () => void;
+      const recoveryPullStarted = new Promise<void>((resolve) => {
+        markRecoveryPullStarted = resolve;
+      });
+
+      // This is the production reconciliation GET. Holding it after the
+      // browser comes back online proves the claim fence does not fall back to
+      // a local timer or a direct sync write.
+      await page.route("**/api/sync/today**", async (route) => {
+        if (
+          holdRecoveryPull
+          && !recoveryPullHeld
+          && route.request().method() === "GET"
+        ) {
+          recoveryPullHeld = true;
+          markRecoveryPullStarted();
+          await recoveryPullReleased;
+        }
+        await route.continue();
+      });
+
+      const claimAcks: Array<{ channel: string; ack: number }> = [];
+      const recordClaim = async (request: Request) => {
+        if (
+          request.method() !== "POST"
+          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+        ) return;
+        const body = request.postDataJSON() as {
+          claim?: { channel?: string };
+        };
+        const channel = body.claim?.channel;
+        if (channel === "tray-produce" || channel === "batch-consume") {
+          claimAcks.push({
+            channel,
+            ack: Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
+          });
+        }
+      };
+      page.on("request", recordClaim);
+
+      // The wake clock reaches the first visible dough cadence while the
+      // browser is offline. Recovery must fail closed: no claim endpoint call
+      // is allowed until the reconnect pull has been acknowledged.
+      await page.context().setOffline(true);
+      await simulateScreenOff(page);
+      const wakeAt = safeBaseMs + 2_100;
+      await mockDateNow(page, wakeAt);
+      await simulateWake(page);
+      await expect(recoveryStatus)
+        .toContainText("Couldn't confirm the current production state", { timeout: 10_000 });
+      await page.waitForTimeout(600);
+      expect(claimAcks, "offline wake must not send claims").toEqual([]);
+      expect(
+        Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
+        "offline wake must not advance the shared-sync acknowledgement",
+      ).toBe(ackBeforeOffline);
+
+      // Restore connectivity, but keep the canonical foreground pull pending.
+      // The online event is the reconnect path used by the production app.
+      holdRecoveryPull = true;
+      await page.context().setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+      await recoveryPullStarted;
+      await page.waitForTimeout(600);
+      expect(claimAcks, "claims must wait while reconnect reconciliation is held").toEqual([]);
+      expect(
+        Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
+        "claims must wait for the current reconnect acknowledgement",
+      ).toBe(ackBeforeOffline);
+
+      // Release only the canonical pull. The app now increments its
+      // acknowledgement and the existing production claim loop sends both
+      // channels through POST /api/sync/auto-track/claim.
+      holdRecoveryPull = false;
+      releaseRecoveryPull();
+      const ackAfterReconnectHandle = await page.waitForFunction(
+        (before) => {
+          const raw = document
+            .querySelector('[data-testid="foreground-recovery-status"]')
+            ?.getAttribute("data-foreground-sync-ack");
+          const value = Number(raw);
+          return Number.isFinite(value) && value > before ? value : false;
+        },
+        ackBeforeOffline,
+        { timeout: 10_000, message: "reconnect did not publish a current sync acknowledgement" },
+      );
+      const ackAfterReconnect = await ackAfterReconnectHandle.jsonValue() as number;
+      await ackAfterReconnectHandle.dispose();
+
+      // Successful recovery intentionally re-arms dough timers from the
+      // acknowledged instant. Advance one normal visible cadence and let the
+      // ordinary visible clock publish it; do not trigger another recovery
+      // that would re-arm the timers again.
+      await mockDateNow(page, wakeAt + 2_100);
+      await page.waitForTimeout(5_000);
+      await expect.poll(
+        () => [...new Set(claimAcks.map(({ channel }) => channel))].sort(),
+        { timeout: 12_000, message: "reconnect did not send both dough claim channels" },
+      ).toEqual(["batch-consume", "tray-produce"]);
+
+      // Every captured claim crossed the post-reconnect acknowledgement
+      // boundary, rather than being a locally fabricated counter update.
+      expect(claimAcks).toHaveLength(2);
+      expect(ackAfterReconnect).toBeGreaterThan(ackBeforeOffline);
+      expect(claimAcks.every(({ ack }) => ack > ackBeforeOffline)).toBe(true);
+      page.off("request", recordClaim);
+
+      // Corroborate the browser requests with the server-visible live row.
+      // This GET is read-only; the counters can only have changed through the
+      // production claim endpoint above.
+      await expect.poll(async () => {
+        const snapshot = await readLiveRunSnapshot(page);
+        return {
+          trays: snapshot.values.traysOnLine,
+          batches: snapshot.values.batchesReady,
+        };
+      }, { timeout: 12_000 }).toEqual({
+        trays: 11,
+        batches: 1.75,
+      });
+    },
+  );
+
+  test(
     "C. disconnected sleeping peer adopts remote Stop before stale recovery writes and after reload",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
       test.slow();
