@@ -1969,6 +1969,69 @@ describe("/sync/events — date-scoped broadcasts", () => {
   });
 });
 
+describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
+  it("pushes a delta-only schedule frame over an existing SSE connection", async () => {
+    const date = "2030-04-03";
+    process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
+    try {
+      await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "heartbeat-writer",
+          payload: {
+            dayState: { runs: [{ id: "heartbeat-run", brand: "Acme", flavor: "Pep" }], resetAt: 1 },
+            runValues: { "heartbeat-run": { casesNeeded: 240 } },
+            runValuesUpdatedAt: { "heartbeat-run": 1 },
+          },
+        }),
+      });
+
+      const ctrl = new AbortController();
+      const res = await fetch(
+        `${baseUrl}/api/sync/events?clientId=heartbeat-watcher&today=${date}`,
+        { headers: authHeaders(), signal: ctrl.signal },
+      );
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let sawHeartbeatSchedule = false;
+      let heartbeatRunId: string | undefined;
+      const deadline = Date.now() + 5_000;
+      try {
+        while (Date.now() < deadline && !sawHeartbeatSchedule) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const frames = buf.split("\n\n");
+          buf = frames.pop() ?? "";
+          for (const f of frames) {
+            const line = f.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            const parsed = JSON.parse(line.slice("data: ".length)) as {
+              heartbeat?: boolean;
+              autoTrackSchedule?: { runId?: string } | null;
+            };
+            if (parsed.heartbeat === true && parsed.autoTrackSchedule) {
+              sawHeartbeatSchedule = true;
+              heartbeatRunId = parsed.autoTrackSchedule.runId;
+            }
+          }
+        }
+      } finally {
+        // Abort and cancel deterministically so the open stream never hangs
+        // afterAll's server.close().
+        await reader.cancel().catch(() => {});
+        ctrl.abort();
+      }
+      expect(sawHeartbeatSchedule).toBe(true);
+      expect(heartbeatRunId).toBe("heartbeat-run");
+    } finally {
+      delete process.env.AUTO_TRACK_HEARTBEAT_MS;
+    }
+  }, 15_000);
+});
+
 describe("/sync — conflict logging to sync_conflict_logs", () => {
   // Each protective merge outcome must write a row to sync_conflict_logs so
   // managers can detect whether offline-first merges are converging or

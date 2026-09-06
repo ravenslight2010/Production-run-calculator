@@ -798,9 +798,43 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   client = { res, clientId, scope, watchDate };
   clients.add(client);
 
+  // Schedule-bearing heartbeat (refactor step 6c): the existing 15s keepalive
+  // ping now carries the server-computed auto-track schedule instead of an
+  // empty comment — same connection, same cadence, zero extra request traffic.
+  // The frame is sent DELTA-ONLY (skipped while the schedule is unchanged;
+  // atMs is excluded from the comparison because it changes every compute), so
+  // clients continuously converge on the server's due times/verdicts and the
+  // local derivation stays a fallback. A failed beat never kills the stream.
+  // Tests override the interval via AUTO_TRACK_HEARTBEAT_MS (read per request
+  // so a suite can set it without rebuilding the app).
+  let lastBeatScheduleKey: string | null = null;
   heartbeat = setInterval(() => {
-    try { res.write(": heartbeat\n\n"); } catch {}
-  }, 15_000);
+    void (async () => {
+      if (closed) return;
+      let frame: string | null = null;
+      try {
+        const [freshRow] = await db
+          .select()
+          .from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
+        const freshData = freshRow?.data ?? null;
+        if (freshData) {
+          const calc = computeServerCalc(freshData as Parameters<typeof computeServerCalc>[0], []);
+          const freshSchedule = buildAutoTrackSchedule(freshData as BroadcastPayload, calc);
+          if (freshSchedule) {
+            const key = JSON.stringify({ generation: freshSchedule.generation, entries: freshSchedule.entries });
+            if (key !== lastBeatScheduleKey) {
+              lastBeatScheduleKey = key;
+              frame = `data: ${JSON.stringify({ autoTrackSchedule: freshSchedule, heartbeat: true })}\n\n`;
+            }
+          }
+        }
+      } catch { /* a failed compute/read must not tear the connection down */ }
+      try {
+        res.write(frame ?? ": heartbeat\n\n");
+      } catch { /* connection already closed */ }
+    })();
+  }, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000);
 });
 
 // ── Scheduled (future) days ──────────────────────────────────────────────────
