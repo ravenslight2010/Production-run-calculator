@@ -42,6 +42,7 @@ import {
   proactiveAlertSettingsTable,
   auditLogsTable,
   syncConflictLogsTable,
+  completedRunHistoryTable,
 } from "@workspace/db";
 import { and, eq, gt, gte, lte, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
@@ -1007,6 +1008,7 @@ router.post(
       productionRunsTable,
       qualityChecksTable,
       proactiveAlertSettingsTable,
+      completedRunHistoryTable,
       // Inventory tables child-first so FK constraints never block the wipe.
       inventoryLedgerTable,
       inventoryLotsTable,

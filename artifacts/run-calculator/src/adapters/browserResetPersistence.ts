@@ -1,5 +1,8 @@
 /** Browser cache reset adapter; epoch comparison is intentionally side-effect scoped here. */
 const RESET_EPOCH_KEY = "run-calc-reset-epoch";
+const COMPLETED_HISTORY_OUTBOX_PREFIX = "run-calc-completed-history-outbox";
+const COMPLETED_HISTORY_CACHE_PREFIX = "run-calc-completed-history-cache";
+const LOCAL_HISTORY_KEY = "run-calc-history";
 
 export function getStoredResetEpoch(): number {
   if (typeof localStorage === "undefined") return 0;
@@ -17,7 +20,13 @@ export function applyResetWipe(serverEpoch: number): boolean {
     const keys: string[] = [];
     for (let index = 0; index < localStorage.length; index++) {
       const key = localStorage.key(index);
-      if (key?.startsWith("run-calc") && key !== RESET_EPOCH_KEY) keys.push(key);
+      if (
+        key?.startsWith("run-calc")
+        && key !== RESET_EPOCH_KEY
+        && key !== LOCAL_HISTORY_KEY
+        && !key.startsWith(COMPLETED_HISTORY_OUTBOX_PREFIX)
+        && !key.startsWith(COMPLETED_HISTORY_CACHE_PREFIX)
+      ) keys.push(key);
     }
     for (const key of keys) localStorage.removeItem(key);
     localStorage.setItem(RESET_EPOCH_KEY, String(serverEpoch));

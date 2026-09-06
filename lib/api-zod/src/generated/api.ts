@@ -5360,6 +5360,53 @@ export const DeleteStaffMemberResponse = zod.void()
 
 
 /**
+ * @summary List immutable completed-run history for the authenticated scope
+ */
+export const ListCompletedHistoryQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional()
+})
+
+export const listCompletedHistoryResponseHistoryItemOneOperationIdMax = 300;
+
+export const listCompletedHistoryResponseHistoryItemOneRunIdMax = 500;
+
+
+
+export const ListCompletedHistoryResponse = zod.object({
+  "history": zod.array(zod.object({
+  "operationId": zod.string().max(listCompletedHistoryResponseHistoryItemOneOperationIdMax),
+  "runId": zod.string().max(listCompletedHistoryResponseHistoryItemOneRunIdMax),
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date(),
+  "snapshot": zod.record(zod.string(), zod.unknown())
+}).and(zod.object({
+  "snapshotHash": zod.string()
+})))
+})
+
+
+/**
+ * @summary Append an immutable completed-run snapshot idempotently
+ */
+export const finalizeCompletedRunBodyOperationIdMax = 300;
+
+export const finalizeCompletedRunBodyRunIdMax = 500;
+
+
+
+export const FinalizeCompletedRunBody = zod.object({
+  "operationId": zod.string().max(finalizeCompletedRunBodyOperationIdMax),
+  "runId": zod.string().max(finalizeCompletedRunBodyRunIdMax),
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date(),
+  "snapshot": zod.record(zod.string(), zod.unknown())
+})
+
+export const FinalizeCompletedRunResponse = zod.unknown()
+
+
+/**
  * @summary Read the client-local current-day sync snapshot
  */
 export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');

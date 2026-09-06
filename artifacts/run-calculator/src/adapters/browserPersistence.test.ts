@@ -45,10 +45,16 @@ describe("browser reset persistence", () => {
   it("wipes run-calculator cache keys once and retains the honored epoch", () => {
     localStorage.setItem("run-calc-day", "old");
     localStorage.setItem("run-calc-profile-a", "old");
+    localStorage.setItem("run-calc-history", "completed");
+    localStorage.setItem("run-calc-completed-history-outbox.live", "pending");
+    localStorage.setItem("run-calc-completed-history-cache.live", "canonical");
     localStorage.setItem("unrelated", "keep");
     expect(applyResetWipe(7)).toBe(true);
     expect(getStoredResetEpoch()).toBe(7);
     expect(localStorage.getItem("run-calc-day")).toBeNull();
+    expect(localStorage.getItem("run-calc-history")).toBe("completed");
+    expect(localStorage.getItem("run-calc-completed-history-outbox.live")).toBe("pending");
+    expect(localStorage.getItem("run-calc-completed-history-cache.live")).toBe("canonical");
     expect(localStorage.getItem("unrelated")).toBe("keep");
     expect(applyResetWipe(7)).toBe(false);
     expect(applyResetWipe(6)).toBe(false);

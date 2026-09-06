@@ -4135,6 +4135,39 @@ paths:
         "404":
           description: User not found
 
+  /completed-history:
+    get:
+      operationId: listCompletedHistory
+      tags: [sync]
+      summary: List immutable completed-run history for the authenticated scope
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Canonical immutable completion records
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompletedHistoryList" }
+    post:
+      operationId: finalizeCompletedRun
+      tags: [sync]
+      summary: Append an immutable completed-run snapshot idempotently
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompletedRunFinalization" }
+      responses:
+        "200": { description: Existing completion acknowledged }
+        "201": { description: Completion persisted }
+        "400": { description: Invalid or oversized snapshot }
+        "409": { description: Different immutable completion already exists }
+
   /sync/today:
     get:
       operationId: getSyncToday
@@ -4225,6 +4258,29 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    CompletedRunFinalization:
+      type: object
+      required: [operationId, runId, date, completedAt, snapshot]
+      properties:
+        operationId: { type: string, maxLength: 300 }
+        runId: { type: string, maxLength: 500 }
+        date: { type: string, format: date }
+        completedAt: { type: string, format: date-time }
+        snapshot: { type: object, additionalProperties: true }
+    CompletedHistoryRecord:
+      allOf:
+        - $ref: "#/components/schemas/CompletedRunFinalization"
+        - type: object
+          required: [snapshotHash]
+          properties:
+            snapshotHash: { type: string }
+    CompletedHistoryList:
+      type: object
+      required: [history]
+      properties:
+        history:
+          type: array
+          items: { $ref: "#/components/schemas/CompletedHistoryRecord" }
     AiStatus:
       type: string
       enum: [deterministic, enriched, unavailable]

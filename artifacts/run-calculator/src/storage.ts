@@ -58,6 +58,7 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
 import {
@@ -1378,7 +1379,12 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
     const runValues: Record<string, FormValues> = {};
     for (const run of keptRuns) {
       const raw = localStorage.getItem(RUN_KEY(run.id));
-      if (raw) runValues[run.id] = JSON.parse(raw);
+      if (raw) {
+        runValues[run.id] = JSON.parse(raw);
+        // Archive first, then enqueue immutable finalization. A failed network
+        // request can never make the local completion disappear.
+        queueCompletedRun(date, run, runValues[run.id]);
+      }
     }
     const entry: HistoryDay = { date, runs: keptRuns, runValues };
     const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
@@ -2034,7 +2040,11 @@ export function captureMasterDataSnapshot(): Record<string, string> {
   if (typeof localStorage === "undefined") return snap;
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (!k || k === CHANGE_HISTORY_KEY) continue;
+    if (
+      !k || k === CHANGE_HISTORY_KEY || k === HISTORY_KEY
+      || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
+      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+    ) continue;
     if (!k.startsWith(APP_KEY_PREFIX)) continue;
     const v = localStorage.getItem(k);
     if (v !== null) snap[k] = v;
@@ -2050,7 +2060,14 @@ export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
   const present = new Set<string>();
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY) present.add(k);
+    // Master-data undo/reset must never discard append-only completed history or
+    // its upload queue. Explicit purge-all is server-administered, not an
+    // incidental local rollback side effect.
+    if (
+      k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY && k !== HISTORY_KEY
+      && !k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
+      && !k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+    ) present.add(k);
   }
   for (const k of present) {
     if (!(k in snap)) {
@@ -2058,6 +2075,10 @@ export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
     }
   }
   for (const [k, v] of Object.entries(snap)) {
+    if (
+      k === HISTORY_KEY || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
+      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+    ) continue;
     try { localStorage.setItem(k, v); } catch {}
   }
 }

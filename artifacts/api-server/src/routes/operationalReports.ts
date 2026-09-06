@@ -12,6 +12,7 @@ import {
   inventoryLotsTable,
   inventoryLedgerTable,
   dailySyncTable,
+  completedRunHistoryTable,
   syncConflictLogsTable,
   qualityChecksTable,
 } from "@workspace/db";
@@ -222,10 +223,38 @@ router.get(
     }
     const { date, runId } = parsed.data;
     const scope = currentScope();
-    const rows = await db.select().from(dailySyncTable).where(and(
+    // An ended run has an immutable completion snapshot. Prefer it over the
+    // mutable active-day document so later sync/reset activity cannot rewrite a
+    // historical operational view.
+    const completed = await db.select().from(completedRunHistoryTable).where(and(
+      eq(completedRunHistoryTable.scope, scope),
+      eq(completedRunHistoryTable.date, date),
+      eq(completedRunHistoryTable.runId, runId),
+    ));
+    const rows = completed.length === 0 ? await db.select().from(dailySyncTable).where(and(
       eq(dailySyncTable.scope, scope),
       eq(dailySyncTable.date, date),
-    ));
+    )) : [];
+    if (completed.length > 1) {
+      operationalError(res, 409, "snapshot-ambiguous", "More than one immutable completion exists for this run.");
+      return;
+    }
+    if (completed.length === 1) {
+      const row = completed[0];
+      const snapshot = adaptCanonicalOperationalSnapshot(row.snapshot);
+      if (!snapshot) { operationalError(res, 400, "invalid-snapshot", "The immutable completion is not an object."); return; }
+      try {
+        res.json(deriveOperationalRunView({
+          snapshot, date, runId, nowMs: Date.now(),
+          snapshotMetadata: { snapshotId: row.snapshotHash, capturedAt: row.completedAt.getTime(), date },
+        }));
+        return;
+      } catch (error) {
+        const code = error instanceof OperationalRunViewError ? error.code : "derivation-failed";
+        operationalError(res, code === "missing-run" ? 404 : 400, code, error instanceof Error ? error.message : "Invalid immutable completion.");
+        return;
+      }
+    }
     if (rows.length === 0) {
       operationalError(res, 404, "snapshot-not-found", "No canonical snapshot exists for this date.");
       return;
@@ -301,7 +330,7 @@ router.post(
     const input = parsed.data;
     const [periodStart, periodEnd] = dateRange(input.scope, input.date);
     const scope = currentScope();
-    const [qualityRows, incidentRows, inventoryRows, lots, syncRows] = await Promise.all([
+    const [qualityRows, incidentRows, inventoryRows, lots, syncRows, completionRows] = await Promise.all([
       db.select().from(qualityChecksTable).where(
         and(
           eq(qualityChecksTable.scope, scope),
@@ -322,6 +351,11 @@ router.post(
         eq(dailySyncTable.scope, scope),
         gte(dailySyncTable.date, periodStart),
         lte(dailySyncTable.date, periodEnd),
+      )),
+      db.select().from(completedRunHistoryTable).where(and(
+        eq(completedRunHistoryTable.scope, scope),
+        gte(completedRunHistoryTable.date, periodStart),
+        lte(completedRunHistoryTable.date, periodEnd),
       )),
     ]);
     let historicalInventory: NonNullable<
@@ -359,28 +393,48 @@ router.post(
     ).length;
     const qualityIssues = qualityRows.reduce((n, row) => n + (Array.isArray(row.issues) ? row.issues.length : 0), 0);
     // Do not trust compatibility `input.runs`: production facts are derived
-    // solely from every canonical scoped daily_sync row in the requested period.
+    // from immutable completed records for ended historical runs. The mutable
+    // daily_sync document remains the source only for the active/current day.
     const nowMs = Date.now();
     const canonicalRuns: DaySummaryInput["runs"] = [];
     let canonicalFailure: { date: string; code: string } | null = null;
     const expectedDates = datesInRange(periodStart, periodEnd);
-    const rowsByDate = new Map<string, typeof syncRows>();
+    type ReportSnapshot = {
+      date: string;
+      data: unknown;
+      updatedAt: Date;
+      source: "active" | "completed";
+    };
+    const rowsByDate = new Map<string, ReportSnapshot[]>();
+    const completedRunKeys = new Set(
+      completionRows.map((row) => `${row.date}\u0000${row.runId}`),
+    );
     for (const row of syncRows) {
       const rows = rowsByDate.get(row.date) ?? [];
-      rows.push(row);
+      rows.push({ date: row.date, data: row.data, updatedAt: row.updatedAt, source: "active" });
+      rowsByDate.set(row.date, rows);
+    }
+    for (const row of completionRows) {
+      const rows = rowsByDate.get(row.date) ?? [];
+      rows.push({
+        date: row.date,
+        data: row.snapshot,
+        updatedAt: row.completedAt,
+        source: "completed",
+      });
       rowsByDate.set(row.date, rows);
     }
     for (const date of expectedDates) {
       const rows = rowsByDate.get(date) ?? [];
-      if (rows.length !== 1) {
+      if (rows.length === 0) {
         canonicalFailure = {
           date,
-          code: rows.length === 0 ? "snapshot-not-found" : "snapshot-ambiguous",
+          code: "snapshot-not-found",
         };
         break;
       }
     }
-    for (const row of syncRows) {
+    for (const rows of rowsByDate.values()) for (const row of rows) {
       if (canonicalFailure) break;
       const snapshot = adaptCanonicalOperationalSnapshot(row.data);
       if (!snapshot || !Array.isArray(snapshot.dayState?.runs)) {
@@ -400,6 +454,10 @@ router.post(
           canonicalFailure = { date: row.date, code: "invalid-run" };
           break;
         }
+        if (
+          row.source === "active"
+          && completedRunKeys.has(`${row.date}\u0000${rawRun.id}`)
+        ) continue;
         try {
           canonicalRuns.push(viewToSummaryRun(deriveOperationalRunView({
             snapshot,

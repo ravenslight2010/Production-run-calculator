@@ -38,6 +38,8 @@ import type {
   CheckUsernameAvailableParams,
   CheeseRecipeList,
   ClaimAutoTrackEventParams,
+  CompletedHistoryList,
+  CompletedRunFinalization,
   ConfirmFreezerSurplusInput,
   ConsumeInput,
   ConsumeResult,
@@ -100,6 +102,7 @@ import type {
   InventorySettings,
   LabelVerifyInput,
   LabelVerifyResult,
+  ListCompletedHistoryParams,
   ListDeniedMergesParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
@@ -13918,6 +13921,168 @@ export const useDeleteStaffMember = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteStaffMemberMutationOptions(options));
+    }
+
+export const getListCompletedHistoryUrl = (params?: ListCompletedHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/completed-history?${stringifiedParams}` : `/api/completed-history`
+}
+
+/**
+ * @summary List immutable completed-run history for the authenticated scope
+ */
+export const listCompletedHistory = async (params?: ListCompletedHistoryParams, options?: Parameters<typeof customFetch>[1]): Promise<CompletedHistoryList> => {
+
+  return customFetch<CompletedHistoryList>(getListCompletedHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompletedHistoryQueryKey = (params?: ListCompletedHistoryParams,) => {
+    return [
+    `/api/completed-history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCompletedHistoryQueryOptions = <TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(params?: ListCompletedHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompletedHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompletedHistory>>> = ({ signal }) => listCompletedHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCompletedHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof listCompletedHistory>>>
+export type ListCompletedHistoryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List immutable completed-run history for the authenticated scope
+ */
+
+export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(
+ params?: ListCompletedHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCompletedHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getFinalizeCompletedRunUrl = () => {
+
+
+
+
+  return `/api/completed-history`
+}
+
+/**
+ * @summary Append an immutable completed-run snapshot idempotently
+ */
+export const finalizeCompletedRun = async (completedRunFinalization: CompletedRunFinalization, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<void>(getFinalizeCompletedRunUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(completedRunFinalization)
+  }
+);}
+
+
+
+
+
+export const getFinalizeCompletedRunMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext> => {
+
+const mutationKey = ['finalizeCompletedRun'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finalizeCompletedRun>>, FinalizeCompletedRunMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  finalizeCompletedRun(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinalizeCompletedRunMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeCompletedRun>>>
+    export type FinalizeCompletedRunMutationBody = BodyType<CompletedRunFinalization>
+    export type FinalizeCompletedRunMutationError = ErrorType<void>
+    export type FinalizeCompletedRunMutationVariables = {data: BodyType<CompletedRunFinalization>}
+
+    /**
+ * @summary Append an immutable completed-run snapshot idempotently
+ */
+export const useFinalizeCompletedRun = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof finalizeCompletedRun>>,
+        TError,
+        FinalizeCompletedRunMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFinalizeCompletedRunMutationOptions(options));
     }
 
 export const getGetSyncTodayUrl = (params?: GetSyncTodayParams,) => {

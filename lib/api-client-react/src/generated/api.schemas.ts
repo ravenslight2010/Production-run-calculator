@@ -5,6 +5,26 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type CompletedRunFinalizationSnapshot = { [key: string]: unknown };
+
+export interface CompletedRunFinalization {
+  /** @maxLength 300 */
+  operationId: string;
+  /** @maxLength 500 */
+  runId: string;
+  date: string;
+  completedAt: string;
+  snapshot: CompletedRunFinalizationSnapshot;
+}
+
+export type CompletedHistoryRecord = CompletedRunFinalization & {
+  snapshotHash: string;
+};
+
+export interface CompletedHistoryList {
+  history: CompletedHistoryRecord[];
+}
+
 /**
  * Whether the response is deterministic-only, AI-enriched, or missing AI narration
  */
@@ -4685,6 +4705,11 @@ export const ListManagerActionQueueCategory = {
 
 export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
+};
+
+export type ListCompletedHistoryParams = {
+from?: string;
+to?: string;
 };
 
 export type GetSyncTodayParams = {

@@ -224,6 +224,7 @@ import {
   loadProfileSubTab,
   type SpecImportDisplayKind,
 } from "../storage";
+import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCompletedHistory, loadCompletedHistoryForActiveScope, pendingCompletedHistoryCount, queueCompletedRun, setCompletedHistoryScope, startRunAndQueueCompetingCompletions } from "../completedHistorySync";
 import { applyResetWipe, getStoredResetEpoch } from "../adapters/browserResetPersistence";
 import {
   loadRunValues,
@@ -2971,6 +2972,12 @@ export default function Home() {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     } : null);
+    setCompletedHistoryScope(me ? (me.sandbox ? "sandbox" : "live") : null);
+    if (me) {
+      const scopedHistory = loadCompletedHistoryForActiveScope();
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(scopedHistory)); } catch {}
+      setHistory(scopedHistory);
+    }
   }, [me?.sandbox, me?.userId]);
   // Shared auto-track suppress ref — owned in Home, passed to LiveRunProvider
   // so both Home callbacks and useAutoTrack suppress the same latch.
@@ -3102,7 +3109,28 @@ export default function Home() {
   }, undefined);
 
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
+  const [pendingHistoryUploads, setPendingHistoryUploads] = useState(() => pendingCompletedHistoryCount());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
+  useEffect(() => {
+    if (!me) return;
+    const updatePending = () => setPendingHistoryUploads(pendingCompletedHistoryCount());
+    const reconcile = async () => {
+      await flushCompletedHistoryOutbox();
+      updatePending();
+      await hydrateCompletedHistory(loadHistory(), (days) => {
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(days)); } catch {}
+        setHistory(days);
+      });
+    };
+    void reconcile();
+    const onOnline = () => { void reconcile(); };
+    window.addEventListener("online", onOnline);
+    window.addEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
+    };
+  }, [me?.sandbox, me?.userId]);
   const [sauceWeightsOpen, setSauceWeightsOpen] = useState(false);
   // Bumped on each write to a non-active run so cached day snapshots refresh.
   // Active-form writes already flow through `v`; ignoring those avoids a
@@ -11279,13 +11307,13 @@ export default function Home() {
       // Mark carried even if no dough batches — prevents re-check on next startRun.
       nextPrepPhase = { ...prep, prepCarriedOver: true };
     }
-    const newRuns = base.runs.map((r, i) =>
-      i === index
-        ? { ...r, startedAt: now, endedAt: undefined }
-        : r.startedAt && !r.endedAt
-          ? { ...r, endedAt: now, pausedAt: undefined }
-          : r
-    );
+    const { runs: newRuns, autoEnded } = startRunAndQueueCompetingCompletions({
+      date: base.date || todayStr(),
+      runs: base.runs,
+      currentIndex: index,
+      now,
+      loadValues: loadRunValues,
+    });
     const newDs = { ...base, runs: newRuns, prepPhase: nextPrepPhase };
     dayStateRef.current = newDs;
     setDayState(newDs);
@@ -11293,10 +11321,6 @@ export default function Home() {
     schedulePush(newDs, 0);
     // Run Insights: runs auto-finalized by starting this one get the same
     // post-run evaluation as an explicit Stop Run (best-effort).
-    const autoEnded = newRuns.filter(
-      (r, i) =>
-        i !== index && r.endedAt === now && base.runs[i]?.startedAt && !base.runs[i]?.endedAt,
-    );
     if (autoEnded.length > 0) {
       void reportRunInsightsAfterFinalize(
         autoEnded,
@@ -11615,6 +11639,10 @@ export default function Home() {
     );
     const nextIndex = index + 1 < base.runs.length ? index + 1 : index;
     const newDs = { ...base, runs: newRuns, currentIndex: nextIndex };
+    const completedRun = newRuns[index];
+    // Completion is durable locally before any network dependency. The outbox
+    // retries independently, so stopping production never waits on connectivity.
+    queueCompletedRun(base.date || todayStr(), completedRun, cur);
     dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
@@ -23491,6 +23519,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
 
   const { isManager } = useMe();
   const { calc, liveFreezerMin } = useLiveRun();
+  const pendingHistoryUploads = pendingCompletedHistoryCount();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
   useAutomaticUpdateReloadBlocker(
     "ingredient-detail-dialog",
@@ -24146,6 +24175,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                           <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                             <History className="w-4 h-4" />
                             History ({displayHistory.length} {displayHistory.length === 1 ? "day" : "days"})
+                            {pendingHistoryUploads > 0 && (
+                              <span className="text-xs font-normal text-amber-600">
+                                {Math.min(pendingHistoryUploads, 99)}{pendingHistoryUploads > 99 ? "+" : ""} pending offline upload{pendingHistoryUploads === 1 ? "" : "s"}
+                              </span>
+                            )}
                           </div>
                           {displayHistory.map((day: any) => {
                             const finishedRuns = day.runs.filter((r: any) => r.endedAt && r.startedAt);

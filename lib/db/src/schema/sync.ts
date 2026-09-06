@@ -19,3 +19,29 @@ export const dailySyncTable = pgTable(
 );
 
 export type DailySync = typeof dailySyncTable.$inferSelect;
+
+// Completed runs are deliberately separate from the mutable daily_sync document.
+// A completion is append-only: the operation key makes retries idempotent while
+// the scoped date/run key prevents a second device from replacing history.
+export const completedRunHistoryTable = pgTable(
+  "completed_run_history",
+  {
+    id: text("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
+    operationId: text("operation_id").notNull(),
+    runId: text("run_id").notNull(),
+    date: text("date").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").notNull(),
+    snapshotHash: text("snapshot_hash").notNull(),
+    actorId: text("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("completed_run_history_scope_operation_idx").on(t.scope, t.operationId),
+    uniqueIndex("completed_run_history_scope_date_run_idx").on(t.scope, t.date, t.runId),
+  ],
+);
+
+export type CompletedRunHistory = typeof completedRunHistoryTable.$inferSelect;
