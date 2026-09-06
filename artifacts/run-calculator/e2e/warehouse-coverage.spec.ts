@@ -71,6 +71,32 @@ async function createManager(
   ]);
 }
 
+async function createStaff(
+  request: APIRequestContext,
+  db: Client,
+  username: string,
+): Promise<void> {
+  const response = await request.post(`${API_BASE}/api/auth/sign-up`, {
+    headers: { "Content-Type": "application/json" },
+    data: { username, password: PASSWORD, accessCode: SIGNUP_CODE },
+  });
+  expect(response.ok(), `sign-up failed: ${response.status()}`).toBe(true);
+
+  const user = await db.query<{ id: string }>(
+    "SELECT id FROM users WHERE username = $1",
+    [username],
+  );
+  expect(user.rows).toHaveLength(1);
+  await db.query(
+    `INSERT INTO user_roles (user_id, role) VALUES ($1, 'operator')
+     ON CONFLICT (user_id) DO UPDATE SET role = 'operator'`,
+    [user.rows[0].id],
+  );
+  await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [
+    user.rows[0].id,
+  ]);
+}
+
 async function signIn(page: Page, username: string): Promise<void> {
   await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
@@ -80,10 +106,12 @@ async function signIn(page: Page, username: string): Promise<void> {
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 }
 
-async function openInventory(page: Page): Promise<void> {
+async function openInventory(page: Page, expectCoverage = true): Promise<void> {
   await page.locator('button[title="More"]').click();
   await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
-  await expect(page.getByTestId("warehouse-coverage")).toBeVisible();
+  if (expectCoverage) {
+    await expect(page.getByTestId("warehouse-coverage")).toBeVisible();
+  }
 }
 
 async function seedRun(page: Page, runId: string): Promise<void> {
@@ -279,6 +307,95 @@ test("shows capped offsite transfer guidance and hides it when onsite stock cove
     await expect(row).not.toContainText("Can cover");
     await page.screenshot({
       path: testInfo.outputPath("warehouse-coverage-onsite-covered.png"),
+      fullPage: true,
+    });
+    expect(browserErrors).toEqual([]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
+
+test("explains restricted inventory actions to non-managers", async ({
+  page,
+  request,
+}, testInfo) => {
+  const username = uniqueTestId("warehouse_staff");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await seedInventory(db);
+    await createStaff(request, db, username);
+    await signIn(page, username);
+    await openInventory(page, false);
+
+    const itemName = page.getByText(fixture.itemName, { exact: true });
+    await expect(itemName).toBeVisible();
+    await itemName.click();
+
+    const addStock = page.getByRole("button", { name: "Add stock", exact: true });
+    await expect(addStock).toBeVisible();
+    await page.getByPlaceholder("Qty", { exact: true }).fill("1");
+    await expect(addStock).toBeEnabled();
+
+    await expect(
+      page.getByText(
+        "Inventory Manager required to change stock records through manual adjustments. You can still review current inventory and record received stock.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Inventory Manager required to change stock records through transfers. You can still review current inventory and record received stock.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Apply adjustment", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Move stock", exact: true }),
+    ).toBeDisabled();
+
+    const capabilityStatuses = await page.evaluate(
+      async ({ itemId, fromLocationId, toLocationId }) => {
+        const [adjust, transfer] = await Promise.all([
+          fetch("/api/inventory/adjust", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemId, qtyDelta: 1, note: "staff denial check" }),
+          }),
+          fetch("/api/inventory/transfer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              itemId,
+              fromLocationId,
+              toLocationId,
+              qty: 0.1,
+            }),
+          }),
+        ]);
+        return { adjust: adjust.status, transfer: transfer.status };
+      },
+      {
+        itemId: fixture.itemId,
+        fromLocationId: fixture.locationId,
+        toLocationId: fixture.onsiteId,
+      },
+    );
+    expect(capabilityStatuses).toEqual({ adjust: 403, transfer: 403 });
+
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-staff-inventory-restrictions.png"),
       fullPage: true,
     });
     expect(browserErrors).toEqual([]);
