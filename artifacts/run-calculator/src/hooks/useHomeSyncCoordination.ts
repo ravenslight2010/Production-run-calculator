@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { createSyncBaselineGate } from "../domain/runSyncPolicy";
 import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
+import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 
 /**
  * The refs which coordinate Home's receive, reset and foreground-wake paths.
@@ -9,7 +10,8 @@ import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
  * sync transport or timing formulas.
  */
 export function useHomeSyncCoordination() {
-  const syncBaselineGateRef = useRef(createSyncBaselineGate());
+  const synchronizationStateMachineRef = useRef(new SynchronizationStateMachine<any>());
+  const syncBaselineGateRef = useRef(createSyncBaselineGate(synchronizationStateMachineRef.current));
   const isSyncApplyingRef = useRef(false);
   const syncApplyPushPendingRef = useRef(false);
   const foregroundSyncBarrierRef = useRef(false);
@@ -31,6 +33,7 @@ export function useHomeSyncCoordination() {
 
   return {
     syncBaselineGateRef,
+    synchronizationStateMachineRef,
     isSyncApplyingRef,
     syncApplyPushPendingRef,
     foregroundSyncBarrierRef,

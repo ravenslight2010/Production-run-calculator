@@ -4,6 +4,7 @@ import {
   type AttentionState,
 } from "./attentionStates";
 import { emitFieldCheckSignal } from "./fieldChecks";
+import { browserRecordStore } from "./adapters/browserRecordStore";
 export type SyncDiagnosticKind =
   | "connected"
   | "local"
@@ -93,24 +94,20 @@ function measurementKey(date: string): string {
 }
 
 export function loadSyncDiagnostics(date: string): SyncDiagnostic[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key(date)) ?? "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is SyncDiagnostic =>
+  return browserRecordStore.record(key(date), () => [], {
+    decode: (parsed) => Array.isArray(parsed) ? parsed.filter((item): item is SyncDiagnostic =>
       item && typeof item === "object" && typeof item.id === "string" &&
       typeof item.kind === "string" && typeof item.at === "number" &&
       typeof item.date === "string" && typeof item.message === "string",
-    ).slice(-MAX_EVENTS);
-  } catch {
-    return [];
-  }
+    ).slice(-MAX_EVENTS) : null,
+  }).read();
 }
 
 export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDiagnostic {
   const next: SyncDiagnostic = { ...event, id: `${event.at}-${Math.random().toString(36).slice(2, 8)}` };
   try {
     const events = [...loadSyncDiagnostics(event.date), next].slice(-MAX_EVENTS);
-    localStorage.setItem(key(event.date), JSON.stringify(events));
+    browserRecordStore.record<SyncDiagnostic[]>(key(event.date), () => [], { decode: () => null }).write(events);
   } catch {
     // Diagnostics must never interfere with production persistence.
   }
@@ -126,16 +123,14 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
 
 export function clearSyncDiagnostics(date: string): void {
   try {
-    localStorage.removeItem(key(date));
-    localStorage.removeItem(measurementKey(date));
+    browserRecordStore.record(key(date), () => [], { decode: () => null }).remove();
+    browserRecordStore.record(measurementKey(date), () => [], { decode: () => null }).remove();
   } catch {}
 }
 
 export function loadSyncMeasurements(date: string): SyncDiagnosticMeasurement[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(measurementKey(date)) ?? "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is SyncDiagnosticMeasurement =>
+  return browserRecordStore.record(measurementKey(date), () => [], {
+    decode: (parsed) => Array.isArray(parsed) ? parsed.filter((item): item is SyncDiagnosticMeasurement =>
       item && typeof item === "object" &&
       (item.path === "complete" || item.path === "partial") &&
       (item.direction === undefined || item.direction === "push" || item.direction === "peer") &&
@@ -153,10 +148,8 @@ export function loadSyncMeasurements(date: string): SyncDiagnosticMeasurement[] 
       (item.peerApplyMs === undefined || (Number.isFinite(item.peerApplyMs) && item.peerApplyMs >= 0)) &&
       Number.isInteger(item.retries) && item.retries >= 0 &&
       typeof item.converged === "boolean",
-    ).slice(-MAX_MEASUREMENTS);
-  } catch {
-    return [];
-  }
+    ).slice(-MAX_MEASUREMENTS) : null,
+  }).read();
 }
 
 export function recordSyncMeasurement(
@@ -165,7 +158,11 @@ export function recordSyncMeasurement(
 ): SyncDiagnosticMeasurement {
   try {
     const measurements = [...loadSyncMeasurements(date), measurement].slice(-MAX_MEASUREMENTS);
-    localStorage.setItem(measurementKey(date), JSON.stringify(measurements));
+    browserRecordStore.record<SyncDiagnosticMeasurement[]>(
+      measurementKey(date),
+      () => [],
+      { decode: () => null },
+    ).write(measurements);
   } catch {
     // Diagnostics must never interfere with production persistence.
   }

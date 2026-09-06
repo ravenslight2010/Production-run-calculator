@@ -6,6 +6,7 @@ import {
   type RunMeta,
 } from "../types";
 import { genId, todayStr } from "../utils";
+import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 
 /** React- and storage-free decisions for the live-run synchronization boundary. */
 export function deepEqual(a: unknown, b: unknown): boolean {
@@ -34,14 +35,12 @@ export function freshDayState(): DayState {
   };
 }
 
-export function createSyncBaselineGate() {
-  let ready = false;
-  let pushPending = false;
+export function createSyncBaselineGate<T = never>(machine = new SynchronizationStateMachine<T>()) {
   return {
-    beginConnection() { ready = false; pushPending = false; },
-    requestPush() { if (ready) return true; pushPending = true; return false; },
-    completeInitialSnapshot() { ready = true; const pending = pushPending; pushPending = false; return pending; },
-    isReady() { return ready; },
+    beginConnection() { machine.beginConnection(); },
+    requestPush() { return machine.requestBaselinePush(); },
+    completeInitialSnapshot() { return machine.completeInitialSnapshot(); },
+    isReady() { return machine.isReady; },
   };
 }
 

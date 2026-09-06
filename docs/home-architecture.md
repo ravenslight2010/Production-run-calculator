@@ -28,12 +28,12 @@ state.
   preserves their local back-button priority. Home retains every
   `DeferredSurface` conditional and loader function, so import chunks remain
   lazy and parsing/commit commands remain in the composition root.
-- **Persistence and sync:** Home owns the sync protocol and its fences
-  (`formHandoffRef`, `isSyncApplyingRef`, foreground barrier, and push
-  generation). `useHomeSyncCoordination` groups the associated React
-  refs/rendered wake state without taking protocol ownership. `storage.ts`
-  owns local persistence and pure merge/guard helpers; it does not own React
-  state or navigation.
+- **Persistence and sync:** Home is the composition root and canonical client
+  owner of live `DayState`; it does not define record formats or transition
+  policy. Browser adapters own bounded records, the synchronization state
+  machine owns connection/push/ack/wake/reset/generation ordering, and pure
+  domain policies choose merge outcomes. `storage.ts` remains a compatibility
+  facade during incremental adoption. See `docs/storage-sync-ownership.md`.
 - **Station composition:** `HomeStationTabs` owns the controlled tab-container
   contract. Station panels own station-specific rendering and local UI state,
   consuming `HomeTabCtx` and `LiveRunContext` rather than lifecycle effects.

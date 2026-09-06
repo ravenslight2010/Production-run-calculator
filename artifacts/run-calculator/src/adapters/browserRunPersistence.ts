@@ -7,6 +7,7 @@ import {
   RUN_KEY,
   type FormValues,
 } from "../types";
+import { browserRecordStore, recordCodec } from "./browserRecordStore";
 
 /** Browser-only cache adapter. Domain conflict policy deliberately lives elsewhere. */
 const UPDATED_KEY = "run-calc-runvalues-updated";
@@ -40,17 +41,18 @@ function normalize(values: Record<string, unknown>, raw: Record<string, unknown>
 }
 
 export function loadRunValues(id: string): FormValues {
-  try {
-    const raw = localStorage.getItem(RUN_KEY(id));
-    if (raw) {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      return normalize({ ...DEFAULT_VALUES, ...parsed } as Record<string, unknown>, parsed);
-    }
-  } catch {}
-  return DEFAULT_VALUES;
+  const parsed = browserRecordStore.record(
+    RUN_KEY(id),
+    () => null,
+    { decode: (value) => value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown> : null },
+  ).read();
+  return parsed
+    ? normalize({ ...DEFAULT_VALUES, ...parsed } as Record<string, unknown>, parsed)
+    : DEFAULT_VALUES;
 }
 export function saveRunValues(id: string, values: FormValues): void {
-  try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
+  browserRecordStore.record(RUN_KEY(id), () => values, { decode: () => null }).write(values);
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(WRITE_EVENT, { detail: { id } }));
 }
 export function subscribeRunValuesWrites(listener: (id: string) => void): () => void {
@@ -60,10 +62,14 @@ export function subscribeRunValuesWrites(listener: (id: string) => void): () => 
   return () => window.removeEventListener(WRITE_EVENT, handler);
 }
 export function loadRunValuesUpdated(): Record<string, number> {
-  try { return JSON.parse(localStorage.getItem(UPDATED_KEY) ?? "{}") as Record<string, number>; } catch { return {}; }
+  return browserRecordStore.record(UPDATED_KEY, () => ({}), recordCodec(
+    (value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0,
+  )).read();
 }
 export function saveRunValuesUpdated(values: Record<string, number>): void {
-  try { localStorage.setItem(UPDATED_KEY, JSON.stringify(values)); } catch {}
+  browserRecordStore.record(UPDATED_KEY, () => ({}), recordCodec(
+    (value): value is number => typeof value === "number",
+  )).write(values);
 }
 export function markRunValuesUpdated(id: string, timestamp = Date.now()): void {
   const values = loadRunValuesUpdated();

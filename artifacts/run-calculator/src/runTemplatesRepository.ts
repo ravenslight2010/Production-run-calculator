@@ -3,6 +3,7 @@
 // still read it, while this module owns the extra sync bookkeeping.
 import type { RunTemplate } from "./types";
 import { TEMPLATES_KEY } from "./types";
+import { browserRecordStore } from "./adapters/browserRecordStore";
 
 export type RunTemplateRecord = RunTemplate & { revision: number; deleted: boolean };
 type OutboxOp =
@@ -34,13 +35,14 @@ function outboxKey(): string { return scopedKey(OUTBOX_KEY); }
 function migrationKey(): string { return scopedKey(MIGRATION_KEY); }
 
 function readJson<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) as T : fallback;
-  } catch { return fallback; }
+  return browserRecordStore.record(key, () => fallback, {
+    decode: (value) => Array.isArray(fallback)
+      ? (Array.isArray(value) ? value as T : null)
+      : value as T,
+  }).read();
 }
 function writeJson(key: string, value: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  browserRecordStore.record(key, () => value, { decode: (item) => item }).write(value);
 }
 function validRecord(value: unknown): value is RunTemplateRecord {
   return !!value && typeof value === "object" && typeof (value as RunTemplate).id === "string";

@@ -118,7 +118,7 @@ describe("SSE sync baseline gate", () => {
     expect(source).toContain("useHomeFormIdentityFences()");
     expect(lifecycleSource).toContain("formHandoffRef: useRef(false)");
     expect(source).toContain("useHomeSyncCoordination()");
-    expect(coordinationSource).toContain("createSyncBaselineGate()");
+    expect(coordinationSource).toContain("createSyncBaselineGate(synchronizationStateMachineRef.current)");
     const errorHandler = source.match(/es\.onerror = \(\) => \{([\s\S]*?)\n    \};/);
     expect(errorHandler?.[1]).toContain("syncBaselineGateRef.current.beginConnection()");
   });

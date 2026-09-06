@@ -23,6 +23,12 @@ beforeEach(() => {
 });
 
 describe("run template repository", () => {
+  it("falls back safely when snapshot or outbox JSON has the wrong schema", () => {
+    localStorage.setItem("run-calc-templates:live", JSON.stringify({ bad: true }));
+    localStorage.setItem("run-calc-templates-outbox-v1:live", JSON.stringify("bad"));
+    expect(localRunTemplates()).toEqual([]);
+    expect(() => saveRunTemplate(template())).not.toThrow();
+  });
   it("creates, edits, and deletes immediately while offline", () => {
     expect(saveRunTemplate(template())).toHaveLength(1);
     expect(saveRunTemplate(template("Edited"))[0].name).toBe("Edited");

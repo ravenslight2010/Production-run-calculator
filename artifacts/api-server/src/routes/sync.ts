@@ -61,6 +61,14 @@ import { applyOperationalIntent, parseOperationalIntent } from "../lib/operation
 import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
 import {
+  SYNC_SNAPSHOT_ID_RE,
+  buildSyncWriteEnvelope,
+  emptySyncData,
+  isPartialSyncPayload,
+  isValidPartialSyncContract,
+  syncSnapshotId,
+} from "../lib/syncContract";
+import {
   computeAutoTrackSchedule,
   computeServerCalc,
   applyTemporaryOverrides,
@@ -69,51 +77,15 @@ import {
   type ServerCalcResult,
 } from "@workspace/live-calc";
 export { detectConflicts } from "../lib/syncConflict";
+export { syncSnapshotId } from "../lib/syncContract";
 
 const router: IRouter = Router();
 
 type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string };
 const clients = new Set<SseClient>();
-const SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
-
-/** Stable identity for a canonical JSON snapshot (object key order independent). */
-export function syncSnapshotId(data: unknown): string {
-  const stable = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(stable);
-    if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([key, child]) => [key, stable(child)]),
-      );
-    }
-    return value;
-  };
-  return createHash("sha256").update(JSON.stringify(stable(data))).digest("hex");
-}
-
 function requestedSnapshot(req: Request): string | undefined {
   const value = req.query.snapshot;
-  return typeof value === "string" && SNAPSHOT_ID_RE.test(value) ? value : undefined;
-}
-
-function emptySyncData(date: string): Record<string, unknown> {
-  return {
-    dayState: { date, runs: [] },
-    runValues: {},
-    runValuesUpdatedAt: {},
-  };
-}
-
-function isPartialSyncPayload(payload: unknown): payload is Record<string, unknown> {
-  return !!payload && typeof payload === "object" && !Array.isArray(payload) &&
-    (payload as Record<string, unknown>).completeness === "partial";
-}
-
-function isValidPartialContract(payload: Record<string, unknown>): boolean {
-  return payload.syncVersion === 1 &&
-    typeof payload.baseSnapshotId === "string" &&
-    SNAPSHOT_ID_RE.test(payload.baseSnapshotId);
+  return typeof value === "string" && SYNC_SNAPSHOT_ID_RE.test(value) ? value : undefined;
 }
 
 type ProtectedUpsertResult = {
@@ -525,7 +497,7 @@ async function upsertProtected(
             ? undefined
             : syncSnapshotId(existing.data);
           if (
-            !isValidPartialContract(payload) ||
+            !isValidPartialSyncContract(payload) ||
             typeof currentSnapshotId !== "string" ||
             payload.baseSnapshotId !== currentSnapshotId
           ) {
@@ -656,14 +628,10 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   res.setHeader("X-Sync-Retry-Count", String(result.retries));
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
-  const responseBody = !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
-    ? { ok: true, unchanged: true, snapshotId }
-    : {
-        ok: true,
-        data: merged,
-        ...(snapshotId ? { snapshotId } : {}),
-        ...(result.partialFallback ? { partialFallback: true } : {}),
-      };
+  const responseBody = buildSyncWriteEnvelope(merged, {
+    requestedSnapshotId: requestedId,
+    partialFallback: result.partialFallback,
+  });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   res.json(responseBody);
 });
@@ -991,14 +959,10 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.setHeader("X-Sync-Retry-Count", String(result.retries));
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
-  const responseBody = !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
-    ? { ok: true, unchanged: true, snapshotId }
-    : {
-      ok: true,
-      data: merged,
-      ...(snapshotId ? { snapshotId } : {}),
-      ...(result.partialFallback ? { partialFallback: true } : {}),
-    };
+  const responseBody = buildSyncWriteEnvelope(merged, {
+    requestedSnapshotId: requestedId,
+    partialFallback: result.partialFallback,
+  });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   res.json(responseBody);
 });

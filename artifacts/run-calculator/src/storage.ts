@@ -147,6 +147,7 @@ import {
   applyResetWipe as wipeBrowserRunCalculator,
   getStoredResetEpoch as readBrowserResetEpoch,
 } from "./adapters/browserResetPersistence";
+import { browserStorage as localStorage } from "./adapters/browserRecordStore";
 
 export function loadList(key: string, fallback: string[]): string[] {
   try {

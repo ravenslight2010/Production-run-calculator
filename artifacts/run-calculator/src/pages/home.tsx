@@ -7534,7 +7534,7 @@ export default function Home() {
   // offline edits remain available before a connection establishes a baseline.
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
-    syncBaselineGateRef, isSyncApplyingRef, syncApplyPushPendingRef,
+    syncBaselineGateRef, synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
     foregroundSyncBarrierRef, foregroundPushPendingRef, foregroundStopIntentRef,
     foregroundRecoveryRetryRef, foregroundRecoveryNoticeTimerRef,
     foregroundRecoveryOwnerRef, syncPushGenerationRef, syncPushAbortControllersRef,
@@ -7569,7 +7569,7 @@ export default function Home() {
       queuedAtPerf?: number;
       queuedAtEpoch?: number;
       trigger?: SyncMeasurementTrigger;
-    }>(),
+    }>(synchronizationStateMachineRef.current),
   );
   const syncPushTimingRef = useRef<{ queuedAtPerf: number; queuedAtEpoch: number } | null>(null);
   const syncPushTriggerRef = useRef<SyncMeasurementTrigger>("edit");
@@ -8614,7 +8614,11 @@ export default function Home() {
         const res = await fetch("/api/sync/reset-epoch");
         if (!res.ok) return;
         const { epoch } = (await res.json()) as { epoch: number };
-        if (typeof epoch === "number" && applyResetWipe(epoch)) window.location.reload();
+        if (typeof epoch === "number" && epoch > getStoredResetEpoch()) {
+          const generation = synchronizationStateMachineRef.current.beginReset(epoch);
+          if (applyResetWipe(epoch)) window.location.reload();
+          else synchronizationStateMachineRef.current.completeReset(generation);
+        }
       } catch {}
     })();
   }, []);
@@ -8726,7 +8730,11 @@ export default function Home() {
         // slate. applyResetWipe records the new epoch so this fires exactly once.
         if (msg.reset && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
-          if (applyResetWipe(msg.resetEpoch)) window.location.reload();
+          if (msg.resetEpoch > getStoredResetEpoch()) {
+            const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
+            if (applyResetWipe(msg.resetEpoch)) window.location.reload();
+            else synchronizationStateMachineRef.current.completeReset(generation);
+          }
           return;
         }
         if (msg.unchanged) {
@@ -8809,7 +8817,8 @@ export default function Home() {
     let cancelled = false;
 
     const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
-      const recoveryOwner = ++foregroundRecoveryOwnerRef.current;
+      const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
+      foregroundRecoveryOwnerRef.current = recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
       showForegroundRecoveryNotice(
@@ -8829,7 +8838,6 @@ export default function Home() {
         syncRetryTimerRef.current = null;
       }
       setSyncRetryWaiting(false);
-      syncPushQueueRef.current.reset();
       syncPushTimingRef.current = null;
       for (const controller of syncPushAbortControllersRef.current) controller.abort();
       syncPushAbortControllersRef.current.clear();
@@ -8849,9 +8857,13 @@ export default function Home() {
           const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
           if (epochRes.ok) {
             const epochBody = await epochRes.json().catch(() => null) as { epoch?: number } | null;
-            if (typeof epochBody?.epoch === "number" && applyResetWipe(epochBody.epoch)) {
-              window.location.reload();
-              return false;
+            if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
+              const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
+              if (applyResetWipe(epochBody.epoch)) {
+                window.location.reload();
+                return false;
+              }
+              synchronizationStateMachineRef.current.completeReset(generation);
             }
           }
 
@@ -8962,7 +8974,7 @@ export default function Home() {
           return false;
          } finally {
            if (foregroundRecoveryOwnerRef.current === recoveryOwner) {
-            if (reconciled) {
+            if (reconciled && synchronizationStateMachineRef.current.completeWake(recoveryOwner, true)) {
                // Resolve the tap while the barrier is still raised. This keeps
                // the canonical adoption and the same-run Stop in one fenced
                // handoff; endRun's resulting push remains queued until below.
@@ -9369,7 +9381,11 @@ export default function Home() {
   function handleStaleSyncWrite(body: unknown): boolean {
     const b = body as { stale?: boolean; epoch?: number } | null;
     if (!b?.stale) return false;
-    if (typeof b.epoch === "number" && applyResetWipe(b.epoch)) window.location.reload();
+    if (typeof b.epoch === "number" && b.epoch > getStoredResetEpoch()) {
+      const generation = synchronizationStateMachineRef.current.beginReset(b.epoch);
+      if (applyResetWipe(b.epoch)) window.location.reload();
+      else synchronizationStateMachineRef.current.completeReset(generation);
+    }
     return true;
   }
 

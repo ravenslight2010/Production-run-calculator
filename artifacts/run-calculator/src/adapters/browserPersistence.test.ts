@@ -9,10 +9,21 @@ import {
   subscribeRunValuesWrites,
 } from "./browserRunPersistence";
 import { applyResetWipe, getStoredResetEpoch } from "./browserResetPersistence";
+import { browserRecordStore } from "./browserRecordStore";
 
 afterEach(() => localStorage.clear());
 
 describe("browser run persistence", () => {
+  it("bounds corrupt and schema-invalid records behind the adapter fallback", () => {
+    localStorage.setItem("corrupt", "{");
+    const record = browserRecordStore.record("corrupt", () => ["fallback"], {
+      decode: (value) => Array.isArray(value) && value.every((item) => typeof item === "string")
+        ? value as string[] : null,
+    });
+    expect(record.read()).toEqual(["fallback"]);
+    localStorage.setItem("corrupt", JSON.stringify([1]));
+    expect(record.read()).toEqual(["fallback"]);
+  });
   it("normalizes legacy values on cache reads without changing the stored contract", () => {
     localStorage.setItem(RUN_KEY("legacy"), JSON.stringify({
       pep1Type: "Pep - Cured",

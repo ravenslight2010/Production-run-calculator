@@ -21,7 +21,7 @@ import {
   OperationalRunViewError,
   type OperationalSyncSnapshotV1,
 } from "@workspace/live-calc";
-import { syncSnapshotId } from "./sync";
+import { syncSnapshotId } from "../lib/syncContract";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { dataHealthWorkspace } from "./profileDataHealth";

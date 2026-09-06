@@ -1,35 +1,29 @@
 /** Browser cache reset adapter; epoch comparison is intentionally side-effect scoped here. */
+import { browserRecordStore } from "./browserRecordStore";
 const RESET_EPOCH_KEY = "run-calc-reset-epoch";
 const COMPLETED_HISTORY_OUTBOX_PREFIX = "run-calc-completed-history-outbox";
 const COMPLETED_HISTORY_CACHE_PREFIX = "run-calc-completed-history-cache";
 const LOCAL_HISTORY_KEY = "run-calc-history";
 
 export function getStoredResetEpoch(): number {
-  if (typeof localStorage === "undefined") return 0;
-  try {
-    const value = Number.parseInt(localStorage.getItem(RESET_EPOCH_KEY) ?? "0", 10);
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  } catch {
-    return 0;
-  }
+  return browserRecordStore.record(RESET_EPOCH_KEY, () => 0, {
+    decode: (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null,
+  }).read();
 }
 
 export function applyResetWipe(serverEpoch: number): boolean {
-  if (typeof localStorage === "undefined" || !Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
+  if (!Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
   try {
-    const keys: string[] = [];
-    for (let index = 0; index < localStorage.length; index++) {
-      const key = localStorage.key(index);
-      if (
-        key?.startsWith("run-calc")
-        && key !== RESET_EPOCH_KEY
+    const keys = browserRecordStore.keys("run-calc").filter((key) =>
+        key !== RESET_EPOCH_KEY
         && key !== LOCAL_HISTORY_KEY
         && !key.startsWith(COMPLETED_HISTORY_OUTBOX_PREFIX)
         && !key.startsWith(COMPLETED_HISTORY_CACHE_PREFIX)
-      ) keys.push(key);
-    }
+    );
     for (const key of keys) localStorage.removeItem(key);
-    localStorage.setItem(RESET_EPOCH_KEY, String(serverEpoch));
+    browserRecordStore.record(RESET_EPOCH_KEY, () => 0, {
+      decode: (value) => typeof value === "number" ? value : null,
+    }).write(serverEpoch);
     return true;
   } catch {
     return false;

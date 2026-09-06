@@ -1,4 +1,5 @@
 import { HISTORY_KEY, type FormValues, type HistoryDay, type RunMeta } from "./types";
+import { browserRecordStore } from "./adapters/browserRecordStore";
 
 export const COMPLETED_HISTORY_OUTBOX_KEY = "run-calc-completed-history-outbox";
 export const COMPLETED_HISTORY_OUTBOX_EVENT = "run-calculator:completed-history-outbox";
@@ -20,33 +21,31 @@ function scopedKey(base: string, scope: HistoryScope | null = activeScope): stri
 function readOutbox(scope: HistoryScope | null = activeScope): Completion[] {
   const key = scopedKey(COMPLETED_HISTORY_OUTBOX_KEY, scope);
   if (!key) return [];
-  try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "[]");
-    return Array.isArray(value) ? value.filter((item): item is Completion =>
+  return browserRecordStore.record(key, () => [], {
+    decode: (value) => Array.isArray(value) ? value.filter((item): item is Completion =>
       !!item && typeof item.operationId === "string" && typeof item.runId === "string"
-      && typeof item.date === "string" && !!item.snapshot) : [];
-  } catch { return []; }
+      && typeof item.date === "string" && !!item.snapshot) : null,
+  }).read();
 }
 function writeOutbox(value: Completion[], scope: HistoryScope | null = activeScope): void {
   const key = scopedKey(COMPLETED_HISTORY_OUTBOX_KEY, scope);
   if (!key) return;
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  browserRecordStore.record<Completion[]>(key, () => [], { decode: () => null }).write(value);
   if (typeof window !== "undefined") window.dispatchEvent(new Event(COMPLETED_HISTORY_OUTBOX_EVENT));
 }
 
 function readScopedCache(scope: HistoryScope | null = activeScope): HistoryDay[] {
   const key = scopedKey(COMPLETED_HISTORY_CACHE_KEY, scope);
   if (!key) return [];
-  try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "[]");
-    return Array.isArray(value) ? value : [];
-  } catch { return []; }
+  return browserRecordStore.record(key, () => [], {
+    decode: (value) => Array.isArray(value) ? value as HistoryDay[] : null,
+  }).read();
 }
 
 function writeScopedCache(days: HistoryDay[], scope: HistoryScope | null = activeScope): void {
   const key = scopedKey(COMPLETED_HISTORY_CACHE_KEY, scope);
   if (!key) return;
-  try { localStorage.setItem(key, JSON.stringify(days)); } catch {}
+  browserRecordStore.record<HistoryDay[]>(key, () => [], { decode: () => null }).write(days);
 }
 
 export function setCompletedHistoryScope(scope: HistoryScope | null): void {
