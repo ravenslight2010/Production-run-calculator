@@ -1,13 +1,13 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b foundation (pure auto-track engine, incl. per-tick decisions) done; 6b/6c not started.
+description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b foundation (pure auto-track engine incl. per-tick decisions) done; 6b/6c not started.
 ---
 
 # Server-side refactor — current status (2026-09-06)
 
 ## Done (merged to main, PR #25) — Step 6b foundation: pure auto-track engine
 
-**Step 6b foundation: pure auto-track engine extracted to `lib/live-calc/src/autoTrackEngine.ts`** — timing/cadence (`getAutoTrackTiming`, `clampWebPeriodMs`), `suggestedDoughStaging`, `computeAutoTrackSuggestion`, `computeAppSlotInfo`, `computeNetSecondDue`, claim-mutation builders (PR #25), AND the per-tick write decisions `computeCaseTickWrite`/`computeTrayTick`/`computeBatchTick` (engine PR #2) now live in live-calc (100 unit tests) and `useAutoTrack` delegates to them. Re-exports keep home.tsx / LiveRunContext.tsx / __mocks__ working. Zero behavior change; refs/effect order untouched. The hook is now ~1,320 lines and every pure decision is shared with the server — Steps 6b/6c are the remaining consumer work.
+**Step 6b foundation: pure auto-track engine extracted to `lib/live-calc/src/autoTrackEngine.ts`** — timing/cadence (`getAutoTrackTiming`, `clampWebPeriodMs`), `suggestedDoughStaging`, `computeAutoTrackSuggestion`, `computeAppSlotInfo`, `computeNetSecondDue`, claim-mutation builders (PR #25), AND the per-tick write decisions `computeCaseTickWrite`/`computeTrayTick`/`computeBatchTick` (PR #27) now live in live-calc (100 unit tests) and `useAutoTrack` delegates to them. Re-exports keep home.tsx / LiveRunContext.tsx / __mocks__ working. Zero behavior change; refs/effect order untouched. The hook is now ~1,320 lines and every pure decision is shared with the server — Steps 6b/6c are the remaining consumer work.
 
 ## Done (merged to main, PR #23) — Step 6a: server-computed auto-track schedule
 
