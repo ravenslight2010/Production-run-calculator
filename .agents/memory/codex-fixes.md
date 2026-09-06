@@ -251,3 +251,24 @@ Each entry includes:
 **Why it was needed:** Step 5 of the approved server-side refactor. Setup + Summary were the last large inline blocks besides the AI closure object; extracting them means manage/import/dialog churn no longer re-renders either block, and `home.tsx` shrinks by ~343 lines. Typecheck passes; LiveTabMemo 79/79; badge/dough/summary-adjacent suites 109/109.
 
 *Last updated: 2026-09-05*
+
+## 2026-09-06 — Server-computed auto-track schedule (refactor step 6a)
+
+**File(s):**
+- `lib/live-calc/src/autoTrackSchedule.ts` (new — pure server-side scheduler)
+- `lib/live-calc/src/autoTrackSchedule.test.ts` (new — 17 unit tests)
+- `lib/live-calc/src/index.ts` (re-export scheduler types/functions)
+- `artifacts/api-server/src/routes/sync.ts` (attach `autoTrackSchedule` to broadcast frames, initial SSE frame, and claim POST responses)
+- `artifacts/run-calculator/src/autoTrackCoordinationClient.ts` (+ `autoTrackScheduleToCoordination`, `publishAutoTrackSchedule`)
+- `artifacts/run-calculator/src/autoTrackCoordinationClient.test.ts` (new — mapping tests)
+- `artifacts/run-calculator/src/pages/home.tsx` (publish the schedule on SSE receive and claim response)
+
+**Problem:** Every auto-track channel needed a local client tick to know when a claim was due, even channels that are pure stored-state math (sauce barrel, applicator batches = anchor + cadence vs. pause-aware elapsed net seconds). A device opening mid-run or waking had to re-derive schedules from scratch, and nothing told clients the canonical due times.
+
+**Fix:** The server computes a per-run auto-track schedule from stored run state + the coordination record and attaches it to every SSE broadcast, the initial SSE frame, and claim responses:
+1. Net-second channels (`sauce-barrel`, `app1-4-batch`) are derived server-side with the client's exact gates (`pressDone`, non-mix types, positive effective batch/oz/required, made < ceil(required)) and pause-correct elapsed `(pausedAt ?? nowMs) - startedAt - closedNonPauseDowntimeMs` (resume rebase makes stored `startedAt` pause-correct).
+2. Wall-clock channels (case, tray/batch consume-produce, hopper) echo the persisted coordination record's canonical `nextDueAt` + `sequence` only.
+3. Clients map the schedule into the existing `AUTO_TRACK_COORDINATION_EVENT` shape via `autoTrackScheduleToCoordination`; generation match adopts the server's sequence (so mid-run openers keep claim parity), mismatch resets sequence to 0 (fresh claim with sequence 1).
+4. Schedule generation is `${runId}:${metaUpdatedAt ?? startedAt ?? 0}`, byte-identical to the claim endpoint's `expectedGeneration` in `applyAutoTrackClaim`.
+
+**Context:** First slice of refactor step 6 (server-side auto-track). The schedule is advisory — live-claim validation still lives in `applyAutoTrackClaim` (unchanged); manual corrections are excluded because the server only echoes coordination or derives from stored anchors. Actual server-side tick execution needs the 1,645-line `useAutoTrack.ts` decomposition first (step 6b/6c).

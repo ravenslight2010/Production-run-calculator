@@ -53,7 +53,13 @@ import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
 import { consumeSauceBarrelInTransaction } from "./inventory";
 export { detectConflicts } from "../lib/syncConflict";
-import { computeServerCalc } from "@workspace/live-calc";
+import {
+  computeAutoTrackSchedule,
+  computeServerCalc,
+  type AutoTrackSchedule,
+  type AutoTrackScheduleInput,
+  type ServerCalcResult,
+} from "@workspace/live-calc";
 
 const router: IRouter = Router();
 
@@ -152,17 +158,65 @@ function clientToday(req: Request): string {
 // so a sandbox writer's state never streams into a live watcher's UI, and a peer
 // on a different local calendar day (behind/ahead of UTC) never receives another
 // day's state into its live view — the cross-date clobber this fix prevents.
+type BroadcastPayload = {
+  dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
+  runValues?: Record<string, Record<string, unknown>>;
+  packagingProgress?: Record<string, unknown>;
+  autoTrackCoordination?: {
+    runs?: Record<string, Record<string, unknown>>;
+  };
+};
+
+/** Server-side tick detection for the current run (refactor step 6a). */
+function buildAutoTrackSchedule(
+  payload: BroadcastPayload | null,
+  calcResult: ServerCalcResult | null,
+): AutoTrackSchedule | null {
+  if (!payload?.dayState?.runs || payload.dayState.runs.length === 0 || !calcResult) {
+    return null;
+  }
+  const runs = payload.dayState.runs;
+  const run = runs[payload.dayState.currentIndex ?? 0];
+  if (!run?.id || typeof run.id !== "string") return null;
+  const runId = run.id;
+  const rawValues = payload.runValues?.[runId];
+  if (!rawValues || typeof rawValues !== "object") return null;
+  const coordinationRuns = payload.autoTrackCoordination?.runs;
+  const coordinationForRun = coordinationRuns?.[runId];
+  const nowMs = Date.now();
+  return computeAutoTrackSchedule({
+    runId,
+    metaUpdatedAt: typeof run.metaUpdatedAt === "number" ? run.metaUpdatedAt : undefined,
+    startedAt: typeof run.startedAt === "number" ? run.startedAt : undefined,
+    pausedAt: typeof run.pausedAt === "number" ? run.pausedAt : undefined,
+    endedAt: typeof run.endedAt === "number" ? run.endedAt : undefined,
+    stoppages: Array.isArray(run.stoppages) ? run.stoppages : undefined,
+    v: rawValues as unknown as AutoTrackScheduleInput["v"],
+    calc: calcResult.calc,
+    progress: rawValues,
+    coordination: coordinationForRun as AutoTrackScheduleInput["coordination"],
+    nowMs,
+  });
+}
+
+// Only ever push to clients watching the SAME data scope AND the SAME local date,
+// so a sandbox writer's state never streams into a live watcher's UI, and a peer
+// on a different local calendar day (behind/ahead of UTC) never receives another
+// day's state into its live view — the cross-date clobber this fix prevents.
 function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
-  // Compute server-side calc for the current run so clients can display
-  // authoritative values without doing the math themselves.
-  let serverCalc: unknown = null;
+  // Compute server-side calc + auto-track schedule for the current run so
+  // clients can display authoritative values and adopt the server's tick
+  // schedule without doing the math themselves.
+  let serverCalc: ServerCalcResult | null = null;
+  let autoTrackSchedule: AutoTrackSchedule | null = null;
   try {
-    const payload = data as { dayState?: { runs?: unknown[]; currentIndex?: number }; runValues?: Record<string, unknown>; packagingProgress?: Record<string, unknown> } | null;
+    const payload = data as BroadcastPayload | null;
     if (payload?.dayState?.runs && payload.dayState.runs.length > 0) {
       serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], []);
+      autoTrackSchedule = buildAutoTrackSchedule(payload, serverCalc);
     }
   } catch { /* calc failure must not break the sync broadcast */ }
-  const msg = `data: ${JSON.stringify({ data, senderId, serverCalc })}\n\n`;
+  const msg = `data: ${JSON.stringify({ data, senderId, serverCalc, autoTrackSchedule })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
       try { client.res.write(msg); } catch {}
@@ -663,12 +717,18 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       sequence: claim.sequence,
       durationMs: Date.now() - startedAt,
     }, "Auto-track claim resolved");
+    let autoTrackSchedule: AutoTrackSchedule | null = null;
+    try {
+      const claimCalc = computeServerCalc(result.data as unknown as Parameters<typeof computeServerCalc>[0], []);
+      autoTrackSchedule = buildAutoTrackSchedule(result.data as BroadcastPayload, claimCalc);
+    } catch { /* schedule failure must not break the claim response */ }
     res.json({
       ok: true,
       outcome: result.outcome,
       state: result.channelState,
       values: result.values,
       data: result.data,
+      autoTrackSchedule,
       snapshotId: syncSnapshotId(result.data),
     });
   } catch (error) {
@@ -715,12 +775,22 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const data = row?.data ?? null;
   const snapshotId = data ? syncSnapshotId(data) : undefined;
   const requested = requestedSnapshot(req);
+  let autoTrackSchedule: AutoTrackSchedule | null = null;
+  let initialServerCalc: ServerCalcResult | null = null;
+  if (data) {
+    try {
+      initialServerCalc = computeServerCalc(data as Parameters<typeof computeServerCalc>[0], []);
+      autoTrackSchedule = buildAutoTrackSchedule(data as BroadcastPayload, initialServerCalc);
+    } catch { /* calc failure must not break the baseline frame */ }
+  }
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
     senderId: null,
     initial: true,
+    serverCalc: initialServerCalc,
+    autoTrackSchedule,
   })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME
