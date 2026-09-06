@@ -1,9 +1,20 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-6 + 7a (server-owned net-second auto-track execution) done; server-authority layer complete on web; wall-clock channels still client-driven.
+description: Where the server-side refactor stands — Steps 1-6 + 7a/7b (server-owned net-second AND wall-clock auto-track execution) done; server-authority layer complete on web.
 ---
 
 # Server-side refactor — current status (2026-09-06)
+
+## Done (merged to main, PR #37) — Step 7b: server executes wall-clock claims + client skip-latch
+
+**Step 7b: the server fires wall-clock (case/tray/batch/hopper) claims itself for FRESH live runs** — `runWallClockServerTicks` (same 15s unref'd tick loop, `AUTO_TRACK_SERVER_TICK_MS`) scans the live scope, runs the pure `tickWallClock` engine with per-run arm-state persisted under `autoTrackServerState.wallClockBookkeeping[runId]`, and applies events through the SAME parse/apply/row-lock transaction as a client claim POST. Bootstrap-only by design:
+- gated to live `running` runs within 6h of start (matches `WALL_CLOCK_REPLAY_CAP_MS`);
+- a channel is driven ONLY while its schedule entry is non-canonical — the first claim anywhere (server or client) re-persists a canonical `nextDueAt`, after which that channel returns to client ownership (the server echoes canonical only);
+- bookkeeping persists every beat (even no-claim beats) so refs/baseline/remainders/seed flags never re-bootstrap from zero; `protectRunValues` preserves the server-owned key through ordinary client pushes (dropped on wholesale reset replacement).
+
+**Client skip-latch (Task 1 mirror):** the schedule→coordination event now carries `canonical`; while a wall-clock channel is non-canonical AND fresh (≤45s) AND `dueNow:false`, connected tabs skip redundant local case writes and suppress tray/batch tick writes (refs still advance). Once canonical, clients resume executing. Old servers without the field never suppress (treated as canonical).
+
+**Verified:** lib 120/120, api-server units 120/120 + protectRunValues 88/88 + build, web auto-track suites (incl. new skip-latch tests) green, web tsc clean. Postgres integration suite (3 new `runWallClockServerTicks` cases) runs in CI.
 
 ## Done (merged to main, PR #33) — Step 7a: server-owned net-second auto-track execution
 
@@ -96,5 +107,5 @@ description: Where the server-side refactor stands — Steps 1-6 + 7a (server-ow
 ## What the next agent should do
 
 1. Verify PR #22 (Setup/Summary extraction, step 5) is merged to main.
-2. Steps 6a/6b/6c + 7a shipped (server schedule → client adoption → heartbeat → server-owned net-second execution). Remaining: wall-clock channels server-side (port arm-state machines first) and the client battery-win of skipping redundant net-second ticks while connected.
+2. Steps 6a/6b/6c + 7a + 7b shipped: the server owns net-second AND fresh-run wall-clock execution; clients adopt server verdicts, skip redundant net-second and (while non-canonical replay is fresh) wall-clock writes, and resume local execution the moment a channel/verdict goes canonical or stale.
 3. When extracting any remaining panel, reuse the recipe: narrow per-concern ctx + dep registry + Suite 4 freeze-guard test; keep dialog/manage/merge/import fields out of the dep lists.
