@@ -2339,8 +2339,17 @@ describe("runWallClockServerTicks — server wall-clock bootstrap (step 7b)", ()
     // expected output, and with staged dough on the line to consume.
     await seedRun({ startedAtMs: nowMs - 300_000 });
 
-    const summary = await runWallClockServerTicks({ nowMs, maxClaims: 12 });
-    expect(summary.accepted).toBeGreaterThan(0);
+    // Loop over beats: the hopper channel arms on its first encounter and
+    // fires on a later beat, and once case/tray/batch claim they go canonical.
+    // Persisted bookkeeping carries the arm-state so later beats fire hopper.
+    let totalAccepted = 0;
+    for (let pass = 0; pass < 8; pass++) {
+      const beatMs = nowMs + pass * 90_000; // advance past the hopper's 70s cycle
+      const summary = await runWallClockServerTicks({ nowMs: beatMs, maxClaims: 12 });
+      totalAccepted += summary.accepted;
+      if (summary.builtClaims === 0) break;
+    }
+    expect(totalAccepted).toBeGreaterThan(0);
 
     const data = await storedData();
     const values = data.runValues[RUN] as Record<string, unknown>;
