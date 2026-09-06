@@ -1897,10 +1897,14 @@ describe("/sync/events — date-scoped broadcasts", () => {
       initial?: boolean;
       senderId?: string | null;
       data?: { dayState?: { runs?: Array<{ id: string }> } };
+      serverCalc?: { runId: string } | null;
+      autoTrackSchedule?: { runId: string; entries: unknown[] } | null;
     };
     expect(initial.initial).toBe(true);
     expect(initial.senderId).toBeNull();
     expect(initial.data?.dayState?.runs?.map((run) => run.id)).toContain("scheduled-run");
+    expect(initial.serverCalc?.runId).toBe("scheduled-run");
+    expect(initial.autoTrackSchedule).toMatchObject({ runId: "scheduled-run", entries: [] });
   });
 
   it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {

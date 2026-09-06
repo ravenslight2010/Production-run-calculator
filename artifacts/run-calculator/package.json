@@ -118,6 +118,7 @@
     "@workspace/cheese-reconcile": "workspace:*",
     "@workspace/cycle-count": "workspace:*",
     "@workspace/day-summary": "workspace:*",
+    "@workspace/live-calc": "workspace:*",
     "@workspace/downtime-trends": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/formula-guard": "workspace:*",

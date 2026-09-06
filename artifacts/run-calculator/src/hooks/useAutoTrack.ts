@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { type FormValues } from "../types";
 import { AUTO_TRACK_COORDINATION_EVENT } from "../autoTrackCoordinationClient";
+import {
+  buildCaseClaimMutations,
+  computeAutoTrackSuggestion,
+  computeCaseTickWrite,
+  getAutoTrackTiming,
+  suggestedDoughStaging,
+  type AutoTrackTiming,
+  type SuggestedDoughStagingReturn,
+} from "@workspace/live-calc";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -44,21 +53,8 @@ interface AutoTrackCalc {
  * never discards valid staged dough. Kept at verbatim parity with mobile
  * RunContext's suggestedDoughStaging.
  */
-export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
-
-export function suggestedDoughStaging(
-  traysNeeded: number,
-  batchesNeeded: number,
-): SuggestedDoughStagingReturn {
-  return {
-    trays: traysNeeded > 0
-      ? Math.max(1, Math.round(Math.min(40, traysNeeded)))
-      : null,
-    batches: batchesNeeded > 0
-      ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, batchesNeeded))))
-      : null,
-  };
-}
+export type { SuggestedDoughStagingReturn } from "@workspace/live-calc";
+export { suggestedDoughStaging } from "@workspace/live-calc";
 
 interface AutoTrackValues {
   casesPerSkid: number;
@@ -277,64 +273,8 @@ export type UseAutoTrackReturn = AutoTrackResult;
 // range: never faster than once per 1s (the app clock resolution) and never
 // slower than once per hour (a stalled/garbage rate must not freeze the
 // counter forever).
-function clampPeriodMs(ms: number): number {
-  if (!Number.isFinite(ms) || ms <= 0) return 60 * 60 * 1000;
-  return Math.min(60 * 60 * 1000, Math.max(1000, ms));
-}
-
-export interface AutoTrackTiming {
-  caseMs: number;
-  trayMs: number;
-  trayProductionMs: number;
-  batchConsumptionMs: number;
-  batchProductionMs: number;
-  hopperMs: number;
-}
-
-/**
- * The single cadence contract shared by auto-track scheduling and countdown UI.
- * Consumption remains quarter-batch internally so fractional inventory movement
- * stays visible; the UI labels that event as such rather than calling it a
- * full-batch completion.
- */
-export function getAutoTrackTiming(
-  ppm: number,
-  pizzasPerCase: number,
-  perTray: number,
-  perBatch: number,
-  machine?: { spinSec: number; hopperSec: number },
-): AutoTrackTiming {
-  const caseMs = ppm > 0 && pizzasPerCase > 0
-    ? clampPeriodMs((pizzasPerCase / ppm) * 60000)
-    : 0;
-  const trayMs = ppm > 0 && perTray > 0
-    ? clampPeriodMs((perTray / ppm) * 60000)
-    : 0;
-  const lineBatchMs = ppm > 0 && perBatch > 0
-    ? (perBatch / ppm) * 60000
-    : 0;
-  const hopperMs = machine && Number.isFinite(machine.hopperSec) && machine.hopperSec > 0
-    ? clampPeriodMs(machine.hopperSec * 1000)
-    : 0;
-  const effectiveDrainMs = Math.max(hopperMs, lineBatchMs);
-  const batchConsumptionMs = effectiveDrainMs > 0
-    ? clampPeriodMs(effectiveDrainMs / 4)
-    : 0;
-  const spinMs = machine && Number.isFinite(machine.spinSec) && machine.spinSec > 0
-    ? machine.spinSec * 1000
-    : 0;
-  const batchProductionMs = spinMs > 0
-    ? clampPeriodMs(spinMs)
-    : (lineBatchMs > 0 ? clampPeriodMs(lineBatchMs) : 0);
-  return {
-    caseMs,
-    trayMs,
-    trayProductionMs: trayMs > 0 ? trayMs / 2 : 0,
-    batchConsumptionMs,
-    batchProductionMs,
-    hopperMs,
-  };
-}
+export type { AutoTrackTiming } from "@workspace/live-calc";
+export { getAutoTrackTiming } from "@workspace/live-calc";
 
 /**
  * Tracks expected progress automatically while running. Each counter updates
@@ -554,39 +494,18 @@ useEffect(() => {
     drainMs > 0 &&
     nowTime.getTime() < endedAt + drainMs;
 
-  const autoTrackSuggestion = useMemo(() => {
-    const ok =
-      (runStatus === "running" || runStatus === "paused" || drainActive) &&
-      calc.ppm > 0 &&
-      v.casesPerSkid > 0 &&
-      v.pizzasPerCase > 0;
-    if (!ok) return null;
-
-    const maxSkids = Math.floor(v.casesNeeded / v.casesPerSkid);
-    const elapsedMin = elapsedBatchSec / 60;
-    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
-    // Clamp to the run's total need so skids/cases freeze at their final state
-    // once production is complete instead of cycling past it (modulo wrap).
-    const expectedCasesRaw = packagingDrainActive
-      ? Math.floor((Math.max(0, packagingDrainElapsedSec) * calc.ppm) / (v.pizzasPerCase * 60))
-      : Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
-    const expectedCases = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCasesRaw) : expectedCasesRaw;
-
-    return {
-      skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
-      casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
-      expectedCases,
-      // Unclamped time-based total — drives the INCREMENTAL delta below so that a
-      // downward manual correction (e.g. after the estimate ran ahead and hit the
-      // casesNeeded clamp) can still climb again. The clamp lives only on what is
-      // displayed/written, not on the delta source.
-      expectedCasesRaw,
-      // Tray/batch suggestions are handled incrementally in the write effect;
-      // returning null here means the UI falls back to the calc-based suggestion.
-      trays: null,
-      batches: null,
-    };
-  }, [
+  const autoTrackSuggestion = useMemo(() => computeAutoTrackSuggestion({
+    runStatus,
+    drainActive,
+    packagingDrainActive,
+    packagingDrainElapsedSec,
+    ppm: calc.ppm,
+    casesPerSkid: v.casesPerSkid,
+    pizzasPerCase: v.pizzasPerCase,
+    casesNeeded: v.casesNeeded,
+    freezerTime: Number(v.freezerTime),
+    elapsedBatchSec,
+  }), [
     runStatus,
     drainActive,
     packagingDrainActive,
@@ -1362,7 +1281,13 @@ useEffect(() => {
       && v.pizzasPerCase > 0
       && nowMs >= caseNextDueMsRef.current
     ) {
-      const casePeriodMs = clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000);
+      const casePeriodMs = getAutoTrackTiming(
+        calc.ppm,
+        v.pizzasPerCase,
+        calc.perTray,
+        calc.perBatch,
+        machine,
+      ).caseMs;
       const prevExpected = lastExpectedCasesRef.current;
       // Baseline the incremental delta off the UNCLAMPED total so the count keeps
       // advancing even after the time-based estimate saturates at casesNeeded (e.g.
@@ -1385,81 +1310,22 @@ useEffect(() => {
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
           (Number(form.getValues("casesOnCurrentSkid")) || 0);
-        if (drainActive || packagingDrainActive) {
-          // Ended runs use the Freeze tunnel WIP drop. During a paused packaging
-          // drain, tunnel WIP is intentionally frozen at pause, so use the
-          // pause-relative stage clock instead. Both paths baseline first,
-          // preventing reload/sync adoption from replaying old output.
-          const exited = packagingDrainActive
-            ? (prevExpected >= 0 ? Math.max(0, expectedRaw - prevExpected) : 0)
-            : (prevFreezer >= 0
-              ? Math.max(0, prevFreezer - drainFreezerRef.current)
-              : 0);
-          if (exited > 0) {
-            const target = curTotal + exited;
-            const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-            if (newTotal !== curTotal) {
-              const nextSkids = Math.floor(newTotal / cps);
-              const nextCases = Math.round(newTotal % cps);
-              commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
-                { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-                { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-              ]);
-            }
-          }
-        } else if (prevExpected < 0) {
-          // First tick after a (re)start/switch: seed the absolute count only when
-          // there is no progress yet. If progress already exists (reload / switching
-          // into a run that's already going / a prior manual entry), just baseline so
-          // we don't double-count.
-          if ((curTotal === 0 || caseClaimRetryRef.current) && expectedCases > curTotal) {
-            const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
-            const nextSkids = Math.floor(seedTotal / cps);
-            const nextCases = Math.round(seedTotal % cps);
-            caseClaimRetryRef.current = false;
-            commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
-              { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-              { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-            ]);
-          }
-        } else {
-          // Add the production since the last tick on top of the current value, so a
-          // manual correction is preserved and tracking continues forward from it.
-          // Floor to a whole number — cases are discrete; a fractional delta
-          // (e.g. 0.1666 when ppm/pizzasPerCase doesn't divide evenly into the
-          // tick interval) would store a float into casesOnCurrentSkid via the
-          // modulo below and corrupt every subsequent curTotal read.
-          const deltaCases = Math.floor(Math.max(0, expectedRaw - prevExpected));
-          if (deltaCases > 0) {
-            // Stale-delta catch-up guard: if the form shows 0 cases but
-            // prevExpected is positive, the form was reset (SSE echo, run
-            // switch, or operator correction to 0) while the expected-cases
-            // baseline was still ahead. Applying the full accumulated delta
-            // on top of 0 would write a wrong low count (e.g. 54 when the
-            // real count is 524). Skip this one tick — lastExpectedCasesRef
-            // was already updated above to expectedRaw, so the NEXT tick has
-            // a fresh baseline and writes ≈ 1 case (normal increment). Set
-            // formResetSkippedRef so the very next tick always proceeds even
-            // if curTotal is still 0 (operator-corrected-to-0 resumes).
-            if (!formResetSkippedRef.current && curTotal === 0 && prevExpected > cps) {
-              formResetSkippedRef.current = true;
-            } else {
-              formResetSkippedRef.current = false;
-              const target = curTotal + deltaCases;
-              // Never pull a value down below what the operator already has on the floor.
-              const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-              if (newTotal !== curTotal) {
-                const nextSkids = Math.floor(newTotal / cps);
-                const nextCases = Math.round(newTotal % cps);
-                commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
-                  { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-                  { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-                ]);
-              }
-            }
-          } else {
-            formResetSkippedRef.current = false;
-          }
+        const decision = computeCaseTickWrite({
+          prevExpected, expectedRaw, expectedCases, prevFreezer,
+          nextFreezer: drainFreezerRef.current, curTotal, casesPerSkid: cps,
+          casesNeeded: v.casesNeeded, drainActive, packagingDrainActive,
+          caseClaimRetry: caseClaimRetryRef.current,
+          formResetSkipped: formResetSkippedRef.current,
+        });
+        if (decision.caseClaimRetryReset) caseClaimRetryRef.current = false;
+        formResetSkippedRef.current = decision.formResetSkippedNew;
+        if (decision.action === "seed" || decision.action === "write") {
+          commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
+            skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
+            skidsTo: Math.floor(decision.newTotal / cps),
+            casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
+            casesTo: Math.round(decision.newTotal % cps),
+          }));
         }
       }
     }

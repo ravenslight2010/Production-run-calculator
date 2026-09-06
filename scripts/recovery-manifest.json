@@ -98,6 +98,46 @@
       "intentionalDifference": "The current handoff keeps source-unavailable notes and a broader scoped digest instead of matching the checkpoint implementation byte-for-byte."
     },
     {
+      "id": "shared-live-calculations",
+      "feature": "Web and API share live production calculations and advisory auto-track schedules",
+      "files": [
+        "lib/live-calc/src/index.ts",
+        "lib/live-calc/src/autoTrackEngine.ts",
+        "lib/live-calc/src/autoTrackSchedule.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/contexts/LiveRunContext.tsx",
+          "contains": "computeCalc("
+        },
+        {
+          "file": "artifacts/run-calculator/src/hooks/useAutoTrack.ts",
+          "contains": "computeAutoTrackSuggestion("
+        },
+        {
+          "file": "artifacts/api-server/src/routes/sync.ts",
+          "contains": "computeServerLiveState("
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "autoTrackScheduleRef"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "artifacts/api-server/src/routes/sync.ts",
+          "contains": "...liveState"
+        }
+      ],
+      "tests": [
+        {
+          "file": "lib/live-calc/src/liveCalc.test.ts",
+          "contains": "describe("
+        }
+      ],
+      "intentionalDifference": "The current recovery preserves the 1-second client cadence floor and publishes server schedules only as advisory SSE/claim metadata. Periodic server-owned ticks and client skip-latches remain intentionally excluded for the existing downstream ownership task."
+    },
+    {
       "id": "recovery-contract-freshness",
       "feature": "Recovered API behavior has checked-in generated contracts",
       "files": [

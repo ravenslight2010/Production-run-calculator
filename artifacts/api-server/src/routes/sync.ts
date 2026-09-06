@@ -52,6 +52,14 @@ import { requireCapability } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
 import { consumeSauceBarrelInTransaction } from "./inventory";
+import {
+  computeAutoTrackSchedule,
+  computeServerCalc,
+  applyTemporaryOverrides,
+  type AutoTrackSchedule,
+  type AutoTrackScheduleInput,
+  type ServerCalcResult,
+} from "@workspace/live-calc";
 export { detectConflicts } from "../lib/syncConflict";
 
 const router: IRouter = Router();
@@ -151,8 +159,56 @@ function clientToday(req: Request): string {
 // so a sandbox writer's state never streams into a live watcher's UI, and a peer
 // on a different local calendar day (behind/ahead of UTC) never receives another
 // day's state into its live view — the cross-date clobber this fix prevents.
+type BroadcastPayload = {
+  dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
+  runValues?: Record<string, Record<string, unknown>>;
+  packagingProgress?: Record<string, unknown>;
+  autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
+};
+
+export function buildAutoTrackSchedule(
+  payload: BroadcastPayload | null,
+  calcResult: ServerCalcResult | null,
+  nowMs = Date.now(),
+): AutoTrackSchedule | null {
+  const run = payload?.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
+  if (!run || typeof run.id !== "string" || !calcResult) return null;
+  const runId = run.id;
+  const rawValues = payload?.runValues?.[runId];
+  if (!rawValues || typeof rawValues !== "object") return null;
+  return computeAutoTrackSchedule({
+    runId,
+    metaUpdatedAt: typeof run.metaUpdatedAt === "number" ? run.metaUpdatedAt : undefined,
+    startedAt: typeof run.startedAt === "number" ? run.startedAt : undefined,
+    pausedAt: typeof run.pausedAt === "number" ? run.pausedAt : undefined,
+    endedAt: typeof run.endedAt === "number" ? run.endedAt : undefined,
+    stoppages: Array.isArray(run.stoppages) ? run.stoppages as AutoTrackScheduleInput["stoppages"] : undefined,
+    v: applyTemporaryOverrides(rawValues) as unknown as AutoTrackScheduleInput["v"],
+    calc: calcResult.calc,
+    progress: rawValues,
+    coordination: payload.autoTrackCoordination?.runs?.[runId] as AutoTrackScheduleInput["coordination"],
+    nowMs,
+  });
+}
+
+function computeServerLiveState(data: unknown, nowMs = Date.now()): {
+  serverCalc: ServerCalcResult | null;
+  autoTrackSchedule: AutoTrackSchedule | null;
+} {
+  try {
+    const payload = data as BroadcastPayload | null;
+    const serverCalc = payload?.dayState
+      ? computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs)
+      : null;
+    return { serverCalc, autoTrackSchedule: buildAutoTrackSchedule(payload, serverCalc, nowMs) };
+  } catch {
+    return { serverCalc: null, autoTrackSchedule: null };
+  }
+}
+
 function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
-  const msg = `data: ${JSON.stringify({ data, senderId })}\n\n`;
+  const liveState = computeServerLiveState(data);
+  const msg = `data: ${JSON.stringify({ data, senderId, ...liveState })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
       try { client.res.write(msg); } catch {}
@@ -644,6 +700,7 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
     if (!result) throw new Error("Auto-track claim did not complete");
     const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
     if (result.outcome === "accepted") broadcast(result.data, senderId, scope, date);
+    const liveState = computeServerLiveState(result.data);
     req.log.info({
       event: "auto_track_claim",
       outcome: result.outcome,
@@ -659,6 +716,7 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       state: result.channelState,
       values: result.values,
       data: result.data,
+      ...liveState,
       snapshotId: syncSnapshotId(result.data),
     });
   } catch (error) {
@@ -705,12 +763,17 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const data = row?.data ?? null;
   const snapshotId = data ? syncSnapshotId(data) : undefined;
   const requested = requestedSnapshot(req);
+  const liveState = data ? computeServerLiveState(data) : {
+    serverCalc: null,
+    autoTrackSchedule: null,
+  };
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
     senderId: null,
     initial: true,
+    ...liveState,
   })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME

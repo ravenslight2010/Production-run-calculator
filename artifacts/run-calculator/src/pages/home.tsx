@@ -1,4 +1,5 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
@@ -7562,6 +7563,11 @@ export default function Home() {
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
   const autoTrackClaimQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastAcceptedAutoTrackStampRef = useRef<Record<string, number>>({});
+  // Advisory server calculations travel beside canonical sync data. They never
+  // overwrite local form state or LWW stamps; later server-ownership work can
+  // adopt these refs without changing today's client-owned ticking semantics.
+  const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
+  const autoTrackScheduleRef = useRef<AutoTrackSchedule | null>(null);
   useEffect(() => subscribeAutoTrackCoordination((payload) => {
     for (const [runId, channels] of Object.entries(payload.runs ?? {})) {
       const acceptedStamp = Math.max(
@@ -8574,7 +8580,11 @@ export default function Home() {
           reset?: boolean;
           resetEpoch?: number;
           initial?: boolean;
+          serverCalc?: { runId: string; calc: Calc } | null;
+          autoTrackSchedule?: AutoTrackSchedule | null;
         };
+        if (msg.serverCalc) serverCalcRef.current = msg.serverCalc;
+        if (msg.autoTrackSchedule) autoTrackScheduleRef.current = msg.autoTrackSchedule;
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
         if (msg.reset && typeof msg.resetEpoch === "number") {
@@ -13800,7 +13810,7 @@ export default function Home() {
   // Effective values for calculation/display: the Run-tab temporary overrides
   // (Freeze tunnel time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
   // Setup fields themselves are never touched.
-  const ve = useMemo(() => withTempOverrides(v), [v]);
+  const ve = useMemo(() => applyTemporaryOverrides(v), [v]);
 
 
   useEffect(() => {
