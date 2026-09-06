@@ -5,9 +5,9 @@ description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c 
 
 # Server-side refactor — current status (2026-09-06)
 
-## In PR (branch `refactor/autotrack-heartbeat`) — Step 6c: schedule-bearing SSE heartbeat
+## Done (merged to main, PR #31) — Step 6c: schedule-bearing SSE heartbeat
 
-**Step 6c: the 15s SSE keepalive ping now carries the server auto-track schedule (delta-only).** Reuses the existing connection/cadence (no extra traffic); clients already adopt it from 6a/6b with local math as the offline fallback. `AUTO_TRACK_HEARTBEAT_MS` env override for tests. This completes the server-authority layer for web: the server owns WHEN (due times + due-now verdicts, live for every device), the claim protocol still owns WHAT (validation/sequencing/manual-correction guards).
+**Step 6c: the 15s SSE keepalive ping now carries the server auto-track schedule (delta-only).** Reuses the existing connection/cadence (no extra traffic); clients already adopt it from 6a/6b with local math as the offline fallback. `AUTO_TRACK_HEARTBEAT_MS` env override for tests. This completes the server-authority layer for web: the server owns WHEN (due times + due-now verdicts, live for every device), the claim protocol still owns WHAT (validation/sequencing/manual-correction guards). Integration test drives a fast beat with a realistic full-FormValues run fixture and asserts delta-only behavior (one schedule-carrying frame, then comment pings).
 
 ## Done (merged to main, PR #29) — Step 6b: server due-now verdict drives net-second claims
 
@@ -78,7 +78,7 @@ description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c 
 
 ## Not started
 
-**Step 6b/6c: Full server-side auto-track tick execution** — Step 6a (server schedule) is in PR; the remaining work is client adoption of server-driven tick fires and eventually server-owned tick execution. `useAutoTrack` is 1,645 lines, deeply coupled to React refs, timers, form values, and state — that decomposition is needed before 6b/6c. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
+**Server-owned auto-track tick EXECUTION (post-6c)** — 6a/6b/6c delivered the server-authority WHEN layer (schedule + due-now verdicts live on every device). A future step could have the SERVER write the claims itself (a server tick loop calling the claim protocol), removing the client tick entirely. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
 
 **Step 4c (if wanted): Schedule panel** — the Schedule editor stays inline; it is dialog-heavy by design (schedule dialog fields are DIALOG_REGISTRY-excluded elsewhere), so it may not benefit from a narrow ctx. The AI panel also stays inline (lazy, closures-only).
 
@@ -92,5 +92,5 @@ description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c 
 ## What the next agent should do
 
 1. Verify PR #22 (Setup/Summary extraction, step 5) is merged to main.
-2. Step 6a (server-computed schedule) shipped as the first slice of server-side auto-track; 6b/6c (client adoption of server tick fires, then server-owned tick execution) require decomposing the 1,645-line useAutoTrack hook first — scope carefully.
+2. Steps 6a/6b/6c shipped (server schedule → client adoption → schedule-bearing SSE heartbeat). Remaining prize: server-owned tick EXECUTION (server writes claims itself via the claim protocol), which would need a server tick loop reusing `autoTrackEngine` — scope carefully.
 3. When extracting any remaining panel, reuse the recipe: narrow per-concern ctx + dep registry + Suite 4 freeze-guard test; keep dialog/manage/merge/import fields out of the dep lists.
