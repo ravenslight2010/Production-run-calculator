@@ -6,8 +6,9 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
+import { runNetSecondServerTicks } from "../routes/sync";
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
 // driven by the CLIENT's local midnight, but the server runs in UTC in
@@ -1969,13 +1970,12 @@ describe("/sync/events — date-scoped broadcasts", () => {
   });
 });
 
-describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
-  // A real client sync payload carries the run's COMPLETE FormValues (web
-  // DEFAULT_VALUES plus live edits). The server schedule cannot be computed
-  // from a skeletal value object (e.g. only casesNeeded), so this fixture
-  // mirrors a real running run: full values plus crusts-mode meta so the
-  // server calc yields a live schedule with real entries.
-  const heartbeatFullValues = {
+// A real client sync payload carries the run's COMPLETE FormValues (web
+// DEFAULT_VALUES plus live edits). The server schedule cannot be computed
+// from a skeletal value object (e.g. only casesNeeded), so this fixture
+// mirrors a real running run: full values plus crusts-mode meta so the
+// server calc yields a live schedule with real entries.
+const FULL_RUN_VALUES = {
     casesNeeded: 240,
     crustsPerCycle: 12,
     cycleSpeed: 600,
@@ -2056,10 +2056,12 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
     app3CheeseRecipe: [],
     app4CheeseRecipeName: "",
     app4CheeseRecipe: [],
-    frontlineRecipeName: "",
+    frontlineRecipeName: "Classic Sauce",
     frontlineRecipe: [],
-  };
 
+};
+
+describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
   it("pushes a delta-only schedule frame over an existing SSE connection", async () => {
     const date = "2030-04-03";
     process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
@@ -2081,7 +2083,7 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
               }],
               resetAt: 1,
             },
-            runValues: { "heartbeat-run": heartbeatFullValues },
+            runValues: { "heartbeat-run": FULL_RUN_VALUES },
             runValuesUpdatedAt: { "heartbeat-run": 1 },
           },
         }),
@@ -2136,6 +2138,155 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
       delete process.env.AUTO_TRACK_HEARTBEAT_MS;
     }
   }, 15_000);
+});
+
+describe("runNetSecondServerTicks — server-owned net-second execution (step 7a)", () => {
+  const DATE = "2030-04-04";
+  const RUN = "tick-run";
+
+  async function seedRun(options: {
+    startedAtMs: number;
+    pausedAt?: number;
+    endedAt?: number;
+    values?: Record<string, unknown>;
+    date?: string;
+  }) {
+    const date = options.date ?? DATE;
+    const response = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "tick-seed",
+        payload: {
+          dayState: {
+            runs: [{
+              id: RUN,
+              brand: "Acme",
+              flavor: "Pep",
+              subTab: "crusts",
+              startedAt: options.startedAtMs,
+              ...(options.pausedAt ? { pausedAt: options.pausedAt } : {}),
+              ...(options.endedAt ? { endedAt: options.endedAt } : {}),
+              metaUpdatedAt: 2,
+            }],
+          },
+          runValues: { [RUN]: options.values ?? FULL_RUN_VALUES },
+          runValuesUpdatedAt: { [RUN]: 1 },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  async function storedData(date = DATE): Promise<Record<string, any>> {
+    const [row] = await db
+      .select()
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")));
+    return row?.data as Record<string, any>;
+  }
+
+  it("advances due sauce barrels and app batches server-side, converging over beats", async () => {
+    const nowMs = Date.now();
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:Classic Sauce:lbs",
+      category: "ingredient",
+      name: "Classic Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 200,
+      qtyRemaining: 200,
+    });
+    await seedRun({ startedAtMs: nowMs - 120_000 });
+
+    let totalAccepted = 0;
+    for (let pass = 0; pass < 5; pass++) {
+      const summary = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
+      totalAccepted += summary.accepted;
+      if (summary.builtClaims === 0) break;
+    }
+
+    const data = await storedData();
+    const values = data.runValues[RUN] as Record<string, unknown>;
+    // netSec = 120s: sauce cadence 53.33s → 2 barrels; app1 cadence ~85.33s → 1 batch.
+    expect(values.sauceBarrelsMade).toBe(2);
+    expect(values.app1BatchesMade).toBe(1);
+    expect(values.sauceBarrelAnchorNetSec).toBeCloseTo(106.667, 2);
+    const coordination = data.autoTrackCoordination.runs[RUN] as Record<string, { sequence: number }>;
+    expect(coordination["sauce-barrel"].sequence).toBe(2);
+    expect(coordination["app1-batch"].sequence).toBe(1);
+    expect(totalAccepted).toBe(3);
+    // Both barrels consumed 50 lbs each from the sauce inventory lot.
+    const [lot] = await db.select().from(inventoryLotsTable);
+    expect(lot.qtyRemaining).toBe(100);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(2);
+    // A beat later nothing is due (anchors advanced past netSec).
+    const after = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
+    expect(after.builtClaims).toBe(0);
+    expect(after.accepted).toBe(0);
+  });
+
+  it("never ticks paused, ended, or un-computable runs", async () => {
+    const nowMs = Date.now();
+    await seedRun({ startedAtMs: nowMs - 120_000, pausedAt: nowMs - 10_000 });
+    await seedRun({ startedAtMs: nowMs - 120_000, endedAt: nowMs - 10_000, date: "2030-04-05" });
+    const response = await fetch(`${baseUrl}/api/sync/today?today=2030-04-06`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "tick-seed",
+        payload: {
+          dayState: { runs: [{ id: "skeletal-run", brand: "Acme", flavor: "Pep" }] },
+          runValues: { "skeletal-run": { casesNeeded: 240 } },
+          runValuesUpdatedAt: { "skeletal-run": 1 },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+
+    const summary = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
+    expect(summary.builtClaims).toBe(0);
+    expect(summary.accepted).toBe(0);
+    expect(summary.examinedDates).toBeGreaterThanOrEqual(3);
+    const data = await storedData();
+    expect((data.runValues[RUN] as Record<string, unknown>).sauceBarrelsMade).toBe(0);
+  });
+
+  it("bounds each pass and continues on later beats", async () => {
+    const nowMs = Date.now();
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:Classic Sauce:lbs",
+      category: "ingredient",
+      name: "Classic Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 200,
+      qtyRemaining: 200,
+    });
+    await seedRun({ startedAtMs: nowMs - 120_000 });
+
+    const capped = await runNetSecondServerTicks({ nowMs, maxClaims: 1 });
+    expect(capped.accepted).toBe(1);
+    let data = await storedData();
+    let values = data.runValues[RUN] as Record<string, unknown>;
+    expect(values.sauceBarrelsMade).toBe(1);
+    expect(values.app1BatchesMade).toBe(0);
+
+    const next = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
+    expect(next.accepted).toBe(2); // second sauce barrel + the app1 batch
+    data = await storedData();
+    values = data.runValues[RUN] as Record<string, unknown>;
+    expect(values.sauceBarrelsMade).toBe(2);
+    expect(values.app1BatchesMade).toBe(1);
+    const [lot] = await db.select().from(inventoryLotsTable);
+    expect(lot.qtyRemaining).toBe(100);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
+  });
 });
 
 describe("/sync — conflict logging to sync_conflict_logs", () => {

@@ -4,6 +4,7 @@ import { seedRoles } from "./lib/roles";
 import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent } from "./lib/observability";
+import { startAutoTrackServerTicks } from "./routes/sync";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -111,6 +112,12 @@ async function startServer(): Promise<void> {
     startupTimer.unref();
     const timer = setInterval(() => { void scan(); }, intervalMs);
     timer.unref();
+
+    // Server-owned auto-track net-second execution (refactor step 7a): the
+    // server fires due sauce/applicator claims itself so runs keep advancing
+    // even with no device open. The interval is unref'd and runs inside the
+    // same process as the SSE heartbeat, so no extra network traffic.
+    startAutoTrackServerTicks();
   });
 
   server.once("error", (err: NodeJS.ErrnoException) => {

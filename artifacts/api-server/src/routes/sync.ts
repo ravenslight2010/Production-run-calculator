@@ -50,14 +50,15 @@ import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
-import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
+import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
+import { buildNetSecondServerClaims } from "../lib/autoTrackServerTicks";
+import { logger } from "../lib/logger";
 import { consumeSauceBarrelInTransaction } from "./inventory";
 export { detectConflicts } from "../lib/syncConflict";
 import {
-  computeAutoTrackSchedule,
+  buildAutoTrackScheduleFromPayload,
   computeServerCalc,
   type AutoTrackSchedule,
-  type AutoTrackScheduleInput,
   type ServerCalcResult,
 } from "@workspace/live-calc";
 
@@ -167,36 +168,12 @@ type BroadcastPayload = {
   };
 };
 
-/** Server-side tick detection for the current run (refactor step 6a). */
+/** Server-side tick detection for the current run (refactor steps 6a/7). */
 function buildAutoTrackSchedule(
   payload: BroadcastPayload | null,
   calcResult: ServerCalcResult | null,
 ): AutoTrackSchedule | null {
-  if (!payload?.dayState?.runs || payload.dayState.runs.length === 0 || !calcResult) {
-    return null;
-  }
-  const runs = payload.dayState.runs;
-  const run = runs[payload.dayState.currentIndex ?? 0];
-  if (!run?.id || typeof run.id !== "string") return null;
-  const runId = run.id;
-  const rawValues = payload.runValues?.[runId];
-  if (!rawValues || typeof rawValues !== "object") return null;
-  const coordinationRuns = payload.autoTrackCoordination?.runs;
-  const coordinationForRun = coordinationRuns?.[runId];
-  const nowMs = Date.now();
-  return computeAutoTrackSchedule({
-    runId,
-    metaUpdatedAt: typeof run.metaUpdatedAt === "number" ? run.metaUpdatedAt : undefined,
-    startedAt: typeof run.startedAt === "number" ? run.startedAt : undefined,
-    pausedAt: typeof run.pausedAt === "number" ? run.pausedAt : undefined,
-    endedAt: typeof run.endedAt === "number" ? run.endedAt : undefined,
-    stoppages: Array.isArray(run.stoppages) ? run.stoppages : undefined,
-    v: rawValues as unknown as AutoTrackScheduleInput["v"],
-    calc: calcResult.calc,
-    progress: rawValues,
-    coordination: coordinationForRun as AutoTrackScheduleInput["coordination"],
-    nowMs,
-  });
+  return buildAutoTrackScheduleFromPayload(payload, calcResult);
 }
 
 // Only ever push to clients watching the SAME data scope AND the SAME local date,
@@ -1070,5 +1047,174 @@ router.post(
     res.json({ ok: true, epoch });
   },
 );
+
+// ── Server-owned auto-track tick loop (refactor step 7a) ────────────────────
+// Runs the NET-SECOND channels (sauce barrel, applicator batches) from the
+// server itself so runs keep auto-tracking even when every device is closed.
+// The wall-clock channels (case/tray/batch/hopper) stay client-driven — they
+// depend on arm-state machines (period advance, remainder carry, feed-complete
+// gates) the server does not model. Each server claim is applied through the
+// EXACT same parse/apply/transaction path as a client claim POST, so every
+// safety invariant (sequence, generation, correction generation, mutation
+// from-checks, sauce inventory idempotency) still holds; a competing client or
+// another server instance simply loses the row-lock race and is rejected as
+// stale/duplicate.
+
+const SERVER_TICK_SENDER_ID = "server:tick";
+const SERVER_TICK_DEFAULT_MS = 15_000;
+const SERVER_TICK_LOOKBACK_DAYS = 45;
+const SERVER_TICK_MAX_CLAIMS = 24;
+
+function dateDaysAgo(days: number): string {
+  const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Apply one server-built claim with the same row-locked transaction as the
+ * claim POST route (sauce inventory consumption + upsert + unique retry). */
+async function applyServerClaim(
+  date: string,
+  scope: Scope,
+  claim: AutoTrackClaim,
+  nowMs: number,
+): Promise<ReturnType<typeof applyAutoTrackClaim>> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select()
+          .from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
+          .for("update");
+        const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim, nowMs);
+        if (applied.outcome === "accepted") {
+          if (applied.inventoryConsumption?.kind === "sauce-barrel") {
+            const consumption = applied.inventoryConsumption;
+            await consumeSauceBarrelInTransaction(
+              tx,
+              consumption.runId,
+              consumption.barrelIndex,
+              consumption.itemKey,
+              consumption.qty,
+              true,
+              consumption.eventId,
+            );
+          }
+          const where = and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope));
+          if (existing) {
+            await tx.update(dailySyncTable)
+              .set({ data: applied.data as any, updatedAt: new Date() })
+              .where(where);
+          } else {
+            await tx.insert(dailySyncTable)
+              .values({ date, scope, data: applied.data as any, updatedAt: new Date() });
+          }
+        }
+        return applied;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error) && attempt < 3) continue;
+      throw error;
+    }
+  }
+  throw new Error("Server auto-track claim did not complete");
+}
+
+export type ServerTickSummary = {
+  examinedDates: number;
+  builtClaims: number;
+  accepted: number;
+  outcomes: Record<string, number>;
+};
+
+/** Scan the live scope's recent days and apply server-built net-second claims
+ * that are due now. Bounded per pass (maxClaims) — anything not reached simply
+ * fires on a later beat. Exported for the integration suite; started in
+ * production by `startAutoTrackServerTicks`. */
+export async function runNetSecondServerTicks(opts: {
+  nowMs?: number;
+  maxClaims?: number;
+} = {}): Promise<ServerTickSummary> {
+  const nowMs = opts.nowMs ?? Date.now();
+  const maxClaims = opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS;
+  // No upper date bound on purpose: the suite seeds historical pseudo-dates,
+  // and future rows without a live run simply produce no claims (a run needs a
+  // startedAt to be ticked at all).
+  const rows = await db
+    .select()
+    .from(dailySyncTable)
+    .where(and(
+      eq(dailySyncTable.scope, "live"),
+      gte(dailySyncTable.date, dateDaysAgo(SERVER_TICK_LOOKBACK_DAYS)),
+    ));
+  let builtClaims = 0;
+  let accepted = 0;
+  const outcomes: Record<string, number> = {};
+  for (const row of rows) {
+    if (builtClaims >= maxClaims) break;
+    let claims: AutoTrackClaim[] = [];
+    try {
+      claims = buildNetSecondServerClaims(row.data, nowMs);
+    } catch { /* an un-computable row simply has no server ticks this beat */ }
+    for (const raw of claims) {
+      if (builtClaims >= maxClaims) break;
+      const parsed = parseAutoTrackClaim(raw, nowMs);
+      if (!parsed) {
+        outcomes.invalid = (outcomes.invalid ?? 0) + 1;
+        continue;
+      }
+      builtClaims++;
+      let result: ReturnType<typeof applyAutoTrackClaim>;
+      try {
+        result = await applyServerClaim(row.date, "live", parsed, nowMs);
+      } catch (error) {
+        logger.error({
+          err: error,
+          event: "server_auto_track_tick",
+          date: row.date,
+          runId: createHash("sha256").update(parsed.runId).digest("hex").slice(0, 12),
+          channel: parsed.channel,
+        }, "Server auto-track tick failed");
+        outcomes.error = (outcomes.error ?? 0) + 1;
+        continue;
+      }
+      outcomes[result.outcome] = (outcomes[result.outcome] ?? 0) + 1;
+      if (result.outcome === "accepted") {
+        accepted++;
+        broadcast(result.data, SERVER_TICK_SENDER_ID, "live", row.date);
+      }
+    }
+  }
+  if (builtClaims > 0) {
+    logger.info({
+      event: "server_auto_track_tick",
+      examinedDates: rows.length,
+      builtClaims,
+      accepted,
+      outcomes,
+    }, "Server auto-track tick pass completed");
+  }
+  return { examinedDates: rows.length, builtClaims, accepted, outcomes };
+}
+
+/** App-level ticker (deferred/unref'd so it never blocks shutdown). Reads the
+ * interval from AUTO_TRACK_SERVER_TICK_MS (default 15s) and skips a pass that
+ * is still running from the previous beat. */
+export function startAutoTrackServerTicks(): NodeJS.Timeout {
+  const intervalMs = Math.max(5_000, Number(process.env.AUTO_TRACK_SERVER_TICK_MS ?? SERVER_TICK_DEFAULT_MS));
+  let running = false;
+  const tick = (): void => {
+    if (running) return;
+    running = true;
+    runNetSecondServerTicks()
+      .catch((err: unknown) => {
+        logger.error({ err, event: "server_auto_track_tick" }, "Server auto-track tick pass failed");
+      })
+      .finally(() => { running = false; });
+  };
+  const timer = setInterval(tick, intervalMs);
+  timer.unref();
+  return timer;
+}
 
 export default router;

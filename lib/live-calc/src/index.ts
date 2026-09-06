@@ -455,6 +455,7 @@ export function computeServerCalc(
 // ── Server-side auto-track schedule (refactor step 6a) ─────────────────────
 export {
   AUTO_TRACK_SCHEDULE_CHANNELS,
+  buildAutoTrackScheduleFromPayload,
   computeAutoTrackElapsedMs,
   computeAutoTrackSchedule,
   type AutoTrackSchedule,
