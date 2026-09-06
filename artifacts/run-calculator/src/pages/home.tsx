@@ -4,11 +4,16 @@ import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { WarehouseTabCtx } from "../contexts/WarehouseTabCtx";
 import { InventoryTabCtx } from "../contexts/InventoryTabCtx";
 import { MixesTabCtx } from "../contexts/MixesTabCtx";
+import { SetupTabCtx } from "../contexts/SetupTabCtx";
 import WarehouseTabContent from "../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
 import { type NeedRow } from "../components/WarehouseNeedsList";
 import InventoryTabContent from "../components/InventoryTabContent";
 import MixesTabContent from "../components/MixesTabContent";
+import SetupContent from "../components/SetupContent";
+import SummaryToolsContent from "../components/SummaryToolsContent";
+import { NumField } from "../components/NumField";
+export { SetupMathConflictBadge } from "../components/SetupContent";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
@@ -281,7 +286,6 @@ import {
 import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
 import { saveDieLineDefaults } from "../dieLineDefaultsServer";
 import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../hooks/useDieLineDefaults";
-import RunInsightsCard from "../components/RunInsightsCard";
 import {
   reportRunInsightsAfterFinalize,
   buildTunnelDieDefaultEntry,
@@ -409,10 +413,6 @@ import {
   type IngredientBatchWeightRow,
   type BatchWeightPropagationProfile,
 } from "../ingredientBatchWeights";
-import FillMissingPanel from "../components/FillMissingPanel";
-import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
-import ManagerActionQueue from "../components/ManagerActionQueue";
-import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { useGetStartedOverview } from "@workspace/onboarding";
@@ -476,7 +476,6 @@ import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveM
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
-import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
 import {
   buildActiveRunIds,
@@ -2198,49 +2197,6 @@ export function TypeDropdown({
   );
 }
 
-export function NumField({
-  control,
-  name,
-  label,
-  step,
-  testId,
-  disabled,
-}: {
-  control: any;
-  name: keyof FormValues;
-  label: string;
-  step?: string;
-  testId?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <FormField
-      control={control}
-      name={name}
-      render={({ field }) => (
-        <FormItem>
-          <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
-          <FormControl>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step={step ?? "any"}
-              className="font-mono bg-background/50 h-9 text-sm"
-              data-testid={testId ?? `input-${name}`}
-              disabled={disabled}
-              {...field}
-              onChange={(e) =>
-                field.onChange(e.target.value === "" ? "" : Number(e.target.value))
-              }
-              onFocus={e => e.target.select()}
-            />
-          </FormControl>
-          <FormMessage />
-        </FormItem>
-      )}
-    />
-  );
-}
 
 // How long a manual stepper edit holds off auto-track writes. 1 minute is the
 // user's explicit preference on web (a manual entry is the new baseline and
@@ -14738,6 +14694,44 @@ export default function Home() {
     scheduledDays,
   ]);
 
+  // ── Setup tab context (narrow, like WarehouseTabCtx) ──────────────────────
+  // Memoized on setup-relevant data only. Dialog/manage/merge state changes
+  // do NOT invalidate this value → SetupContent (memo'd) skips re-renders
+  // when only dialogs/imports/AI/merge change. `form` and the callbacks
+  // (commitMissingField / applyRunSuggestion / getRunSuggestionAcceptWarning)
+  // are intentionally kept out of the dep list: they are stable or fresh via
+  // the ref, and the reactive values their closures read (v, currentRun,
+  // currentRunId) are listed below.
+  //
+  // !! KEEP IN SYNC: setupTabCtxDeps.ts mirrors this dep list for the
+  // freeze-guard test (LiveTabMemo.snappy.test.tsx Suite 4). Update BOTH when
+  // adding/removing a dep.  Dialog/manage/merge/import fields must NOT appear.
+  const setupTabCtxValueRaw = useMemo(
+    () => ({
+      applyRunSuggestion, circles, commitMissingField, currentRun, doughSubTab,
+      form, getRunSuggestionAcceptWarning, gripSheets,
+      isManager, isSupervisor, shipper, skidStacking, v,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      v,
+      circles, shipper, skidStacking, gripSheets,
+      isManager, isSupervisor,
+      currentRun,
+      doughSubTab,
+    ],
+  );
+  const setupTabCtxRef = useRef(setupTabCtxValueRaw);
+  setupTabCtxRef.current = setupTabCtxValueRaw;
+  const setupTabCtxValue = useMemo(() => setupTabCtxRef.current, [
+    // Keep in sync with SETUP_TAB_CTX_DEP_FIELDS
+    v,
+    circles, shipper, skidStacking, gripSheets,
+    isManager, isSupervisor,
+    currentRun,
+    doughSubTab,
+  ]);
+
   // ── Context value for extracted sub-components ──────────────────────────
   // Wrapped in useMemo so the object reference only changes when reactive
   // state actually changes.  Plain-function closures (addBrand, pauseRun,
@@ -16876,189 +16870,9 @@ export default function Home() {
               <ProductionLineDepartment run={<LiveRunTabContent />} />
 
               {/* ─── SETUP ─── */}
-              <ManagementDepartment setup={<>
-                <div className="mb-4 flex items-center gap-2" data-testid="setup-header">
-                  <Settings className="w-5 h-5 text-primary" />
-                  <h2 className="text-lg font-bold">Setup</h2>
-                  <SetupMathConflictBadge
-                    slots={[
-                      { rows: v.app1CheeseRecipe, ozPerPizza: v.app1OzPerPizza },
-                      { rows: v.app2CheeseRecipe, ozPerPizza: v.app2OzPerPizza },
-                      { rows: v.app3CheeseRecipe, ozPerPizza: v.app3OzPerPizza },
-                      { rows: v.app4CheeseRecipe, ozPerPizza: v.app4OzPerPizza },
-                    ]}
-                  />
-                </div>
-                {/* Run Insights: manager-only pattern-based setting suggestions
-                    from completed runs. One at a time; Accept applies, Dismiss
-                    suppresses. Renders nothing when there's nothing to show. */}
-                {isManager && (
-                  <RunInsightsCard
-                    brand={currentRun?.brand ?? ""}
-                    flavor={currentRun?.flavor ?? ""}
-                    onAccept={applyRunSuggestion}
-                    getAcceptWarning={getRunSuggestionAcceptWarning}
-                  />
-                )}
-                <div className="mb-4">
-                  <FillMissingPanel
-                    getRecord={() => ({
-                      ...form.getValues(),
-                      brand: currentRun?.brand ?? "",
-                      flavor: currentRun?.flavor ?? "",
-                      subTab: doughSubTab,
-                    })}
-                    brand={currentRun?.brand ?? ""}
-                    flavor={currentRun?.flavor ?? ""}
-                    dieType={form.getValues("dieType") ?? ""}
-                    canEdit={isSupervisor}
-                    onCommit={commitMissingField}
-                  />
-                </div>
-
-                {/* Packaging Settings */}
-                <details className="group rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden mb-4">
-                  <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
-                    <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                      <Package className="w-3.5 h-3.5" />
-                      Packaging Settings
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                  </summary>
-                  <div className="border-t border-border/40 px-5 pb-5 pt-4 space-y-4">
-                    {PACKAGING_FIELDS.map((f) => {
-                      const cur = (v[f.name] as string) ?? "";
-                      // The four editable packaging master lists (circles / shipper /
-                      // skidStacking / gripSheets) draw their selectable options from
-                      // the live, user-editable lists so options added in Setup
-                      // Profiles appear here too — mirroring the die-type pattern.
-                      // cartoned (Packaging Type) and slipSheets stay fixed.
-                      const editableList: string[] | null =
-                        f.name === "circles" ? circles
-                        : f.name === "shipper" ? shipper
-                        : f.name === "skidStacking" ? skidStacking
-                        : f.name === "gripSheets" ? gripSheets
-                        : null;
-                      const opts = editableList ?? f.options;
-                      // "cartoned" is the Packaging Type field: render its fixed
-                      // options via their display labels (e.g. "n-a" → "N/A").
-                      const isPackagingType = f.name === "cartoned";
-                      return (
-                        <div key={f.name}>
-                          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                            {f.label}
-                          </label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {opts.map((opt) => {
-                              const active = cur === opt;
-                              const optLabel = isPackagingType
-                                ? PACKAGING_TYPE_OPTIONS.find((o) => o.value === opt)?.label ?? opt
-                                : opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() =>
-                                    form.setValue(f.name, active ? "" : opt, { shouldDirty: true })
-                                  }
-                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${isPackagingType ? "" : "capitalize"} ${
-                                    active
-                                      ? "bg-primary text-primary-foreground border-primary"
-                                      : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
-                                  }`}
-                                >
-                                  {optLabel}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {/* Label position — only relevant for Labeled runs. Shown
-                              directly under the Packaging Type selector. */}
-                          {f.name === "cartoned" && cur.trim().toLowerCase() === "labeled" && (
-                            <div className="mt-3">
-                              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                                Label Position
-                              </label>
-                              <div className="flex flex-wrap gap-1.5">
-                                {LABEL_POSITION_OPTIONS.map((opt) => {
-                                  const active = ((v.labelPosition as string) ?? "") === opt.value;
-                                  return (
-                                    <button
-                                      key={opt.value}
-                                      type="button"
-                                      onClick={() =>
-                                        form.setValue("labelPosition", active ? "" : opt.value, { shouldDirty: true })
-                                      }
-                                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
-                                        active
-                                          ? "bg-primary text-primary-foreground border-primary"
-                                          : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
-                                      }`}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                          {/* Quantity field(s) matching the selected Packaging Type,
-                              shown right under the Packaging Type / Label Position
-                              selectors. Hidden values stay in storage so toggling
-                              back doesn't lose numbers. */}
-                          {f.name === "cartoned" && (() => {
-                            const typeVal = cur.trim().toLowerCase();
-                            const posVal = ((v.labelPosition as string) ?? "").trim().toLowerCase();
-                            if (isCartonedValue(typeVal)) {
-                              return (
-                                <div className="mt-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="cartonsPerCase"
-                                    label="Cartons Per Case"
-                                    step="1"
-                                  />
-                                </div>
-                              );
-                            }
-                            if (typeVal === "labeled" && (posVal === "top" || posVal === "bottom")) {
-                              return (
-                                <div className="mt-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="labelsPerRoll"
-                                    label="Labels Per Roll"
-                                    step="1"
-                                  />
-                                </div>
-                              );
-                            }
-                            if (typeVal === "labeled" && posVal === "both") {
-                              return (
-                                <div className="mt-3 grid grid-cols-2 gap-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="topLabelsPerRoll"
-                                    label="Top Labels Per Roll"
-                                    step="1"
-                                  />
-                                  <NumField
-                                    control={form.control}
-                                    name="bottomLabelsPerRoll"
-                                    label="Bottom Labels Per Roll"
-                                    step="1"
-                                  />
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-                </>} />
+              <SetupTabCtx.Provider value={setupTabCtxValue}>
+                <ManagementDepartment setup={<SetupContent />} />
+              </SetupTabCtx.Provider>
 
               {/* ─── PACKAGING ─── */}
               <ProductionLineDepartment
@@ -17251,78 +17065,7 @@ export default function Home() {
 
               {/* ─── SUMMARY ─── */}
               <ProductionLineDepartment summary={<>
-                {isManager && (
-                  <div className="max-w-3xl mx-auto mb-4">
-                    <div className="mb-3 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2" data-testid="summary-tools-header">
-                      <BarChart2 className="h-4 w-4 text-primary" />
-                      <div>
-                        <h2 className="text-sm font-bold">Operations desk</h2>
-                        <p className="text-xs text-muted-foreground">Manager follow-up and shift context</p>
-                      </div>
-                    </div>
-                    <div className="mb-3" data-testid="summary-priority-actions">
-                      <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
-                    </div>
-                    <ShiftHandoffDigest
-                      onOpenSource={(source) => {
-                        if (source === "incidents") { setActiveTab("incidents"); return; }
-                        if (source === "quality") { setActiveTab("quality"); return; }
-                        if (source === "inventory") { setActiveTab("warehouse"); return; }
-                        setManageCategory("audit");
-                        setShowManageDialog(true);
-                      }}
-                    />
-                    <details className="group mt-3 rounded-xl border border-border/50 bg-card/40" data-testid="summary-report-details">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 select-none">
-                        <span className="flex items-center gap-2 text-sm font-semibold">
-                          <BarChart2 className="h-4 w-4 text-muted-foreground" /> Reports and trends
-                          <span className="text-xs font-normal text-muted-foreground">Generate or export a report</span>
-                        </span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                      </summary>
-                      <div className="border-t border-border/40 p-3">
-                        <OperationalReportPanel
-                          onOpenQuality={(range: OperationalReportDetailRange) => {
-                            setActiveTab("quality");
-                          }}
-                          onOpenIncidents={(range: OperationalReportDetailRange) => {
-                            setActiveTab("incidents");
-                          }}
-                          buildInput={(scope, date) =>
-                            scope === "week"
-                              ? buildWeekSummaryInput({
-                                  date,
-                                  nowMs: Date.now(),
-                                  history: [
-                                    ...history,
-                                    {
-                                      date: todayStr(),
-                                      runs: dayState.runs,
-                                      runValues: Object.fromEntries(
-                                        dayState.runs.map((run) => [
-                                          run.id,
-                                          run.id === currentRunId
-                                            ? form.getValues()
-                                            : loadRunValues(run.id),
-                                        ]),
-                                      ),
-                                    },
-                                  ],
-                                  runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                                })
-                              : buildDaySummaryInput({
-                                  date,
-                                  nowMs: Date.now(),
-                                  runs: dayState.runs,
-                                  runValues: (run) =>
-                                    run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
-                                })
-                          }
-                        />
-                      </div>
-                    </details>
-                  </div>
-                )}
+                <SummaryToolsContent />
                 <LiveSummaryTabContent />
                 </>} />
 
@@ -19119,44 +18862,6 @@ export function ElapsedTimeBadge({
   return <span data-testid={testId} className={className}>{fmtElapsed(runAge + addend)}</span>;
 }
 
-/**
- * SetupMathConflictBadge — aggregate math conflicts for the Setup header.
- *
- * The count is intentionally derived during render so edits to any applicator
- * slot are reflected immediately, including in-place recipe-row updates from
- * react-hook-form.
- */
-export function SetupMathConflictBadge({
-  slots,
-}: {
-  slots: Array<{
-    rows?: RecipeRow[];
-    ozPerPizza?: number;
-  }>;
-}) {
-  const conflictCount = slots.reduce(
-    (count, slot) =>
-      count +
-      detectAppSlotConflicts(
-        (slot.rows ?? []) as { ingredient: string; lbs: number }[],
-        Number(slot.ozPerPizza) || 0,
-      ).length,
-    0,
-  );
-
-  if (conflictCount === 0) return null;
-
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400"
-      data-testid="setup-math-conflict-count"
-      aria-label={`${conflictCount} math conflict${conflictCount === 1 ? "" : "s"}`}
-    >
-      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-      {conflictCount} math conflict{conflictCount === 1 ? "" : "s"}
-    </span>
-  );
-}
 
 /**
  * PerRunMixSlotBadge — the math-check badge as it appears on the per-run
