@@ -312,3 +312,10 @@
   animation: floor-drift 90s ease-in-out infinite;
   will-change: transform;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-drift {
+    animation: none;
+    will-change: auto;
+  }
+}

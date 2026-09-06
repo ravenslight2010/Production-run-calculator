@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { ClipboardCheck, ExternalLink, Lock, RefreshCw } from "lucide-react";
+import { ChevronDown, ClipboardCheck, ExternalLink, Lock, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useMe } from "../useRole";
@@ -44,29 +44,41 @@ const ActionQueueItemCard = memo(function ActionQueueItemCard({
   onNavigate?: (tab: string) => void;
 }) {
   const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const primaryLabel = item.status === "open" ? "Claim" : "Open source";
   return <div key={item.id} className="rounded-md border border-border bg-background p-3" style={{ contentVisibility: "auto", containIntrinsicSize: "0 124px" }}>
     <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[state]}`} data-testid={`attention-state-${item.id}`}>{ATTENTION_STATE_LABEL[state]}</span><span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category] ?? item.category}</span></div>
       <p className="mt-1 text-xs text-muted-foreground">{item.description} · {age(item.createdAt)} · {item.assigneeName ?? "Unassigned"}</p>
-    </div><a className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline" href={item.sourcePath} onClick={(event) => {
+    </div><a className="hidden shrink-0 items-center gap-1 text-xs text-primary hover:underline sm:inline-flex" href={item.sourcePath} onClick={(event) => {
       event.preventDefault();
       window.location.hash = item.sourcePath.replace(/^#/, "");
       onNavigate?.(item.sourcePath.startsWith("#incidents/")
         ? "incidents"
         : item.sourceType === "sync" ? "summary" : "setup");
     }}>Open source <ExternalLink className="h-3 w-3" /></a></div>
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <select aria-label={`Status for ${item.title}`} className="rounded border border-border bg-background px-2 py-1 text-xs" value={item.status} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, status: e.target.value as ActionItem["status"] })}>
+    <p className="mt-2 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(state, item.status)}</p>
+    <div className="mt-3 grid grid-cols-[1fr_auto] gap-2 sm:flex sm:flex-wrap">
+      {item.status === "open" ? <Button className="min-h-11 sm:min-h-9" disabled={mutationPending} onClick={() => onUpdate(item, { version: item.version, status: "in_progress", assigneeId: "me" })}>{primaryLabel}</Button> :
+        <Button asChild className="min-h-11 sm:min-h-9"><a href={item.sourcePath} onClick={(event) => {
+          event.preventDefault();
+          window.location.hash = item.sourcePath.replace(/^#/, "");
+          onNavigate?.(item.sourcePath.startsWith("#incidents/") ? "incidents" : item.sourceType === "sync" ? "summary" : "setup");
+        }}>{primaryLabel}</a></Button>}
+      <Button type="button" variant="outline" className="min-h-11 min-w-11 sm:min-h-9" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
+        Details <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${detailsOpen ? "rotate-180" : ""}`} />
+      </Button>
+    </div>
+    {detailsOpen && <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted/20 p-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <select aria-label={`Status for ${item.title}`} className="min-h-11 rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:text-xs" value={item.status} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, status: e.target.value as ActionItem["status"] })}>
         {queueStatuses.map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
       </select>
-      {item.status !== "resolved" && <Button size="sm" variant="outline" className="h-7 text-xs" disabled={mutationPending} onClick={() => onUpdate(item, { version: item.version, status: "in_progress", assigneeId: "me" })}>Claim</Button>}
-      <select aria-label={`Owner for ${item.title}`} className="max-w-44 rounded border border-border bg-background px-2 py-1 text-xs" value={item.assigneeId ?? ""} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, assigneeId: e.target.value || null })}>
+      <select aria-label={`Owner for ${item.title}`} className="min-h-11 w-full rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:max-w-44 sm:text-xs" value={item.assigneeId ?? ""} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, assigneeId: e.target.value || null })}>
         <option value="">Unassigned</option>{assignees.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}
       </select>
-      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => onToggleNote(item.id)}>Add note</Button>
-    </div>
-    <p className="mt-2 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(state, item.status)}</p>
-      {noteOpen && <div className="mt-2 flex gap-2"><input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => onNoteChange(e.target.value)} /><Button size="sm" className="h-7 text-xs" disabled={!note.trim() || mutationPending} onClick={() => onUpdate(item, { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) })}>Save</Button></div>}
+      <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => onToggleNote(item.id)}>Add note</Button>
+    </div>}
+      {detailsOpen && noteOpen && <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input className="min-h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-base sm:text-sm" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => onNoteChange(e.target.value)} /><Button className="min-h-11" disabled={!note.trim() || mutationPending} onClick={() => onUpdate(item, { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) })}>Save note</Button></div>}
     {item.deferReason && <p className="mt-1 text-xs text-amber-600">Deferred: {item.deferReason}</p>}{item.resolutionNote && <p className="mt-1 text-xs text-muted-foreground">Note: {item.resolutionNote}</p>}
   </div>;
 });
@@ -146,10 +158,10 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
     </div><p className="text-xs text-muted-foreground">One prioritized view of unresolved work. Source workflows remain the system of record.</p></CardHeader>
     <CardContent className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <select aria-label="Filter action status" className="rounded border border-border bg-background px-2 py-1.5 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
+        <select aria-label="Filter action status" className="min-h-11 flex-1 rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:flex-none sm:text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
            {[...queueStatuses, "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All" : value.replace("_", " ")}{value !== "all" ? ` (${counts[value] ?? 0})` : ""}</option>)}
         </select>
-        <select aria-label="Filter action category" className="rounded border border-border bg-background px-2 py-1.5 text-xs" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select aria-label="Filter action category" className="min-h-11 flex-1 rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:flex-none sm:text-xs" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="all">All sources</option>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>

@@ -556,6 +556,16 @@ test.describe("phone layout smoke", () => {
           exact: true,
         }),
       ).toBeVisible();
+      const newInventoryItem = page.getByRole("button", { name: "New", exact: true });
+      if (await newInventoryItem.isVisible()) {
+        const newItemBox = await newInventoryItem.boundingBox();
+        expect(newItemBox?.height).toBeGreaterThanOrEqual(44);
+        await newInventoryItem.click();
+        await expect(page.getByRole("button", { name: "From production", exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Custom", exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Add to inventory", exact: true })).toBeVisible();
+        await assertPhoneLayout(page, "inventory add-item controls");
+      }
 
       await moreButton.click();
       await page.getByRole("menuitem", { name: "Settings" }).click();
@@ -602,6 +612,7 @@ test.describe("phone layout smoke", () => {
 
   for (const viewport of [
     { width: 375, height: 812 },
+    { width: 568, height: 320 },
     { width: 768, height: 1024 },
     { width: 1280, height: 800 },
   ] as const) {
@@ -610,6 +621,9 @@ test.describe("phone layout smoke", () => {
     }) => {
       await page.setViewportSize(viewport);
       await signInToSandbox(page);
+      await page.getByTestId("tab-run").click();
+      const startRun = page.getByTestId("button-start-run");
+      if (await startRun.isVisible()) await startRun.click();
 
       // New accounts start with Floor Mode disabled, but enabling it here
       // exercises the account-backed setting and the real header launch path.
@@ -629,6 +643,40 @@ test.describe("phone layout smoke", () => {
         name: "Exit Floor Mode and return to calculator",
       });
       await expect(exit).toBeVisible();
+      const pause = page.getByTestId("floor-pause-run");
+      await expect(pause).toBeVisible();
+      await expect(pause).toHaveAccessibleName("Pause");
+      await expect(page.getByTestId("floor-cases-minus")).toBeVisible();
+      await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
+      await expect(page.getByTestId("floor-skid-done")).toBeVisible();
+      await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+      for (const testId of [
+        "floor-pause-run",
+        "floor-cases-minus",
+        "floor-cases-plus",
+        "floor-skid-done",
+        "floor-complete-run",
+      ]) {
+        const box = await page.getByTestId(testId).boundingBox();
+        expect(box?.height, `${testId} height at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
+        expect(box?.width, `${testId} width at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
+      }
+
+      await pause.click();
+      await expect(page.getByTestId("floor-resume-run")).toBeVisible();
+      await page.getByTestId("floor-resume-run").click();
+      await expect(page.getByTestId("floor-pause-run")).toBeVisible();
+      await page.getByTestId("floor-complete-run").click();
+      const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
+      await expect(completeDialog).toBeVisible();
+      if (viewport.width === 1280) {
+        await completeDialog.getByTestId("floor-confirm-complete-run").click();
+        await expect(completeDialog).toBeHidden();
+        await expect(overlay.getByText("ENDED", { exact: true })).toBeVisible();
+      } else {
+        await completeDialog.getByRole("button", { name: "Keep running" }).click();
+      }
+      await expect(completeDialog).toBeHidden();
 
       const geometry = await exit.evaluate((element) => {
         const rect = element.getBoundingClientRect();

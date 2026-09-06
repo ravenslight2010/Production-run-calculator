@@ -325,7 +325,7 @@ export default function InventoryTab({
                   <button
                     type="button"
                     onClick={() => setSubPrefill(item.name)}
-                    className="shrink-0 px-2 py-0.5 rounded border border-amber-500/50 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/15 transition-colors"
+                    className="shrink-0 min-h-11 px-3 rounded border border-amber-500/50 text-sm font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/15 transition-colors sm:min-h-8 sm:text-xs"
                   >
                     Substitute
                   </button>
@@ -395,7 +395,7 @@ export default function InventoryTab({
               <button
                 type="button"
                 onClick={() => setShowAdd((v) => !v)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+                className="flex min-h-11 items-center gap-1.5 px-3 rounded-md border border-border/60 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors sm:min-h-8 sm:text-xs"
               >
                 {showAdd ? <ChevronDown className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />} {showAdd ? "Close" : "New"}
               </button>
@@ -632,7 +632,7 @@ function ItemRow({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left"
+        className="w-full min-h-14 flex items-center justify-between gap-2 px-3 py-3 text-left"
       >
         <span className="flex items-center gap-1.5 min-w-0">
           {expanded ? <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />}
@@ -713,7 +713,7 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
   const emptyLots = item.lots.filter((l) => l.qtyRemaining <= 0);
 
   return (
-    <div className="px-3 pb-3 space-y-3 border-t border-border/40 pt-3">
+    <div className="px-3 pb-3 space-y-4 border-t border-border/40 pt-3">
       {/* Lots */}
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Lots (FIFO/FEFO order)</p>
@@ -775,11 +775,12 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
               type="number"
               value={thresholdVal}
               onChange={(e) => setThresholdVal(e.target.value)}
-              className="h-7 w-20 text-xs"
+               inputMode="decimal"
+               className="h-11 w-24 text-base sm:h-9 sm:text-sm"
             />
             <Button
               size="sm"
-              className="h-7 px-2 text-xs"
+               className="h-11 px-4 sm:h-9"
               disabled={busy}
               onClick={() =>
                 run(async () => {
@@ -792,7 +793,7 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
             </Button>
           </span>
         ) : (
-          <button type="button" onClick={() => setEditThreshold(true)} className="flex items-center gap-1 text-xs font-mono tabular-nums text-foreground hover:text-primary">
+          <button type="button" onClick={() => setEditThreshold(true)} className="min-h-11 flex items-center gap-1 px-2 text-sm font-mono tabular-nums text-foreground hover:text-primary sm:min-h-8 sm:text-xs">
             {fmtQty(item.reorderThreshold)} {item.unit} <Pencil className="w-3 h-3" />
           </button>
         )}
@@ -815,11 +816,11 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
       {canManageInventory && item.category !== "packaging" && (
         <div className="space-y-2 rounded-md border border-border/40 bg-background/50 p-2.5">
           <div className="text-xs font-semibold">Production ingredient link</div>
-          <select
+           <select
             aria-label="Production ingredient"
             value={linkId}
             onChange={(e) => setLinkId(e.target.value)}
-            className="h-8 w-full rounded-md border border-border/60 bg-background px-2 text-xs"
+             className="h-11 w-full rounded-md border border-border/60 bg-background px-3 text-base sm:h-9 sm:text-sm"
           >
             <option value="">Not linked — never auto-deduct</option>
             {productionIngredients.filter((i) => i.enabled).map((i) => (
@@ -827,18 +828,18 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
             ))}
           </select>
           <div className="grid grid-cols-2 gap-2">
-            <Input aria-label="Production units per inventory unit" value={conversion} onChange={(e) => setConversion(e.target.value)} placeholder={`e.g. 20 ${item.unit} → lbs`} className="h-8 text-xs" />
-            <Input aria-label="Consumption priority" value={priority} onChange={(e) => setPriority(e.target.value)} type="number" min="0" className="h-8 text-xs" />
+             <Input aria-label="Production units per inventory unit" inputMode="decimal" value={conversion} onChange={(e) => setConversion(e.target.value)} placeholder={`e.g. 20 ${item.unit} → lbs`} className="h-11 text-base sm:h-9 sm:text-sm" />
+             <Input aria-label="Consumption priority" inputMode="numeric" value={priority} onChange={(e) => setPriority(e.target.value)} type="number" min="0" className="h-11 text-base sm:h-9 sm:text-sm" />
           </div>
           <div className="text-[11px] text-muted-foreground">
             {item.conversionConfirmed ? `Confirmed: ${item.conversionFactor} production units per ${item.unit}.` : "A confirmed conversion is required before production can deduct this product."}
           </div>
-          <Button type="button" size="sm" className="h-7 text-xs" disabled={busy} onClick={saveProductionLink}>Save production link</Button>
+           <Button type="button" size="sm" className="min-h-11 sm:min-h-9" disabled={busy} onClick={saveProductionLink}>Save production link</Button>
         </div>
       )}
 
       {/* History */}
-      <button type="button" onClick={loadHistory} className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground">
+      <button type="button" onClick={loadHistory} className="min-h-11 flex items-center gap-1.5 px-2 text-sm font-semibold text-muted-foreground hover:text-foreground sm:min-h-8 sm:text-xs">
         <HistoryIcon className="w-3.5 h-3.5" /> {showHistory ? "Hide" : "Show"} history
       </button>
       {showHistory && (
@@ -871,7 +872,7 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngr
             type="button"
             disabled={busy}
             onClick={() => setConfirmDelete(true)}
-            className="flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-400 disabled:opacity-50"
+            className="min-h-11 flex items-center gap-1.5 px-2 text-sm font-semibold text-red-500 hover:text-red-400 disabled:opacity-50"
           >
             <Trash2 className="w-3.5 h-3.5" /> Delete item
           </button>
@@ -933,16 +934,17 @@ function RestockForm({
   return (
     <div className="space-y-1.5">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Restock</p>
-      <div className="grid grid-cols-3 gap-1.5">
-        <Input type="number" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} className="h-8 text-xs" />
-        <Input placeholder="Lot #" value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} className="h-8 text-xs" />
-        <Input type="date" placeholder="Exp" value={expiration} onChange={(e) => setExpiration(e.target.value)} className="h-8 text-xs" />
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Input aria-label={`Restock quantity for ${item.name}`} inputMode="decimal" type="number" placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} className="h-11 text-base sm:h-9 sm:text-sm" />
+        <Input aria-label={`Lot number for ${item.name}`} placeholder="Lot number" value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} className="h-11 text-base sm:h-9 sm:text-sm" />
+        <Input aria-label={`Expiration date for ${item.name}`} type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} className="h-11 text-base sm:h-9 sm:text-sm" />
       </div>
       {locations.length > 1 && (
         <select
           value={locationId}
           onChange={(e) => setLocationId(e.target.value)}
-          className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
+          aria-label={`Restock location for ${item.name}`}
+          className="h-11 w-full text-base rounded-md border border-border/60 bg-background px-3 sm:h-9 sm:text-sm"
         >
           {locations.map((loc) => (
             <option key={loc.id} value={String(loc.id)}>
@@ -953,7 +955,7 @@ function RestockForm({
       )}
       <Button
         size="sm"
-        className="h-8 w-full text-xs"
+        className="min-h-12 w-full text-base font-semibold sm:min-h-10 sm:text-sm"
         disabled={busy || !(n > 0)}
         onClick={() =>
           run(async () => {
@@ -1016,12 +1018,13 @@ function TransferForm({
           Inventory Manager required to change stock records through transfers. You can still review current inventory and record received stock.
         </p>
       )}
-      <div className="grid grid-cols-2 gap-1.5">
+       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <select
           value={fromId}
           onChange={(e) => setFromId(e.target.value)}
           disabled={!canManageInventory}
-          className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
+           aria-label={`Transfer ${item.name} from location`}
+           className="h-11 w-full text-base rounded-md border border-border/60 bg-background px-3 sm:h-9 sm:text-sm"
         >
           <option value="">From…</option>
           {locations.map((loc) => (
@@ -1034,7 +1037,8 @@ function TransferForm({
           value={toId}
           onChange={(e) => setToId(e.target.value)}
           disabled={!canManageInventory}
-          className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
+           aria-label={`Transfer ${item.name} to location`}
+           className="h-11 w-full text-base rounded-md border border-border/60 bg-background px-3 sm:h-9 sm:text-sm"
         >
           <option value="">To…</option>
           {locations.map((loc) => (
@@ -1050,12 +1054,14 @@ function TransferForm({
         value={qty}
         onChange={(e) => setQty(e.target.value)}
         disabled={!canManageInventory}
-        className="h-8 text-xs"
+         aria-label={`Transfer quantity for ${item.name}`}
+         inputMode="decimal"
+         className="h-11 text-base sm:h-9 sm:text-sm"
       />
       <Button
         size="sm"
         variant="outline"
-        className="h-8 w-full text-xs"
+         className="min-h-12 w-full text-base font-semibold sm:min-h-10 sm:text-sm"
         disabled={!canManageInventory || busy || !valid}
         onClick={() =>
           run(async () => {
@@ -1097,14 +1103,14 @@ function AdjustForm({
           Inventory Manager required to change stock records through manual adjustments. You can still review current inventory and record received stock.
         </p>
       )}
-      <div className="grid grid-cols-2 gap-1.5">
-        <Input type="number" placeholder="± Qty" value={delta} onChange={(e) => setDelta(e.target.value)} disabled={!canManageInventory} className="h-8 text-xs" />
-        <Input placeholder="Reason" value={note} onChange={(e) => setNote(e.target.value)} disabled={!canManageInventory} className="h-8 text-xs" />
+       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+         <Input aria-label={`Adjustment quantity for ${item.name}`} inputMode="decimal" type="number" placeholder="Add or subtract quantity" value={delta} onChange={(e) => setDelta(e.target.value)} disabled={!canManageInventory} className="h-11 text-base sm:h-9 sm:text-sm" />
+         <Input aria-label={`Adjustment reason for ${item.name}`} placeholder="Reason" value={note} onChange={(e) => setNote(e.target.value)} disabled={!canManageInventory} className="h-11 text-base sm:h-9 sm:text-sm" />
       </div>
       <Button
         size="sm"
         variant="outline"
-        className="h-8 w-full text-xs"
+         className="min-h-12 w-full text-base font-semibold sm:min-h-10 sm:text-sm"
         disabled={!canManageInventory || busy || !(n !== 0) || Number.isNaN(n)}
         onClick={() =>
           run(async () => {
@@ -1164,7 +1170,7 @@ function LocationsCard({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+            className="flex min-h-11 items-center gap-1.5 px-3 rounded-md border border-border/60 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors sm:min-h-8 sm:text-xs"
           >
             {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />} {open ? "Close" : "Manage"}
           </button>
@@ -1177,15 +1183,16 @@ function LocationsCard({
             {locations.map((loc) => (
               <div key={loc.id} className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/10 px-3 py-2">
                 {editId === loc.id ? (
-                  <span className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <span className="flex flex-1 min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
                     <Input
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      className="h-7 text-xs"
+                      aria-label={`Location name for ${loc.name}`}
+                      className="h-11 text-base sm:h-9 sm:text-sm"
                     />
                     <Button
                       size="sm"
-                      className="h-7 px-2 text-xs"
+                      className="h-11 px-4 sm:h-9"
                       disabled={busy || !editName.trim()}
                       onClick={() =>
                         run(async () => {
@@ -1206,14 +1213,14 @@ function LocationsCard({
                   </span>
                 )}
                 {editId !== loc.id && (
-                  <span className="flex items-center gap-2 shrink-0">
+                  <span className="flex items-center gap-1 shrink-0">
                     {!loc.isOnsite && (
                       <button
                         type="button"
                         aria-label={`Delete location ${loc.name}`}
                         disabled={busy}
                         onClick={() => run(() => updateInventoryLocation(loc.id, { isOnsite: true }))}
-                        className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50"
+                        className="min-h-11 px-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50 sm:min-h-8 sm:text-xs"
                       >
                         Set onsite
                       </button>
@@ -1225,16 +1232,17 @@ function LocationsCard({
                         setEditId(loc.id);
                         setEditName(loc.name);
                       }}
-                      className="text-muted-foreground hover:text-foreground"
+                      className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground sm:min-h-9 sm:min-w-9"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                     {!loc.isOnsite && (
                       <button
                         type="button"
+                        aria-label={`Delete location ${loc.name}`}
                         disabled={busy}
                         onClick={() => setDeleteTarget(loc)}
-                        className="text-red-500 hover:text-red-400 disabled:opacity-50"
+                        className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-md text-red-500 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50 sm:min-h-9 sm:min-w-9"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1244,16 +1252,17 @@ function LocationsCard({
               </div>
             ))}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               placeholder="New location name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              className="h-8 text-xs"
+              aria-label="New inventory location name"
+              className="h-11 text-base sm:h-9 sm:text-sm"
             />
             <Button
               size="sm"
-              className="h-8 px-3 text-xs shrink-0"
+              className="h-11 px-4 shrink-0 sm:h-9"
               disabled={busy || !newName.trim()}
               onClick={() =>
                 run(async () => {
@@ -1356,19 +1365,21 @@ function AddItemForm({
 
   return (
     <div className="space-y-2.5">
-      <div className="flex gap-1.5">
+      <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => setMode("candidate")}
           disabled={candidates.length === 0}
-          className={`flex-1 h-8 rounded-md border text-xs font-semibold transition-colors disabled:opacity-40 ${mode === "candidate" ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground"}`}
+          aria-pressed={mode === "candidate"}
+          className={`min-h-11 rounded-md border text-sm font-semibold transition-colors disabled:opacity-40 ${mode === "candidate" ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground"}`}
         >
           From production
         </button>
         <button
           type="button"
           onClick={() => setMode("custom")}
-          className={`flex-1 h-8 rounded-md border text-xs font-semibold transition-colors ${mode === "custom" ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground"}`}
+          aria-pressed={mode === "custom"}
+          className={`min-h-11 rounded-md border text-sm font-semibold transition-colors ${mode === "custom" ? "border-primary bg-primary/10 text-primary" : "border-border/60 text-muted-foreground"}`}
         >
           Custom
         </button>
@@ -1379,9 +1390,10 @@ function AddItemForm({
           <p className="text-xs text-muted-foreground italic">All production items already tracked. Use Custom to add others.</p>
         ) : (
           <select
+            aria-label="Production item to track"
             value={selectedKey}
             onChange={(e) => setSelectedKey(e.target.value)}
-            className="w-full h-9 rounded-md border border-border/60 bg-background px-2 text-sm"
+            className="w-full h-11 rounded-md border border-border/60 bg-background px-3 text-base sm:h-10 sm:text-sm"
           >
             {candidates.map((c) => (
               <option key={c.key} value={c.key}>
@@ -1392,13 +1404,14 @@ function AddItemForm({
         )
       ) : (
         <div className="space-y-1.5">
-          <Input placeholder="Item name" value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm" />
-          <div className="grid grid-cols-2 gap-1.5">
-            <Input placeholder="Unit (e.g. lbs, cases)" value={unit} onChange={(e) => setUnit(e.target.value)} className="h-9 text-sm" />
+          <Input aria-label="Inventory item name" placeholder="Item name" value={name} onChange={(e) => setName(e.target.value)} className="h-11 text-base sm:h-10 sm:text-sm" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Input aria-label="Inventory unit" placeholder="Unit (e.g. lbs, cases)" value={unit} onChange={(e) => setUnit(e.target.value)} className="h-11 text-base sm:h-10 sm:text-sm" />
             <select
+              aria-label="Inventory category"
               value={category}
               onChange={(e) => setCategory(e.target.value as "ingredient" | "packaging")}
-              className="h-9 rounded-md border border-border/60 bg-background px-2 text-sm"
+              className="h-11 rounded-md border border-border/60 bg-background px-3 text-base sm:h-10 sm:text-sm"
             >
               <option value="ingredient">Ingredient</option>
               <option value="packaging">Packaging</option>
@@ -1408,13 +1421,15 @@ function AddItemForm({
       )}
 
       <Input
+         aria-label="Reorder threshold"
+         inputMode="decimal"
         type="number"
         placeholder="Reorder threshold (optional)"
         value={threshold}
         onChange={(e) => setThreshold(e.target.value)}
-        className="h-9 text-sm"
+         className="h-11 text-base sm:h-10 sm:text-sm"
       />
-      <Button size="sm" className="h-9 w-full text-sm" disabled={busy} onClick={submit}>
+      <Button size="sm" className="min-h-12 w-full text-base font-semibold sm:min-h-10 sm:text-sm" disabled={busy} onClick={submit}>
         <Plus className="w-3.5 h-3.5" /> Add to inventory
       </Button>
     </div>

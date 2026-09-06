@@ -62,7 +62,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
         data-testid="compact-run-strip"
       >
         <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
-        <div className="px-3 py-2.5 pt-3 flex items-center justify-between gap-3">
+        <div className="px-3 py-2.5 pt-3 flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex flex-col flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               {runStatus === "running" ? (
@@ -104,7 +104,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
               </span>
             </div>
           </div>
-          <div className="flex flex-col items-end text-right shrink-0">
+          <div className="hidden min-[430px]:flex flex-col items-end text-right shrink-0">
             {v.casesNeeded > 0 && (
               <div className="flex items-center gap-1.5 mb-0.5">
                 <span className="text-sm font-bold font-mono tabular-nums text-foreground">{fmtComma(calc.casesCompleted)}</span>
@@ -136,14 +136,15 @@ const CompactRunStrip = memo(function CompactRunStrip() {
             </div>
           </div>
           {(runStatus === "running" || runStatus === "paused") && (
-            <div className="shrink-0 border-l border-border/50 pl-3">
+            <div className="shrink-0 border-l border-border/50 pl-2 sm:pl-3">
               {runStatus === "running" ? (
                 <button
                   type="button"
                   title="Pause run"
+                  aria-label="Pause active run"
                   data-testid="strip-pause"
                   onClick={(e: any) => { e.stopPropagation(); pauseRun(); }}
-                  className="bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
+                  className="min-h-11 min-w-11 bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
                 >
                   <Pause className="w-4 h-4 fill-current" />
                 </button>
@@ -151,9 +152,10 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                 <button
                   type="button"
                   title="Resume on Run tab"
+                  aria-label="Open Run tab to resume active run"
                   data-testid="strip-resume"
                   onClick={(e: any) => { e.stopPropagation(); setActiveTab("run"); }}
-                  className="bg-emerald-600/20 text-emerald-500 hover:bg-emerald-500 hover:text-black p-2.5 rounded-lg transition-colors border border-emerald-500/30"
+                  className="min-h-11 min-w-11 bg-emerald-600/20 text-emerald-500 hover:bg-emerald-500 hover:text-black p-2.5 rounded-lg transition-colors border border-emerald-500/30"
                 >
                   <Play className="w-4 h-4 fill-current" />
                 </button>

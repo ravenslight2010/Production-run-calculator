@@ -21,6 +21,7 @@ import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,
@@ -706,6 +707,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18251,7 +18262,7 @@ function PauseTunnelDecision({
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
-    endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    endRun, endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
     persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
@@ -18266,6 +18277,7 @@ function FloorModeView() {
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
   } = useLiveRun();
+  const [confirmComplete, setConfirmComplete] = useState(false);
 
         const totalSkids = v.casesNeeded > 0 && v.casesPerSkid > 0 ? Math.ceil(v.casesNeeded / v.casesPerSkid) : 0;
         const floorStatus = runStatus === "ended" ? "paused" : runStatus === "pending" ? "paused" : runStatus;
@@ -18293,12 +18305,12 @@ function FloorModeView() {
         return (
           <div
             data-testid="floor-mode-overlay"
-            className="fixed inset-0 z-[40] flex flex-col font-sans select-none"
+            className="fixed inset-0 z-[40] flex flex-col overflow-y-auto font-sans select-none"
             style={{ background: bg, color: "white" }}
           >
             {/* Header */}
             <header
-              className="relative z-10 flex justify-between items-center pb-2 shrink-0"
+                className="sticky top-0 z-10 flex justify-between items-center pb-2 shrink-0"
               style={{
                 paddingTop: "calc(1.25rem + env(safe-area-inset-top))",
                 paddingLeft: "calc(1.25rem + env(safe-area-inset-left))",
@@ -18310,7 +18322,7 @@ function FloorModeView() {
                   {currentRun ? runLabel(currentRun) : "No Active Run"}
                 </span>
                 <span className="flex items-center gap-1.5 self-start px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest" style={{ background: badge, color: badgeText }}>
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: accentColor }} />
+                  <span className="w-1.5 h-1.5 rounded-full motion-safe:animate-pulse" style={{ background: accentColor }} />
                   {statusLabel}
                 </span>
               </div>
@@ -18326,11 +18338,11 @@ function FloorModeView() {
               </button>
             </header>
 
-            <div className="floor-drift flex flex-1 flex-col min-h-0">
+            <div className="floor-drift flex min-h-full flex-1 flex-col">
             {/* Big three numbers */}
-            <div className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
+            <div className="flex-1 grid grid-cols-2 min-[700px]:grid-cols-3 items-center justify-items-center gap-4 min-h-[250px] px-4 py-3 sm:gap-7 sm:min-h-[360px]">
               <div className="flex flex-col items-center">
-                <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
+                <div className="text-6xl sm:text-8xl leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
                 {calc.casesInFreezer > 0 && (
                   <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZE TUNNEL</div>
@@ -18345,8 +18357,10 @@ function FloorModeView() {
               {doughSubTab !== "crusts" && (
                 <div className="flex flex-col items-center">
                   <div
-                    className="text-[96px] leading-none font-black tracking-tight tabular-nums"
-                    style={{ color: accentColor, ...(mm === 0 && ss < 120 && runStatus === "running" ? { animation: "pulse 1s ease-in-out infinite" } : {}) }}
+                    className={`text-5xl sm:text-8xl leading-none font-black tracking-tight tabular-nums ${
+                      mm === 0 && ss < 120 && runStatus === "running" ? "motion-safe:animate-pulse" : ""
+                    }`}
+                    style={{ color: accentColor }}
                   >
                     {batchStr}
                   </div>
@@ -18356,7 +18370,7 @@ function FloorModeView() {
             </div>
 
             {/* Bottom */}
-            <div className="px-4 pb-6 space-y-4 shrink-0">
+            <div className="sticky bottom-0 px-3 pt-3 space-y-3 shrink-0 sm:px-4" style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))", background: `linear-gradient(transparent, ${bg} 12%)` }}>
               {/* Smarter insights: pace, ETA, supply + food-safety heads-up */}
               {(() => {
                 type Chip = { key: string; label: string; bg: string; fg: string };
@@ -18435,7 +18449,8 @@ function FloorModeView() {
                 }
                 if (items.length === 0) return null;
                 return (
-                  <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <details className="rounded-xl px-3 py-2.5" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <summary className="min-h-11 flex cursor-pointer items-center text-sm font-bold tracking-wide">Frontline details</summary>
                     <div className="text-[9px] font-bold tracking-[0.18em] mb-2" style={{ color: "rgba(255,255,255,0.25)" }}>FRONTLINE</div>
                     <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(items.length, 4)}, 1fr)` }}>
                       {items.map((item: any, i: any) => (
@@ -18446,7 +18461,7 @@ function FloorModeView() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 );
               })()}
 
@@ -18458,12 +18473,27 @@ function FloorModeView() {
                 />
               )}
               {/* Action buttons */}
-              <div className="flex gap-3">
+              {(runStatus === "running" || runStatus === "paused") && (
+                <div className="grid grid-cols-3 gap-2" aria-label="Case corrections">
+                  <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
+                    const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
+                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                  }} className="min-h-12 rounded-xl text-lg font-bold" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
+                  <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
+                  <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
+                    const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
+                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                  }} disabled={v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {hasActiveStop ? (
                   <button
                     type="button"
                     onClick={endStop}
-                    className="flex-1 h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 animate-pulse transition-colors"
+                    className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 motion-safe:animate-pulse transition-colors"
                     style={{ background: "rgba(234,88,12,0.5)", color: "#fed7aa", border: "1px solid rgba(234,88,12,0.4)" }}
                   >
                     <CircleDot className="w-5 h-5" /> End Stop
@@ -18472,7 +18502,7 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: "rgba(127,29,29,0.45)", color: "#fca5a5", border: "1px solid rgba(239,68,68,0.2)" }}
                   >
                     🛑 Log Stop
@@ -18482,7 +18512,8 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={pauseRun}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    data-testid="floor-pause-run"
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: "rgba(255,255,255,0.06)", color: "#fbbf24", border: "1px solid rgba(255,255,255,0.08)" }}
                   >
                     ⏸ Pause
@@ -18492,7 +18523,8 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={resumeRun}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    data-testid="floor-resume-run"
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
                   >
                     ▶ Resume
@@ -18512,13 +18544,41 @@ function FloorModeView() {
                       form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                       form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
-                    className="flex-[1.3] h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
+                    data-testid="floor-skid-done"
+                    className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: accentBar, color: bg }}
                   >
                     ✅ Skid Done
                   </button>
                 )}
+                {(runStatus === "running" || runStatus === "paused") && (
+                  <button
+                    type="button"
+                    data-testid="floor-complete-run"
+                    onClick={() => setConfirmComplete(true)}
+                    className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: "rgba(127,29,29,0.65)", color: "#fecaca", border: "1px solid rgba(248,113,113,0.35)" }}
+                  >
+                    <Square className="w-5 h-5 fill-current" /> Complete Run
+                  </button>
+                )}
               </div>
+              <AlertDialog open={confirmComplete} onOpenChange={setConfirmComplete}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Complete this run?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This ends production tracking for {currentRun ? runLabel(currentRun) : "the active run"} and advances to the next queued run.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Keep running</AlertDialogCancel>
+                    <AlertDialogAction data-testid="floor-confirm-complete-run" className="bg-red-700 hover:bg-red-600" onClick={() => endRun(currentRun?.id)}>
+                      Complete run
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             </div>
           </div>
