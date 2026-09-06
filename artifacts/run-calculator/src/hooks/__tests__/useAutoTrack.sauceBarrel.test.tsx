@@ -234,3 +234,60 @@ describe("useAutoTrack server due-now verdict (step 6b)", () => {
     expect(claim.mock.calls[0][0]).toMatchObject({ channel: "sauce-barrel", dueAt: 10 });
   });
 });
+
+describe("server-owned net-second suppression (Task 1)", () => {
+  it("skips the redundant local claim while a fresh server schedule says not due", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    const { rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(5, claim), // local due at 10 net-seconds
+    });
+
+    publishAutoTrackSchedule({
+      runId: "sauce-auto",
+      generation: "sauce-auto:started",
+      atMs: Date.now(),
+      entries: [
+        { channel: "sauce-barrel", dueAt: 10, dueNow: false, nextDueAt: 20, canonical: false },
+      ],
+    });
+
+    // The verdict says NOT due; however far past the local due time it gets, a
+    // connected tab must not re-fire its own claim (the server executes it).
+    rerender(props(25, claim));
+    rerender(props(26, claim));
+    rerender(props(40, claim));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("restores the local elapsed fallback after the fresh verdict goes stale", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    const { rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(5, claim),
+    });
+    publishAutoTrackSchedule({
+      runId: "sauce-auto",
+      generation: "sauce-auto:started",
+      atMs: Date.now(),
+      entries: [
+        { channel: "sauce-barrel", dueAt: 10, dueNow: false, nextDueAt: 20, canonical: false },
+      ],
+    });
+    rerender(props(25, claim));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim).not.toHaveBeenCalled();
+
+    // 46s later (3 missed heartbeats) the latch expires: local fallback resumes.
+    rerender(props(26, claim, {}, { nowTime: new Date(1_700_000_000_000 + 46_000) }));
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+    expect(claim.mock.calls[0][0]).toMatchObject({ channel: "sauce-barrel", dueAt: 10 });
+  });
+});
