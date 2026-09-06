@@ -1019,7 +1019,7 @@ export const WasteInsightResponse = zod.object({
  * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), and returns the authoritative deterministic discrepancy list. Available to any signed-in user.
  * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
-export const AiSpecReconcileBody = zod.object({
+export const OperationsSpecReconciliationBody = zod.object({
   "specSheetId": zod.number().int().describe('The id of the saved spec sheet to check against'),
   "currentRecipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1046,7 +1046,7 @@ export const AiSpecReconcileBody = zod.object({
 }).describe('A brand+flavor profile reduced to the run-setup spec fields the reconcile diff needs (die type, sauce oz\/pizza, applicator and pepperoni slots). Extra fields are allowed so a richer profile object passes through.')).optional().describe('The app\'s current brand+flavor profiles, so the diff can also compare profile spec fields (die\/sauce\/applicators\/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared.')
 })
 
-export const AiSpecReconcileResponse = zod.object({
+export const OperationsSpecReconciliationResponse = zod.object({
   "specSheetId": zod.number().int(),
   "discrepancies": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1057,10 +1057,7 @@ export const AiSpecReconcileResponse = zod.object({
   "currentLbs": zod.number().optional(),
   "message": zod.string()
 })),
-  "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
@@ -1068,7 +1065,7 @@ export const AiSpecReconcileResponse = zod.object({
  * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint validates and returns that exact deterministic discrepancy list. It never invents or applies anything. Available to any signed-in user.
  * @summary Return already-computed mix discrepancies; read-only
  */
-export const AiMixReconcileBody = zod.object({
+export const OperationsMixReconciliationBody = zod.object({
   "label": zod.string().optional().describe('Optional label for what was compared (e.g. the sheet name)'),
   "discrepancies": zod.array(zod.object({
   "source": zod.enum(['premix', 'spec']),
@@ -1083,11 +1080,19 @@ export const AiMixReconcileBody = zod.object({
 })).describe('The deterministic discrepancies computed client-side')
 })
 
-export const AiMixReconcileResponse = zod.object({
-  "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+export const OperationsMixReconciliationResponse = zod.object({
+  "discrepancies": zod.array(zod.object({
+  "source": zod.enum(['premix', 'spec']),
+  "type": zod.enum(['missing-mix', 'missing-component', 'extra-component', 'amount-mismatch', 'pull-timing-mismatch']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "mixName": zod.string(),
+  "ingredient": zod.string().optional(),
+  "sheetPerPizza": zod.number().optional(),
+  "mixPerPizza": zod.number().optional(),
+  "message": zod.string()
+})).describe('The validated deterministic discrepancies supplied by the client'),
+  "generatedAt": zod.number()
 })
 
 
@@ -1095,7 +1100,7 @@ export const AiMixReconcileResponse = zod.object({
  * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, deterministic plain-language recap for floor staff and managers. Read-only — never writes or commits run data.
  * @summary Plain-language end-of-day / weekly production recap; read-only
  */
-export const AiSummaryBody = zod.object({
+export const OperationsRecapBody = zod.object({
   "scope": zod.enum(['day', 'week']).describe('Whether to recap a single day or a rolling week'),
   "date": zod.string().describe('ISO date for the day, or the week-ending date for a weekly recap'),
   "nowMs": zod.number().describe('Client clock in epoch ms'),
@@ -1112,7 +1117,7 @@ export const AiSummaryBody = zod.object({
   "wasteFlaggedCount": zod.number().optional().describe('Inventory items flagged at-risk \/ waste within the scope (optional)')
 })
 
-export const AiSummaryResponse = zod.object({
+export const OperationsRecapResponse = zod.object({
   "summary": zod.string().describe('Deterministic plain-language recap'),
   "stats": zod.object({
   "scope": zod.enum(['day', 'week']),
@@ -1133,9 +1138,7 @@ export const AiSummaryResponse = zod.object({
   "wasteFlaggedCount": zod.number(),
   "hasData": zod.boolean()
 }).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('Compatibility field; deterministic responses return false'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
@@ -1270,14 +1273,14 @@ export const GetShiftHandoffDigestResponse = zod.object({
 
 
 /**
- * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
- * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ * Reads the recorded incident log and deterministically groups recurring reports and crashes by screen and platform. Counts and descriptions come only from recorded incidents; the endpoint never invents incidents or edits anything. Read-only and advisory.
+ * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
-export const AiIncidentClustersBody = zod.object({
+export const OperationsIncidentPatternsBody = zod.object({
   "lookbackDays": zod.number().optional().describe('Only cluster incidents created within this many days (default 30)')
 }).describe('No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.')
 
-export const AiIncidentClustersResponse = zod.object({
+export const OperationsIncidentPatternsResponse = zod.object({
   "clusters": zod.array(zod.object({
   "theme": zod.string().describe('Short human-readable label for the grouped issue'),
   "rootCauseHypothesis": zod.string().describe('Plain-language guess at what these incidents share'),
@@ -1288,8 +1291,7 @@ export const AiIncidentClustersResponse = zod.object({
 })),
   "totalIncidents": zod.number().describe('How many incidents were considered'),
   "note": zod.string().optional().describe('Optional explanation (e.g. too few incidents to cluster)'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI proposed the grouping; false for the deterministic fallback')
+  "generatedAt": zod.number()
 })
 
 
@@ -1297,7 +1299,7 @@ export const AiIncidentClustersResponse = zod.object({
  * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. Detection and descriptions are fully deterministic. Read-only — never edits or commits run data.
  * @summary Flag production runs that drifted from their historical norm; read-only
  */
-export const AiAnomaliesBody = zod.object({
+export const OperationsAnomalyDetectionBody = zod.object({
   "today": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -1316,7 +1318,7 @@ export const AiAnomaliesBody = zod.object({
 }).describe('One finished run, in the flat shape both apps produce for summaries.')).describe('Recent finished runs from prior days (baseline pool)')
 })
 
-export const AiAnomaliesResponse = zod.object({
+export const OperationsAnomalyDetectionResponse = zod.object({
   "anomalies": zod.array(zod.object({
   "runLabel": zod.string(),
   "brand": zod.string(),
@@ -1332,9 +1334,7 @@ export const AiAnomaliesResponse = zod.object({
   "baselineRuns": zod.number(),
   "summary": zod.string().describe('Deterministic summary, or empty when nothing was flagged'),
   "note": zod.string().optional().describe('Optional explanation (e.g. not enough history to judge)'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('Compatibility field; deterministic responses return false'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
@@ -1342,7 +1342,7 @@ export const AiAnomaliesResponse = zod.object({
  * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side by the shared @workspace/schedule-optimize library. Read-only — never edits or commits the schedule.
  * @summary Suggest a deterministic run order for the day; read-only
  */
-export const AiScheduleOptimizeBody = zod.object({
+export const OperationsScheduleOrderingBody = zod.object({
   "runs": zod.array(zod.object({
   "id": zod.string(),
   "label": zod.string().describe('Human label for messaging, e.g. \"Run 2 · Margherita\"'),
@@ -1363,7 +1363,7 @@ export const AiScheduleOptimizeBody = zod.object({
 }).describe('A factory sequence production rule (only sequence-type rules affect ordering).')).optional().describe('Factory production rules (optional; only sequence rules apply)')
 })
 
-export const AiScheduleOptimizeResponse = zod.object({
+export const OperationsScheduleOrderingResponse = zod.object({
   "order": zod.array(zod.string()).describe('Suggested run order (run ids), best-first'),
   "changed": zod.boolean().describe('True when the suggested order differs from the input order'),
   "improved": zod.boolean().describe('True when the suggested order is strictly better than the input'),
@@ -1379,9 +1379,7 @@ export const AiScheduleOptimizeResponse = zod.object({
 }),
   "summary": zod.string().describe('Deterministic summary, or empty when no improvement is available'),
   "note": zod.string().optional().describe('Optional explanation (e.g. already optimally ordered)'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('Compatibility field; deterministic responses return false'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 

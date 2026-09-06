@@ -20,6 +20,8 @@ tags:
     description: Staff roles and access control
   - name: ai
     description: AI assistant (optimization recommendations)
+  - name: operationsInsights
+    description: Deterministic operational analysis and reconciliation
   - name: incidents
     description: Issue reports, crash capture, and AI diagnosis
   - name: duplicateReviews
@@ -947,10 +949,10 @@ paths:
         "502":
           description: AI provider error
 
-  /ai/spec-reconcile:
+  /operations-insights/spec-reconciliation:
     post:
-      operationId: aiSpecReconcile
-      tags: [ai]
+      operationId: operationsSpecReconciliation
+      tags: [operationsInsights]
       summary: Cross-reference a saved spec sheet against the current recipes; read-only
       description: >-
         Loads the saved spec sheet by id, deterministically diffs its recipes
@@ -975,10 +977,10 @@ paths:
         "404":
           description: No saved spec sheet with that id
 
-  /ai/mix-reconcile:
+  /operations-insights/mix-reconciliation:
     post:
-      operationId: aiMixReconcile
-      tags: [ai]
+      operationId: operationsMixReconciliation
+      tags: [operationsInsights]
       summary: Return already-computed mix discrepancies; read-only
       description: >-
         The deterministic diff of the current mixes against the imported premix
@@ -1002,10 +1004,10 @@ paths:
         "400":
           description: Invalid input
 
-  /ai/summary:
+  /operations-insights/recap:
     post:
-      operationId: aiSummary
-      tags: [ai]
+      operationId: operationsRecap
+      tags: [operationsInsights]
       summary: Plain-language end-of-day / weekly production recap; read-only
       description: >-
         Given a day's (or rolling week's) runs — planned vs. produced cases,
@@ -1086,20 +1088,16 @@ paths:
         "403":
           description: Manager capability required
 
-  /ai/incident-clusters:
+  /operations-insights/incident-patterns:
     post:
-      operationId: aiIncidentClusters
-      tags: [ai]
-      summary: Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+      operationId: operationsIncidentPatterns
+      tags: [operationsInsights]
+      summary: Group recurring reported issues and crashes; manager-only, read-only
       description: >-
-        Reads the recorded incident log (manager-only) and groups recurring
-        reports and crashes into a small number of root-cause themes, each with a
-        plain-language hypothesis and a suggested next step. The AI only proposes
-        groupings and narration; the server verifies every incident id, recomputes
-        the per-theme counts deterministically, and never invents incidents or
-        edits anything. Read-only and advisory. Fail-safe: if the AI is
-        unavailable or returns nothing usable, a deterministic grouping (by screen
-        and platform) is returned instead so managers always get a useful view.
+        Reads the recorded incident log and deterministically groups recurring
+        reports and crashes by screen and platform. Counts and descriptions come
+        only from recorded incidents; the endpoint never invents incidents or
+        edits anything. Read-only and advisory.
       requestBody:
         required: false
         content:
@@ -1116,10 +1114,10 @@ paths:
         "400":
           description: Invalid input
 
-  /ai/anomalies:
+  /operations-insights/anomalies:
     post:
-      operationId: aiAnomalies
-      tags: [ai]
+      operationId: operationsAnomalyDetection
+      tags: [operationsInsights]
       summary: Flag production runs that drifted from their historical norm; read-only
       description: >-
         Given today's finished runs plus recent finished-run history, deterministically
@@ -1142,10 +1140,10 @@ paths:
         "400":
           description: Invalid input
 
-  /ai/schedule-optimize:
+  /operations-insights/schedule-order:
     post:
-      operationId: aiScheduleOptimize
-      tags: [ai]
+      operationId: operationsScheduleOrdering
+      tags: [operationsInsights]
       summary: Suggest a deterministic run order for the day; read-only
       description: >-
         Given the runs planned for one day, deterministically proposes an ordering that
@@ -5928,8 +5926,6 @@ components:
         - specSheetId
         - discrepancies
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         specSheetId:
           type: integer
@@ -5937,16 +5933,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReconcileDiscrepancy"
-        summary:
-          type: string
-          description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     MixComponentSpec:
       type: object
@@ -6181,20 +6169,16 @@ components:
     MixReconcileResult:
       type: object
       required:
+        - discrepancies
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
-        summary:
-          type: string
-          description: Advisory plain-language summary; absent/empty when the AI is unavailable
+        discrepancies:
+          type: array
+          description: The validated deterministic discrepancies supplied by the client
+          items:
+            $ref: "#/components/schemas/MixDiscrepancyWire"
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     SummaryRunInput:
       type: object
@@ -6323,8 +6307,6 @@ components:
         - summary
         - stats
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         summary:
           type: string
@@ -6333,11 +6315,6 @@ components:
           $ref: "#/components/schemas/SummaryStats"
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: Compatibility field; deterministic responses return false
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     OperationalReportInput:
       type: object
@@ -6516,7 +6493,6 @@ components:
         - clusters
         - totalIncidents
         - generatedAt
-        - aiGenerated
       properties:
         clusters:
           type: array
@@ -6530,9 +6506,6 @@ components:
           description: Optional explanation (e.g. too few incidents to cluster)
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI proposed the grouping; false for the deterministic fallback
 
     AnomalyRunInput:
       type: object
@@ -6617,8 +6590,6 @@ components:
         - baselineRuns
         - summary
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         anomalies:
           type: array
@@ -6636,11 +6607,6 @@ components:
           description: Optional explanation (e.g. not enough history to judge)
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: Compatibility field; deterministic responses return false
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     ScheduleOptimizeRunInput:
       type: object
@@ -6740,8 +6706,6 @@ components:
         - after
         - summary
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         order:
           type: array
@@ -6766,11 +6730,6 @@ components:
           description: Optional explanation (e.g. already optimally ordered)
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: Compatibility field; deterministic responses return false
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     FillMissingField:
       type: object

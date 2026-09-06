@@ -15,7 +15,7 @@
 //     mix, because most products legitimately don't pre-blend anything.
 //
 // The diff is fully deterministic and runs on BOTH clients (instant, free); the
-// AI only narrates the already-computed discrepancies (see /ai/mix-reconcile).
+// The Operations Insights API validates the already-computed discrepancies.
 // Each reconcile also produces per-mix `items` carrying a `suggestedMix` so the
 // UI can offer a one-tap, manager-confirmed "apply" through the existing saveMixes
 // write path — nothing here mutates anything.

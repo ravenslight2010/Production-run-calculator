@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import * as GeneratedApi from "./generated/api";
 import {
-  AiAnomaliesResponse,
-  AiScheduleOptimizeResponse,
-  AiSummaryResponse,
+  OperationsAnomalyDetectionResponse,
+  OperationsIncidentPatternsResponse,
+  OperationsMixReconciliationResponse,
+  OperationsRecapResponse,
+  OperationsScheduleOrderingResponse,
+  OperationsSpecReconciliationResponse,
 } from "./generated/api";
 
 describe("generated Zod schema runtime contracts", () => {
-  it("keeps retained deterministic operation status contracts valid", () => {
+  it("keeps Operations Insights deterministic response contracts valid", () => {
     expect(
-      AiSummaryResponse.parse({
+      OperationsRecapResponse.parse({
         summary: "Production recap",
         stats: {
           scope: "day",
@@ -27,25 +30,21 @@ describe("generated Zod schema runtime contracts", () => {
           hasData: false,
         },
         generatedAt: 1,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-      }).aiStatus,
-    ).toBe("deterministic");
+      }).summary,
+    ).toBe("Production recap");
 
     expect(
-      AiAnomaliesResponse.parse({
+      OperationsAnomalyDetectionResponse.parse({
         anomalies: [],
         checkedRuns: 0,
         baselineRuns: 0,
         summary: "",
         generatedAt: 1,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-      }).aiStatus,
-    ).toBe("deterministic");
+      }).anomalies,
+    ).toEqual([]);
 
     expect(
-      AiScheduleOptimizeResponse.parse({
+      OperationsScheduleOrderingResponse.parse({
         order: [],
         changed: false,
         improved: false,
@@ -53,10 +52,43 @@ describe("generated Zod schema runtime contracts", () => {
         after: { allergenViolations: 0, ruleViolations: 0, changeovers: 0 },
         summary: "",
         generatedAt: 1,
-        aiGenerated: false,
-        aiStatus: "deterministic",
-      }).aiStatus,
-    ).toBe("deterministic");
+      }).improved,
+    ).toBe(false);
+
+    expect(
+      OperationsSpecReconciliationResponse.parse({
+        specSheetId: 1,
+        discrepancies: [],
+        generatedAt: 1,
+      }).discrepancies,
+    ).toEqual([]);
+
+    expect(
+      OperationsMixReconciliationResponse.parse({
+        discrepancies: [],
+        generatedAt: 1,
+      }).discrepancies,
+    ).toEqual([]);
+
+    expect(
+      OperationsIncidentPatternsResponse.parse({
+        clusters: [],
+        totalIncidents: 0,
+        generatedAt: 1,
+      }).clusters,
+    ).toEqual([]);
+  });
+
+  it("publishes permanent operation names without legacy AI contract names", () => {
+    expect("OperationsSpecReconciliationBody" in GeneratedApi).toBe(true);
+    expect("OperationsMixReconciliationBody" in GeneratedApi).toBe(true);
+    expect("OperationsIncidentPatternsBody" in GeneratedApi).toBe(true);
+    expect("AiSpecReconcileBody" in GeneratedApi).toBe(false);
+    expect("AiMixReconcileBody" in GeneratedApi).toBe(false);
+    expect("AiSummaryBody" in GeneratedApi).toBe(false);
+    expect("AiAnomaliesBody" in GeneratedApi).toBe(false);
+    expect("AiScheduleOptimizeBody" in GeneratedApi).toBe(false);
+    expect("AiIncidentClustersBody" in GeneratedApi).toBe(false);
   });
 
   it("does not publish retired conversation-history schemas", () => {

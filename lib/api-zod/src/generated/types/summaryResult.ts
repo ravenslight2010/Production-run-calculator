@@ -5,7 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AiStatus } from './aiStatus';
 import type { SummaryStats } from './summaryStats';
 
 export interface SummaryResult {
@@ -13,7 +12,4 @@ export interface SummaryResult {
   summary: string;
   stats: SummaryStats;
   generatedAt: number;
-  /** Compatibility field; deterministic responses return false */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }

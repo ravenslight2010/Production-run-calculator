@@ -2768,7 +2768,8 @@ export async function commitSpecImport(
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
   // kept) so it can later be cross-referenced against the current recipe library
-  // (see /ai/spec-reconcile) and diffed by the next re-import of the same file
+  // (see /operations-insights/spec-reconciliation) and diffed by the next
+  // re-import of the same file
   // (see the prune above). Profile-only sheets snapshot too so their re-imports
   // can also skip unchanged profiles. Best-effort: the import already applied
   // locally, so a failed snapshot must never surface as an import error.

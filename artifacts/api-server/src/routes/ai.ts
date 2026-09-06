@@ -291,15 +291,17 @@ const mixReconcileRateStore =
 
 // Cross-reference a saved spec sheet against the current recipe library. The
 // diff is deterministic (the shared @workspace/spec-reconcile lib runs here AND
-// on both clients), so the discrepancy list is authoritative. The historical
-// /ai URL remains for client compatibility; no model or generated summary is
-// involved. Read-only; not manager-gated.
+// on both clients), so the discrepancy list is authoritative. The stable
+// Operations Insights route exposes only deterministic fields; the historical
+// /ai URL retains compatibility metadata for older clients. Read-only; not
+// manager-gated.
 router.post(
-  "/ai/spec-reconcile",
+  ["/operations-insights/spec-reconciliation", "/ai/spec-reconcile"],
   rateLimit({
     windowMs: SPEC_RECONCILE_RATE_WINDOW_MS,
     max: SPEC_RECONCILE_RATE_MAX,
-    keyGenerator: (req) => `ai-spec-reconcile:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) =>
+      `operations-spec-reconciliation:${req.userId ?? req.ip ?? "unknown"}`,
     store: specReconcileRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -334,7 +336,7 @@ router.post(
       dataRecipesRaw = data.recipes;
       dataProfilesRaw = data.profiles;
     } catch (err) {
-      req.log.error({ err }, "ai-spec-reconcile failed to load saved spec sheet");
+      req.log.error({ err }, "operations spec reconciliation failed to load saved spec sheet");
       res.status(500).json({ error: "Failed to load saved spec sheet" });
       return;
     }
@@ -362,24 +364,26 @@ router.post(
     res.json({
       specSheetId: validation.data.specSheetId,
       discrepancies,
-      summary: "",
-      aiGenerated: false,
-      aiStatus: "deterministic",
       generatedAt: Date.now(),
+      ...(req.path.startsWith("/ai/")
+        ? { summary: "", aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );
 
 // Return the already-computed mix discrepancies. The deterministic diff (the
-// shared @workspace/mix-reconcile lib) runs on both clients. The historical /ai
-// URL remains for client compatibility, but no model or generated summary is
-// involved. Not manager-gated (any signed-in user).
+// shared @workspace/mix-reconcile lib) runs on both clients. The stable
+// Operations Insights route exposes only deterministic fields; the historical
+// /ai URL retains compatibility metadata. Not manager-gated (any signed-in
+// user).
 router.post(
-  "/ai/mix-reconcile",
+  ["/operations-insights/mix-reconciliation", "/ai/mix-reconcile"],
   rateLimit({
     windowMs: MIX_RECONCILE_RATE_WINDOW_MS,
     max: MIX_RECONCILE_RATE_MAX,
-    keyGenerator: (req) => `ai-mix-reconcile:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) =>
+      `operations-mix-reconciliation:${req.userId ?? req.ip ?? "unknown"}`,
     store: mixReconcileRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -393,10 +397,10 @@ router.post(
 
     res.json({
       discrepancies,
-      summary: "",
-      aiGenerated: false,
-      aiStatus: "deterministic",
       generatedAt: Date.now(),
+      ...(req.path.startsWith("/ai/")
+        ? { summary: "", aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );
@@ -410,14 +414,15 @@ router.post(
 
 // End-of-day / weekly production recap. Stats and the plain-language summary are
 // computed deterministically from the supplied runs (shared
-// @workspace/day-summary lib). The historical /ai URL remains for compatibility;
-// this endpoint never calls a model or writes run data.
+// @workspace/day-summary lib). The stable Operations Insights route exposes the
+// deterministic contract; the historical /ai URL retains compatibility
+// metadata. This endpoint never calls a model or writes run data.
 router.post(
-  "/ai/summary",
+  ["/operations-insights/recap", "/ai/summary"],
   rateLimit({
     windowMs: SUMMARY_RATE_WINDOW_MS,
     max: SUMMARY_RATE_MAX,
-    keyGenerator: (req) => `ai-summary:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) => `operations-recap:${req.userId ?? req.ip ?? "unknown"}`,
     store: summaryRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -435,22 +440,24 @@ router.post(
       summary: fallback,
       stats,
       generatedAt: Date.now(),
-      aiGenerated: false,
-      aiStatus: "deterministic",
+      ...(req.path.startsWith("/ai/")
+        ? { aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );
 
 // Predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
 // stoppages vs. a per-product baseline) is computed deterministically from the
-// supplied runs (shared @workspace/anomaly lib). The historical /ai URL remains
-// for compatibility; no model narration is involved.
+// supplied runs (shared @workspace/anomaly lib). The stable Operations Insights
+// route exposes the deterministic contract; the historical /ai URL retains
+// compatibility metadata.
 router.post(
-  "/ai/anomalies",
+  ["/operations-insights/anomalies", "/ai/anomalies"],
   rateLimit({
     windowMs: ANOMALY_RATE_WINDOW_MS,
     max: ANOMALY_RATE_MAX,
-    keyGenerator: (req) => `ai-anomalies:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) => `operations-anomalies:${req.userId ?? req.ip ?? "unknown"}`,
     store: anomalyRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -476,8 +483,9 @@ router.post(
         ...baseResponse,
         summary: "",
         note: "Not enough run history yet to spot anomalies.",
-        aiGenerated: false,
-        aiStatus: "deterministic",
+        ...(req.path.startsWith("/ai/")
+          ? { aiGenerated: false, aiStatus: "deterministic" as const }
+          : {}),
       });
       return;
     }
@@ -485,8 +493,9 @@ router.post(
     res.json({
       ...baseResponse,
       summary: "",
-      aiGenerated: false,
-      aiStatus: "deterministic",
+      ...(req.path.startsWith("/ai/")
+        ? { aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );
@@ -494,16 +503,17 @@ router.post(
 // Schedule-order suggestion. Given the runs planned for one day, the server
 // deterministically proposes an ordering (allergen runs end-of-day, similar
 // brand/die grouped to cut changeovers, factory sequence rules honored — shared
-// @workspace/schedule-optimize lib). The historical /ai URL remains for client
-// compatibility. Read-only — the manager applies the returned order through the
-// normal move path.
+// @workspace/schedule-optimize lib). The stable Operations Insights route
+// exposes the deterministic contract; the historical /ai URL retains
+// compatibility metadata. Read-only — the manager applies the returned order
+// through the normal move path.
 router.post(
-  "/ai/schedule-optimize",
+  ["/operations-insights/schedule-order", "/ai/schedule-optimize"],
   requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: SCHEDULE_RATE_WINDOW_MS,
     max: SCHEDULE_RATE_MAX,
-    keyGenerator: (req) => `ai-schedule-optimize:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) => `operations-schedule-order:${req.userId ?? req.ip ?? "unknown"}`,
     store: scheduleRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -535,8 +545,9 @@ router.post(
         ...baseResponse,
         summary: "",
         note: "Not enough runs to reorder.",
-        aiGenerated: false,
-        aiStatus: "deterministic",
+        ...(req.path.startsWith("/ai/")
+          ? { aiGenerated: false, aiStatus: "deterministic" as const }
+          : {}),
       });
       return;
     }
@@ -545,8 +556,9 @@ router.post(
         ...baseResponse,
         summary: "",
         note: "Runs are already in a good order.",
-        aiGenerated: false,
-        aiStatus: "deterministic",
+        ...(req.path.startsWith("/ai/")
+          ? { aiGenerated: false, aiStatus: "deterministic" as const }
+          : {}),
       });
       return;
     }
@@ -554,8 +566,9 @@ router.post(
     res.json({
       ...baseResponse,
       summary: "",
-      aiGenerated: false,
-      aiStatus: "deterministic",
+      ...(req.path.startsWith("/ai/")
+        ? { aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );

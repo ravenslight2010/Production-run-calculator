@@ -203,7 +203,7 @@ describe("buildDiagnosisPrompt — user-controlled fields are JSON-encoded", () 
 // Cross-route rate-limit isolation
 // ---------------------------------------------------------------------------
 
-// POST /incidents and POST /ai/incident-clusters use separate Postgres-backed
+// POST /incidents and POST /operations-insights/incident-patterns use separate Postgres-backed
 // rate-limit stores and distinct namespaced keys. Exhausting the quota on one
 // endpoint must NOT deny the other. This test drives the rateLimit middleware
 // directly with two separate limiters (mimicking the two routes) and verifies

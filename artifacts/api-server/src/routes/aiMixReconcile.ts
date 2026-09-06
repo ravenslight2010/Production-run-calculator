@@ -1,4 +1,4 @@
-import { AiMixReconcileBody } from "@workspace/api-zod";
+import { OperationsMixReconciliationBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   type MixDiscrepancy,
@@ -13,7 +13,7 @@ export const MAX_DISCREPANCIES_IN_PROMPT = 300;
 export const MAX_DISCREPANCIES = 600;
 export const MAX_LABEL_CHARS = 200;
 
-export type MixReconcileInput = z.infer<typeof AiMixReconcileBody>;
+export type MixReconcileInput = z.infer<typeof OperationsMixReconciliationBody>;
 
 export type MixReconcileValidationResult =
   | { ok: true; data: MixReconcileInput }
@@ -24,7 +24,7 @@ export type MixReconcileValidationResult =
 // client — the body carries the EXACT discrepancy list and the AI only narrates
 // it. Validate the envelope with the generated schema, then enforce the cost cap.
 export function validateMixReconcileBody(body: unknown): MixReconcileValidationResult {
-  const parsed = AiMixReconcileBody.safeParse(body);
+  const parsed = OperationsMixReconciliationBody.safeParse(body);
   if (!parsed.success) {
     return { ok: false, status: 400, error: parsed.error.message };
   }

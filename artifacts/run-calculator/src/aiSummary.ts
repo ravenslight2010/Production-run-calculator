@@ -1,15 +1,14 @@
 import type { FormValues, RunMeta, HistoryDay } from "./types";
 import { buildShapedRun } from "./runShaping";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
-import type { AiStatus } from "./aiStatus";
 
-// AI end-of-day / weekly production-recap client (raw fetch, matches
+// Operations Insights end-of-day / weekly production-recap client.
 // Shapes the day's (or a rolling week's) runs through the shared deterministic
 // run mapping, then requests the recap facts.
 // Kept in lockstep with the mobile context/aiSummary.ts so both platforms send
 // identically-shaped data and show the same card (replit.md parity rule).
 
-// ── Types (mirror the OpenAPI /ai/summary contract) ──────────────────────────
+// ── Types (mirror the OpenAPI Operations Insights recap contract) ───────────
 export type SummaryScope = "day" | "week";
 
 export type SummaryRunInput = {
@@ -25,6 +24,7 @@ export type SummaryRunInput = {
 export type SummaryInput = {
   scope: SummaryScope;
   date: string;
+  nowMs: number;
   runs: SummaryRunInput[];
   incidentCount?: number;
   wasteFlaggedCount?: number;
@@ -56,8 +56,6 @@ export type SummaryResult = {
   summary: string;
   stats: SummaryStats;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
 };
 
 // Map one run (via the shared run mapper, keeping cases/downtime/stoppage
@@ -93,6 +91,7 @@ export function buildDaySummaryInput(args: {
   return {
     scope: "day",
     date: args.date,
+    nowMs: args.nowMs,
     runs,
     incidentCount: args.incidentCount,
     wasteFlaggedCount: args.wasteFlaggedCount,
@@ -121,6 +120,7 @@ export function buildWeekSummaryInput(args: {
   return {
     scope: "week",
     date: args.date,
+    nowMs: args.nowMs,
     runs,
     incidentCount: args.incidentCount,
     wasteFlaggedCount: args.wasteFlaggedCount,
@@ -129,7 +129,7 @@ export function buildWeekSummaryInput(args: {
 
 // ── API client (raw fetch, matches inventoryShared) ──────────────────────────
 export async function requestSummary(input: SummaryInput): Promise<SummaryResult> {
-  const res = await fetch("/api/ai/summary", {
+  const res = await fetch("/api/operations-insights/recap", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -14,7 +14,6 @@
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import type { Discrepancy, ReconcileRecipe, ReconcileProfile } from "@workspace/spec-reconcile";
 import { inventoryClientId } from "./inventoryShared";
-import type { AiStatus } from "./aiStatus";
 import {
   loadDoughRecipePresets,
   loadFrontlineRecipePresets,
@@ -132,8 +131,6 @@ export type SpecReconcileResult = {
   specSheetId: number;
   discrepancies: Discrepancy[];
   generatedAt: number;
-  summary?: string;
-  aiStatus?: AiStatus;
 };
 
 function authHeaders(json = false): Record<string, string> {
@@ -266,13 +263,12 @@ export function loadCurrentReconcileProfiles(
 
 /**
  * Cross-reference one saved spec sheet against the current recipe library and
- * profiles. The server runs the deterministic diff and adds an advisory
- * plain-language summary; the discrepancy list is always returned even if the
- * AI is down. Current profiles are sent for the brand+flavors this sheet covers.
+ * profiles. The server runs and returns the deterministic diff. Current
+ * profiles are sent for the brand+flavors this sheet covers.
  */
 export async function reconcileSpecSheet(sheet: SavedSpecSheet): Promise<SpecReconcileResult> {
   const specProfiles = Array.isArray(sheet.data?.profiles) ? sheet.data.profiles : [];
-  const res = await fetch("/api/ai/spec-reconcile", {
+  const res = await fetch("/api/operations-insights/spec-reconciliation", {
     method: "POST",
     headers: authHeaders(true),
     body: JSON.stringify({

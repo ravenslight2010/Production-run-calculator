@@ -9,7 +9,7 @@ const router: IRouter = Router();
 
 // Saved premix sheets: snapshots of imported premix workbooks (the Mix[] they
 // declared) so the current mixes can later be reconciled against them (see
-// /ai/mix-reconcile). Shared factory-wide across all signed-in users (the
+// /operations-insights/mix-reconciliation). Shared factory-wide across all signed-in users (the
 // router-level requireAuth gates them) and scope-isolated like the learned
 // spec-import aliases. Only the two most recent snapshots are kept; older ones
 // are pruned on save. Mirrors savedSpecSheets.ts exactly.

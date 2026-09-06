@@ -3283,19 +3283,19 @@ export const useWasteInsight = <TError = ErrorType<void>,
       return useMutation(getWasteInsightMutationOptions(options));
     }
 
-export const getAiSpecReconcileUrl = () => {
+export const getOperationsSpecReconciliationUrl = () => {
 
 
 
 
-  return `/api/ai/spec-reconcile`
+  return `/api/operations-insights/spec-reconciliation`
 }
 
 /**
  * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), and returns the authoritative deterministic discrepancy list. Available to any signed-in user.
  * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
-export const aiSpecReconcile = async (specReconcileInput: SpecReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecReconcileResult> => {
+export const operationsSpecReconciliation = async (specReconcileInput: SpecReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecReconcileResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3303,7 +3303,7 @@ export const aiSpecReconcile = async (specReconcileInput: SpecReconcileInput, op
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<SpecReconcileResult>(getAiSpecReconcileUrl(),
+return customFetch<SpecReconcileResult>(getOperationsSpecReconciliationUrl(),
   {
     ...options,
     method: 'POST',
@@ -3316,11 +3316,11 @@ return customFetch<SpecReconcileResult>(getAiSpecReconcileUrl(),
 
 
 
-export const getAiSpecReconcileMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,AiSpecReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,AiSpecReconcileMutationVariables, TContext> => {
+export const getOperationsSpecReconciliationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsSpecReconciliation>>, TError,OperationsSpecReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsSpecReconciliation>>, TError,OperationsSpecReconciliationMutationVariables, TContext> => {
 
-const mutationKey = ['aiSpecReconcile'];
+const mutationKey = ['operationsSpecReconciliation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3330,10 +3330,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSpecReconcile>>, AiSpecReconcileMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsSpecReconciliation>>, OperationsSpecReconciliationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiSpecReconcile(data,requestOptions)
+          return  operationsSpecReconciliation(data,requestOptions)
         }
 
 
@@ -3343,38 +3343,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiSpecReconcileMutationResult = NonNullable<Awaited<ReturnType<typeof aiSpecReconcile>>>
-    export type AiSpecReconcileMutationBody = BodyType<SpecReconcileInput>
-    export type AiSpecReconcileMutationError = ErrorType<void>
-    export type AiSpecReconcileMutationVariables = {data: BodyType<SpecReconcileInput>}
+    export type OperationsSpecReconciliationMutationResult = NonNullable<Awaited<ReturnType<typeof operationsSpecReconciliation>>>
+    export type OperationsSpecReconciliationMutationBody = BodyType<SpecReconcileInput>
+    export type OperationsSpecReconciliationMutationError = ErrorType<void>
+    export type OperationsSpecReconciliationMutationVariables = {data: BodyType<SpecReconcileInput>}
 
     /**
  * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
-export const useAiSpecReconcile = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,AiSpecReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsSpecReconciliation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsSpecReconciliation>>, TError,OperationsSpecReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiSpecReconcile>>,
+        Awaited<ReturnType<typeof operationsSpecReconciliation>>,
         TError,
-        AiSpecReconcileMutationVariables,
+        OperationsSpecReconciliationMutationVariables,
         TContext
       > => {
-      return useMutation(getAiSpecReconcileMutationOptions(options));
+      return useMutation(getOperationsSpecReconciliationMutationOptions(options));
     }
 
-export const getAiMixReconcileUrl = () => {
+export const getOperationsMixReconciliationUrl = () => {
 
 
 
 
-  return `/api/ai/mix-reconcile`
+  return `/api/operations-insights/mix-reconciliation`
 }
 
 /**
  * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint validates and returns that exact deterministic discrepancy list. It never invents or applies anything. Available to any signed-in user.
  * @summary Return already-computed mix discrepancies; read-only
  */
-export const aiMixReconcile = async (mixReconcileInput: MixReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<MixReconcileResult> => {
+export const operationsMixReconciliation = async (mixReconcileInput: MixReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<MixReconcileResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3382,7 +3382,7 @@ export const aiMixReconcile = async (mixReconcileInput: MixReconcileInput, optio
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<MixReconcileResult>(getAiMixReconcileUrl(),
+return customFetch<MixReconcileResult>(getOperationsMixReconciliationUrl(),
   {
     ...options,
     method: 'POST',
@@ -3395,11 +3395,11 @@ return customFetch<MixReconcileResult>(getAiMixReconcileUrl(),
 
 
 
-export const getAiMixReconcileMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,AiMixReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,AiMixReconcileMutationVariables, TContext> => {
+export const getOperationsMixReconciliationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsMixReconciliation>>, TError,OperationsMixReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsMixReconciliation>>, TError,OperationsMixReconciliationMutationVariables, TContext> => {
 
-const mutationKey = ['aiMixReconcile'];
+const mutationKey = ['operationsMixReconciliation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3409,10 +3409,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMixReconcile>>, AiMixReconcileMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsMixReconciliation>>, OperationsMixReconciliationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiMixReconcile(data,requestOptions)
+          return  operationsMixReconciliation(data,requestOptions)
         }
 
 
@@ -3422,38 +3422,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiMixReconcileMutationResult = NonNullable<Awaited<ReturnType<typeof aiMixReconcile>>>
-    export type AiMixReconcileMutationBody = BodyType<MixReconcileInput>
-    export type AiMixReconcileMutationError = ErrorType<void>
-    export type AiMixReconcileMutationVariables = {data: BodyType<MixReconcileInput>}
+    export type OperationsMixReconciliationMutationResult = NonNullable<Awaited<ReturnType<typeof operationsMixReconciliation>>>
+    export type OperationsMixReconciliationMutationBody = BodyType<MixReconcileInput>
+    export type OperationsMixReconciliationMutationError = ErrorType<void>
+    export type OperationsMixReconciliationMutationVariables = {data: BodyType<MixReconcileInput>}
 
     /**
  * @summary Return already-computed mix discrepancies; read-only
  */
-export const useAiMixReconcile = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,AiMixReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsMixReconciliation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsMixReconciliation>>, TError,OperationsMixReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiMixReconcile>>,
+        Awaited<ReturnType<typeof operationsMixReconciliation>>,
         TError,
-        AiMixReconcileMutationVariables,
+        OperationsMixReconciliationMutationVariables,
         TContext
       > => {
-      return useMutation(getAiMixReconcileMutationOptions(options));
+      return useMutation(getOperationsMixReconciliationMutationOptions(options));
     }
 
-export const getAiSummaryUrl = () => {
+export const getOperationsRecapUrl = () => {
 
 
 
 
-  return `/api/ai/summary`
+  return `/api/operations-insights/recap`
 }
 
 /**
  * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, deterministic plain-language recap for floor staff and managers. Read-only — never writes or commits run data.
  * @summary Plain-language end-of-day / weekly production recap; read-only
  */
-export const aiSummary = async (summaryInput: SummaryInput, options?: Parameters<typeof customFetch>[1]): Promise<SummaryResult> => {
+export const operationsRecap = async (summaryInput: SummaryInput, options?: Parameters<typeof customFetch>[1]): Promise<SummaryResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3461,7 +3461,7 @@ export const aiSummary = async (summaryInput: SummaryInput, options?: Parameters
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<SummaryResult>(getAiSummaryUrl(),
+return customFetch<SummaryResult>(getOperationsRecapUrl(),
   {
     ...options,
     method: 'POST',
@@ -3474,11 +3474,11 @@ return customFetch<SummaryResult>(getAiSummaryUrl(),
 
 
 
-export const getAiSummaryMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,AiSummaryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,AiSummaryMutationVariables, TContext> => {
+export const getOperationsRecapMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsRecap>>, TError,OperationsRecapMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsRecap>>, TError,OperationsRecapMutationVariables, TContext> => {
 
-const mutationKey = ['aiSummary'];
+const mutationKey = ['operationsRecap'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3488,10 +3488,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSummary>>, AiSummaryMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsRecap>>, OperationsRecapMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiSummary(data,requestOptions)
+          return  operationsRecap(data,requestOptions)
         }
 
 
@@ -3501,23 +3501,23 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiSummaryMutationResult = NonNullable<Awaited<ReturnType<typeof aiSummary>>>
-    export type AiSummaryMutationBody = BodyType<SummaryInput>
-    export type AiSummaryMutationError = ErrorType<void>
-    export type AiSummaryMutationVariables = {data: BodyType<SummaryInput>}
+    export type OperationsRecapMutationResult = NonNullable<Awaited<ReturnType<typeof operationsRecap>>>
+    export type OperationsRecapMutationBody = BodyType<SummaryInput>
+    export type OperationsRecapMutationError = ErrorType<void>
+    export type OperationsRecapMutationVariables = {data: BodyType<SummaryInput>}
 
     /**
  * @summary Plain-language end-of-day / weekly production recap; read-only
  */
-export const useAiSummary = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,AiSummaryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsRecap = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsRecap>>, TError,OperationsRecapMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiSummary>>,
+        Awaited<ReturnType<typeof operationsRecap>>,
         TError,
-        AiSummaryMutationVariables,
+        OperationsRecapMutationVariables,
         TContext
       > => {
-      return useMutation(getAiSummaryMutationOptions(options));
+      return useMutation(getOperationsRecapMutationOptions(options));
     }
 
 export const getExportOperationalReportUrl = () => {
@@ -3684,19 +3684,19 @@ export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getSh
 
 
 
-export const getAiIncidentClustersUrl = () => {
+export const getOperationsIncidentPatternsUrl = () => {
 
 
 
 
-  return `/api/ai/incident-clusters`
+  return `/api/operations-insights/incident-patterns`
 }
 
 /**
- * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
- * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ * Reads the recorded incident log and deterministically groups recurring reports and crashes by screen and platform. Counts and descriptions come only from recorded incidents; the endpoint never invents incidents or edits anything. Read-only and advisory.
+ * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
-export const aiIncidentClusters = async (incidentClustersInput?: IncidentClustersInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentClustersResult> => {
+export const operationsIncidentPatterns = async (incidentClustersInput?: IncidentClustersInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentClustersResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3704,7 +3704,7 @@ export const aiIncidentClusters = async (incidentClustersInput?: IncidentCluster
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<IncidentClustersResult>(getAiIncidentClustersUrl(),
+return customFetch<IncidentClustersResult>(getOperationsIncidentPatternsUrl(),
   {
     ...options,
     method: 'POST',
@@ -3717,11 +3717,11 @@ return customFetch<IncidentClustersResult>(getAiIncidentClustersUrl(),
 
 
 
-export const getAiIncidentClustersMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,AiIncidentClustersMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,AiIncidentClustersMutationVariables, TContext> => {
+export const getOperationsIncidentPatternsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsIncidentPatterns>>, TError,OperationsIncidentPatternsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsIncidentPatterns>>, TError,OperationsIncidentPatternsMutationVariables, TContext> => {
 
-const mutationKey = ['aiIncidentClusters'];
+const mutationKey = ['operationsIncidentPatterns'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3731,10 +3731,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiIncidentClusters>>, AiIncidentClustersMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsIncidentPatterns>>, OperationsIncidentPatternsMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiIncidentClusters(data,requestOptions)
+          return  operationsIncidentPatterns(data,requestOptions)
         }
 
 
@@ -3744,38 +3744,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiIncidentClustersMutationResult = NonNullable<Awaited<ReturnType<typeof aiIncidentClusters>>>
-    export type AiIncidentClustersMutationBody = BodyType<IncidentClustersInput> | undefined
-    export type AiIncidentClustersMutationError = ErrorType<void>
-    export type AiIncidentClustersMutationVariables = {data?: BodyType<IncidentClustersInput>}
+    export type OperationsIncidentPatternsMutationResult = NonNullable<Awaited<ReturnType<typeof operationsIncidentPatterns>>>
+    export type OperationsIncidentPatternsMutationBody = BodyType<IncidentClustersInput> | undefined
+    export type OperationsIncidentPatternsMutationError = ErrorType<void>
+    export type OperationsIncidentPatternsMutationVariables = {data?: BodyType<IncidentClustersInput>}
 
     /**
- * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
-export const useAiIncidentClusters = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,AiIncidentClustersMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsIncidentPatterns = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsIncidentPatterns>>, TError,OperationsIncidentPatternsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiIncidentClusters>>,
+        Awaited<ReturnType<typeof operationsIncidentPatterns>>,
         TError,
-        AiIncidentClustersMutationVariables,
+        OperationsIncidentPatternsMutationVariables,
         TContext
       > => {
-      return useMutation(getAiIncidentClustersMutationOptions(options));
+      return useMutation(getOperationsIncidentPatternsMutationOptions(options));
     }
 
-export const getAiAnomaliesUrl = () => {
+export const getOperationsAnomalyDetectionUrl = () => {
 
 
 
 
-  return `/api/ai/anomalies`
+  return `/api/operations-insights/anomalies`
 }
 
 /**
  * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. Detection and descriptions are fully deterministic. Read-only — never edits or commits run data.
  * @summary Flag production runs that drifted from their historical norm; read-only
  */
-export const aiAnomalies = async (anomalyInput: AnomalyInput, options?: Parameters<typeof customFetch>[1]): Promise<AnomalyResult> => {
+export const operationsAnomalyDetection = async (anomalyInput: AnomalyInput, options?: Parameters<typeof customFetch>[1]): Promise<AnomalyResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3783,7 +3783,7 @@ export const aiAnomalies = async (anomalyInput: AnomalyInput, options?: Paramete
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<AnomalyResult>(getAiAnomaliesUrl(),
+return customFetch<AnomalyResult>(getOperationsAnomalyDetectionUrl(),
   {
     ...options,
     method: 'POST',
@@ -3796,11 +3796,11 @@ return customFetch<AnomalyResult>(getAiAnomaliesUrl(),
 
 
 
-export const getAiAnomaliesMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,AiAnomaliesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,AiAnomaliesMutationVariables, TContext> => {
+export const getOperationsAnomalyDetectionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsAnomalyDetection>>, TError,OperationsAnomalyDetectionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsAnomalyDetection>>, TError,OperationsAnomalyDetectionMutationVariables, TContext> => {
 
-const mutationKey = ['aiAnomalies'];
+const mutationKey = ['operationsAnomalyDetection'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3810,10 +3810,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiAnomalies>>, AiAnomaliesMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsAnomalyDetection>>, OperationsAnomalyDetectionMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiAnomalies(data,requestOptions)
+          return  operationsAnomalyDetection(data,requestOptions)
         }
 
 
@@ -3823,38 +3823,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiAnomaliesMutationResult = NonNullable<Awaited<ReturnType<typeof aiAnomalies>>>
-    export type AiAnomaliesMutationBody = BodyType<AnomalyInput>
-    export type AiAnomaliesMutationError = ErrorType<void>
-    export type AiAnomaliesMutationVariables = {data: BodyType<AnomalyInput>}
+    export type OperationsAnomalyDetectionMutationResult = NonNullable<Awaited<ReturnType<typeof operationsAnomalyDetection>>>
+    export type OperationsAnomalyDetectionMutationBody = BodyType<AnomalyInput>
+    export type OperationsAnomalyDetectionMutationError = ErrorType<void>
+    export type OperationsAnomalyDetectionMutationVariables = {data: BodyType<AnomalyInput>}
 
     /**
  * @summary Flag production runs that drifted from their historical norm; read-only
  */
-export const useAiAnomalies = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,AiAnomaliesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsAnomalyDetection = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsAnomalyDetection>>, TError,OperationsAnomalyDetectionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiAnomalies>>,
+        Awaited<ReturnType<typeof operationsAnomalyDetection>>,
         TError,
-        AiAnomaliesMutationVariables,
+        OperationsAnomalyDetectionMutationVariables,
         TContext
       > => {
-      return useMutation(getAiAnomaliesMutationOptions(options));
+      return useMutation(getOperationsAnomalyDetectionMutationOptions(options));
     }
 
-export const getAiScheduleOptimizeUrl = () => {
+export const getOperationsScheduleOrderingUrl = () => {
 
 
 
 
-  return `/api/ai/schedule-optimize`
+  return `/api/operations-insights/schedule-order`
 }
 
 /**
  * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side by the shared @workspace/schedule-optimize library. Read-only — never edits or commits the schedule.
  * @summary Suggest a deterministic run order for the day; read-only
  */
-export const aiScheduleOptimize = async (scheduleOptimizeInput: ScheduleOptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<ScheduleOptimizeResponse> => {
+export const operationsScheduleOrdering = async (scheduleOptimizeInput: ScheduleOptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<ScheduleOptimizeResponse> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3862,7 +3862,7 @@ export const aiScheduleOptimize = async (scheduleOptimizeInput: ScheduleOptimize
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<ScheduleOptimizeResponse>(getAiScheduleOptimizeUrl(),
+return customFetch<ScheduleOptimizeResponse>(getOperationsScheduleOrderingUrl(),
   {
     ...options,
     method: 'POST',
@@ -3875,11 +3875,11 @@ return customFetch<ScheduleOptimizeResponse>(getAiScheduleOptimizeUrl(),
 
 
 
-export const getAiScheduleOptimizeMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,AiScheduleOptimizeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,AiScheduleOptimizeMutationVariables, TContext> => {
+export const getOperationsScheduleOrderingMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsScheduleOrdering>>, TError,OperationsScheduleOrderingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsScheduleOrdering>>, TError,OperationsScheduleOrderingMutationVariables, TContext> => {
 
-const mutationKey = ['aiScheduleOptimize'];
+const mutationKey = ['operationsScheduleOrdering'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3889,10 +3889,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiScheduleOptimize>>, AiScheduleOptimizeMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsScheduleOrdering>>, OperationsScheduleOrderingMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiScheduleOptimize(data,requestOptions)
+          return  operationsScheduleOrdering(data,requestOptions)
         }
 
 
@@ -3902,23 +3902,23 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiScheduleOptimizeMutationResult = NonNullable<Awaited<ReturnType<typeof aiScheduleOptimize>>>
-    export type AiScheduleOptimizeMutationBody = BodyType<ScheduleOptimizeInput>
-    export type AiScheduleOptimizeMutationError = ErrorType<void>
-    export type AiScheduleOptimizeMutationVariables = {data: BodyType<ScheduleOptimizeInput>}
+    export type OperationsScheduleOrderingMutationResult = NonNullable<Awaited<ReturnType<typeof operationsScheduleOrdering>>>
+    export type OperationsScheduleOrderingMutationBody = BodyType<ScheduleOptimizeInput>
+    export type OperationsScheduleOrderingMutationError = ErrorType<void>
+    export type OperationsScheduleOrderingMutationVariables = {data: BodyType<ScheduleOptimizeInput>}
 
     /**
  * @summary Suggest a deterministic run order for the day; read-only
  */
-export const useAiScheduleOptimize = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,AiScheduleOptimizeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsScheduleOrdering = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsScheduleOrdering>>, TError,OperationsScheduleOrderingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiScheduleOptimize>>,
+        Awaited<ReturnType<typeof operationsScheduleOrdering>>,
         TError,
-        AiScheduleOptimizeMutationVariables,
+        OperationsScheduleOrderingMutationVariables,
         TContext
       > => {
-      return useMutation(getAiScheduleOptimizeMutationOptions(options));
+      return useMutation(getOperationsScheduleOrderingMutationOptions(options));
     }
 
 export const getAiFillMissingUrl = () => {

@@ -7,7 +7,8 @@ import { currentScope } from "../lib/requestScope";
 const router: IRouter = Router();
 
 // Saved spec sheets: snapshots of imported spec sheets so they can later be
-// cross-referenced against the current recipe library (see /ai/spec-reconcile).
+// cross-referenced against the current recipe library (see
+// /operations-insights/spec-reconciliation).
 // Shared factory-wide across all signed-in users (the router-level requireAuth
 // gates them) and scope-isolated like the learned spec-import aliases. Only the
 // two most recent snapshots are kept; older ones are pruned on save.

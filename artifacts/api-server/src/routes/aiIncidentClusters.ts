@@ -1,4 +1,4 @@
-import { AiIncidentClustersBody } from "@workspace/api-zod";
+import { OperationsIncidentPatternsBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   buildFallbackClusters,
@@ -10,7 +10,7 @@ import type { IncidentDTO } from "../lib/incidents";
 // incidents (manager-only) and groups recurring reports/crashes by screen and
 // platform. Read-only and advisory; never edits anything.
 
-export type IncidentClustersBody = z.infer<typeof AiIncidentClustersBody>;
+export type IncidentClustersBody = z.infer<typeof OperationsIncidentPatternsBody>;
 
 // Don't feed an unbounded log into one prompt. Newest-first, capped.
 export const CLUSTER_MAX_INCIDENTS = 120;
@@ -24,7 +24,7 @@ export type ClusterValidationResult =
 
 export function validateClustersBody(body: unknown): ClusterValidationResult {
   // Body is optional; treat missing/empty as {}.
-  const parsed = AiIncidentClustersBody.safeParse(body ?? {});
+  const parsed = OperationsIncidentPatternsBody.safeParse(body ?? {});
   if (!parsed.success) {
     return { ok: false, status: 400, error: "Invalid incident-clusters input" };
   }

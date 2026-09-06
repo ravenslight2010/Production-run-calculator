@@ -5,16 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AiStatus } from './aiStatus';
 import type { ReconcileDiscrepancy } from './reconcileDiscrepancy';
 
 export interface SpecReconcileResult {
   specSheetId: number;
   discrepancies: ReconcileDiscrepancy[];
-  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
-  summary?: string;
   generatedAt: number;
-  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }

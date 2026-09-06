@@ -1187,12 +1187,7 @@ export interface ReconcileDiscrepancy {
 export interface SpecReconcileResult {
   specSheetId: number;
   discrepancies: ReconcileDiscrepancy[];
-  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
-  summary?: string;
   generatedAt: number;
-  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 export interface MixComponentSpec {
@@ -1330,12 +1325,9 @@ export interface MixReconcileInput {
 }
 
 export interface MixReconcileResult {
-  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
-  summary?: string;
+  /** The validated deterministic discrepancies supplied by the client */
+  discrepancies: MixDiscrepancyWire[];
   generatedAt: number;
-  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 /**
@@ -1424,9 +1416,6 @@ export interface SummaryResult {
   summary: string;
   stats: SummaryStats;
   generatedAt: number;
-  /** Compatibility field; deterministic responses return false */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 export type OperationalReportInputScope = typeof OperationalReportInputScope[keyof typeof OperationalReportInputScope];
@@ -1638,8 +1627,6 @@ export interface IncidentClustersResult {
   /** Optional explanation (e.g. too few incidents to cluster) */
   note?: string;
   generatedAt: number;
-  /** True when the AI proposed the grouping; false for the deterministic fallback */
-  aiGenerated: boolean;
 }
 
 /**
@@ -1700,9 +1687,6 @@ export interface AnomalyResult {
   /** Optional explanation (e.g. not enough history to judge) */
   note?: string;
   generatedAt: number;
-  /** Compatibility field; deterministic responses return false */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 /**
@@ -1778,9 +1762,6 @@ export interface ScheduleOptimizeResponse {
   /** Optional explanation (e.g. already optimally ordered) */
   note?: string;
   generatedAt: number;
-  /** Compatibility field; deterministic responses return false */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];

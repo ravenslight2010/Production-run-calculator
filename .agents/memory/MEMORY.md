@@ -135,3 +135,4 @@
 - [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
 - [Retained AI cache boundary](retained-ai-cache-boundary.md) — cache only unresolved model suggestions; recompute and merge deterministic matches per request.
 - [Retired AI data retention](retired-ai-data-retention.md) — stop writers first; delete generated pools by allowlist, redact sensitive payloads, and preserve operational rows and correction memory.
+- [Operations API compatibility window](operations-api-compatibility-window.md) — deterministic contracts stay provider-neutral while retired names remain temporary aliases for older clients.

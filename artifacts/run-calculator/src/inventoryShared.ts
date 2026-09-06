@@ -7,7 +7,6 @@ import {
   fetchWithDiagnostics,
   type DiagnosticIngestionTransportName,
 } from "./performanceDiagnostics";
-import type { AiStatus } from "./aiStatus";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -1474,9 +1473,8 @@ export const markIncidentReviewed = (id: string) =>
 export const markIncidentResolved = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`, { method: "POST" });
 
-// Manager-only AI root-cause clustering across the incident log. Advisory and
-// read-only: the server reads the incidents itself, the AI only proposes the
-// grouping, and a deterministic grouping is returned if the AI is unavailable.
+// Manager-only deterministic pattern grouping across the incident log.
+// Advisory and read-only: the server reads and groups the incidents itself.
 export type IncidentClusterSeverity = "low" | "medium" | "high";
 export type IncidentCluster = {
   theme: string;
@@ -1491,18 +1489,16 @@ export type IncidentClustersResult = {
   totalIncidents: number;
   note?: string;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
 };
 export const requestIncidentClusters = (lookbackDays?: number) =>
-  api<IncidentClustersResult>("/ai/incident-clusters", {
+  api<IncidentClustersResult>("/operations-insights/incident-patterns", {
     method: "POST",
     body: JSON.stringify(lookbackDays ? { lookbackDays } : {}),
   });
 
-// AI predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
-// stoppages vs. a per-product baseline) is deterministic server-side; the AI
-// only narrates flagged anomalies. Advisory and read-only. Open to all staff.
+// Operations Insights anomaly flags. Drift detection (downtime/yield/stoppages
+// vs. a per-product baseline) is deterministic server-side. Advisory and
+// read-only. Open to all staff.
 export type AnomalyMetric = "downtime" | "yield" | "stoppages";
 export type AnomalySeverity = "low" | "medium" | "high";
 export type AnomalyRunInput = {
@@ -1531,19 +1527,17 @@ export type AnomalyResult = {
   summary: string;
   note?: string;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
 };
 export const requestAnomalies = (
   today: AnomalyRunInput[],
   history: AnomalyRunInput[],
 ) =>
-  api<AnomalyResult>("/ai/anomalies", {
+  api<AnomalyResult>("/operations-insights/anomalies", {
     method: "POST",
     body: JSON.stringify({ today, history }),
   });
 
-// AI schedule optimizer. The suggested run order (allergen runs end-of-day,
+// Operations Insights schedule ordering. The suggested run order (allergen runs end-of-day,
 // similar brand/die grouped to cut changeovers, factory sequence rules honored)
 // is computed deterministically server-side; the AI only narrates it, and only
 // when a strictly better order exists. Advisory and read-only — the manager
@@ -1575,14 +1569,12 @@ export type ScheduleOptimizeResult = {
   summary: string;
   note?: string;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
 };
 export const requestScheduleOptimize = (
   runs: ScheduleRunInput[],
   rules?: unknown[],
 ) =>
-  api<ScheduleOptimizeResult>("/ai/schedule-optimize", {
+  api<ScheduleOptimizeResult>("/operations-insights/schedule-order", {
     method: "POST",
     body: JSON.stringify({ runs, rules: rules ?? [] }),
   });

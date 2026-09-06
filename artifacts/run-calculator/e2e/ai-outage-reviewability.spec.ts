@@ -95,7 +95,7 @@ async function installFixtureRoutes(page: Page): Promise<void> {
   });
 
   const unavailable = { generatedAt: Date.now(), aiStatus: "unavailable" as const };
-  await page.route("**/api/ai/spec-reconcile", async (route) => {
+  await page.route("**/api/operations-insights/spec-reconciliation", async (route) => {
     await route.fulfill({ json: {
       ...unavailable,
       specSheetId: SPEC_SHEET_ID,
@@ -107,7 +107,7 @@ async function installFixtureRoutes(page: Page): Promise<void> {
       }],
     } });
   });
-  await page.route("**/api/ai/summary", async (route) => {
+  await page.route("**/api/operations-insights/recap", async (route) => {
     await route.fulfill({ json: {
       ...unavailable,
       summary: "24 cases made against 30 planned; the shift stayed on track.",
@@ -122,7 +122,7 @@ async function installFixtureRoutes(page: Page): Promise<void> {
       aiGenerated: false,
     } });
   });
-  await page.route("**/api/ai/anomalies", async (route) => {
+  await page.route("**/api/operations-insights/anomalies", async (route) => {
     await route.fulfill({ json: {
       ...unavailable,
       anomalies: [{
@@ -134,7 +134,7 @@ async function installFixtureRoutes(page: Page): Promise<void> {
       checkedRuns: 2, baselineRuns: 4, summary: "", aiGenerated: false,
     } });
   });
-  await page.route("**/api/ai/schedule-optimize", async (route) => {
+  await page.route("**/api/operations-insights/schedule-order", async (route) => {
     await route.fulfill({ json: {
       ...unavailable,
       order: [SCHEDULE_RUN_2, SCHEDULE_RUN_1],

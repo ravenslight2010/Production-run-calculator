@@ -5,7 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AiStatus } from './aiStatus';
 import type { Anomaly } from './anomaly';
 
 export interface AnomalyResult {
@@ -17,7 +16,4 @@ export interface AnomalyResult {
   /** Optional explanation (e.g. not enough history to judge) */
   note?: string;
   generatedAt: number;
-  /** Compatibility field; deterministic responses return false */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }

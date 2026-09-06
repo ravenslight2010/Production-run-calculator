@@ -6,7 +6,7 @@ import {
 } from "./aiSummary";
 import type { AnomalyRunInput } from "./inventoryShared";
 
-// AI predictive-maintenance / anomaly-check client builder. Reuses the shared
+// Operations Insights anomaly-check client builder. Reuses the shared
 // summary run-shaping (buildShapedRun → SummaryRunInput) so the numbers stay
 // consistent with the deterministic recap, then maps to the compact anomaly
 // run shape. Kept in lockstep with the mobile context/aiAnomaly.ts so both

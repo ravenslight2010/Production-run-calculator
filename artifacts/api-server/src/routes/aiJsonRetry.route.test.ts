@@ -127,6 +127,29 @@ async function post(path: string, body: unknown): Promise<Response> {
   });
 }
 
+describe("Operations Insights compatibility aliases", () => {
+  const recapInput = {
+    scope: "day",
+    date: "2026-09-06",
+    nowMs: Date.UTC(2026, 8, 6, 12),
+    runs: [],
+  };
+
+  it("keeps AI metadata only on the legacy recap alias", async () => {
+    const stable = await post("/operations-insights/recap", recapInput);
+    expect(stable.status).toBe(200);
+    const stableBody = (await stable.json()) as Record<string, unknown>;
+    expect(stableBody).not.toHaveProperty("aiGenerated");
+    expect(stableBody).not.toHaveProperty("aiStatus");
+
+    const legacy = await post("/ai/summary", recapInput);
+    expect(legacy.status).toBe(200);
+    const legacyBody = (await legacy.json()) as Record<string, unknown>;
+    expect(legacyBody.aiGenerated).toBe(false);
+    expect(legacyBody.aiStatus).toBe("deterministic");
+  });
+});
+
 // A response cut off mid-string, like the truncation seen from the real model.
 const TRUNCATED_REPLY = '{"suggestions":[{"tar';
 

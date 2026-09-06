@@ -2,7 +2,8 @@
 //
 // A "saved spec sheet" is a snapshot of an imported spec sheet, kept so it can
 // later be cross-referenced against the current recipe library (see
-// /ai/spec-reconcile). These tests guard the route contract against a real
+// /operations-insights/spec-reconciliation). These tests guard the route
+// contract against a real
 // Postgres database:
 //   - GET lists snapshots newest-first;
 //   - POST inserts a snapshot and prunes to the two most recent (MAX_SAVED=2);

@@ -1,4 +1,4 @@
-import { AiSummaryBody } from "@workspace/api-zod";
+import { OperationsRecapBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   aggregateDaySummary,
@@ -7,16 +7,11 @@ import {
   type DaySummaryStats,
 } from "@workspace/day-summary";
 
-// AI end-of-day / weekly production recap. Given a day's (or rolling week's)
-// runs, the server computes the numeric stats deterministically (shared
-// @workspace/day-summary lib) and the model only NARRATES them into a short,
-// plain-language recap. Mirrors the other /ai/* endpoints' posture: heavy shaping
-// is deterministic and server-side, the model output is untrusted and length-
-// clamped, and the feature is fail-safe — if the AI is unavailable or returns
-// nothing usable, a deterministic fallback summary (also from the lib) is used so
-// the caller always gets a usable recap. Read-only; never writes run data.
+// Operations Insights end-of-day / weekly production recap. The server computes
+// the numeric stats and plain-language recap deterministically from supplied
+// run facts. Read-only; never writes run data.
 
-export type SummaryInput = z.infer<typeof AiSummaryBody>;
+export type SummaryInput = z.infer<typeof OperationsRecapBody>;
 
 // Bound how many runs one request can carry so a single call can't blow up cost
 // or latency. Mirrors the other AI endpoint guards.
@@ -29,7 +24,7 @@ export type SummaryValidationResult =
   | { ok: false; status: number; error: string };
 
 export function validateSummaryBody(body: unknown): SummaryValidationResult {
-  const parsed = AiSummaryBody.safeParse(body);
+  const parsed = OperationsRecapBody.safeParse(body);
   if (!parsed.success) {
     return { ok: false, status: 400, error: "Invalid summary input" };
   }

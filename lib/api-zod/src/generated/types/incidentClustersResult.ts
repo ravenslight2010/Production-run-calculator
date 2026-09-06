@@ -14,6 +14,4 @@ export interface IncidentClustersResult {
   /** Optional explanation (e.g. too few incidents to cluster) */
   note?: string;
   generatedAt: number;
-  /** True when the AI proposed the grouping; false for the deterministic fallback */
-  aiGenerated: boolean;
 }

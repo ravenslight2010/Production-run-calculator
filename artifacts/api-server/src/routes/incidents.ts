@@ -121,16 +121,18 @@ router.post(
   },
 );
 
-// POST /ai/incident-clusters — manager-only deterministic grouping across the
-// incident log. The historical /ai URL remains for client compatibility.
-// Advisory and read-only; groups are keyed by platform and screen.
+// Manager-only deterministic grouping across the incident log. The stable
+// Operations Insights route exposes only deterministic fields; the historical
+// /ai URL retains compatibility metadata. Advisory and read-only; groups are
+// keyed by platform and screen.
 router.post(
-  "/ai/incident-clusters",
+  ["/operations-insights/incident-patterns", "/ai/incident-clusters"],
   requireCapability("review-incidents"),
   rateLimit({
     windowMs: CLUSTERS_RATE_WINDOW_MS,
     max: CLUSTERS_RATE_MAX,
-    keyGenerator: (req) => `ai-incident-clusters:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) =>
+      `operations-incident-patterns:${req.userId ?? req.ip ?? "unknown"}`,
     store: clustersRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -157,7 +159,9 @@ router.post(
             ? "No incidents in the selected window yet."
             : "Not enough incidents yet to find a pattern.",
         generatedAt: Date.now(),
-        aiGenerated: false,
+        ...(req.path.startsWith("/ai/")
+          ? { aiGenerated: false, aiStatus: "deterministic" as const }
+          : {}),
       });
       return;
     }
@@ -166,8 +170,9 @@ router.post(
       clusters: buildFallbackClusters(shaped),
       totalIncidents: shaped.length,
       generatedAt: Date.now(),
-      aiGenerated: false,
-      aiStatus: "deterministic",
+      ...(req.path.startsWith("/ai/")
+        ? { aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );

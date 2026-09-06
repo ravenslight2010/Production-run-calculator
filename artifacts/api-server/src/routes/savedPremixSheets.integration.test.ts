@@ -2,7 +2,8 @@
 //
 // A "saved premix sheet" is a snapshot of an imported premix workbook (its
 // Mix[]), kept so the current mixes can later be reconciled against it (see
-// /ai/mix-reconcile). These tests guard the route contract against a real
+// /operations-insights/mix-reconciliation). These tests guard the route
+// contract against a real
 // Postgres database:
 //   - GET lists snapshots newest-first;
 //   - POST inserts a snapshot and prunes to the two most recent (MAX_SAVED=2);
