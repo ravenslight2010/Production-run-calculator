@@ -1,7 +1,19 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { useEvent } from "../hooks/useEvent";
 import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
+import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/WarehouseTabCtx";
+import { InventoryTabCtx, type InventoryTabContextValue } from "../contexts/InventoryTabCtx";
+import { MixesTabCtx, type MixesTabContextValue } from "../contexts/MixesTabCtx";
+import { SetupTabCtx, type SetupTabContextValue } from "../contexts/SetupTabCtx";
+import WarehouseTabContent from "../components/WarehouseTabContent";
+import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
+import InventoryTabContent from "../components/InventoryTabContent";
+import MixesTabContent from "../components/MixesTabContent";
+import SetupContent from "../components/SetupContent";
+import SummaryToolsContent from "../components/SummaryToolsContent";
+import ScreenModeView from "../components/ScreenModeView";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
@@ -3832,10 +3844,10 @@ export default function Home() {
     }
   }
 
-  async function replaceRunSurplus(
+  const replaceRunSurplus = useEvent(async (
     run: RunMeta,
     allocations: Array<{ lotId: string; cases: number }>,
-  ) {
+  ) => {
     setFreezerSurplusBusy(true);
     setFreezerSurplusError(null);
     try {
@@ -3856,7 +3868,7 @@ export default function Home() {
     } finally {
       setFreezerSurplusBusy(false);
     }
-  }
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -10294,9 +10306,9 @@ export default function Home() {
   // Commit a single confirmed value from the "Fill in missing data" panel. Goes
   // through the normal form path (setValue → autosave effect persists run values
   // + profile), so there is no separate write path and no auto-apply.
-  function commitMissingField(key: string, value: string | number) {
+  const commitMissingField = useEvent((key: string, value: string | number) => {
     form.setValue(key as keyof FormValues, value as never, { shouldDirty: true });
-  }
+  });
 
   function switchToRun(newIndex: number) {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
@@ -10347,21 +10359,21 @@ export default function Home() {
   function makeSubLogEntry(kind: SubstitutionLogEntry["kind"], description: string): SubstitutionLogEntry {
     return { id: genId(), ts: Date.now(), kind, description, ...(me?.name ? { user: me.name } : {}) };
   }
-  function addSubstitution(sub: IngredientSubstitution) {
+  const addSubstitution = useEvent((sub: IngredientSubstitution) => {
     const existing = dayStateRef.current.substitutions ?? [];
     // One active substitution per affected ingredient — replace if it exists.
     const next = [...existing.filter(s => s.ingredient !== sub.ingredient), sub];
     persistSubstitutions(next, [makeSubLogEntry("added", describeSubstitution(sub))]);
-  }
-  function removeSubstitution(id: string) {
+  });
+  const removeSubstitution = useEvent((id: string) => {
     const existing = dayStateRef.current.substitutions ?? [];
     const removed = existing.find(s => s.id === id);
     persistSubstitutions(
       existing.filter(s => s.id !== id),
       removed ? [makeSubLogEntry("cleared", describeSubstitution(removed))] : [],
     );
-  }
-  function clearSubstitutions() {
+  });
+  const clearSubstitutions = useEvent(() => {
     const existing = dayStateRef.current.substitutions ?? [];
     if (existing.length === 0) {
       persistSubstitutions([]);
@@ -10372,7 +10384,7 @@ export default function Home() {
         ? describeSubstitution(existing[0])
         : `All substitutions (${existing.length})`;
     persistSubstitutions([], [makeSubLogEntry("cleared", description)]);
-  }
+  });
 
   // ── Warehouse staging checklist (day-state overlay) ────────────────────────
   // Warehouse staff tick off per-run need rows as they pull/stage them. Like
@@ -10380,7 +10392,7 @@ export default function Home() {
   // at the daily reset. Only checked rows are stored (true); unchecking deletes
   // the key. Keyed by `${runId}::${label}__${unit}` so it lines up across web +
   // mobile and survives row re-renders.
-  function toggleStagedItem(runId: string, rowKey: string) {
+  const toggleStagedItem = useEvent((runId: string, rowKey: string) => {
     const key = `${runId}::${rowKey}`;
     const prev = dayStateRef.current.stagedItems ?? {};
     const next = { ...prev };
@@ -10391,7 +10403,7 @@ export default function Home() {
     saveDayState(newDs);
     lastLocalEditRef.current = Date.now();
     schedulePush(newDs, 0);
-  }
+  });
 
   function addRun() {
     if (dayState.runs.length >= MAX_RUNS) return;
@@ -11420,7 +11432,7 @@ export default function Home() {
 
   // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
   // never called automatically. Returns a confirmation line for the card.
-  async function applyRunSuggestion(s: RunSuggestion): Promise<string> {
+  const applyRunSuggestion = useEvent(async (s: RunSuggestion): Promise<string> => {
     if (s.type === "speed-target") {
       const changed: string[] = [];
       // Targeted profile write: load → patch one field → save. saveProfile's
@@ -11494,13 +11506,13 @@ export default function Home() {
       );
     }
     return `Tunnel time updated to ${s.recommendedValue} min (${changed.join(" + ")}).`;
-  }
+  });
 
   // Pre-flight check for RunInsightsCard: returns a warning string when Accept
   // is likely to throw (no saved profile AND not the current open run).  This
   // mirrors the throw conditions in applyRunSuggestion so managers see the
   // problem before clicking rather than only after.
-  function getRunSuggestionAcceptWarning(s: RunSuggestion): string | null {
+  const getRunSuggestionAcceptWarning = useEvent((s: RunSuggestion): string | null => {
     const isCurrentRun =
       !!currentRun &&
       (currentRun.brand ?? "") === s.brand &&
@@ -11543,7 +11555,7 @@ export default function Home() {
       return "No saved setup or die defaults for this product — open its Setup profile first.";
     }
     return null;
-  }
+  });
 
   function endRun(expectedRunId?: string, fromForegroundRecovery = false) {
     // Guard: a run that was never started cannot be ended. Every UI call-site
@@ -14326,6 +14338,40 @@ export default function Home() {
     return [...options].sort();
   }, [needsInventorySnapshot, inventoryCandidates, inventoryRunValues]);
 
+  // Focused values include their action callbacks in dependencies: a tab can
+  // never keep a closure from an earlier Home render.
+  const warehouseTabCtxValue = useMemo<WarehouseTabContextValue>(() => ({
+    activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
+    cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
+    freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
+    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    setPinError, setPinInput, setScheduleDeleteConfirm, setScheduledDays, setScheduleView,
+    setShowPinDialog, setShowScheduleDialog, todayScheduledValues, toggleStagedItem,
+  }), [activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
+    cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
+    freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
+    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    todayScheduledValues, toggleStagedItem]);
+  const inventoryTabCtxValue = useMemo<InventoryTabContextValue>(() => ({
+    candidates: inventoryCandidates, runValsList: inventoryRunValues, coverageRunVals: inventoryRunValues,
+    substitutions: dayState.substitutions ?? [], substitutionLog: dayState.substitutionLog ?? [],
+    substitutionOptions: inventorySubstitutionOptions, onAddSubstitution: addSubstitution,
+    onRemoveSubstitution: removeSubstitution, onClearSubstitutions: clearSubstitutions,
+  }), [dayState, inventoryCandidates, inventoryRunValues, inventorySubstitutionOptions,
+    addSubstitution, removeSubstitution, clearSubstitutions]);
+  const mixesTabCtxValue = useMemo<MixesTabContextValue>(() => ({
+    canManageInventory, currentRunId, dayState, effectiveValuesForRun, form, mixMakeDay,
+    mixPlanItems, mixes, scheduledDays, saveMixAlreadyMadeOptimistically,
+    acknowledgeMixAlreadyMadeSave, setMixMakeDay,
+  }), [canManageInventory, currentRunId, dayState, effectiveValuesForRun, form, mixMakeDay,
+    mixPlanItems, mixes, scheduledDays, saveMixAlreadyMadeOptimistically,
+    acknowledgeMixAlreadyMadeSave]);
+  const setupTabCtxValue = useMemo<SetupTabContextValue>(() => ({
+    applyRunSuggestion, circles, commitMissingField, currentRun, doughSubTab, form,
+    getRunSuggestionAcceptWarning, gripSheets, isManager, isSupervisor, shipper, skidStacking, v,
+  }), [applyRunSuggestion, circles, commitMissingField, currentRun, doughSubTab, form,
+    getRunSuggestionAcceptWarning, gripSheets, isManager, isSupervisor, shipper, skidStacking, v]);
+
   // ── Context value for extracted sub-components ──────────────────────────
   // Wrapped in useMemo so the object reference only changes when reactive
   // state actually changes.  Plain-function closures (addBrand, pauseRun,
@@ -16470,189 +16516,9 @@ export default function Home() {
               <ProductionLineDepartment run={<LiveRunTabContent />} />
 
               {/* ─── SETUP ─── */}
-              <ManagementDepartment setup={<>
-                <div className="mb-4 flex items-center gap-2" data-testid="setup-header">
-                  <Settings className="w-5 h-5 text-primary" />
-                  <h2 className="text-lg font-bold">Setup</h2>
-                  <SetupMathConflictBadge
-                    slots={[
-                      { rows: v.app1CheeseRecipe, ozPerPizza: v.app1OzPerPizza },
-                      { rows: v.app2CheeseRecipe, ozPerPizza: v.app2OzPerPizza },
-                      { rows: v.app3CheeseRecipe, ozPerPizza: v.app3OzPerPizza },
-                      { rows: v.app4CheeseRecipe, ozPerPizza: v.app4OzPerPizza },
-                    ]}
-                  />
-                </div>
-                {/* Run Insights: manager-only pattern-based setting suggestions
-                    from completed runs. One at a time; Accept applies, Dismiss
-                    suppresses. Renders nothing when there's nothing to show. */}
-                {isManager && (
-                  <RunInsightsCard
-                    brand={currentRun?.brand ?? ""}
-                    flavor={currentRun?.flavor ?? ""}
-                    onAccept={applyRunSuggestion}
-                    getAcceptWarning={getRunSuggestionAcceptWarning}
-                  />
-                )}
-                <div className="mb-4">
-                  <FillMissingPanel
-                    getRecord={() => ({
-                      ...form.getValues(),
-                      brand: currentRun?.brand ?? "",
-                      flavor: currentRun?.flavor ?? "",
-                      subTab: doughSubTab,
-                    })}
-                    brand={currentRun?.brand ?? ""}
-                    flavor={currentRun?.flavor ?? ""}
-                    dieType={form.getValues("dieType") ?? ""}
-                    canEdit={isSupervisor}
-                    onCommit={commitMissingField}
-                  />
-                </div>
-
-                {/* Packaging Settings */}
-                <details className="group rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden mb-4">
-                  <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
-                    <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                      <Package className="w-3.5 h-3.5" />
-                      Packaging Settings
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                  </summary>
-                  <div className="border-t border-border/40 px-5 pb-5 pt-4 space-y-4">
-                    {PACKAGING_FIELDS.map((f) => {
-                      const cur = (v[f.name] as string) ?? "";
-                      // The four editable packaging master lists (circles / shipper /
-                      // skidStacking / gripSheets) draw their selectable options from
-                      // the live, user-editable lists so options added in Setup
-                      // Profiles appear here too — mirroring the die-type pattern.
-                      // cartoned (Packaging Type) and slipSheets stay fixed.
-                      const editableList: string[] | null =
-                        f.name === "circles" ? circles
-                        : f.name === "shipper" ? shipper
-                        : f.name === "skidStacking" ? skidStacking
-                        : f.name === "gripSheets" ? gripSheets
-                        : null;
-                      const opts = editableList ?? f.options;
-                      // "cartoned" is the Packaging Type field: render its fixed
-                      // options via their display labels (e.g. "n-a" → "N/A").
-                      const isPackagingType = f.name === "cartoned";
-                      return (
-                        <div key={f.name}>
-                          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                            {f.label}
-                          </label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {opts.map((opt) => {
-                              const active = cur === opt;
-                              const optLabel = isPackagingType
-                                ? PACKAGING_TYPE_OPTIONS.find((o) => o.value === opt)?.label ?? opt
-                                : opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() =>
-                                    form.setValue(f.name, active ? "" : opt, { shouldDirty: true })
-                                  }
-                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${isPackagingType ? "" : "capitalize"} ${
-                                    active
-                                      ? "bg-primary text-primary-foreground border-primary"
-                                      : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
-                                  }`}
-                                >
-                                  {optLabel}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {/* Label position — only relevant for Labeled runs. Shown
-                              directly under the Packaging Type selector. */}
-                          {f.name === "cartoned" && cur.trim().toLowerCase() === "labeled" && (
-                            <div className="mt-3">
-                              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                                Label Position
-                              </label>
-                              <div className="flex flex-wrap gap-1.5">
-                                {LABEL_POSITION_OPTIONS.map((opt) => {
-                                  const active = ((v.labelPosition as string) ?? "") === opt.value;
-                                  return (
-                                    <button
-                                      key={opt.value}
-                                      type="button"
-                                      onClick={() =>
-                                        form.setValue("labelPosition", active ? "" : opt.value, { shouldDirty: true })
-                                      }
-                                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
-                                        active
-                                          ? "bg-primary text-primary-foreground border-primary"
-                                          : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
-                                      }`}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                          {/* Quantity field(s) matching the selected Packaging Type,
-                              shown right under the Packaging Type / Label Position
-                              selectors. Hidden values stay in storage so toggling
-                              back doesn't lose numbers. */}
-                          {f.name === "cartoned" && (() => {
-                            const typeVal = cur.trim().toLowerCase();
-                            const posVal = ((v.labelPosition as string) ?? "").trim().toLowerCase();
-                            if (isCartonedValue(typeVal)) {
-                              return (
-                                <div className="mt-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="cartonsPerCase"
-                                    label="Cartons Per Case"
-                                    step="1"
-                                  />
-                                </div>
-                              );
-                            }
-                            if (typeVal === "labeled" && (posVal === "top" || posVal === "bottom")) {
-                              return (
-                                <div className="mt-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="labelsPerRoll"
-                                    label="Labels Per Roll"
-                                    step="1"
-                                  />
-                                </div>
-                              );
-                            }
-                            if (typeVal === "labeled" && posVal === "both") {
-                              return (
-                                <div className="mt-3 grid grid-cols-2 gap-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="topLabelsPerRoll"
-                                    label="Top Labels Per Roll"
-                                    step="1"
-                                  />
-                                  <NumField
-                                    control={form.control}
-                                    name="bottomLabelsPerRoll"
-                                    label="Bottom Labels Per Roll"
-                                    step="1"
-                                  />
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-                </>} />
+              <SetupTabCtx.Provider value={setupTabCtxValue}>
+                <ManagementDepartment setup={<SetupContent />} />
+              </SetupTabCtx.Provider>
 
               {/* ─── PACKAGING ─── */}
               <ProductionLineDepartment
@@ -16662,697 +16528,18 @@ export default function Home() {
               />
 
               {/* ─── WAREHOUSE ─── */}
-              <WarehouseInventoryDepartment warehouse={<>
-                <div className="mb-4" data-testid="warehouse-page-heading">
-                  <h2 className="flex items-center gap-2 text-lg font-bold">
-                    <Warehouse className="h-5 w-5 text-primary" />
-                    Warehouse
-                  </h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Prepare materials and packaging for production.
-                  </p>
-                </div>
-                <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="warehouse-attention-header">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-                    <h3 className="text-sm font-bold">Warehouse attention</h3>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
-                  </p>
-                </div>
-                <FreezerSurplusPanel
-                  mode="warehouse"
-                  ledger={freezerSurplus}
-                  loaded={freezerSurplusLoaded}
-                  busy={freezerSurplusBusy}
-                  error={freezerSurplusError}
-                  pendingRuns={[
-                    ...dayState.runs.filter((run) => !run.startedAt && !run.endedAt && !!run.brand),
-                    ...scheduledDays.flatMap((day) =>
-                      day.date === todayStr()
-                        ? []
-                        : (day.runs ?? [])
-                          .filter((run) => !!run.brand)
-                          .map((run, index) => ({
-                            ...run,
-                            id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}:${index}`,
-                            brand: run.brand,
-                            flavor: run.flavor,
-                            runDate: day.date,
-                          } as RunMeta & { runDate: string; casesNeeded?: number })),
-                    ),
-                  ]}
-                  getOriginalTarget={(run) =>
-                    Number((run as RunMeta & { casesNeeded?: number }).casesNeeded) ||
-                    Number(loadRunValues(run.id).casesNeeded) || 0}
-                  onConfirm={async () => {}}
-                  onAllocate={async (run, allocations) => {
-                    await replaceRunSurplus(run, allocations);
-                    await refreshFreezerSurplus();
-                  }}
-                />
-                {/* Pull Out Freezer: for each upcoming scheduled run within an
-                    item's days-early window whose recipe uses a tagged
-                    freezer-pull ingredient, show what to pull now, grouped by
-                    run date. Scheduled runs carry no recipe rows, so resolve
-                    each via its profile -> FormValues -> need rows, exactly like
-                    the schedule editor / per-run breakdown. */}
-                {(() => {
-                  const plan = freezerPullPlan;
-                  if (plan.length === 0) return null;
-                  return (
-                    <div className="space-y-3 mb-4">
-                      {plan.map((group) => (
-                        <Card
-                          key={group.date}
-                          className="border-border/50 bg-card/60 shadow-md"
-                          data-testid={`freezer-pull-${group.date}`}
-                        >
-                          <CardHeader className="pb-2 pt-4 px-5">
-                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                              <Snowflake className="w-4 h-4" /> Pull Out Freezer for {group.date}
-                              <span className="ml-1 font-normal normal-case text-xs text-muted-foreground/70">
-                                ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
-                              </span>
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="px-4 pb-4 space-y-3">
-                            {group.runs.map((run, ri) => (
-                              <div key={ri} className="rounded-xl border border-border/50 bg-background/50 p-3">
-                                <div className="font-semibold text-sm text-foreground mb-1.5 truncate">
-                                  {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
-                                </div>
-                                <div className="space-y-1">
-                                  {run.items.map((it, ii) => (
-                                    <div key={ii} className="flex items-baseline justify-between gap-2 text-sm">
-                                      <span className="text-muted-foreground min-w-0 truncate">
-                                        {it.name}
-                                        <span className="ml-1.5 text-[11px] text-amber-500/70">pull {it.daysEarly}d early</span>
-                                      </span>
-                                      <span className="font-bold tabular-nums whitespace-nowrap text-foreground">
-                                        {it.quantity} <span className="font-normal text-muted-foreground/70">{it.unit}</span>
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  );
-                })()}
-                {/* Time to Count: warehouse sections now due for a cycle count
-                    (never counted, or last counted longer ago than their
-                    cadence). Config is factory-wide manager master-data; any
-                    signed-in user can mark a section counted, which stamps it
-                    and clears it until the cadence elapses again. */}
-                {(() => {
-                  const due = buildCycleCountDueList({
-                    schedules: cycleCountSchedules,
-                    today: todayStr(),
-                  });
-                  if (due.length === 0) return null;
-                  return (
-                    <Card
-                      className="border-border/50 border-l-4 border-l-amber-500 bg-card/60 shadow-md mb-4"
-                      data-testid="cycle-count-due"
-                    >
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <ClipboardCheck className="w-4 h-4" /> Time to Count
-                          <span className="ml-1 font-normal normal-case text-xs text-amber-500/80">
-                            ({due.length} section{due.length !== 1 ? "s" : ""} due)
-                          </span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4 space-y-2">
-                        {due.map((d) => (
-                          <div
-                            key={d.id}
-                            className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-background/50 p-3"
-                          >
-                            <div className="min-w-0">
-                              <div className="font-semibold text-sm text-foreground truncate">
-                                {d.section}
-                              </div>
-                              <div className="text-[11px] text-muted-foreground">
-                                {d.daysSince === null
-                                  ? `Never counted · every ${d.cadenceDays}d`
-                                  : `Last counted ${d.lastCountedAt} · ${d.daysSince}d ago${d.overdueDays > 0 ? ` (${d.overdueDays}d over)` : ""}`}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => markCountedMutation.mutate(d.id)}
-                              disabled={markCountedMutation.isPending}
-                              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold disabled:opacity-50"
-                            >
-                              <ClipboardCheck className="w-3.5 h-3.5" /> Mark counted
-                            </button>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-                {/* Reorder Now: cross-location on-hand at/below reorder threshold
-                    once upcoming scheduled-run demand is subtracted. Scheduled
-                    runs carry no recipe rows, so resolve each via its profile ->
-                    FormValues (same pattern as the freezer-pull / per-run blocks)
-                    and feed them as the demand basis. Advisory only. */}
-                <ReorderCard scheduledValsList={scheduledValues} />
-                {/* Use First: stock lots expiring within the configured window
-                    (plus any already past), ordered first-expired-first-out, with
-                    the lots used by today's runs surfaced to the top. Today's runs
-                    = active runs + runs scheduled for today, resolved to their
-                    FormValues. Deterministic counterpart to the AI waste insight;
-                    advisory only. */}
-                <UseFirstCard todayValsList={[...activeRunValues, ...todayScheduledValues]} />
-                {(() => {
-                  const agg = activeWarehouseRows;
-                  const pkg = activePackagingRows;
-                  return (
-                    <>
-                      <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                        <CardHeader className="pb-2 pt-4 px-5">
-                          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                            <Warehouse className="w-4 h-4" /> Total Ingredient Needs — All Runs
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="px-4 pb-4">
-                          <WarehouseNeedsList rows={agg} />
-                        </CardContent>
-                      </Card>
-                      {pkg.length > 0 && (
-                        <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                          <CardHeader className="pb-2 pt-4 px-5">
-                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                              <Package className="w-4 h-4" /> Packaging Needs — All Runs
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="px-4 pb-4">
-                            <WarehouseNeedsList rows={pkg} />
-                          </CardContent>
-                        </Card>
-                      )}
-                    </>
-                  );
-                })()}
-                {/* Per-run breakdown: what each active run needs and roughly how
-                    long it runs, so warehouse staff can stage materials run by
-                    run instead of reading off one combined total. Reuses the
-                    same need/packaging math as the roll-up above. */}
-                {(() => {
-                  if (activeRuns.length === 0) return null;
-                  return (
-                    <details className="group mb-4 rounded-xl border border-border/50 bg-card/60 shadow-md" data-testid="warehouse-run-details">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 select-none">
-                        <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          <ListChecks className="h-4 w-4 shrink-0" /> What Each Run Needs
-                          <span className="normal-case tracking-normal text-xs font-normal">({activeRuns.length} active)</span>
-                        </span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                      </summary>
-                      <div className="border-t border-border/40 px-4 pb-4 pt-4 space-y-3">
-                        {activeRuns.map((r) => {
-                          const detail = activeRunNeedDetails.get(r.id);
-                          const vals = runValuesById.get(r.id) ?? DEFAULT_VALUES;
-                          const s = detail?.summary ?? computeSummaryStats(vals);
-                          const rows = detail?.rows ?? [];
-                          const estSec = s.estimatedTimeSec;
-                          const staged = dayState.stagedItems ?? {};
-                          const stagedCount = rows.filter((row: NeedRow) => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;
-                          return (
-                            <div key={r.id} className="rounded-md border border-border/40 bg-muted/10 p-3" data-testid={`warehouse-run-${r.id}`}>
-                              <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                                <span className="font-semibold text-sm truncate">{runLabel(r)}</span>
-                                <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                                  {rows.length > 0 ? `${stagedCount}/${rows.length} staged · ` : ""}{s.totalCases} case{s.totalCases !== 1 ? "s" : ""}{estSec > 0 ? ` · ~${fmtTime(estSec)}` : ""}
-                                </span>
-                              </div>
-                              {rows.length === 0 ? (
-                                <p className="text-xs text-muted-foreground italic">No materials configured yet.</p>
-                              ) : (
-                                <div className="space-y-4">
-                                  {groupWarehouseNeedRows(rows).map((group) => (
-                                    <section key={group.area} aria-label={`${group.area} needs`}>
-                                      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                        {group.area}
-                                      </h3>
-                                      <div className="space-y-1">
-                                  {group.rows.map((row) => {
-                                    const rowKey = `${row.label}__${row.sub ?? ""}`;
-                                    const checked = !!staged[`${r.id}::${rowKey}`];
-                                    return (
-                                      <button
-                                        key={`${group.area}::${rowKey}`}
-                                        type="button"
-                                        onClick={() => toggleStagedItem(r.id, rowKey)}
-                                        aria-pressed={checked}
-                                        data-testid={`stage-${r.id}-${rowKey}`}
-                                        className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-muted/40 transition-colors"
-                                      >
-                                        {checked ? (
-                                          <CheckSquare className="w-4 h-4 shrink-0 text-primary" />
-                                        ) : (
-                                          <Square className="w-4 h-4 shrink-0 text-muted-foreground/60" />
-                                        )}
-                                        <span className={`flex-1 truncate ${checked ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>{row.label}</span>
-                                        <span className={`font-bold tabular-nums whitespace-nowrap ${checked ? "text-muted-foreground" : "text-foreground"}`}>
-                                          {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                      </div>
-                                    </section>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  );
-                })()}
-                <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                  <CardHeader className="pb-2 pt-4 px-5">
-                    <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <CalendarDays className="w-4 h-4" /> Production Schedule
-                      </CardTitle>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
-                        }}
-                        title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
-                      >
-                        {isSupervisor ? <CalendarPlus className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} Manage
-                      </button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    {scheduledDays.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-3">No upcoming days scheduled. Tap Manage to plan future production.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {scheduledDays.map(day => (
-                          <div key={day.date} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/20 border border-border/30 text-sm">
-                            <span className="font-medium">{day.date}</span>
-                            <span className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-                </>} />
+              <WarehouseTabCtx.Provider value={warehouseTabCtxValue}>
+                <WarehouseInventoryDepartment warehouse={<WarehouseTabContent />} />
+              </WarehouseTabCtx.Provider>
 
-              <WarehouseInventoryDepartment inventory={<>
-                  <div className="mb-4" data-testid="inventory-page-heading">
-                    <h2 className="flex items-center gap-2 text-lg font-bold">
-                      <ClipboardList className="h-5 w-5 text-primary" />
-                      Inventory
-                    </h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Review stock, lots, alerts, transfers, and substitutions.
-                    </p>
-                  </div>
-                  <DeferredInventoryTab
-                  candidates={inventoryCandidates}
-                  runValsList={inventoryRunValues}
-                  coverageRunVals={inventoryRunValues}
-                  substitutions={dayState.substitutions ?? []}
-                  substitutionLog={dayState.substitutionLog ?? []}
-                  substitutionOptions={inventorySubstitutionOptions}
-                  onAddSubstitution={addSubstitution}
-                  onRemoveSubstitution={removeSubstitution}
-                  onClearSubstitutions={clearSubstitutions}
-                  />
-                </>} />
+              <InventoryTabCtx.Provider value={inventoryTabCtxValue}>
+                <WarehouseInventoryDepartment inventory={<InventoryTabContent />} />
+              </InventoryTabCtx.Provider>
 
               {/* ─── MIX PLAN ─── */}
-              <WarehouseInventoryDepartment mixes={<>
-                {/* Pre-blended mixes made ahead for a product. Pick a make-day;
-                    for every scheduled run within a matching mix's days-early
-                    window, show per-product cards with cases/pizzas, batches to
-                    make, total lbs, and a "Pull For Mix" per-component lbs
-                    breakdown. Scheduled runs carry no recipe rows, so resolve
-                    each via its profile -> FormValues -> computeSummaryStats for
-                    pizza/case counts, exactly like the warehouse card. Advisory
-                    only — this never moves stock. */}
-                <div className="space-y-4 max-w-2xl mx-auto pb-8">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Blend className="w-5 h-5 text-emerald-400" />
-                    <h2 className="text-lg font-semibold">Mix Plan</h2>
-                    <p className="basis-full text-sm text-muted-foreground">
-                      Plan which mixes to make ahead for upcoming scheduled production.
-                    </p>
-                  </div>
-                  <Card>
-                    <CardContent className="px-4 py-3 flex items-center gap-3 flex-wrap">
-                      <label htmlFor="mix-make-day" className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-                        Make day
-                      </label>
-                      <Input
-                        id="mix-make-day"
-                        type="date"
-                        value={mixMakeDay}
-                        onChange={(e) => setMixMakeDay(e.target.value || todayStr())}
-                        className="w-auto"
-                        data-testid="mix-make-day"
-                      />
-                    </CardContent>
-                  </Card>
-                  {(() => {
-                    if (mixes.length === 0) {
-                      return (
-                        <p className="text-sm text-muted-foreground px-1">
-                          No mix recipes defined yet.{canManageInventory ? " Add them under Settings → Mix Recipes." : " Ask a manager to add them under Settings."}
-                        </p>
-                      );
-                    }
-                    // Helper: resolve a FormValues → MixScheduledRun shape. Used for
-                    // both today's live runs and future scheduled runs so the
-                    // ingredient extraction logic stays in one place.
-                    const valsToMixRun = (date: string, brand: string, flavor: string, vals: FormValues) => {
-                      const s = computeSummaryStats(vals);
-                      const ingredientOzPerPizza: Record<string, number> = {};
-                      const addSlot = (
-                        recipe: typeof vals.app1CheeseRecipe,
-                        type: string,
-                        oz: number,
-                      ) => {
-                        if (recipe.length > 0 && oz > 0) {
-                          const { rows } = computeCheesePerPizzaOz(recipe, oz);
-                          recipe.forEach((row, i) => {
-                            if (row.ingredient)
-                              ingredientOzPerPizza[row.ingredient] =
-                                (ingredientOzPerPizza[row.ingredient] ?? 0) + rows[i];
-                          });
-                        } else if (type && oz > 0) {
-                          ingredientOzPerPizza[type] =
-                            (ingredientOzPerPizza[type] ?? 0) + oz;
-                        }
-                      };
-                      addSlot(vals.app1CheeseRecipe, vals.app1Type, vals.app1OzPerPizza);
-                      addSlot(vals.app2CheeseRecipe, vals.app2Type, vals.app2OzPerPizza);
-                      addSlot(vals.app3CheeseRecipe, vals.app3Type, vals.app3OzPerPizza);
-                      addSlot(vals.app4CheeseRecipe, vals.app4Type, vals.app4OzPerPizza);
-                      if (vals.pep1Type && vals.pep1OzPerPizza > 0)
-                        ingredientOzPerPizza[vals.pep1Type] = (ingredientOzPerPizza[vals.pep1Type] ?? 0) + vals.pep1OzPerPizza;
-                      if (vals.pep2Type && vals.pep2OzPerPizza > 0)
-                        ingredientOzPerPizza[vals.pep2Type] = (ingredientOzPerPizza[vals.pep2Type] ?? 0) + vals.pep2OzPerPizza;
-                      if (vals.pep1TypeB && (vals.pep1OzPerPizzaB ?? 0) > 0)
-                        ingredientOzPerPizza[vals.pep1TypeB] = (ingredientOzPerPizza[vals.pep1TypeB] ?? 0) + (vals.pep1OzPerPizzaB ?? 0);
-                      if (vals.pep2TypeB && (vals.pep2OzPerPizzaB ?? 0) > 0)
-                        ingredientOzPerPizza[vals.pep2TypeB] = (ingredientOzPerPizza[vals.pep2TypeB] ?? 0) + (vals.pep2OzPerPizzaB ?? 0);
-                      return {
-                        date,
-                        brand,
-                        flavor,
-                        // Use totalPizzasForSauce (adds the casesPerLayer startup
-                        // buffer) so mixes and cheese-type mixes get the same
-                        // buffer as applicator ingredients.
-                        pizzas: s.totalPizzasForSauce,
-                        cases: s.totalCases,
-                        ingredients: Object.keys(ingredientOzPerPizza),
-                        ingredientOzPerPizza,
-                      };
-                    };
-                    // Today's live runs (dayState.runs) are NOT in the scheduled
-                    // pool — they live in the live day state. Include them as
-                    // date=today so the make-day plan works when today is selected.
-                    const todayDateStr = todayStr();
-                    const liveRunsForMixes = dayState.runs
-                      .filter((r) => r.brand && !r.endedAt)
-                      .map((r) => {
-                        const runVals = effectiveValuesForRun(
-                          r,
-                          r.id === currentRunId ? form.getValues() : loadRunValues(r.id),
-                        );
-                        return valsToMixRun(todayDateStr, r.brand, r.flavor ?? "", runVals);
-                      });
-                    const runs = [
-                      ...liveRunsForMixes,
-                      ...scheduledDays.flatMap((day) =>
-                        (day.runs ?? [])
-                          .filter((r) => r.brand)
-                          .map((r) => {
-                            const profile = loadProfile(r.brand, r.flavor);
-                            const vals: FormValues = {
-                              ...(profile ?? DEFAULT_VALUES),
-                              casesNeeded: r.casesNeeded,
-                              ...(r.dieType ? { dieType: r.dieType } : {}),
-                            };
-                            return valsToMixRun(
-                              day.date,
-                              r.brand,
-                              r.flavor,
-                              effectiveValuesForRun(
-                                {
-                                  id: (r as typeof r & { id?: string }).id ?? `${day.date}:${r.brand}:${r.flavor}`,
-                                  brand: r.brand,
-                                  flavor: r.flavor,
-                                },
-                                vals,
-                              ),
-                            );
-                          }),
-                      ),
-                    ];
-                    const plan = buildMixPlan({ runs, mixes: mixPlanItems, today: mixMakeDay });
-                    if (plan.length === 0) {
-                      return (
-                        <p className="text-sm text-muted-foreground px-1" data-testid="mix-plan-empty">
-                          No mixes to make for this day. Pick a make-day with scheduled runs whose product matches a mix (within its days-early window).
-                        </p>
-                      );
-                    }
-                    return (
-                      <div className="space-y-3">
-                        {plan.map((group) => (
-                          <Card
-                            key={group.date}
-                            className="bg-emerald-950/30 border-emerald-700/40 shadow-md"
-                            data-testid={`mix-plan-${group.date}`}
-                          >
-                            <CardHeader className="pb-2 pt-4 px-5">
-                              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
-                                <Blend className="w-4 h-4" /> Mix Plan for {group.date}
-                                <span className="ml-1 font-normal normal-case text-xs text-emerald-400/80">
-                                  ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
-                                </span>
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="px-4 pb-4 space-y-3">
-                              {group.runs.map((run, ri) => (
-                                <div key={ri} className="rounded-md border border-emerald-800/40 bg-emerald-950/20 p-3">
-                                  <div className="flex items-baseline justify-between gap-2 mb-2">
-                                    <div className="font-semibold text-sm text-emerald-100 min-w-0 truncate">
-                                      {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
-                                    </div>
-                                    <div className="text-xs text-emerald-300/80 whitespace-nowrap tabular-nums">
-                                      {run.cases} case{run.cases !== 1 ? "s" : ""}
-                                      {run.pizzas > 0 ? ` · ${run.pizzas} pizza${run.pizzas !== 1 ? "s" : ""}` : null}
-                                    </div>
-                                  </div>
-                                  {run.cases > 0 && run.pizzas === 0 && (
-                                    <div className="flex items-center gap-1.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 mb-2 text-xs text-amber-300">
-                                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                      Pizzas/case not set for this product — open Setup to enter it so lbs can be computed
-                                    </div>
-                                  )}
-                                  <div className="space-y-2.5">
-                                    {run.mixes.map((m) => (
-                                      <div key={m.mixId} className="rounded border border-emerald-800/30 bg-emerald-900/10 p-2.5">
-                                        <div className="flex items-baseline justify-between gap-2 mb-1">
-                                          <span className="font-medium text-sm text-emerald-50 truncate">
-                                            {m.name}
-                                            {m.daysEarly > 0 && (
-                                              <span className="ml-1.5 text-[11px] text-emerald-400/70">make {m.daysEarly}d early</span>
-                                            )}
-                                          </span>
-                                          <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50 text-sm">
-                                            {m.batchSize > 0 ? (
-                                              <>{fmtNum(m.batches, 2)} <span className="font-normal text-emerald-300/80">batch{m.batches === 1 ? "" : "es"}</span></>
-                                            ) : (
-                                              <span className="font-normal text-emerald-300/80 text-xs">no batch size</span>
-                                            )}
-                                          </span>
-                                        </div>
-                                        <div className="flex items-baseline justify-between gap-2 text-xs text-emerald-300/80 mb-1.5 tabular-nums">
-                                          <span>
-                                            Total {fmtNum(m.totalLbs, 2)} lbs
-                                            <span className="ml-1 text-emerald-400/70">(incl. 15% waste + {m.startupLbs} lb startup)</span>
-                                          </span>
-                                          {m.remainingLbs < m.totalLbs && (
-                                            <span className="text-emerald-300">need {fmtNum(m.remainingLbs, 2)} lbs</span>
-                                          )}
-                                        </div>
-                                        {/* Already made — controlled component so state stays stable during saves */}
-                                        {(() => {
-                                          const liveMix = mixPlanItems.find((mx) => mx.id === m.mixId);
-                                          return liveMix ? (
-                                            <MixAlreadyMadeInput
-                                              mix={liveMix}
-                                              saveMixes={saveMixes}
-                                              onOptimisticSave={saveMixAlreadyMadeOptimistically}
-                                              onSaveAcknowledged={acknowledgeMixAlreadyMadeSave}
-                                            />
-                                          ) : null;
-                                        })()}
-                                        {m.notes && (
-                                          <div className="text-[11px] text-emerald-400/70 italic mb-1.5">{m.notes}</div>
-                                        )}
-                                        {m.missingAmounts && (
-                                          <div className="flex items-center gap-1.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 mb-1.5 text-xs text-amber-300">
-                                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                            No oz/pizza amounts — open Mix Recipes to enter them
-                                          </div>
-                                        )}
-                                        <div className="space-y-1 pt-1 border-t border-emerald-800/30">
-                                          <div className="text-[11px] uppercase tracking-wider text-emerald-400/70 font-semibold pt-1">
-                                            Pull For Mix
-                                            {m.batchSize > 0 && m.batches > 0 && (
-                                              <span className="ml-1.5 font-normal normal-case text-emerald-500/70">(per batch in parentheses)</span>
-                                            )}
-                                          </div>
-                                          {m.components.length === 0 ? (
-                                            <div className="text-xs text-emerald-400/60">No components defined.</div>
-                                          ) : (
-                                            m.components.map((c, ci) => {
-                                              // Per-batch is a recipe spec — unchanged by already-made.
-                                              const perBatch = m.batchSize > 0 && m.batches > 0 && m.totalLbs > 0
-                                                ? (c.lbs / m.totalLbs) * m.batchSize
-                                                : null;
-                                              // Pull amount scales to remaining batches only.
-                                              const pullLbs = m.totalLbs > 0
-                                                ? c.lbs * m.remainingLbs / m.totalLbs
-                                                : 0;
-                                              return (
-                                                <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
-                                                  <span className="text-emerald-200/90 truncate">{c.ingredient}</span>
-                                                  <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50">
-                                                    {fmtNum(pullLbs, 2)} <span className="font-normal text-emerald-300/80">lbs</span>
-                                                    {perBatch !== null && (
-                                                      <span className="font-normal text-emerald-400/70 ml-1.5">({fmtNum(perBatch, 2)}/batch)</span>
-                                                    )}
-                                                  </span>
-                                                </div>
-                                              );
-                                            })
-                                          )}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                              {/* Prep mixes — ingredient-linked. Zero-pull cards (totalLbs === 0) are hidden;
-                                  cards with totalLbs > 0 but remainingLbs === 0 still show so staff can confirm
-                                  already-made coverage. */}
-                              {(() => {
-                                const visiblePrepMixes = group.prepMixes.filter((m) => m.totalLbs > 0);
-                                return visiblePrepMixes.length > 0 && (
-                                <div className="mt-3 pt-3 border-t border-emerald-800/40 space-y-3">
-                                  <p className="text-[11px] uppercase tracking-wider font-semibold text-violet-400/80">Ingredient Prep</p>
-                                  {visiblePrepMixes.map((m) => {
-                                    const expandKey = `${group.date}::${m.mixId}`;
-                                    const isExpanded = prepMixExpanded.has(expandKey);
-                                    const toggleExpanded = () =>
-                                      setPrepMixExpanded((prev) => {
-                                        const next = new Set(prev);
-                                        if (next.has(expandKey)) next.delete(expandKey);
-                                        else next.add(expandKey);
-                                        return next;
-                                      });
-                                    return (
-                                    <div key={m.mixId} className="rounded-lg bg-violet-950/30 border border-violet-800/30 p-3 space-y-1.5">
-                                      <div className="flex items-baseline justify-between gap-2">
-                                        <span className="font-semibold text-sm text-violet-100">{m.name}</span>
-                                        <span className="text-xs tabular-nums text-violet-300/80">
-                                          {m.batchSize > 0 ? `${fmtNum(m.batches, 2)} batches` : <span className="text-violet-400/60">no batch size</span>}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-baseline justify-between gap-2 text-xs text-violet-300/80 tabular-nums">
-                                        <span>Total {fmtNum(m.totalLbs, 2)} lbs <span className="text-violet-400/70">(incl. 15% waste + {m.startupLbs} lb startup)</span></span>
-                                        {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
-                                      </div>
-                                      {/* Per-run breakdown toggle — only when 2+ runs contribute */}
-                                      {m.contributions && m.contributions.length >= 2 && (
-                                        <div>
-                                          <button
-                                            type="button"
-                                            onClick={toggleExpanded}
-                                            className="flex items-center gap-1 text-[11px] text-violet-400/80 hover:text-violet-300 transition-colors"
-                                          >
-                                            <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
-                                            {isExpanded ? "Hide" : "Show"} run breakdown ({m.contributions.length} runs)
-                                          </button>
-                                          {isExpanded && (
-                                            <div className="mt-1.5 space-y-0.5 pl-4 border-l border-violet-700/40">
-                                              {m.contributions.map((contrib, ci) => (
-                                                <div key={ci} className="flex items-baseline justify-between gap-2 text-xs">
-                                                  <span className="text-violet-300/80 truncate">
-                                                    {contrib.brand}{contrib.flavor ? ` — ${contrib.flavor}` : ""}
-                                                    <span className="ml-1 text-violet-400/60">({fmtComma(contrib.pizzas)} pizza{contrib.pizzas !== 1 ? "s" : ""})</span>
-                                                  </span>
-                                                  <span className="tabular-nums whitespace-nowrap text-violet-200/90 font-medium">
-                                                    {fmtNum(contrib.totalLbs, 2)} <span className="font-normal text-violet-400/70">lbs</span>
-                                                  </span>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                      {(() => {
-                                        const liveMix = mixPlanItems.find((mx) => mx.id === m.mixId);
-                                        return liveMix ? (
-                                          <MixAlreadyMadeInput
-                                            mix={liveMix}
-                                            saveMixes={saveMixes}
-                                            onOptimisticSave={saveMixAlreadyMadeOptimistically}
-                                            onSaveAcknowledged={acknowledgeMixAlreadyMadeSave}
-                                          />
-                                        ) : null;
-                                      })()}
-                                      <PrepMixMissingAmountsWarning entry={m} />
-                                      {m.components.length > 0 && (
-                                        <div className="space-y-1 pt-1 border-t border-violet-800/30">
-                                          <p className="text-[11px] uppercase tracking-wider text-violet-400/70 font-semibold pt-1">Pull For Prep</p>
-                                          {m.components.map((c, ci) => (
-                                            <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
-                                              <span className="text-violet-200/90 truncate">{c.ingredient}</span>
-                                              <span className="font-bold tabular-nums whitespace-nowrap text-violet-50">
-                                                {fmtNum(m.totalLbs > 0 ? c.lbs * m.remainingLbs / m.totalLbs : 0, 2)} <span className="font-normal text-violet-300/80">lbs</span>
-                                              </span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                              })()}
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
-                </>} />
+              <MixesTabCtx.Provider value={mixesTabCtxValue}>
+                <WarehouseInventoryDepartment mixes={<MixesTabContent />} />
+              </MixesTabCtx.Provider>
 
               <ManagementDepartment ai={
                 <LazyDeferredManagementSurface
@@ -17469,78 +16656,7 @@ export default function Home() {
 
               {/* ─── SUMMARY ─── */}
               <ProductionLineDepartment summary={<>
-                {isManager && (
-                  <div className="max-w-3xl mx-auto mb-4">
-                    <div className="mb-3 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2" data-testid="summary-tools-header">
-                      <BarChart2 className="h-4 w-4 text-primary" />
-                      <div>
-                        <h2 className="text-sm font-bold">Operations desk</h2>
-                        <p className="text-xs text-muted-foreground">Manager follow-up and shift context</p>
-                      </div>
-                    </div>
-                    <div className="mb-3" data-testid="summary-priority-actions">
-                      <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
-                    </div>
-                    <ShiftHandoffDigest
-                      onOpenSource={(source) => {
-                        if (source === "incidents") { setActiveTab("incidents"); return; }
-                        if (source === "quality") { setActiveTab("quality"); return; }
-                        if (source === "inventory") { setActiveTab("warehouse"); return; }
-                        setManageCategory("audit");
-                        setShowManageDialog(true);
-                      }}
-                    />
-                    <details className="group mt-3 rounded-xl border border-border/50 bg-card/40" data-testid="summary-report-details">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 select-none">
-                        <span className="flex items-center gap-2 text-sm font-semibold">
-                          <BarChart2 className="h-4 w-4 text-muted-foreground" /> Reports and trends
-                          <span className="text-xs font-normal text-muted-foreground">Generate or export a report</span>
-                        </span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                      </summary>
-                      <div className="border-t border-border/40 p-3">
-                        <OperationalReportPanel
-                          onOpenQuality={(range: OperationalReportDetailRange) => {
-                            setActiveTab("quality");
-                          }}
-                          onOpenIncidents={(range: OperationalReportDetailRange) => {
-                            setActiveTab("incidents");
-                          }}
-                          buildInput={(scope, date) =>
-                            scope === "week"
-                              ? buildWeekSummaryInput({
-                                  date,
-                                  nowMs: Date.now(),
-                                  history: [
-                                    ...history,
-                                    {
-                                      date: todayStr(),
-                                      runs: dayState.runs,
-                                      runValues: Object.fromEntries(
-                                        dayState.runs.map((run) => [
-                                          run.id,
-                                          run.id === currentRunId
-                                            ? form.getValues()
-                                            : loadRunValues(run.id),
-                                        ]),
-                                      ),
-                                    },
-                                  ],
-                                  runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                                })
-                              : buildDaySummaryInput({
-                                  date,
-                                  nowMs: Date.now(),
-                                  runs: dayState.runs,
-                                  runValues: (run) =>
-                                    run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
-                                })
-                          }
-                        />
-                      </div>
-                    </details>
-                  </div>
-                )}
+                <SummaryToolsContent />
                 <LiveSummaryTabContent />
                 </>} />
 
@@ -18977,690 +18093,6 @@ export default function Home() {
 // ScreenModeView and GlanceOverlay use the narrow HomeTab context. FloorModeView
 // uses HomeCtx because it must surface the short-lived pause decision overlay.
 // ═══════════════════════════════════════════════════════════════════════════
-
-function ScreenModeView() {
-  const {
-    activePackagingRows, activeWarehouseRows, currentRun, dayState, doughSubTab, nextRunDieType, runStatus,
-    runSummaryStatsById, runValuesById,
-    scheduledDays, screenMode, v, ve,
-  } = useHomeTabCtx();
-
-  const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
-    casesPct, casesFreezerPct, casesPctWithFreezer,
-    currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
-    showBatchDue, setShowBatchDue,
-    autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
-    stallPrompt, setStallPrompt, stallCheck,
-  } = useLiveRun();
-
-  if (screenMode === "dashboard") {
-    const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400";
-    const paceLabel = calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE";
-    const dashDowntimeSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-    const dashMinutesDelta = calc.ppm > 0 && calc.paceDelta !== 0 ? Math.round(Math.abs(calc.paceDelta) * v.pizzasPerCase / calc.ppm) : 0;
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-6 gap-6 select-none">
-        {/* Top bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Factory className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Production Dashboard</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-
-        {/* Run name + status */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-5xl font-black tracking-tight break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
-          {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
-          {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
-          {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
-          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
-        </div>
-
-        {/* Main stats row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 flex-1">
-          {/* PPM */}
-          <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center">
-            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Pizzas / Min</p>
-            <p className="text-8xl font-black tabular-nums text-primary">{calc.ppm > 0 ? fmtComma(calc.ppm) : "—"}</p>
-          </div>
-
-          {/* Cases progress */}
-          <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
-            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cases Done</p>
-            <p className="text-7xl font-black tabular-nums">
-              {fmtComma(calc.casesCompleted)}
-              <span className="text-3xl text-muted-foreground"> / {fmtComma(v.casesNeeded)}</span>
-            </p>
-            <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
-              <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
-              {casesFreezerPct > 0 && (
-                <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
-              )}
-            </div>
-            <div className="flex items-center gap-6 flex-wrap">
-              <p className="text-lg font-semibold text-muted-foreground">
-                {Math.round(casesPct * 100)}% complete
-                {calc.casesInFreezer > 0 && (
-                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in Freeze tunnel ({Math.round(casesPctWithFreezer * 100)}%)</span>
-                )}
-              </p>
-              {v.casesPerSkid > 0 && v.casesNeeded > 0 && (
-                <p className="text-lg font-semibold text-muted-foreground">
-                  {v.skidsCompleted} / {Math.floor(v.casesNeeded / v.casesPerSkid)} skids
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Pace + time */}
-          <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
-            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Pace</p>
-            <p className={`text-6xl font-black ${paceColor}`}>{paceLabel}</p>
-            {calc.paceDelta !== 0 && (
-              <p className="text-2xl font-bold text-muted-foreground">
-                {calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))} cases
-                {dashMinutesDelta > 0 && <span className="text-lg ml-2 opacity-70">(~{fmtMins(dashMinutesDelta)})</span>}
-              </p>
-            )}
-            {dashDowntimeSec > 0 && (
-              <p className="text-lg font-semibold text-red-400/80">
-                ↓ {fmtTime(dashDowntimeSec)} downtime
-              </p>
-            )}
-            {calc.adjustedTimeSec > 0 && (
-              <div className="mt-2 pt-4 border-t border-border">
-                <p className="text-sm text-muted-foreground uppercase tracking-wider font-semibold mb-1">Est. Finish</p>
-                <p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p>
-                <p className="text-lg text-muted-foreground">{fmtTime(calc.adjustedTimeSec)} remaining</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Next run footer */}
-        {dayState.runs[dayState.currentIndex + 1] && (
-          <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-muted/20 border border-border/50 text-muted-foreground">
-            <ArrowRight className="w-4 h-4 shrink-0" />
-            <span className="text-sm font-semibold min-w-0 truncate">Next: {runLabel(dayState.runs[dayState.currentIndex + 1])}</span>
-            {nextRunDieType && nextRunDieType !== v.dieType && (
-              <span className="ml-2 text-xs font-bold text-amber-400">⚠ Die change → {nextRunDieType}</span>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (screenMode === "dough") {
-    const batchUrgent = secUntilNextBatch > 0 && secUntilNextBatch < 120;
-    const batchDue = secUntilNextBatch <= 0 || (elapsedBatchSec > 0 && secUntilNextBatch < 5);
-    const mm = Math.floor(secUntilNextBatch / 60);
-    const ss = Math.floor(secUntilNextBatch % 60);
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
-        {/* Top bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Droplets className="w-6 h-6 text-primary" />
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Dough Station</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-
-        <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
-
-        {/* Big countdown */}
-        {runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
-          <div className={`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`}>
-            <p className={`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`}>
-              {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
-            </p>
-            <p className={`text-[10rem] font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`}>
-              {batchDue ? "GO" : `${fmtCountdownParts(mm, ss)}`}
-            </p>
-            <div className="flex items-center gap-8 text-center mt-4">
-              <div>
-                <p className="text-sm text-muted-foreground uppercase tracking-wider">Current Batch</p>
-                <p className="text-5xl font-black tabular-nums">{currentBatchNum + 1}</p>
-              </div>
-              {totalBatchesNeeded > 0 && (
-                <>
-                  <p className="text-4xl text-muted-foreground font-light">of</p>
-                  <div>
-                    <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Batches</p>
-                    <p className="text-5xl font-black tabular-nums">{totalBatchesNeeded}</p>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-6 text-muted-foreground">
-              <div className="text-center">
-                <p className="text-xs uppercase tracking-wider mb-1">Time Per Batch</p>
-                <p className="text-2xl font-bold">{fmtTime(calc.timePerBatchSec)}</p>
-              </div>
-              {calc.perBatch > 0 && (
-                <div className="text-center">
-                  <p className="text-xs uppercase tracking-wider mb-1">Yield / Batch</p>
-                  <p className="text-2xl font-bold">{fmtComma(Math.round(calc.perBatch))}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center rounded-3xl border border-border bg-card">
-            <p className="text-2xl text-muted-foreground">
-              {doughSubTab === "crusts" ? "Crust run — no dough batches to mix" : runStatus === "pending" ? "Run not started" : runStatus === "ended" ? "Run ended" : "Enter line speed to see batch timing"}
-            </p>
-          </div>
-        )}
-
-        {/* Dough stats row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="rounded-2xl bg-card border border-border p-4 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{doughSubTab === "crusts" ? "Stacks Ready" : "Trays on Line"}</p>
-            <p className="text-3xl font-black tabular-nums">{v.traysOnLine > 0 ? v.traysOnLine : "—"}</p>
-            {calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.traysNeeded, 0)} still needed <span className="opacity-60">(net)</span></p>}
-          </div>
-          {doughSubTab !== "crusts" && (
-            <div className="rounded-2xl bg-card border border-border p-4 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batches Ready</p>
-              <p className="text-3xl font-black tabular-nums">{v.batchesReady}</p>
-              {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} still needed <span className="opacity-60">(net)</span></p>}
-            </div>
-          )}
-          {v.doughBatchYield > 0 && doughSubTab !== "crusts" && (
-            <div className="rounded-2xl bg-card border border-border p-4 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batch Yield</p>
-              <p className="text-3xl font-black tabular-nums">{fmtComma(v.doughBatchYield)}</p>
-              <p className="text-sm text-muted-foreground">doughballs</p>
-            </div>
-          )}
-          {v.casesNeeded > 0 && (
-            <div className="rounded-2xl bg-card border border-border p-4 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Cases Done</p>
-              <p className="text-3xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
-              <p className="text-sm text-muted-foreground">/ {fmtComma(v.casesNeeded)}</p>
-              {calc.casesInFreezer > 0 && (
-                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (screenMode === "frontline") {
-    const s = computeSummaryStats(v);
-    const items: { label: string; value: string; sub?: string }[] = [];
-    if (s.sauceBatches > 0) {
-      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-      items.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
-    }
-    if (s.app1Type) {
-      const isMix = s.app1Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0)
-        items.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app1Lbs, 1) + " lbs total" });
-    }
-    if (s.app2Type) {
-      const isMix = s.app2Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0)
-        items.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" });
-    }
-    // Pep applicators sit between App 2 and App 3, matching the physical line
-    // order (and the Run/Frontline tabs' card order).
-    const pep1Label = v.pep1Combined === true ? "Pep 1 & 2" : "Pep 1";
-    if (s.pep1Type) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-      if ((isPepStd ? s.pep1Lbs : s.pep1Batches) > 0)
-        items.push({ label: `${pep1Label} — ${s.pep1Type}`, value: isPepStd ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-    }
-    if (s.pep1TypeB) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
-      if ((isPepStd ? s.pep1LbsB : s.pep1BatchesB) > 0)
-        items.push({ label: `${pep1Label} — ${s.pep1TypeB}`, value: isPepStd ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
-    }
-    if (s.pep2Type) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-      if ((isPepStd ? s.pep2Lbs : s.pep2Batches) > 0)
-        items.push({ label: `Pep 2 — ${s.pep2Type}`, value: isPepStd ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
-    }
-    if (s.pep2TypeB) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
-      if ((isPepStd ? s.pep2LbsB : s.pep2BatchesB) > 0)
-        items.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: isPepStd ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
-    }
-    if (s.app3Type) {
-      const isMix = s.app3Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0)
-        items.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app3Lbs, 1) + " lbs total" });
-    }
-    if (s.app4Type) {
-      const isMix = s.app4Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
-        items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
-    }
-    const cheeseRecipes: { label: string; rows: { ingredient: string; lbs: number }[] }[] = [];
-    if ((v.app1CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 1 Cheese Recipe`, rows: v.app1CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
-    if ((v.app2CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 2 Cheese Recipe`, rows: v.app2CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
-
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
-        {/* Top bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Layers className="w-6 h-6 text-primary" />
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Frontline Station</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-
-        {/* Run name + status */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
-          {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
-          {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
-          {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
-          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
-          {v.casesNeeded > 0 && (
-            <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
-              {fmtComma(calc.casesCompleted)} <span className="text-lg">/ {fmtComma(v.casesNeeded)} cases</span>
-              {calc.casesInFreezer > 0 && (
-                <span className="text-lg text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in Freeze tunnel</span>
-              )}
-            </span>
-          )}
-        </div>
-
-        {/* Progress bar */}
-        {v.casesNeeded > 0 && (
-          <div className="h-3 rounded-full bg-muted/30 overflow-hidden -mt-2 flex">
-            <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
-            {casesFreezerPct > 0 && (
-              <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
-            )}
-          </div>
-        )}
-
-        {/* Ingredient grid */}
-        {items.length > 0 ? (
-          <div className="grid grid-cols-2 gap-4 flex-1">
-            {items.map((item: any, i: any) => (
-              <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
-                <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{item.label}</p>
-                <p className="text-5xl font-black tabular-nums text-foreground">{item.value}</p>
-                {item.sub && <p className="text-base text-muted-foreground font-semibold">{item.sub}</p>}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center rounded-2xl border border-border bg-card">
-            <p className="text-2xl text-muted-foreground">No frontline ingredients configured</p>
-          </div>
-        )}
-
-        {/* Cheese recipe breakdown */}
-        {cheeseRecipes.filter((r: any) => r.rows.length > 0).map((recipe: any, i: any) => (
-          <div key={i} className="rounded-2xl bg-card border border-border p-6">
-            <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{recipe.label}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {recipe.rows.map((row: any, j: any) => (
-                <div key={j} className="flex items-center justify-between gap-3">
-                  <span className="text-xl font-semibold">{row.ingredient}</span>
-                  <span className="text-2xl font-black tabular-nums text-primary">{fmtNum(row.lbs, 1)} lbs</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-
-        {/* Time remaining footer */}
-        {(runStatus === "running" || runStatus === "paused") && calc.adjustedTimeSec > 0 && (
-          <div className="flex items-center gap-8 px-6 py-4 rounded-2xl bg-muted/20 border border-border/50 text-muted-foreground">
-            <div><p className="text-xs uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
-            <div><p className="text-xs uppercase tracking-wider">Time Left</p><p className="text-3xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p></div>
-            {calc.ppm > 0 && <div><p className="text-xs uppercase tracking-wider">PPM</p><p className="text-3xl font-black tabular-nums">{fmtComma(calc.ppm)}</p></div>}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (screenMode === "backline") {
-    const freezerMs = Number(ve.freezerTime) * 60000;
-    const freezerRemainMs = runStatus === "ended" && currentRun?.endedAt && freezerMs > 0
-      ? Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime())
-      : 0;
-    const freezerDraining = freezerRemainMs > 0;
-    const freezerPct = freezerMs > 0 ? Math.max(0, 1 - freezerRemainMs / freezerMs) : 1;
-    const fmm = Math.floor(freezerRemainMs / 60000);
-    const fss = Math.floor((freezerRemainMs % 60000) / 1000);
-    const upcomingRuns = dayState.runs.filter((_: any, i: any) => i > dayState.currentIndex);
-
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
-        {/* Top bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Clock className="w-6 h-6 text-primary" />
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Backline Station</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-
-        {/* Current run block */}
-        <div className={`rounded-3xl border p-8 flex flex-col gap-5 ${
-          runStatus === "ended" && freezerDraining ? "bg-amber-950/30 border-amber-600/40"
-          : runStatus === "ended" ? "bg-emerald-950/20 border-emerald-700/30"
-          : runStatus === "running" ? "bg-primary/5 border-primary/30"
-          : "bg-card border-border"
-        }`}>
-          <div className="flex items-center gap-4 flex-wrap">
-            <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
-            {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
-            {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
-            {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
-            {runStatus === "ended" && !freezerDraining && <span className="px-3 py-1 rounded-full bg-emerald-700/30 text-emerald-400 text-sm font-bold uppercase">Complete</span>}
-          </div>
-
-          {/* Cases progress while running */}
-          {(runStatus === "running" || runStatus === "paused") && v.casesNeeded > 0 && (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-end gap-4">
-                <p className="text-6xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
-                <p className="text-3xl text-muted-foreground font-bold mb-1">/ {fmtComma(v.casesNeeded)} cases</p>
-                {calc.casesInFreezer > 0 && (
-                  <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
-                )}
-              </div>
-              <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
-                <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
-                {casesFreezerPct > 0 && (
-                  <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
-                )}
-              </div>
-              <div className="flex gap-6 flex-wrap">
-                {v.casesPerSkid > 0 && (
-                  <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Skids Done</p><p className="text-2xl font-black tabular-nums">{v.skidsCompleted}{v.casesNeeded > 0 ? ` / ${Math.floor(v.casesNeeded / v.casesPerSkid)}` : ""}</p></div>
-                )}
-                {calc.ppm > 0 && <div><p className="text-xs text-muted-foreground uppercase tracking-wider">PPM</p><p className="text-2xl font-black tabular-nums">{fmtComma(calc.ppm)}</p></div>}
-                {currentRunDowntimeMs > 0 && <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Downtime</p><p className="text-2xl font-black tabular-nums text-amber-400">{fmtTime(currentRunDowntimeMs / 1000)}</p></div>}
-              </div>
-              {calc.adjustedTimeSec > 0 && (
-                <div className="flex gap-8 mt-1">
-                  <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
-                  <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Time Left</p><p className="text-3xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p></div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Freeze tunnel countdown */}
-          {runStatus === "ended" && freezerMs > 0 && (
-            <div className="flex flex-col gap-4">
-              <p className={`text-sm font-bold uppercase tracking-widest ${freezerDraining ? "text-amber-400" : "text-emerald-400"}`}>
-                {freezerDraining ? "❄️ Freeze Tunnel Draining" : "✅ Freeze Tunnel Empty — Ready"}
-              </p>
-              {freezerDraining && (
-                <>
-                  <p className="text-[8rem] font-black tabular-nums leading-none text-amber-400">
-                    {fmtCountdownParts(fmm, fss)}
-                  </p>
-                  <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
-                    <div className="h-full rounded-full bg-amber-500 transition-all duration-1000" style={{ width: `${freezerPct * 100}%` }} />
-                  </div>
-                  <p className="text-lg text-muted-foreground">{fmtMins(Number(ve.freezerTime))} total · clears at {fmtClock((currentRun?.endedAt ?? 0) + freezerMs)}</p>
-                </>
-              )}
-              {!freezerDraining && (
-                <p className="text-5xl font-black text-emerald-400">CLEAR</p>
-              )}
-            </div>
-          )}
-
-          {/* Ended with no freezer */}
-          {runStatus === "ended" && freezerMs === 0 && (
-            <p className="text-5xl font-black text-emerald-400">Run Complete</p>
-          )}
-        </div>
-
-        {/* Upcoming runs */}
-        {upcomingRuns.length > 0 && (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Up Next — {upcomingRuns.length} run{upcomingRuns.length > 1 ? "s" : ""}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {upcomingRuns.map((run: any, i: any) => {
-                const vals = withTempOverrides(loadRunValues(run.id));
-                const s = computeSummaryStats(vals);
-                const estSec = s.estimatedTimeSec;
-                const dieChange = vals.dieType && v.dieType && vals.dieType !== (i === 0 ? v.dieType : loadRunValues(upcomingRuns[i - 1].id).dieType);
-                return (
-                  <div key={run.id} className="rounded-2xl bg-card border border-border p-5 flex flex-col gap-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">#{dayState.currentIndex + i + 2}</span>
-                      {dieChange && <span className="text-xs font-bold text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Die change</span>}
-                    </div>
-                    <p className="text-2xl font-black leading-tight break-words min-w-0">{runLabel(run)}</p>
-                    {vals.dieType && <span className="self-start px-2 py-0.5 rounded text-xs font-bold bg-muted/50 border border-border/50 text-muted-foreground">{vals.dieType}</span>}
-                    <div className="flex gap-4 mt-auto">
-                      {s.totalCases > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cases</p><p className="text-xl font-black tabular-nums">{fmtComma(s.totalCases)}</p></div>}
-                      {estSec > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Time</p><p className="text-xl font-black tabular-nums">{fmtTime(estSec)}</p></div>}
-                       {vals.freezerTime && Number(vals.freezerTime) > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Freeze Tunnel</p><p className="text-xl font-black tabular-nums">{fmtNum(Number(vals.freezerTime), 0)}m</p></div>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {upcomingRuns.length === 0 && runStatus === "ended" && !freezerDraining && (
-          <div className="flex items-center justify-center rounded-2xl border border-border bg-card py-10">
-            <p className="text-2xl text-muted-foreground">No more runs scheduled for this shift</p>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (screenMode === "sauce") {
-    const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
-        {/* Top bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Droplets className="w-6 h-6 text-primary" />
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Sauce Station</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-
-        {/* Run name + status */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
-          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
-          {v.casesNeeded > 0 && (
-            <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
-              {fmtComma(Math.max(0, calc.casesLeftToRun))} <span className="text-lg">cases left</span>
-            </span>
-          )}
-        </div>
-
-        {/* Big sauce display */}
-        {calc.sauceBatches > 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border border-border bg-card p-12">
-            <p className="text-lg font-bold uppercase tracking-widest text-muted-foreground">Sauce Needed</p>
-            <p className="text-[10rem] font-black tabular-nums leading-none text-primary">{fmtNum(calc.sauceBatches, 2)}</p>
-            <p className="text-3xl font-bold text-muted-foreground">batches</p>
-            {bd && (
-              <div className="flex items-center gap-8 text-center mt-4">
-                <div>
-                  <p className="text-sm text-muted-foreground uppercase tracking-wider">Batches / Barrel</p>
-                  <p className="text-5xl font-black tabular-nums">{bd.batchesPerBarrel}</p>
-                </div>
-                <p className="text-4xl text-muted-foreground font-light">→</p>
-                <div>
-                  <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Barrels</p>
-                  <p className="text-5xl font-black tabular-nums text-primary">{bd.totalBarrels}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center rounded-3xl border border-border bg-card">
-            <p className="text-2xl text-muted-foreground">No sauce configured for this run</p>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (screenMode === "warehouse") {
-    const activeRuns = dayState.runs.filter((r: any) => !r.endedAt);
-    const warehouseRows = [
-      ...activeWarehouseRows,
-      ...activePackagingRows,
-    ];
-    const warehouseGroups = groupWarehouseNeedRows(warehouseRows);
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
-        {/* Top bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Warehouse className="w-6 h-6 text-primary" />
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Warehouse</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-
-        <h1 data-testid="warehouse-screen-heading" className="text-4xl font-black">Warehouse Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
-
-        {/* Aggregate ingredient grid, grouped to match the interactive warehouse tab. */}
-        {warehouseGroups.length > 0 ? (
-          <div className="space-y-6 flex-1 content-start">
-            {warehouseGroups.map((group) => (
-              <section key={group.area}>
-                <h2 className="mb-3 text-lg font-bold uppercase tracking-widest text-muted-foreground">{group.area}</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {group.rows.map((row, i) => (
-                    <div key={`${group.area}-${i}`} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
-                      <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground truncate">{row.label}</p>
-                      <p className="text-5xl font-black tabular-nums text-foreground">{row.value}</p>
-                      {row.sub && <p className="text-base text-muted-foreground font-semibold">{row.sub}</p>}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center rounded-2xl border border-border bg-card">
-            <p className="text-2xl text-muted-foreground">No active runs with ingredient needs</p>
-          </div>
-        )}
-
-        {/* Upcoming production schedule */}
-        {scheduledDays.length > 0 && (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Upcoming Production</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {scheduledDays.map((day: any) => (
-                <div key={day.date} className="rounded-2xl bg-card border border-border p-5 flex items-center justify-between gap-3">
-                  <span className="text-2xl font-black">{day.date}</span>
-                  <span className="text-lg text-muted-foreground font-semibold">{day.runCount} run{day.runCount !== 1 ? "s" : ""}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (screenMode === "summary") {
-    const finished = dayState.runs.filter((r: any) => !!r.endedAt);
-    const totalCases = finished.reduce(
-      (sum: number, run: RunMeta) => sum + (
-        runSummaryStatsById.get(run.id)?.totalCases ??
-        computeSummaryStats(runValuesById.get(run.id) ?? DEFAULT_VALUES).totalCases
-      ),
-      0,
-    );
-    return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <BarChart2 className="w-6 h-6 text-primary" />
-            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Shift Summary</span>
-          </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
-        </div>
-        <div className="grid grid-cols-2 gap-4 flex-1">
-          {dayState.runs.map((run: any, i: any) => {
-            const vals = runValuesById.get(run.id) ?? DEFAULT_VALUES;
-            const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
-            const isCurr = i === dayState.currentIndex;
-            const isDone = !!run.endedAt;
-            return (
-              <div key={run.id} className={`rounded-2xl border p-6 flex flex-col gap-3 ${isCurr ? "bg-primary/10 border-primary/40" : isDone ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card border-border/50"}`}>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <p className="text-2xl font-black break-words min-w-0">{runLabel(run)}</p>
-                  {vals.dieType && <span className="px-2 py-0.5 rounded text-xs font-bold bg-muted/50 border border-border text-muted-foreground">{vals.dieType}</span>}
-                  <span className={`ml-auto text-xs font-bold uppercase px-2 py-0.5 rounded-full ${isCurr ? "bg-primary/20 text-primary" : isDone ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                    {isCurr ? "Current" : isDone ? "Done" : "Upcoming"}
-                  </span>
-                </div>
-                <div className="flex gap-6 flex-wrap">
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Cases</p>
-                    <p className="text-3xl font-black tabular-nums">{fmtComma(isDone && run.actualCases != null ? run.actualCases : isCurr ? calc.casesCompleted : 0)}<span className="text-lg text-muted-foreground"> / {fmtComma(s.totalCases)}</span></p>
-                  </div>
-                  {isCurr && calc.ppm > 0 && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">PPM</p>
-                      <p className="text-3xl font-black tabular-nums">{fmtComma(calc.ppm)}</p>
-                    </div>
-                  )}
-                  {isCurr && calc.paceStatus && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Pace</p>
-                      <p className={`text-2xl font-black ${calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400"}`}>
-                        {calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE"}
-                        {calc.paceDelta !== 0 && <span className="text-lg text-muted-foreground ml-1">{calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))}</span>}
-                      </p>
-                    </div>
-                  )}
-                  {s.estimatedTimeSec > 0 && !isCurr && !isDone && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Time</p>
-                      <p className="text-2xl font-black tabular-nums">{fmtTime(s.estimatedTimeSec)}</p>
-                    </div>
-                  )}
-                </div>
-                {run.startedAt && <p className="text-xs text-muted-foreground">Started {fmtClock(run.startedAt)}{run.endedAt ? ` · Ended ${fmtClock(run.endedAt)}` : ""}</p>}
-              </div>
-            );
-          })}
-        </div>
-        {finished.length > 0 && (
-          <div className="flex items-center gap-8 px-6 py-4 rounded-2xl bg-card border border-border">
-            <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Runs Finished</p><p className="text-4xl font-black">{finished.length}</p></div>
-            <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Total Cases</p><p className="text-4xl font-black tabular-nums">{fmtComma(totalCases)}</p></div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return null;
-}
 
 function PauseTunnelDecision({
   pausedAt,
@@ -21596,241 +20028,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     </>
   );
 });
-
-function FreezerSurplusPanel({
-  mode,
-  ledger,
-  loaded,
-  busy,
-  error,
-  completedRun,
-  freezerTimeMin,
-  nowMs,
-  pendingRuns,
-  getOriginalTarget,
-  onConfirm,
-  onAllocate,
-}: {
-  mode: "packaging" | "warehouse";
-  ledger: FreezerSurplusLedger;
-  loaded: boolean;
-  busy: boolean;
-  error: string | null;
-  completedRun?: RunMeta | null;
-  freezerTimeMin?: number;
-  nowMs?: number;
-  pendingRuns?: RunMeta[];
-  getOriginalTarget: (run: RunMeta) => number;
-  onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
-  onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
-}) {
-  const [cases, setCases] = useState("");
-  const [productionDate, setProductionDate] = useState(todayStr());
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
-  const [localMessage, setLocalMessage] = useState<string | null>(null);
-  const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
-  const runs = pendingRuns ?? [];
-
-  async function confirmLot() {
-    const count = Number(cases);
-    if (!completedRun || !Number.isSafeInteger(count) || count <= 0) {
-      setLocalMessage("Enter a positive whole number of excess cases.");
-      return;
-    }
-    if (!productionDate) {
-      setLocalMessage("Choose the production date for this freezer lot.");
-      return;
-    }
-    try {
-      await onConfirm(completedRun, count, productionDate);
-      setCases("");
-      setConfirmedRunId(completedRun.id);
-      setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
-    } catch {
-      // The parent exposes the server's actionable error.
-    }
-  }
-
-  async function saveSelection(run: RunMeta) {
-    const byLot = selections[run.id] ?? {};
-    const allocations = Object.entries(byLot)
-      .filter(([, count]) => count > 0)
-      .map(([lotId, count]) => ({ lotId, cases: count }));
-    try {
-      await onAllocate(run, allocations);
-      setSelectedRunId(null);
-      setLocalMessage(
-        allocations.length > 0
-          ? `Applied ${allocations.reduce((sum, item) => sum + item.cases, 0)} carried-in cases to ${run.brand}${run.flavor ? ` — ${run.flavor}` : ""}.`
-          : "Pull released. The run keeps its full original target.",
-      );
-    } catch {
-      // The parent exposes the server's actionable error.
-    }
-  }
-
-  if (mode === "packaging") {
-    if (!completedRun?.brand && !completedRun?.flavor) return null;
-    const remainingMs = getFreezerSurplusRemainingMs({
-      endedAt: completedRun.endedAt,
-      freezerTimeMin: freezerTimeMin ?? 0,
-      nowMs: nowMs ?? 0,
-    });
-    if (confirmedRunId === completedRun.id || remainingMs <= 0) return null;
-    return (
-      <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
-        <div className="flex items-start gap-3">
-          <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-bold">Confirm finished-case freezer surplus</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Record excess cases from the completed run as a separate dated lot. This does not change any future run until Warehouse explicitly pulls it.
-            </p>
-            <p className="mt-2 text-sm font-semibold">
-              {completedRun.brand}{completedRun.flavor ? ` — ${completedRun.flavor}` : ""}
-            </p>
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[8rem_10rem_auto]">
-              <label className="text-xs font-semibold text-muted-foreground">
-                Excess cases
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputMode="numeric"
-                  value={cases}
-                  onChange={(event) => setCases(event.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                  aria-label="Excess finished cases"
-                />
-              </label>
-              <label className="text-xs font-semibold text-muted-foreground">
-                Production date
-                <input
-                  type="date"
-                  value={productionDate}
-                  onChange={(event) => setProductionDate(event.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                  aria-label="Freezer lot production date"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void confirmLot()}
-                disabled={busy}
-                className="self-end rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-              >
-                {busy ? "Saving…" : "Confirm surplus"}
-              </button>
-            </div>
-            {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
-            {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  const lots = ledger.lots.filter((lot) => lot.remainingCases > 0);
-  return (
-    <section className="mb-4 rounded-xl border border-sky-500/30 bg-sky-500/5 p-4" data-testid="freezer-surplus-warehouse">
-      <div className="flex items-start gap-3">
-        <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-bold">Dated freezer surplus</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Select a dated lot and case count before the matching run starts. Unselected lots stay available; no selection means the full target is produced.
-          </p>
-          {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
-          {!loaded && <p className="mt-3 text-xs text-muted-foreground">Loading server-confirmed lots…</p>}
-          {loaded && runs.length === 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">No unstarted matching runs are waiting for a freezer pull.</p>
-          )}
-          <div className="mt-3 space-y-3">
-            {runs.map((run) => {
-              const summary = summarizeSurplusForRun({
-                runId: run.id,
-                brand: run.brand,
-                flavor: run.flavor,
-                originalTarget: getOriginalTarget(run),
-                lots: ledger.lots,
-                allocations: ledger.allocations,
-              });
-              const productLots = lots.filter((lot) => isMatchingSurplusProduct(lot, run));
-              const current = selections[run.id] ?? Object.fromEntries(
-                summary.selected.map((allocation) => [allocation.lotId, allocation.cases]),
-              );
-              const isEditing = selectedRunId === run.id;
-              return (
-                <div
-                  key={run.id}
-                  className="rounded-lg border border-border/50 bg-background/60 p-3"
-                  data-testid={`freezer-surplus-run-${run.id}`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold">{run.brand}{run.flavor ? ` — ${run.flavor}` : ""}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Original target <strong className="text-foreground">{summary.originalTarget}</strong>
-                        {" · "}Carried in <strong className="text-sky-300">{summary.carriedInCases}</strong>
-                        {" · "}Still to produce <strong className="text-foreground">{summary.productionCases}</strong>
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedRunId(isEditing ? null : run.id)}
-                      className="rounded-md border border-sky-500/40 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/10"
-                    >
-                      {isEditing ? "Close pull" : summary.carriedInCases > 0 ? "Revise pull" : "Choose pull"}
-                    </button>
-                  </div>
-                  {isEditing && (
-                    <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
-                      {productLots.length === 0 ? (
-                        <p className="text-xs italic text-muted-foreground">No available dated lot matches this brand and flavor.</p>
-                      ) : productLots.map((lot) => (
-                        <label key={lot.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span>
-                            {lot.productionDate} · {lot.remainingCases} available
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            max={lot.remainingCases + (current[lot.id] ?? 0)}
-                            step="1"
-                            value={current[lot.id] ?? 0}
-                            onChange={(event) => {
-                              const next = Math.max(0, Math.floor(Number(event.target.value) || 0));
-                              setSelections((prev) => ({
-                                ...prev,
-                                [run.id]: { ...(prev[run.id] ?? current), [lot.id]: next },
-                              }));
-                            }}
-                            className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right font-mono text-sm"
-                            aria-label={`Cases from freezer lot dated ${lot.productionDate}`}
-                          />
-                        </label>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => void saveSelection(run)}
-                        disabled={busy}
-                        className="mt-2 rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                      >
-                        {busy ? "Saving…" : "Confirm pull"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {localMessage && <p className="mt-2 text-xs font-medium text-sky-300" role="status">{localMessage}</p>}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();

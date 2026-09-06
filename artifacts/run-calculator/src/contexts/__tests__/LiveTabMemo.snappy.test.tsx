@@ -294,7 +294,6 @@ describe("LiveTabMemo — all 8 memo()-wrapped components receive clock updates 
     expect(renderCount).toBeGreaterThan(countAfterMount);
   });
 });
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Suite 2 — Manage-dialog open does NOT corrupt live data
 //            (uses REAL HomeCtx.Provider + useHomeCtx())
@@ -764,7 +763,6 @@ describe("LiveTabMemo — Suite 4: homeTabCtxValue ref is stable across ALL dial
     }
   });
 });
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Suite 4 counter-proof — guard DOES catch the regression
 //
@@ -4178,3 +4176,4 @@ describe("LiveTabMemo — Suite 12: real CompactRunStrip is wired to useHomeTabC
     expect(renderCount).toBe(countAfterMount);
   });
 });
+// ═══════════════════════════════════════════════════════════════════════════════

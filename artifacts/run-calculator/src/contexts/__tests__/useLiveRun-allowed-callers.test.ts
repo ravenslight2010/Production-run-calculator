@@ -54,8 +54,6 @@ const ALLOWED_CALLERS = new Set<string>([
   "LiveRunHandoffGuard",
 
   // Live display helpers mounted on top of the main content area:
-  // ScreenModeView — station/TV cast display, updates counters per second
-  "ScreenModeView",
   // FloorModeView — idle floor-mode big-numbers monitor
   "FloorModeView",
   // PauseTunnelDecision — its visible ten-second safety countdown must tick
@@ -93,6 +91,11 @@ const ALLOWED_FILES = new Set<string>([
   // It is the persistent mini status bar shown on non-Run tabs while manage
   // dialogs are open, so it genuinely needs the per-second clock subscription.
   "components/CompactRunStrip.tsx",
+
+  // ScreenModeView.tsx — extracted station/TV cast screens render elapsed
+  // production counters and clocks, so their deliberate per-second updates
+  // are operator-visible rather than incidental subscription churn.
+  "components/ScreenModeView.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────

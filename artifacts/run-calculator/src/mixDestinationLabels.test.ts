@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const homeSource = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+const mixesTabSource = readFileSync(
+  resolve(process.cwd(), "src/components/MixesTabContent.tsx"),
+  "utf8",
+);
 
 describe("mix destination labels", () => {
   it("keeps the operational menu and recipe-management sub-tab distinct", () => {
@@ -13,7 +17,7 @@ describe("mix destination labels", () => {
   });
 
   it("directs incomplete mix definitions to Mix Recipes", () => {
-    expect(homeSource).toContain("open Mix Recipes to enter them");
+    expect(mixesTabSource).toContain("open Mix Recipes to enter them");
     expect(homeSource).toContain("added to Mix Recipes — set batch size and per-pizza amounts there.");
   });
 });

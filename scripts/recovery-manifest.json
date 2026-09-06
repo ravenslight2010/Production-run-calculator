@@ -199,6 +199,52 @@
           "contains": "diff -ru"
         }
       ]
+    },
+    {
+      "id": "calculator-ui-memo-boundaries",
+      "feature": "Calculator station screens and warehouse tools render behind focused memoized boundaries",
+      "files": [
+        "artifacts/run-calculator/src/components/ScreenModeView.tsx",
+        "artifacts/run-calculator/src/components/SetupContent.tsx",
+        "artifacts/run-calculator/src/components/SummaryToolsContent.tsx",
+        "artifacts/run-calculator/src/components/WarehouseTabContent.tsx",
+        "artifacts/run-calculator/src/components/InventoryTabContent.tsx",
+        "artifacts/run-calculator/src/components/MixesTabContent.tsx",
+        "artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "WarehouseTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "SetupTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "InventoryTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "MixesTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "SummaryToolsContent"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "screenMode ? <ScreenModeView />"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/contexts/__tests__/LiveTabMemo.snappy.test.tsx",
+          "contains": "describe("
+        }
+      ],
+      "intentionalDifference": "Home remains the owner of form state, persistence, synchronization, live-run coordination, permissions, imports, and dialogs. The focused views consume only memoized presentation contexts; no formula, API, database, or workflow ownership was moved."
     }
   ]
 }
