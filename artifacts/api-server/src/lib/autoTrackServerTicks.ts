@@ -40,7 +40,11 @@ function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anc
   ];
 }
 
-function schedule(payload: Payload, nowMs: number): { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null {
+function schedule(
+  payload: Payload,
+  nowMs: number,
+  options: { allowEndedDrain?: boolean } = {},
+): { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null {
   const result = computeServerCalc(payload as never, [], nowMs);
   const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
   if (!result || !run || typeof run.id !== "string") return null;
@@ -48,16 +52,21 @@ function schedule(payload: Payload, nowMs: number): { schedule: AutoTrackSchedul
   // eligibility is lifecycle based rather than server-date based. Conversely,
   // an abandoned old running register must never restart net claims.
   const startedAt = number(run.startedAt);
+  const endedAt = number(run.endedAt);
+  const values = payload.runValues?.[run.id];
+  if (!values) return null;
+  const endedDrainActive = options.allowEndedDrain === true
+    && endedAt > 0
+    && number(values.freezerTime) > 0
+    && nowMs < endedAt + number(values.freezerTime) * 60_000;
   const lifecycleStamp = Math.max(startedAt, number(run.metaUpdatedAt));
   if (
     startedAt <= 0
     || number(run.pausedAt) > 0
-    || number(run.endedAt) > 0
+    || (endedAt > 0 && !endedDrainActive)
     || lifecycleStamp <= 0
     || nowMs - lifecycleStamp > WALL_CLOCK_REPLAY_CAP_MS
   ) return null;
-  const values = payload.runValues?.[run.id];
-  if (!values) return null;
   return {
     schedule: computeAutoTrackSchedule({
       runId: run.id, metaUpdatedAt: number(run.metaUpdatedAt), startedAt: number(run.startedAt),
@@ -114,10 +123,15 @@ export type ServerWallClockBookkeeping = WallClockBookkeeping & {
 };
 export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  const built = schedule(payload, nowMs);
+  const built = schedule(payload, nowMs, { allowEndedDrain: true });
   const run = payload.dayState?.runs?.[payload.dayState?.currentIndex ?? 0];
-  if (!built || !run || number(run.startedAt) <= 0 || number(run.pausedAt) > 0 || number(run.endedAt) > 0 || nowMs - number(run.startedAt) > WALL_CLOCK_REPLAY_CAP_MS) return null;
+  if (!built || !run || number(run.startedAt) <= 0 || number(run.pausedAt) > 0) return null;
   const { schedule: plan, values } = built;
+  const endedAt = number(run.endedAt);
+  const drainActive = endedAt > 0
+    && number(values.freezerTime) > 0
+    && nowMs < endedAt + number(values.freezerTime) * 60_000;
+  const runStatus = drainActive ? "ended" : "running";
   const old = payload.autoTrackServerState?.wallClockBookkeeping?.[plan.runId] ?? {};
   const calc = computeServerCalc(payload as never, [], nowMs)!.calc;
   const timing = getAutoTrackTiming(calc.ppm, number(values.pizzasPerCase), calc.perTray, calc.perBatch, {
@@ -151,7 +165,20 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     ? { ...old.serverSequences } as Partial<Record<WallClockChannel, number>>
     : {};
   if (hasPersistedBookkeeping && old.lifecycleGeneration !== plan.generation) {
+    const priorCaseNextDueMs = bookkeeping.caseNextDueMs;
+    const priorDrainFreezer = bookkeeping.drainFreezer;
     bookkeeping = rearmWallClockTimers(freshBookkeeping, nowMs, timing);
+    // End Run advances the lifecycle generation, but the physical freezer keeps
+    // draining. Preserve its last observed contents and case arm so the first
+    // ended-generation beat accounts for exactly what exited across the handoff.
+    // Every dough-owned timer still rebases and other lifecycle transitions keep
+    // the normal full reset above.
+    if (drainActive) {
+      bookkeeping.caseNextDueMs = priorCaseNextDueMs > 0
+        ? priorCaseNextDueMs
+        : bookkeeping.caseNextDueMs;
+      bookkeeping.drainFreezer = priorDrainFreezer;
+    }
     serverSequences = {};
   }
   const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
@@ -160,7 +187,7 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined,
   }) / 1000;
   const suggestion = computeAutoTrackSuggestion({
-    runStatus: "running", drainActive: false, packagingDrainActive: false, packagingDrainElapsedSec: 0,
+    runStatus, drainActive, packagingDrainActive: false, packagingDrainElapsedSec: 0,
     ppm: calc.ppm, casesPerSkid: number(values.casesPerSkid), pizzasPerCase: number(values.pizzasPerCase),
     casesNeeded: number(values.casesNeeded), freezerTime: number(values.freezerTime), elapsedBatchSec: elapsedSec,
   });
@@ -203,7 +230,7 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     bookkeeping = rearmWallClockTimers(bookkeeping, nowMs, timing);
   }
   const tick = tickWallClock({
-    bookkeeping, nowMs, timing, runStatus: "running", drainActive: false, packagingDrainActive: false,
+    bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive: false,
     packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
     calc: { ppm: calc.ppm, perTray: calc.perTray, perBatch: calc.perBatch, pressDone: calc.pressDone, casesInFreezer: calc.casesInFreezer, traysNeeded: calc.traysNeeded, batchesNeeded: calc.batchesNeeded },
     v: { pizzasPerCase: number(values.pizzasPerCase), casesPerSkid: number(values.casesPerSkid), casesNeeded: number(values.casesNeeded), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
@@ -217,7 +244,14 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
       // Manual invalidation remains client-owned until a current-generation
       // register is established. A current client register is a safe takeover
       // base once its due boundary actually produces an engine event.
-      if (state.generation !== plan.generation) return false;
+      if (state.generation !== plan.generation) {
+        // End advances the lifecycle generation while the same physical case
+        // stream drains. Let the new generation's sequence-1 claim arbitrate
+        // through the normal row lock regardless of whether the browser or
+        // server owned the running generation. Competing browser/server claims
+        // for the ended generation cannot both be accepted.
+        return drainActive && event.channel === "case";
+      }
       const ownedSequence = number(serverSequences[event.channel]);
       return ownedSequence === 0 || ownedSequence === number(state.sequence);
     })

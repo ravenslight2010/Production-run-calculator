@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { computeServerCalc } from "@workspace/live-calc";
 import { buildNetSecondServerClaims, buildWallClockServerClaims } from "./autoTrackServerTicks";
 import { applyAutoTrackClaim } from "./autoTrackCoordination";
 
@@ -69,6 +70,131 @@ describe("server auto-track claim builders", () => {
     const caseClaim = plan.claims.find((claim) => claim.channel === "case")!;
     expect(caseClaim.mutations).toHaveLength(2);
     expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+  });
+
+  it("continues canonical case beats during the bounded post-End freezer drain", () => {
+    const source = payload({ freezerTime: 3 });
+    const run = source.dayState.runs[0] as Record<string, unknown>;
+    run.endedAt = NOW - 60_000;
+    run.metaUpdatedAt = 2;
+    const currentFreezer = Math.floor(computeServerCalc(source as never, [], NOW)!.calc.casesInFreezer);
+    const priorFreezer = currentFreezer + 4;
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: {
+        [RUN]: {
+          lifecycleGeneration: `${RUN}:1`,
+          serverSequences: { case: 3 },
+          caseNextDueMs: NOW - 1,
+          lastExpectedCases: 10,
+          drainFreezer: priorFreezer,
+        },
+      },
+    };
+    (source as Record<string, unknown>).autoTrackCoordination = {
+      runs: {
+        [RUN]: {
+          case: {
+            generation: `${RUN}:1`,
+            sequence: 3,
+            nextDueAt: NOW - 1,
+            acceptedEventId: "server:case:3",
+          },
+        },
+      },
+    };
+
+    const draining = buildWallClockServerClaims(source, NOW);
+    expect(draining?.claims.map((claim) => claim.channel)).toEqual(["case"]);
+    expect(draining?.claims[0]?.sequence).toBe(1);
+    expect(draining?.claims[0]?.mutations).toEqual([
+      { field: "skidsCompleted", from: 0, to: 0 },
+      { field: "casesOnCurrentSkid", from: 0, to: 4 },
+    ]);
+    expect(draining?.bookkeeping.drainFreezer).toBe(currentFreezer);
+    expect(applyAutoTrackClaim(source as never, draining!.claims[0]!, NOW).outcome).toBe("accepted");
+
+    run.endedAt = NOW - 3 * 60_000;
+    expect(buildWallClockServerClaims(source, NOW)).toBeNull();
+  });
+
+  it("takes over a browser-owned case register when End starts a new drain generation", () => {
+    const source = payload({ freezerTime: 3 });
+    const run = source.dayState.runs[0] as Record<string, unknown>;
+    run.endedAt = NOW - 60_000;
+    run.metaUpdatedAt = 2;
+    const currentFreezer = Math.floor(computeServerCalc(source as never, [], NOW)!.calc.casesInFreezer);
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: {
+        [RUN]: {
+          lifecycleGeneration: `${RUN}:1`,
+          caseNextDueMs: NOW - 1,
+          drainFreezer: currentFreezer + 3,
+        },
+      },
+    };
+    (source as Record<string, unknown>).autoTrackCoordination = {
+      runs: {
+        [RUN]: {
+          case: {
+            generation: `${RUN}:1`,
+            sequence: 7,
+            nextDueAt: NOW - 1,
+            acceptedEventId: "browser:case:7",
+          },
+        },
+      },
+    };
+
+    const draining = buildWallClockServerClaims(source, NOW)!;
+    expect(draining.claims[0]).toMatchObject({
+      channel: "case",
+      generation: `${RUN}:2`,
+      sequence: 1,
+    });
+    expect(draining.claims[0]!.mutations[1]).toMatchObject({
+      field: "casesOnCurrentSkid",
+      from: 0,
+      to: 3,
+    });
+    expect(applyAutoTrackClaim(source as never, draining.claims[0]!, NOW).outcome).toBe("accepted");
+  });
+
+  it("establishes an End baseline without prior server bookkeeping, then continues drain", () => {
+    const source = payload({ freezerTime: 3 });
+    const run = source.dayState.runs[0] as Record<string, unknown>;
+    run.endedAt = NOW;
+    run.metaUpdatedAt = 2;
+    (source as Record<string, unknown>).autoTrackCoordination = {
+      runs: {
+        [RUN]: {
+          case: {
+            generation: `${RUN}:1`,
+            sequence: 2,
+            nextDueAt: NOW - 1,
+            acceptedEventId: "browser:case:2",
+          },
+        },
+      },
+    };
+
+    const baseline = buildWallClockServerClaims(source, NOW)!;
+    expect(baseline.claims).toEqual([]);
+    expect(baseline.bookkeeping.drainFreezer).toBeGreaterThanOrEqual(0);
+
+    const nextAt = NOW + 120_000;
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: { [RUN]: baseline.bookkeeping },
+    };
+    expect(computeServerCalc(source as never, [], nextAt)!.calc.casesInFreezer)
+      .toBeLessThan(baseline.bookkeeping.drainFreezer);
+    const draining = buildWallClockServerClaims(source, nextAt)!;
+    expect(draining.claims).toHaveLength(1);
+    expect(draining.claims[0]).toMatchObject({
+      channel: "case",
+      generation: `${RUN}:2`,
+      sequence: 1,
+    });
+    expect(applyAutoTrackClaim(source as never, draining.claims[0]!, nextAt).outcome).toBe("accepted");
   });
 
   it("honors only matching-generation dough pause control while case continues", () => {
