@@ -52,6 +52,33 @@ immediately. This evidence intentionally covers only the bootstrap endpoint;
 live sync, SSE, clocks, auto-track, notifications, and sensitive operational
 polls are outside the optimization.
 
+### Master-data transport follow-up (2026-09-06)
+
+The shared observer cadence and foreground/idle behavior above are unchanged.
+The authenticated bootstrap now adds private conditional revalidation and gzip
+at the endpoint boundary; it does not move catalog ownership into live sync.
+The client keeps the last normalized snapshot with its validator, returns that
+snapshot on `304`, clears transport state at every auth transition, and keeps
+the snapshot current when a manager mutation updates a catalog slice.
+
+An authenticated request through the development preview proxy measured the
+real catalog without retaining credentials or response content:
+
+| Bootstrap response | Before body bytes | After body bytes | Result |
+| --- | ---: | ---: | --- |
+| Cold/changed `200` | 464,534 UTF-8 | 40,522 gzip | 424,012 bytes / 91.3% smaller |
+| Unchanged active/foreground refresh | 464,534 UTF-8 | 0 (`304`) | Full response body avoided |
+
+The current identity representation is 464,496 bytes; gzip reduces it to
+40,522 bytes, a 91.3% response-body reduction. The 38-byte difference from the
+prior 464,534-byte capture is the removal of a volatile response timestamp,
+which is necessary for a stable validator. Measurements exclude HTTP headers.
+Responses use `Cache-Control: private, max-age=0, must-revalidate`, a weak
+content validator shared safely across gzip/identity encodings and bound to the
+authenticated data scope, plus `Vary: Accept-Encoding`. Successful ingredient,
+mix, cheese, dough, and sauce writes invalidate the affected server scope
+immediately.
+
 The main chunk reduction is modest because other management importers still
 share some workbook dependencies, but the complete run/spec workflow is now
 requested only by workbook actions rather than by calculator startup.

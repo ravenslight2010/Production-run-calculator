@@ -47,6 +47,8 @@ export const CACHE_CONTROL_EXCLUSIONS: Record<string, string> = {
   "/healthz": "Public platform health probe — must stay freely cacheable.",
   "/auth/username-available":
     "Transient public availability lookup, not shared mutable list data — not subject to the stale-list bug.",
+  "/master-data/bootstrap":
+    "Authenticated, scope-keyed catalog uses private conditional revalidation; shared caches must not store it.",
   // SSE streams set their own streaming headers; applying noStore would be wrong.
   "/sync/events": "SSE stream — sets its own streaming headers.",
   "/inventory/events": "SSE stream — sets its own streaming headers.",

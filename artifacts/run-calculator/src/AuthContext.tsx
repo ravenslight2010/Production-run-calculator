@@ -16,6 +16,7 @@ import {
   type StaffMember,
 } from "./inventoryShared";
 import { AuthContext } from "./useAuth";
+import { resetMasterDataTransportCache } from "./masterData";
 
 // NOTE: the raw context object and `useAuth` live in ./useAuth.ts so this file
 // exports ONLY a component. Mixing them here broke React Fast Refresh's
@@ -81,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // carries the epoch guard above for fetch implementations that do not
       // honor AbortSignal.
       await qc.cancelQueries({ queryKey: ["me"], exact: true });
+      resetMasterDataTransportCache();
       qc.setQueryData(["me"], identity);
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
@@ -136,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const forceSignedOut = useCallback(() => {
     advanceAuthEpoch();
     freshSessionRef.current = false;
+    resetMasterDataTransportCache();
     qc.setQueryData(["me"], null);
   }, [advanceAuthEpoch, qc]);
 

@@ -5,6 +5,7 @@ import { SaveMixesBody, DeleteMixesBody } from "@workspace/api-zod";
 import { normalizeMix, type Mix } from "@workspace/mixes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 
 // Manager-defined, factory-wide mixes (pre-blended recipes made ahead for a
 // product). Reading is open to any signed-in user (both apps build the mix
@@ -112,6 +113,7 @@ router.post(
             },
           });
       }
+      invalidateMasterDataBootstrapCache();
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -147,6 +149,7 @@ router.delete(
             ),
           );
       }
+      invalidateMasterDataBootstrapCache();
       const items = await listAll();
       res.json({ items });
     } catch (err) {

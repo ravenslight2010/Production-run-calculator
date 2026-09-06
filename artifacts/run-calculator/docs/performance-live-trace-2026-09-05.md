@@ -52,6 +52,32 @@ The 65-second idle window is intentionally shorter than the old five-minute
 poll interval, so it confirms the new quiet behavior without overstating a
 longer baseline comparison.
 
+## Conditional transport follow-up (2026-09-06)
+
+The 464,534-byte values above are retained as the pre-change live baseline.
+After adding gzip and private ETag revalidation, an authenticated measurement
+through the same development preview boundary produced:
+
+| Request | Status | Response-body bytes | Change from live baseline |
+| --- | ---: | ---: | ---: |
+| Identity encoding, changed representation | 200 | 464,496 | 38 bytes smaller |
+| Gzip encoding, changed representation | 200 | 40,522 | 424,012 bytes / 91.3% smaller |
+| Gzip with matching `If-None-Match` | 304 | 0 | 464,534 bytes / 100% body avoided |
+
+The response headers were `Cache-Control: private, max-age=0, must-revalidate`,
+`Vary: Accept-Encoding`, and `Content-Encoding: gzip` for gzip clients. The
+validator is weak because gzip and identity encode the same semantic JSON into
+different bytes, and it includes the authenticated data scope so a browser
+cannot reuse a private cached body after an account/scope transition. HTTP
+header bytes are excluded from the body-byte totals.
+
+This changes only transport cost. The existing one-minute shared cadence,
+foreground refresh, idle/background suppression, authorization, and
+manager-returned cache updates remain in place. Manager writes invalidate the
+affected server scope, while auth transitions clear the client's retained
+validator and snapshot so one browser session cannot reuse another session's
+transport state.
+
 ## Operational-polling safety
 
 The trace deliberately excluded `/api/sync/*`, SSE, factory-data, field-check,

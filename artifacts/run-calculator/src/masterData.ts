@@ -42,25 +42,58 @@ function normalizeList<T>(items: unknown, normalize: (item: unknown) => T | null
 }
 
 let inFlight: Promise<MasterDataBootstrap> | null = null;
+let masterDataEtag: string | null = null;
+let lastLoadedBootstrap: MasterDataBootstrap | null = null;
+let masterDataTransportGeneration = 0;
+
+export function resetMasterDataTransportCache(): void {
+  masterDataTransportGeneration += 1;
+  inFlight = null;
+  masterDataEtag = null;
+  lastLoadedBootstrap = null;
+}
 
 export function fetchMasterDataBootstrap(): Promise<MasterDataBootstrap> {
   if (inFlight) return inFlight;
-  inFlight = fetch("/api/master-data/bootstrap", {
-    headers: { "x-client-id": inventoryClientId() },
+  const generation = masterDataTransportGeneration;
+  const headers: Record<string, string> = {
+    "x-client-id": inventoryClientId(),
+  };
+  if (masterDataEtag && lastLoadedBootstrap) {
+    headers["if-none-match"] = masterDataEtag;
+  }
+  const request = fetch("/api/master-data/bootstrap", {
+    headers,
   }).then(async (res) => {
+    if (generation !== masterDataTransportGeneration) {
+      throw new Error("Master data request superseded by a session change");
+    }
+    if (res.status === 304) {
+      if (!lastLoadedBootstrap) {
+        throw new Error("Master data returned 304 without a cached snapshot");
+      }
+      return lastLoadedBootstrap;
+    }
     if (!res.ok) throw new Error(`Load master data failed (${res.status})`);
     const data = await res.json() as Record<string, unknown>;
-    return {
+    if (generation !== masterDataTransportGeneration) {
+      throw new Error("Master data request superseded by a session change");
+    }
+    const normalized = {
       ingredients: normalizeList(data.ingredients, normalizeIngredient),
       doughRecipes: normalizeNamedRecipes(data.doughRecipes),
       sauceRecipes: normalizeNamedRecipes(data.sauceRecipes),
       cheeseRecipes: normalizeCheeseRecipes(data.cheeseRecipes),
       mixes: normalizeMixes(data.mixes),
     };
+    lastLoadedBootstrap = normalized;
+    masterDataEtag = res.headers?.get("etag") ?? null;
+    return normalized;
   }).finally(() => {
-    inFlight = null;
+    if (inFlight === request) inFlight = null;
   });
-  return inFlight;
+  inFlight = request;
+  return request;
 }
 
 const LEGACY_QUERY_KEYS: Record<MasterDataSlice, readonly [string]> = {
@@ -186,6 +219,9 @@ export function setMasterDataSlice<K extends MasterDataSlice>(
   slice: K,
   value: MasterDataBootstrap[K],
 ): void {
+  if (lastLoadedBootstrap) {
+    lastLoadedBootstrap = { ...lastLoadedBootstrap, [slice]: value };
+  }
   queryClient.setQueryData<MasterDataBootstrap>(
     MASTER_DATA_QUERY_KEY,
     (current) => current
@@ -205,6 +241,12 @@ export function updateMasterDataSlice<K extends MasterDataSlice>(
   slice: K,
   updater: (current: MasterDataBootstrap[K] | undefined) => MasterDataBootstrap[K] | undefined,
 ): void {
+  if (lastLoadedBootstrap) {
+    lastLoadedBootstrap = {
+      ...lastLoadedBootstrap,
+      [slice]: updater(lastLoadedBootstrap[slice]),
+    } as MasterDataBootstrap;
+  }
   queryClient.setQueryData<MasterDataBootstrap>(
     MASTER_DATA_QUERY_KEY,
     (current) => {
@@ -225,6 +267,10 @@ export async function invalidateMasterDataSlice(
   queryClient: QueryClient,
   slice: MasterDataSlice,
 ): Promise<void> {
+  // A mutation that does not return the complete slice must force the next
+  // request to validate the server representation instead of accepting a 304
+  // for the previous snapshot.
+  masterDataEtag = null;
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: MASTER_DATA_QUERY_KEY }),
     queryClient.invalidateQueries({ queryKey: LEGACY_QUERY_KEYS[slice] }),

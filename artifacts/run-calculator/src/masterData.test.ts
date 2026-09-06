@@ -6,6 +6,7 @@ import React, { createElement } from "react";
 import {
   fetchMasterDataBootstrap,
   MasterDataPolling,
+  resetMasterDataTransportCache,
   setMasterDataSlice,
   MASTER_DATA_QUERY_KEY,
 } from "./masterData";
@@ -44,6 +45,7 @@ function AllMasterDataConsumers() {
 describe("master-data bootstrap loading", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetMasterDataTransportCache();
   });
 
   afterEach(() => {
@@ -84,6 +86,37 @@ describe("master-data bootstrap loading", () => {
     await expect(fetchMasterDataBootstrap()).rejects.toThrow("offline");
     await expect(fetchMasterDataBootstrap()).resolves.toMatchObject({ ingredients: [] });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses the server representation with its validator and sends it on the next refresh", async () => {
+    const etag = '"master-data-test"';
+    const responseHeaders = new Headers({ etag });
+    const first = {
+      ok: true,
+      status: 200,
+      headers: responseHeaders,
+      json: () => Promise.resolve(bootstrapBody),
+    } as unknown as Response;
+    const unchanged = {
+      ok: true,
+      status: 304,
+      headers: responseHeaders,
+    } as unknown as Response;
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(unchanged);
+
+    const initial = await fetchMasterDataBootstrap();
+    const unchangedResult = await fetchMasterDataBootstrap();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({
+      headers: {
+        "x-client-id": expect.any(String),
+        "if-none-match": etag,
+      },
+    });
+    expect(unchangedResult).toEqual(initial);
   });
 
   it("uses one active poller, pauses while idle or hidden, and refreshes once on resume", async () => {
@@ -186,5 +219,94 @@ describe("master-data bootstrap loading", () => {
 
     expect(queryClient.getQueryData<typeof bootstrapBody>(MASTER_DATA_QUERY_KEY)?.mixes).toEqual([savedMix]);
     expect(queryClient.getQueryData(["mixes"])).toEqual([savedMix]);
+  });
+
+  it("keeps a manager cache update as the 304 snapshot", async () => {
+    const responseHeaders = new Headers({ etag: '"master-data-manager"' });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: responseHeaders,
+      json: () => Promise.resolve(bootstrapBody),
+    } as unknown as Response);
+    await fetchMasterDataBootstrap();
+
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(MASTER_DATA_QUERY_KEY, bootstrapBody);
+    const savedMix = { id: "m2", name: "New Mix", components: [], enabled: true };
+    setMasterDataSlice(queryClient, "mixes", [savedMix]);
+
+    const unchangedResponse = {
+      ok: true,
+      status: 304,
+      headers: responseHeaders,
+    } as unknown as Response;
+    vi.mocked(fetch).mockResolvedValueOnce(unchangedResponse);
+    await expect(fetchMasterDataBootstrap()).resolves.toMatchObject({
+      mixes: [savedMix],
+    });
+  });
+
+  it("does not carry a validator or snapshot across an auth transition", async () => {
+    const responseHeaders = new Headers({ etag: 'W/"master-data-old-session"' });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: responseHeaders,
+      json: () => Promise.resolve(bootstrapBody),
+    } as unknown as Response);
+    await fetchMasterDataBootstrap();
+
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(MASTER_DATA_QUERY_KEY, bootstrapBody);
+    setMasterDataSlice(queryClient, "mixes", [
+      { id: "private", name: "Prior Session Mix", components: [], enabled: true },
+    ]);
+    resetMasterDataTransportCache();
+
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-new-session"' }),
+      json: () => Promise.resolve({ ...bootstrapBody, mixes: [] }),
+    } as unknown as Response);
+    const nextSession = await fetchMasterDataBootstrap();
+
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({
+      headers: {
+        "x-client-id": expect.any(String),
+      },
+    });
+    expect((fetchSpy.mock.calls[1]?.[1] as RequestInit).headers).not.toHaveProperty("if-none-match");
+    expect(nextSession.mixes).toEqual([]);
+  });
+
+  it("does not let an old session repopulate transport state after JSON parsing", async () => {
+    let resolveJson!: (value: typeof bootstrapBody) => void;
+    const json = vi.fn(() => new Promise<typeof bootstrapBody>((resolve) => {
+      resolveJson = resolve;
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
+    } as unknown as Response);
+
+    const staleRequest = fetchMasterDataBootstrap();
+    await vi.waitFor(() => expect(json).toHaveBeenCalledTimes(1));
+    resetMasterDataTransportCache();
+    resolveJson(bootstrapBody);
+
+    await expect(staleRequest).rejects.toThrow("superseded by a session change");
+
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-new-session"' }),
+      json: () => Promise.resolve(bootstrapBody),
+    } as unknown as Response);
+    await fetchMasterDataBootstrap();
+    expect((fetchSpy.mock.calls[1]?.[1] as RequestInit).headers).not.toHaveProperty("if-none-match");
   });
 });
