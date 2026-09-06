@@ -141,6 +141,13 @@ belong in `skill-catalog-allowlist.json` with an explicit routing target.
 - Pizza production line planning, scheduling, and inventory for floor staff (web + mobile).
 - AI issue diagnosis & manager alerts: any signed-in user can report an issue and get an immediate plain-language AI diagnosis plus a safe workaround; uncaught crashes are auto-captured and become server-side incidents with AI diagnosis.
 
+### Production line layout
+
+The approved floor-layout reference is available as a
+[full-resolution PNG](docs/production-line/production-line.png).
+
+![Production line material flow map](docs/production-line/production-line.png)
+
 ## Document map
 
 - `replit.md` — operational runbook (Replit workflows, reset flow, corpus harness, gotchas).
