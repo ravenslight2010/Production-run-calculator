@@ -1970,6 +1970,96 @@ describe("/sync/events — date-scoped broadcasts", () => {
 });
 
 describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
+  // A real client sync payload carries the run's COMPLETE FormValues (web
+  // DEFAULT_VALUES plus live edits). The server schedule cannot be computed
+  // from a skeletal value object (e.g. only casesNeeded), so this fixture
+  // mirrors a real running run: full values plus crusts-mode meta so the
+  // server calc yields a live schedule with real entries.
+  const heartbeatFullValues = {
+    casesNeeded: 240,
+    crustsPerCycle: 12,
+    cycleSpeed: 600,
+    speedAdjustment: 1.0,
+    approxLineSpeed: 450,
+    freezerTime: 3.5,
+    pizzasPerCase: 12,
+    casesPerSkid: 48,
+    casesPerLayer: 12,
+    doughballsPerTray: 36,
+    crustsPerStack: 6,
+    doughBatchYield: 150,
+    crustsPerCase: 12,
+    skidsCompleted: 0,
+    casesOnCurrentSkid: 0,
+    traysOnLine: 0,
+    batchesReady: 0,
+    mixerLowSec: 330,
+    mixerHighSec: 180,
+    hopperSec: 70,
+    carryOverDone: false,
+    sauceOzPerPizza: 2,
+    sauceBarrelLbs: 50,
+    sauceBarrelsMade: 0,
+    sauceBarrelAnchorNetSec: 0,
+    sauceBarrelCorrectionGeneration: 0,
+    app1OzPerPizza: 2.5,
+    app1BatchLbs: 100,
+    app1BatchesMade: 0,
+    app1BatchAnchorNetSec: 0,
+    app1BatchCorrectionGeneration: 0,
+    app2OzPerPizza: 0,
+    app2BatchLbs: 0,
+    app2BatchesMade: 0,
+    app2BatchAnchorNetSec: 0,
+    app2BatchCorrectionGeneration: 0,
+    app3OzPerPizza: 0,
+    app3BatchLbs: 0,
+    app3BatchesMade: 0,
+    app3BatchAnchorNetSec: 0,
+    app3BatchCorrectionGeneration: 0,
+    app4OzPerPizza: 0,
+    app4BatchLbs: 0,
+    app4BatchesMade: 0,
+    app4BatchAnchorNetSec: 0,
+    app4BatchCorrectionGeneration: 0,
+    pep1Sticks: 0,
+    pep1OzPerPizza: 0,
+    pep1BatchLbs: 0,
+    pep2Sticks: 0,
+    pep2OzPerPizza: 0,
+    pep2BatchLbs: 0,
+    pep1Combined: true,
+    pep1TypeB: "",
+    pep2TypeB: "",
+    pep1SticksB: 0,
+    pep1OzPerPizzaB: 0,
+    pep1BatchLbsB: 0,
+    pep2SticksB: 0,
+    pep2OzPerPizzaB: 0,
+    pep2BatchLbsB: 0,
+    app1Type: "app",
+    app2Type: "",
+    app3Type: "",
+    app4Type: "",
+    pep1Type: "",
+    pep2Type: "",
+    dieType: "Round 12",
+    allergen: "none",
+    doughRecipeName: "",
+    targetDoughballWeight: 8,
+    doughRecipe: [],
+    app1CheeseRecipeName: "",
+    app1CheeseRecipe: [],
+    app2CheeseRecipeName: "",
+    app2CheeseRecipe: [],
+    app3CheeseRecipeName: "",
+    app3CheeseRecipe: [],
+    app4CheeseRecipeName: "",
+    app4CheeseRecipe: [],
+    frontlineRecipeName: "",
+    frontlineRecipe: [],
+  };
+
   it("pushes a delta-only schedule frame over an existing SSE connection", async () => {
     const date = "2030-04-03";
     process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
@@ -1980,8 +2070,18 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
         body: JSON.stringify({
           senderId: "heartbeat-writer",
           payload: {
-            dayState: { runs: [{ id: "heartbeat-run", brand: "Acme", flavor: "Pep" }], resetAt: 1 },
-            runValues: { "heartbeat-run": { casesNeeded: 240 } },
+            dayState: {
+              runs: [{
+                id: "heartbeat-run",
+                brand: "Acme",
+                flavor: "Pep",
+                subTab: "crusts",
+                startedAt: Date.now() - 60_000,
+                metaUpdatedAt: 1,
+              }],
+              resetAt: 1,
+            },
+            runValues: { "heartbeat-run": heartbeatFullValues },
             runValuesUpdatedAt: { "heartbeat-run": 1 },
           },
         }),
@@ -1995,17 +2095,22 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buf = "";
-      let sawHeartbeatSchedule = false;
+      let scheduleFrames = 0;
+      let commentBeats = 0;
       let heartbeatRunId: string | undefined;
       const deadline = Date.now() + 5_000;
       try {
-        while (Date.now() < deadline && !sawHeartbeatSchedule) {
+        // Read until one schedule-carrying beat AND at least two subsequent
+        // comment-only beats arrive — proving the schedule frame is pushed
+        // once and then SKIPPED while it is unchanged (delta-only).
+        while (Date.now() < deadline && (scheduleFrames < 1 || commentBeats < 2)) {
           const { value, done } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
           const frames = buf.split("\n\n");
           buf = frames.pop() ?? "";
           for (const f of frames) {
+            if (f.includes(": heartbeat")) commentBeats++;
             const line = f.split("\n").find((l) => l.startsWith("data: "));
             if (!line) continue;
             const parsed = JSON.parse(line.slice("data: ".length)) as {
@@ -2013,7 +2118,7 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
               autoTrackSchedule?: { runId?: string } | null;
             };
             if (parsed.heartbeat === true && parsed.autoTrackSchedule) {
-              sawHeartbeatSchedule = true;
+              scheduleFrames++;
               heartbeatRunId = parsed.autoTrackSchedule.runId;
             }
           }
@@ -2024,7 +2129,8 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
         await reader.cancel().catch(() => {});
         ctrl.abort();
       }
-      expect(sawHeartbeatSchedule).toBe(true);
+      expect(scheduleFrames).toBe(1);
+      expect(commentBeats).toBeGreaterThanOrEqual(2);
       expect(heartbeatRunId).toBe("heartbeat-run");
     } finally {
       delete process.env.AUTO_TRACK_HEARTBEAT_MS;
