@@ -23,11 +23,13 @@ type DeferredSurfaceProps<T extends ComponentType<any>> = {
   label: string;
   load: ModuleLoader<T>;
   componentProps: ComponentProps<T>;
+  presentation?: "inline" | "dialog";
 };
 
 type RetryBoundaryProps = {
   label: string;
   onRetry: () => void;
+  presentation: "inline" | "dialog";
   children: ReactNode;
 };
 
@@ -44,23 +46,27 @@ class DeferredRetryBoundary extends Component<RetryBoundaryProps, RetryBoundaryS
     if (!this.state.error) return this.props.children;
     return (
       <div
-        className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-5 text-center"
+        className={this.props.presentation === "dialog"
+          ? "fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+          : undefined}
         role="alert"
       >
-        <p className="text-sm font-medium">Couldn’t load {this.props.label}.</p>
-        <p className="text-xs text-muted-foreground">
-          Check the connection and try this section again. Your saved work is not affected.
-        </p>
-        <button
-          type="button"
-          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted"
-          onClick={() => {
-            this.setState({ error: null });
-            this.props.onRetry();
-          }}
-        >
-          Retry {this.props.label}
-        </button>
+        <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-card p-5 text-center shadow-xl">
+          <p className="text-sm font-medium">Couldn’t load {this.props.label}.</p>
+          <p className="text-xs text-muted-foreground">
+            Check the connection and try this section again. Your saved work is not affected.
+          </p>
+          <button
+            type="button"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            onClick={() => {
+              this.setState({ error: null });
+              this.props.onRetry();
+            }}
+          >
+            Retry {this.props.label}
+          </button>
+        </div>
       </div>
     );
   }
@@ -70,6 +76,7 @@ export function DeferredSurface<T extends ComponentType<any>>({
   label,
   load,
   componentProps,
+  presentation = "inline",
 }: DeferredSurfaceProps<T>) {
   const [attempt, setAttempt] = useState(0);
   const LazySurface = useMemo(() => lazy(load), [load, attempt]);
@@ -78,13 +85,22 @@ export function DeferredSurface<T extends ComponentType<any>>({
     <DeferredRetryBoundary
       key={attempt}
       label={label}
+      presentation={presentation}
       onRetry={() => setAttempt((current) => current + 1)}
     >
       <Suspense
         fallback={
-          <p className="text-xs text-muted-foreground" role="status">
-            Loading {label}…
-          </p>
+          presentation === "dialog" ? (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+              <p className="rounded-lg border border-border bg-card px-5 py-4 text-sm text-foreground shadow-xl" role="status">
+                Loading {label}…
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground" role="status">
+              Loading {label}…
+            </p>
+          )
         }
       >
         <div aria-live="polite">

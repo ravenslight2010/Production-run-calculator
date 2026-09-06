@@ -640,32 +640,23 @@ import {
   pendingDuplicateReviewAfterResolution,
   savePendingDuplicateReview,
 } from "@/pendingDuplicateReview";
-import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
-import SpecImportDialog from "@/components/SpecImportDialog";
+import type { ImportCommit } from "@/components/ExcelImportDialog";
 import { CameraFilePicker } from "@/components/CameraFilePicker";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import type { SpecImportPrepared } from "@/specImport";
 import { requestParseSpecImages } from "@/parseSpecSheet";
 import type { ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
-import PremixImportDialog from "@/components/PremixImportDialog";
-import ShippingImportDialog from "@/components/ShippingImportDialog";
-import { SauceGuideImportDialog, DoughGuideImportDialog } from "@/components/RecipeGuideImportDialog";
-import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
-import { prepareShippingImport, commitShippingImport, type ShippingImportPrepared } from "@/shippingImport";
-import {
-  prepareSauceGuideImport, commitSauceGuideImport,
-  prepareDoughGuideImport, commitDoughGuideImport,
-  type SauceGuideImportPrepared, type DoughGuideImportPrepared,
-} from "@/recipeGuideImport";
+import type { PremixImportPrepared } from "@/premixImport";
+import type { ShippingImportPrepared } from "@/shippingImport";
+import type { SauceGuideImportPrepared, DoughGuideImportPrepared } from "@/recipeGuideImport";
 import type { ShippingPatch } from "@workspace/shipping-import";
 import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
 import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
 import CheeseReconcilePanel from "@/components/CheeseReconcilePanel";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
-import CheeseImportDialog from "@/components/CheeseImportDialog";
-import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
+import type { CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe, CheeseComponent } from "@workspace/cheese-recipes";
 import {
@@ -712,6 +703,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DeferredSurface } from "../departments/DeferredDepartmentSurface";
 
 const LazyDeferredManagementSurface = lazy(() => {
   const startedAt = typeof performance === "undefined" ? null : performance.now();
@@ -720,6 +712,20 @@ const LazyDeferredManagementSurface = lazy(() => {
     return module;
   });
 });
+
+const loadExcelImportDialog = () => import("@/components/ExcelImportDialog");
+const loadSpecImportDialog = () => import("@/components/SpecImportDialog");
+const loadPremixImportDialog = () => import("@/components/PremixImportDialog");
+const loadShippingImportDialog = () => import("@/components/ShippingImportDialog");
+const loadSauceGuideImportDialog = () =>
+  import("@/components/RecipeGuideImportDialog").then((module) => ({
+    default: module.SauceGuideImportDialog,
+  }));
+const loadDoughGuideImportDialog = () =>
+  import("@/components/RecipeGuideImportDialog").then((module) => ({
+    default: module.DoughGuideImportDialog,
+  }));
+const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
 
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
@@ -12694,7 +12700,8 @@ export default function Home() {
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms; re-importing updates existing mixes by id.
   async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES);
+    const { premixImport } = await loadWorkbookWorkflow();
+    const files = Array.from(e.target.files ?? []).slice(0, premixImport.MAX_PREMIX_IMPORT_FILES);
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
@@ -12717,7 +12724,7 @@ export default function Home() {
       for (const f of files) {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
-      const prepared = await preparePremixImport(
+      const prepared = await premixImport.preparePremixImport(
         buffers,
         (done, total) => {
           if (gen === premixImportGenRef.current)
@@ -12789,7 +12796,7 @@ export default function Home() {
     setPremixImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     try {
-      const result = await commitPremixImport(
+      const result = await (await loadWorkbookWorkflow()).premixImport.commitPremixImport(
         premixImportPrepared,
         mixesToApply,
         freezerPulls,
@@ -12907,7 +12914,7 @@ export default function Home() {
     setShowShippingImport(true);
     try {
       const buffer = await file.arrayBuffer();
-      const prepared = await prepareShippingImport(buffer);
+      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer);
       if (gen !== shippingImportGenRef.current) return;
       setShippingImportPrepared(prepared);
     } catch (err) {
@@ -12921,7 +12928,7 @@ export default function Home() {
     }
   }
 
-  function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[], acknowledged = false) {
+  async function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -12936,7 +12943,7 @@ export default function Home() {
     }
     setShippingImportApplying(true);
     try {
-      const result = commitShippingImport(rows, acknowledged);
+      const result = (await loadWorkbookWorkflow()).shippingImport.commitShippingImport(rows, acknowledged);
       const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
       void recordImportHistory({
         importType: "shipping",
@@ -13031,7 +13038,7 @@ export default function Home() {
         fetchNamedRecipes("sauce").catch(() => [] as NamedRecipe[]),
       ]);
       const extraSauceNames = serverSauceRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await prepareSauceGuideImport(buffer, extraSauceNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareSauceGuideImport(buffer, extraSauceNames);
       if (gen !== sauceGuideImportGenRef.current) return;
       setSauceGuideImportPrepared(prepared);
     } catch (err) {
@@ -13043,7 +13050,7 @@ export default function Home() {
     }
   }
 
-  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
+  async function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -13058,7 +13065,7 @@ export default function Home() {
     }
     setSauceGuideImportApplying(true);
     try {
-      const result = commitSauceGuideImport(rows, acknowledged);
+      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
       void recordImportHistory({
         importType: "sauce",
         sourceLabel: "Sauce recipe guide",
@@ -13106,7 +13113,7 @@ export default function Home() {
         fetchNamedRecipes("dough").catch(() => [] as NamedRecipe[]),
       ]);
       const extraDoughNames = serverDoughRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await prepareDoughGuideImport(buffer, extraDoughNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
     } catch (err) {
@@ -13118,7 +13125,7 @@ export default function Home() {
     }
   }
 
-  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
+  async function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -13133,7 +13140,7 @@ export default function Home() {
     }
     setDoughGuideImportApplying(true);
     try {
-      const result = commitDoughGuideImport(rows, acknowledged);
+      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
       void recordImportHistory({
         importType: "dough",
         sourceLabel: "Dough recipe guide",
@@ -13171,7 +13178,8 @@ export default function Home() {
   // Nothing is written until the user confirms; re-importing updates existing
   // cheese recipes by id.
   async function handleCheeseImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_CHEESE_IMPORT_FILES);
+    const { cheeseImport } = await loadWorkbookWorkflow();
+    const files = Array.from(e.target.files ?? []).slice(0, cheeseImport.MAX_CHEESE_IMPORT_FILES);
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
     if (files.length === 0) return;
@@ -13192,7 +13200,7 @@ export default function Home() {
       for (const f of files) {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
-      const prepared = await prepareCheeseImport(
+      const prepared = await cheeseImport.prepareCheeseImport(
         buffers,
         (done, total) => {
           if (gen === cheeseImportGenRef.current)
@@ -13262,7 +13270,7 @@ export default function Home() {
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     const importRollbackBefore = captureMasterDataSnapshot();
     try {
-      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -17137,26 +17145,38 @@ export default function Home() {
         )}
 
         {/* ── Excel Import Dialog ──────────────────────────────────────────── */}
-        <ExcelImportDialog
-          open={showImportDialog}
-          onClose={() => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); }}
-          result={importResult}
-          brands={brands}
-          brandFlavors={brandFlavors}
-          canCreate={isSupervisor}
-          defaultDate={importDefaultDate}
-          onConfirm={(payload) => {
-            if (payload.multiDay) { void commitMultiDayImport(payload); return; }
-            if (importIntoEditor) importExcelIntoEditor(payload);
-            else void commitExcelImport(payload);
-          }}
-          progress={importProgress}
-        />
+        {showImportDialog && (
+          <DeferredSurface
+            label="schedule import"
+            load={loadExcelImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); },
+              result: importResult,
+              brands,
+              brandFlavors,
+              canCreate: isSupervisor,
+              defaultDate: importDefaultDate,
+              onConfirm: (payload) => {
+                if (payload.multiDay) { void commitMultiDayImport(payload); return; }
+                if (importIntoEditor) importExcelIntoEditor(payload);
+                else void commitExcelImport(payload);
+              },
+              progress: importProgress,
+            }}
+          />
+        )}
 
         {/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */}
-        <SpecImportDialog
-          open={showSpecImport}
-          onClose={() => {
+        {showSpecImport && (
+          <DeferredSurface
+            label="spec sheet import"
+            load={loadSpecImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.
@@ -17178,20 +17198,27 @@ export default function Home() {
             setSpecImportProgress(null);
             setSpecPhotoFiles([]);
             setSpecPhotoReplaceIndex(null);
-          }}
-          loading={specImportLoading}
-          progress={specImportProgress}
-          error={specImportError}
-          prepared={specImportPrepared}
-          applying={specImportApplying}
-          existingRecipeNamesByKind={existingImportRecipeNames}
-          onConfirm={handleSpecImportConfirm}
-        />
+              },
+              loading: specImportLoading,
+              progress: specImportProgress,
+              error: specImportError,
+              prepared: specImportPrepared,
+              applying: specImportApplying,
+              existingRecipeNamesByKind: existingImportRecipeNames,
+              onConfirm: handleSpecImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Premix Sheet Import Dialog ───────────────────────────────────── */}
-        <PremixImportDialog
-          open={showPremixImport}
-          onClose={() => {
+        {showPremixImport && (
+          <DeferredSurface
+            label="premix import"
+            load={loadPremixImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             premixImportGenRef.current++;
             premixImportAbortRef.current?.abort();
             premixImportAbortRef.current = null;
@@ -17206,19 +17233,26 @@ export default function Home() {
             setPremixImportError(null);
             setPremixImportLoading(false);
             setPremixImportProgress(null);
-          }}
-          loading={premixImportLoading}
-          progress={premixImportProgress}
-          error={premixImportError}
-          prepared={premixImportPrepared}
-          applying={premixImportApplying}
-          onConfirm={handlePremixImportConfirm}
-        />
+              },
+              loading: premixImportLoading,
+              progress: premixImportProgress,
+              error: premixImportError,
+              prepared: premixImportPrepared,
+              applying: premixImportApplying,
+              onConfirm: handlePremixImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Shipping & Palletizing Guide Import Dialog ───────────────────── */}
-        <ShippingImportDialog
-          open={showShippingImport}
-          onClose={() => {
+        {showShippingImport && (
+          <DeferredSurface
+            label="shipping guide import"
+            load={loadShippingImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             shippingImportGenRef.current++;
             if (shippingImportLoading) {
               toast({
@@ -17230,52 +17264,73 @@ export default function Home() {
             setShippingImportPrepared(null);
             setShippingImportError(null);
             setShippingImportLoading(false);
-          }}
-          loading={shippingImportLoading}
-          error={shippingImportError}
-          prepared={shippingImportPrepared}
-          applying={shippingImportApplying}
-          onConfirm={handleShippingImportConfirm}
-        />
+              },
+              loading: shippingImportLoading,
+              error: shippingImportError,
+              prepared: shippingImportPrepared,
+              applying: shippingImportApplying,
+              onConfirm: handleShippingImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Sauce Guide Import Dialog ─────────────────────────────────────── */}
-        <SauceGuideImportDialog
-          open={showSauceGuideImport}
-          onClose={() => {
+        {showSauceGuideImport && (
+          <DeferredSurface
+            label="sauce guide import"
+            load={loadSauceGuideImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             sauceGuideImportGenRef.current++;
             setShowSauceGuideImport(false);
             setSauceGuideImportPrepared(null);
             setSauceGuideImportError(null);
             setSauceGuideImportLoading(false);
-          }}
-          loading={sauceGuideImportLoading}
-          error={sauceGuideImportError}
-          prepared={sauceGuideImportPrepared}
-          applying={sauceGuideImportApplying}
-          onConfirm={handleSauceGuideImportConfirm}
-        />
+              },
+              loading: sauceGuideImportLoading,
+              error: sauceGuideImportError,
+              prepared: sauceGuideImportPrepared,
+              applying: sauceGuideImportApplying,
+              onConfirm: handleSauceGuideImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Dough Recipe Guide Import Dialog ─────────────────────────────── */}
-        <DoughGuideImportDialog
-          open={showDoughGuideImport}
-          onClose={() => {
+        {showDoughGuideImport && (
+          <DeferredSurface
+            label="dough guide import"
+            load={loadDoughGuideImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             doughGuideImportGenRef.current++;
             setShowDoughGuideImport(false);
             setDoughGuideImportPrepared(null);
             setDoughGuideImportError(null);
             setDoughGuideImportLoading(false);
-          }}
-          loading={doughGuideImportLoading}
-          error={doughGuideImportError}
-          prepared={doughGuideImportPrepared}
-          applying={doughGuideImportApplying}
-          onConfirm={handleDoughGuideImportConfirm}
-        />
+              },
+              loading: doughGuideImportLoading,
+              error: doughGuideImportError,
+              prepared: doughGuideImportPrepared,
+              applying: doughGuideImportApplying,
+              onConfirm: handleDoughGuideImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Cheese Mix Recipe Specs Import Dialog ────────────────────────── */}
-        <CheeseImportDialog
-          open={showCheeseImport}
-          onClose={() => {
+        {showCheeseImport && (
+          <DeferredSurface
+            label="cheese recipe import"
+            load={loadCheeseImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             cheeseImportGenRef.current++;
             cheeseImportAbortRef.current?.abort();
             cheeseImportAbortRef.current = null;
@@ -17290,14 +17345,16 @@ export default function Home() {
             setCheeseImportError(null);
             setCheeseImportLoading(false);
             setCheeseImportProgress(null);
-          }}
-          loading={cheeseImportLoading}
-          progress={cheeseImportProgress}
-          error={cheeseImportError}
-          prepared={cheeseImportPrepared}
-          applying={cheeseImportApplying}
-          onConfirm={handleCheeseImportConfirm}
-        />
+              },
+              loading: cheeseImportLoading,
+              progress: cheeseImportProgress,
+              error: cheeseImportError,
+              prepared: cheeseImportPrepared,
+              applying: cheeseImportApplying,
+              onConfirm: handleCheeseImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Setup Profiles Dialog ─────────────────────────────────────────
             Standalone brand/flavor setup editor. Lets a manager/supervisor

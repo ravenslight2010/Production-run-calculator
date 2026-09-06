@@ -206,3 +206,54 @@ and local retry action. Warehouse loading is prefetched from pointer/focus
 navigation intent; manager editor loading is prefetched from the Settings
 intent. No provider, synchronized data store, or live-run owner was moved into
 the deferred chunks.
+
+## Home-owned workbook boundary follow-up (2026-09-06)
+
+A fresh production build showed that Home still imported the workbook graph
+through the import dialogs and deterministic guide-import modules. Vite reported
+that `xlsx` and `specImport` were both dynamically and statically imported, so
+the nominal workbook loader could not remove them from initial Home parse and
+evaluation.
+
+The retained change removes those static edges. Home continues to own every
+import's selected files, generation guards, abort controller, prepared review,
+commit callback, and error state. Only the dialog UI and workbook implementation
+modules load after the user opens an importer. The existing auth, sync, form,
+notification, master-data, and live-run providers remain mounted once.
+
+| Measure | Before | After | Result |
+| --- | ---: | ---: | --- |
+| Home chunk, minified | 2,012.18 kB | 1,323.48 kB | 688.70 kB smaller (34.2%) |
+| Home chunk, gzip | 556.00 kB | 345.54 kB | 210.46 kB smaller (37.9%) |
+| `xlsx` | Included in Home | 499.55 kB / 161.55 kB gzip deferred chunk | Loaded on first workbook action |
+| Spec import implementation | Included in Home | 31.59 kB / 10.73 kB gzip deferred chunk | Loaded on first workbook action |
+| Import dialogs | Included in Home | 6.69–36.08 kB deferred chunks | Loaded only for the selected importer |
+| Vite production build | 8.19 s | 7.13 s | Build-time variance; not a startup budget |
+| Precache payload | 4,121.72 KiB | 4,123.38 KiB | Essentially unchanged; PWA retains optional chunks |
+
+This is a direct reduction in initial Home transfer, parse, and module
+evaluation input. The optional HEIC chunk remains unchanged and deferred.
+Workbook actions still share one cached loader rather than creating parallel
+module/state owners.
+
+Import dialogs use the shared deferred-surface boundary in dialog presentation
+mode. Loading appears as an accessible modal status; a load or render failure
+appears as a modal alert with a local Retry action and the saved Home-owned
+review state intact.
+
+Validation after the split:
+
+- production build passed with no static/dynamic workbook collision warnings;
+- calculator typecheck passed;
+- 22 focused deferred-surface and performance tests passed;
+- the deterministic workbook corpus passed all 11 checks;
+- the calculator and API workflows restarted, and the calculator reached Vite
+  ready in 765 ms.
+
+The bounded authenticated browser journey was attempted once at desktop and
+390×844. It was environment-blocked before authentication: API readiness
+returned `503` after `database_schema_failed`, so no department or import
+navigation result is claimed. The browser showed the explicit “Service is not
+ready” state with no page error. Existing department navigation coverage still
+targets Production → Warehouse → QC → Management/Floor Mode → reload at both
+viewports; provider placement and those paths were not changed by this split.
