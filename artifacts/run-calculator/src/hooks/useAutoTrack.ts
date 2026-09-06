@@ -20,6 +20,14 @@ import {
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
+// Server schedule-verdict freshness window (Task 1 / step 7a). Server
+// schedules arrive on the SSE heartbeat every 15s (step 6c); the server also
+// executes net-second claims itself (step 7a). While a channel's verdict is
+// fresh AND `dueNow:false`, the client skips its redundant local elapsed claim
+// (fewer renders/requests); after this window (3 heartbeat cadences) or with
+// no schedule at all, the local elapsed fallback resumes for offline devices.
+const SERVER_SCHEDULE_TTL_MS = 45_000;
+
 interface AutoTrackCalc {
   ppm: number;
   perTray: number;
@@ -293,6 +301,11 @@ export function useAutoTrack({
   nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
+  // Latest client-clock mirror so event handlers (SSE adopts) and effects can
+  // read "now" without capturing a stale prop in a stale closure or re-running
+  // on every clock tick. Updated during render, like coordinationIdentityRef.
+  const nowTimeRef = useRef(nowTime.getTime());
+  nowTimeRef.current = nowTime.getTime();
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
   // When set, tray/batch production and consumption ticks are suppressed
   // without affecting cases/skids or the global auto-track toggle.
@@ -387,6 +400,21 @@ export function useAutoTrack({
   // schedule yet). Wall-clock channels are NOT verdict-driven (the server only
   // echoes their canonical due refs).
   const serverDueNowRef = useRef<Partial<Record<AutoTrackChannel, boolean>>>({});
+  // Server schedule-verdict freshness latch (Task 1 / step 7a). Each adopt of
+  // a per-channel entry stamps the client clock. Because the server NOW owns
+  // net-second claim execution (it runs the same unref'd tick loop whether or
+  // not any device is open), a FRESH verdict of `dueNow:false` means the server
+  // has already decided not to claim at this net-second — a redundant local
+  // elapsed-armed claim here would double-write the same barrel/batch and lose
+  // the row-lock race (or duplicate splat on an idle peer). We therefore skip
+  // the local net-second check while the latch is fresh AND the verdict is
+  // `false`. The latch expires after SERVER_SCHEDULE_TTL_MS (3 heartbeat
+  // cadences, ~45s) so a server that stalls or goes silent (offline) degrades
+  // back to the local elapsed fallback instead of leaving the run untracked.
+  // A fresh `true` still fires immediately through the existing one-shot
+  // serverVerdictDue path. Explicit `false` is required — an absent verdict +
+  // fresh schedule (wall-clock channels) must NOT suppress the local fallback.
+  const serverScheduleAtMsRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   // Claims for different channels can become due in the same render. Keep
   // them FIFO so the later claim is built from the first acknowledgement's
@@ -442,7 +470,9 @@ export function useAutoTrack({
           const dueRef = dueRefForChannel(channel);
           dueRef.current = state.nextDueAt;
           // A generation mismatch means the verdict belongs to a different run
-          // identity — never let it fire claims against this run.
+          // identity — never let it fire claims against this run, and do NOT
+          // stamp the freshness latch (a stale-identity schedule must not
+          // suppress this run's local fallback).
           serverDueNowRef.current[channel] = false;
           continue;
         }
@@ -451,6 +481,7 @@ export function useAutoTrack({
           state.sequence,
         );
         serverDueNowRef.current[channel] = state.dueNow === true;
+        serverScheduleAtMsRef.current[channel] = nowTimeRef.current;
         const dueRef = dueRefForChannel(channel);
         dueRef.current = state.nextDueAt;
       }
@@ -519,6 +550,7 @@ export function useAutoTrack({
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
     serverDueNowRef.current = {};
+    serverScheduleAtMsRef.current = {};
     sauceNextDueNetSecRef.current = 0;
     appNextDueNetSecRefs.app1.current = 0;
     appNextDueNetSecRefs.app2.current = 0;
@@ -1062,10 +1094,17 @@ export function useAutoTrack({
       anchor,
       cadence,
     });
-    // Step 6b: the server's due-now verdict (fresh schedule) fires the claim
-    // immediately; the local elapsed check remains the fallback for devices
-    // without a live schedule (offline). The verdict is one-shot per arrival.
+    // Step 6b/7a: the server's due-now verdict (fresh schedule) fires the claim
+    // immediately; the local elapsed check is the fallback for devices without
+    // a live schedule (offline) or once the verdict latch goes stale. Task 1:
+    // while a FRESH verdict says explicitly NOT due, the server owns the next
+    // claim (it executes the same claim in its tick loop) — skip the local
+    // net-second check so a connected tab stops re-firing redundant claims.
     const serverVerdictDue = serverDueNowRef.current["sauce-barrel"] === true;
+    const serverOwnsNextClaim =
+      serverDueNowRef.current["sauce-barrel"] === false &&
+      nowTimeRef.current - (serverScheduleAtMsRef.current["sauce-barrel"] ?? 0) <= SERVER_SCHEDULE_TTL_MS;
+    if (serverOwnsNextClaim) return;
     if (!serverVerdictDue && elapsedBatchSec < dueAtNetSec) return;
     serverDueNowRef.current["sauce-barrel"] = false;
     const currentCount = Math.max(0, Number(v.sauceBarrelsMade) || 0);
@@ -1166,8 +1205,14 @@ export function useAutoTrack({
       // At most one sequenced event is claimed at a time. The canonical
       // acknowledgement advances the persisted anchor, then this effect claims
       // the next overdue fractional cadence without losing accumulated time.
-      // Step 6b: a fresh server due-now verdict fires immediately; the local
-      // elapsed check remains the fallback. Verdicts are one-shot per arrival.
+      // Step 6b/7a: a fresh server due-now verdict fires immediately; the local
+      // elapsed check is the fallback. Task 1: a FRESH explicit not-due verdict
+      // means the server owns this slot's next claim — skip the redundant local
+      // net-second check while that latch is fresh.
+      const serverOwnsNextClaim =
+        serverDueNowRef.current[slot.channel] === false &&
+        nowTimeRef.current - (serverScheduleAtMsRef.current[slot.channel] ?? 0) <= SERVER_SCHEDULE_TTL_MS;
+      if (serverOwnsNextClaim) continue;
       const serverVerdictDue = serverDueNowRef.current[slot.channel] === true;
       if ((!serverVerdictDue && elapsedBatchSec < dueAt) || made >= Math.ceil(slot.required)) continue;
       serverDueNowRef.current[slot.channel] = false;

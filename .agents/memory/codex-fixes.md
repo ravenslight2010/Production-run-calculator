@@ -354,6 +354,7 @@ Each entry includes:
 **Context:** Completes refactor step 6 as a safe server-authority layer: the server owns WHEN (schedule due times + due-now verdicts, now live for every device); the claim endpoint still owns WHAT gets written (validation, sequencing, manual-correction guards), which is what makes automatic writes safe against operator edits. Verified: PR #31 merged; api-server tsc + build + 18/18 coordination unit tests; CI green including `API tests (Postgres)` (74/74) — only the two known pre-existing failures (department journey, release gates) remain.
 
 *Last updated: 2026-09-06*
+
 ## 2026-09-06 — Server-owned net-second auto-track execution (refactor step 7a)
 
 **File(s):**
@@ -371,3 +372,21 @@ Each entry includes:
 **Context:** Completes the net-second half of server-owned execution (refactor step 7a). Wall-clock channels (case/tray/batch/hopper) intentionally stay client-driven — the server would need to port the client's arm-state machines (period advance, remainder carry, feed-complete gates, dough-timer pauses) before it can safely write them; that's the only remaining step toward full server ownership. Also fixed during CI iteration: the integration fixture's shared `FULL_RUN_VALUES` had an empty `frontlineRecipeName`, so sauce claims couldn't validate inventory (conflict every beat) while app batches succeeded. Verified: api-server tsc + build; DB-free unit suites 120/120; live-calc 100/100; web tsc; CI `API tests (Postgres)` green including the new server-tick integration; only the two known pre-existing failures (department journey, release gates) remain. PR #33 merged.
 
 *Last updated: 2026-09-06*
+## 2026-09-06 — Client skips redundant net-second claims while server is authoritative (refactor Task 1)
+
+**File(s):**
+- `artifacts/run-calculator/src/hooks/useAutoTrack.ts`
+- `artifacts/run-calculator/src/hooks/__tests__/useAutoTrack.sauceBarrel.test.tsx`
+- `artifacts/run-calculator/src/hooks/__tests__/useAutoTrack.applicators.test.tsx`
+
+**Problem:** After step 7a, the server executes net-second claims (sauce barrel, app batches) itself. A connected client still re-ran its own local elapsed claim every second once a claim was due (each re-run re-posts the same claim and loses the server row-lock race or splats a duplicate), wasting renders + requests for no benefit.
+
+**Fix:** Added a per-channel verdict freshness latch in `useAutoTrack.ts`: `serverScheduleAtMsRef` (stamped on each adopt of a generation-matching schedule entry) plus a client-clock mirror `nowTimeRef` (so the SSE adopt handler and effects read "now" without stale closures). A channel is treated as server-owned only while:
+1. the latch is fresh (`nowTime - lastAdoptMs <= 45_000`, 3 heartbeat cadences), AND
+2. the latest verdict is explicitly `dueNow === false`.
+
+In that state the sauce/applicator effects `return`/`continue` BEFORE the local elapsed check, so a connected tab stops re-firing redundant claims. A fresh `dueNow === true` still fires immediately (existing one-shot path); an absent verdict or an expired latch (offline/server stall) falls back to the existing local elapsed claims. Generation-mismatched schedules do NOT stamp the latch (they must never suppress this run's fallback). `resetBookkeeping()` clears the latch. Constant `SERVER_SCHEDULE_TTL_MS = 45_000` lives at module scope.
+
+**Tests:** 5 new cases (sauce: fresh not-due suppresses even far past local due; stale latch restores local fallback at 46s. apps: fresh due-now verdict fires before local elapsed; fresh not-due suppresses; stale latch restores). Note for future test authors: with no `runGeneration` prop and `endedAt` defaulted to `null`, the client identity is `"{runId}:running:0"` — schedules must publish that generation to be adopted.
+
+**Context:** Refactor Task 1 (battery/CPU win while fully connected). The server tick (7a) + heartbeat (6c) are what make suppression safe: the server executes the claim within 15s regardless of what any client does; offline/stale clients degrade back to local execution automatically. Verified: web tsc clean; sauceBarrel 15/15, applicators 12/12, coordinationClient + trays/batches + pauseResume + screenWake + suppression 58/58, sync regression 23/23.
