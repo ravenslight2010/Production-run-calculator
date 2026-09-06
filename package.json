@@ -5,7 +5,9 @@
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "audit:prod": "pnpm audit --prod",
+    "audit:prod": "pnpm run audit:prod:release",
+    "audit:prod:ci": "pnpm audit --prod --audit-level high --ignore-registry-errors",
+    "audit:prod:release": "pnpm audit --prod --audit-level high",
     "check:skill-catalog": "pnpm --filter @workspace/scripts run check:skill-catalog",
     "check:api-generated": "pnpm --filter @workspace/api-spec run check-generated && pnpm --filter @workspace/api-zod run test && tsc --build --force ./lib/api-client-react/tsconfig.json ./lib/api-zod/tsconfig.json",
     "audit:recovery": "pnpm --filter @workspace/scripts run audit:recovery",

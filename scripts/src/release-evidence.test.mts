@@ -93,6 +93,49 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  const rootPackage = JSON.parse(
+    await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+  ) as { scripts?: Record<string, string> };
+  const ciWorkflow = await readFile(
+    new URL("../../.github/workflows/ci.yml", import.meta.url),
+    "utf8",
+  );
+  const releaseWorkflow = await readFile(
+    new URL("../../.github/workflows/release-check.yml", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    rootPackage.scripts?.["audit:prod:ci"],
+    "pnpm audit --prod --audit-level high --ignore-registry-errors",
+    "informational CI security must report high-severity advisories and tolerate registry failures",
+  );
+  assert.equal(
+    rootPackage.scripts?.["audit:prod:release"],
+    "pnpm audit --prod --audit-level high",
+    "blocking release security must fail on high-severity advisories and registry failures",
+  );
+  assert.equal(
+    rootPackage.scripts?.["audit:prod"],
+    "pnpm run audit:prod:release",
+    "the configured production security workflow must retain its fail-closed compatibility command",
+  );
+  assert.match(
+    ciWorkflow,
+    /name: Informational security audit \(high severity; registry best-effort\)[\s\S]*continue-on-error: true[\s\S]*run: pnpm run audit:prod:ci/,
+    "CI must name and run the informational security policy",
+  );
+  assert.doesNotMatch(
+    releaseWorkflow,
+    /test:source-heal-verify|verify-source-library-reconciliation\.mts/,
+    "the workflow must not invoke source reconciliation outside the release evidence runner",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "source-library reconciliation verification",
+    ).length,
+    1,
+    "the retained release evidence runner must own exactly one source reconciliation gate",
+  );
   const specImportPackage = JSON.parse(
     await readFile(
       new URL("../../lib/spec-import/package.json", import.meta.url),
@@ -103,6 +146,11 @@ async function run(): Promise<void> {
     specImportPackage.scripts?.test,
     "vitest run",
     "spec-import must expose its Vitest suite through the package test script",
+  );
+  assert.deepEqual(
+    PRODUCTION_DEPENDENCY_AUDIT_STEP.args,
+    ["run", "audit:prod:release"],
+    "the retained release runner must use the blocking release security policy",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes("spec import tests"),
@@ -475,7 +523,7 @@ async function run(): Promise<void> {
   const partialKnownContractReport = formatReleaseReport(
     [
       {
-        label: "production dependency audit",
+        label: "blocking release security audit (high severity; registry required)",
         status: "FAIL",
         elapsedMs: 100,
       },

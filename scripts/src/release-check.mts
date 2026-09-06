@@ -396,8 +396,8 @@ export const PRODUCTION_AUDIT_TIMEOUT_MS = 5 * 60_000;
 export const PRODUCTION_AUDIT_WARNING_MS = 4 * 60_000;
 
 export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
-  label: "production dependency audit",
-  args: ["run", "audit:prod"],
+  label: "blocking release security audit (high severity; registry required)",
+  args: ["run", "audit:prod:release"],
   timeoutMs: PRODUCTION_AUDIT_TIMEOUT_MS,
   warningMs: PRODUCTION_AUDIT_WARNING_MS,
   stage: "prerequisites",
