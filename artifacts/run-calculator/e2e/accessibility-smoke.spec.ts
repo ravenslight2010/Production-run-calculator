@@ -27,16 +27,7 @@ async function scan(
 ): Promise<void> {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "best-practice"])
-    // These three rules describe known app-shell baseline work rather than
-    // regressions in the tested workflow. The focused checks below still
-    // enforce labels, keyboard focus, dialog behavior, and target size.
-    .disableRules([
-      "landmark-one-main",
-      "region",
-      "meta-viewport",
-      "page-has-heading-one",
-      ...additionalDisabledRules,
-    ])
+    .disableRules(additionalDisabledRules)
     .analyze();
   const details = results.violations.map((violation) => {
     const nodes = violation.nodes
@@ -45,6 +36,22 @@ async function scan(
     return `${violation.id} (${violation.help}):\n    ${nodes}`;
   });
   expect(details, `Accessibility violations on ${screen}`).toEqual([]);
+}
+
+async function scanLegacyShell(
+  page: Page,
+  screen: string,
+  additionalDisabledRules: string[] = [],
+): Promise<void> {
+  // The current auth and application shells do not yet provide a complete
+  // main/region landmark structure. Keep this exception at shell-rendered
+  // scan sites so document metadata, headings, and every unrelated axe rule
+  // remain enforced across the suite.
+  await scan(page, screen, [
+    "landmark-one-main",
+    "region",
+    ...additionalDisabledRules,
+  ]);
 }
 
 async function assertLabels(
@@ -183,7 +190,7 @@ async function checkImportDialog(
     timeout: 10_000,
   });
   await assertDialogContract(page, dialog, check.screen);
-  await scan(page, check.screen, ["button-name", "label", "landmark-unique"]);
+  await scanLegacyShell(page, check.screen, ["button-name", "label", "landmark-unique"]);
   await assertTargets(page, check.screen);
   await assertKeyboardTraversal(page, check.screen, 6);
 
@@ -373,7 +380,7 @@ test.describe("accessibility smoke", () => {
   test("sign-in has labeled controls, keyboard navigation, and no obvious violations", async ({ page }) => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-    await scan(page, "sign-in");
+    await scanLegacyShell(page, "sign-in");
     await assertLabels(page, "sign-in");
     await assertTargets(page, "sign-in");
     await assertKeyboardTraversal(page, "sign-in", 6);
@@ -388,7 +395,7 @@ test.describe("accessibility smoke", () => {
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
     await signUp(page);
     await seedPendingRun(page);
-    await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
+    await scanLegacyShell(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
     await assertKeyboardTraversal(page, "live run");
     await expect(page.locator('[data-testid="button-start-run"]')).toBeEnabled();
@@ -402,7 +409,7 @@ test.describe("accessibility smoke", () => {
       await warehouseDetails.locator("summary").click();
       await expect(warehouseDetails).toHaveAttribute("open", "");
     }
-    await scan(page, "warehouse attention hierarchy", ["button-name", "color-contrast", "landmark-unique"]);
+    await scanLegacyShell(page, "warehouse attention hierarchy", ["button-name", "color-contrast", "landmark-unique"]);
 
     // Settings is exposed from the stable warehouse header on compact and
     // desktop layouts; selecting it also ensures the header is in the active
@@ -410,7 +417,7 @@ test.describe("accessibility smoke", () => {
     await openSettings(page);
     const settingsDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
     await assertDialogContract(page, settingsDialog, "manager setup dialog");
-    await scan(page, "manager setup dialog", ["button-name", "landmark-unique"]);
+    await scanLegacyShell(page, "manager setup dialog", ["button-name", "landmark-unique"]);
     await assertTargets(page, "manager setup dialog");
     await assertKeyboardTraversal(page, "manager setup dialog");
     await page.getByRole("button", { name: "Tools", exact: true }).focus();
@@ -482,7 +489,7 @@ test.describe("accessibility smoke", () => {
     const setupProfiles = page.getByRole("dialog", { name: "Setup Profiles" });
     await expect(setupProfiles).toBeVisible();
     await assertDialogContract(page, setupProfiles, "setup profiles dialog");
-    await scan(page, "setup profiles dialog", ["button-name", "label", "landmark-unique"]);
+    await scanLegacyShell(page, "setup profiles dialog", ["button-name", "label", "landmark-unique"]);
     await assertTargets(page, "setup profiles dialog");
     await assertKeyboardTraversal(page, "setup profiles dialog", 6);
     await page.keyboard.press("Escape");
@@ -522,7 +529,7 @@ test.describe("accessibility smoke", () => {
     await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toBeVisible();
     await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(3);
-    await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
+    await scanLegacyShell(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
     await assertKeyboardTraversal(page, "reported issues field checks", 8);
   });
 
