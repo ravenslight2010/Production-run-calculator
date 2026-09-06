@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, savedSpecSheetsTable, type SavedSpecSheetRow } from "@workspace/db";
 import { SaveSpecSheetBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
@@ -70,40 +70,44 @@ router.post("/spec-sheets", async (req: Request, res: Response) => {
   const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
   const rawHash = (parsed.data.sourceHash ?? "").trim().toLowerCase();
   const sourceHash = SOURCE_HASH_RE.test(rawHash) ? rawHash : null;
+  const scope = currentScope();
 
   try {
-    await db.insert(savedSpecSheetsTable).values({
-      scope: currentScope(),
-      label,
-      sourceKey,
-      sourceHash,
-      data: parsed.data.data,
-    });
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${"saved-spec-sheets:" + scope}, 0))`,
+      );
+      await tx.insert(savedSpecSheetsTable).values({
+        scope,
+        label,
+        sourceKey,
+        sourceHash,
+        data: parsed.data.data,
+      });
 
-    // Keep only the two most recent snapshots PER distinct file (sourceKey), not
-    // two overall — the factory has many distinct spec sheets and wants the last
-    // two versions of each. Rows without a sourceKey (older/mobile clients) share
-    // a single legacy bucket. Re-read newest first and delete past the per-key cap.
-    const rows = await db
-      .select({ id: savedSpecSheetsTable.id, sourceKey: savedSpecSheetsTable.sourceKey })
-      .from(savedSpecSheetsTable)
-      .where(eq(savedSpecSheetsTable.scope, currentScope()))
-      .orderBy(desc(savedSpecSheetsTable.createdAt), desc(savedSpecSheetsTable.id));
-    const perKeyCount = new Map<string, number>();
-    const stale: number[] = [];
-    for (const r of rows) {
-      const key = r.sourceKey ?? "";
-      const n = (perKeyCount.get(key) ?? 0) + 1;
-      perKeyCount.set(key, n);
-      if (n > MAX_SAVED) stale.push(r.id);
-    }
-    for (const id of stale) {
-      await db
-        .delete(savedSpecSheetsTable)
-        .where(
-          and(eq(savedSpecSheetsTable.scope, currentScope()), eq(savedSpecSheetsTable.id, id)),
+      // Keep only the two most recent snapshots PER distinct file (sourceKey), not
+      // two overall — the factory has many distinct spec sheets and wants the last
+      // two versions of each. Rows without a sourceKey (older/mobile clients) share
+      // a single legacy bucket. Re-read newest first and delete past the per-key cap.
+      const rows = await tx
+        .select({ id: savedSpecSheetsTable.id, sourceKey: savedSpecSheetsTable.sourceKey })
+        .from(savedSpecSheetsTable)
+        .where(eq(savedSpecSheetsTable.scope, scope))
+        .orderBy(desc(savedSpecSheetsTable.createdAt), desc(savedSpecSheetsTable.id));
+      const perKeyCount = new Map<string, number>();
+      const stale: number[] = [];
+      for (const r of rows) {
+        const key = r.sourceKey ?? "";
+        const n = (perKeyCount.get(key) ?? 0) + 1;
+        perKeyCount.set(key, n);
+        if (n > MAX_SAVED) stale.push(r.id);
+      }
+      if (stale.length > 0) {
+        await tx.delete(savedSpecSheetsTable).where(
+          and(eq(savedSpecSheetsTable.scope, scope), inArray(savedSpecSheetsTable.id, stale)),
         );
-    }
+      }
+    });
 
     const specSheets = await listAll();
     res.json({ specSheets });

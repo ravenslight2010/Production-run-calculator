@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, savedShippingGuidesTable, type SavedShippingGuideRow } from "@workspace/db";
 import { SaveShippingGuideBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
@@ -69,39 +69,40 @@ router.post("/shipping-guides", async (req: Request, res: Response) => {
   const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
   const rawHash = (parsed.data.sourceHash ?? "").trim().toLowerCase();
   const sourceHash = SOURCE_HASH_RE.test(rawHash) ? rawHash : null;
+  const scope = currentScope();
 
   try {
-    await db.insert(savedShippingGuidesTable).values({
-      scope: currentScope(),
-      label,
-      sourceKey,
-      sourceHash,
-      data: parsed.data.data,
-    });
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${"saved-shipping-guides:" + scope}, 0))`,
+      );
+      await tx.insert(savedShippingGuidesTable).values({
+        scope,
+        label,
+        sourceKey,
+        sourceHash,
+        data: parsed.data.data,
+      });
 
-    // Keep only the two most recent snapshots PER distinct file (sourceKey).
-    // Rows without a sourceKey share a single legacy bucket. Re-read newest
-    // first and delete past the per-key cap.
-    const rows = await db
-      .select({ id: savedShippingGuidesTable.id, sourceKey: savedShippingGuidesTable.sourceKey })
-      .from(savedShippingGuidesTable)
-      .where(eq(savedShippingGuidesTable.scope, currentScope()))
-      .orderBy(desc(savedShippingGuidesTable.createdAt), desc(savedShippingGuidesTable.id));
-    const perKeyCount = new Map<string, number>();
-    const stale: number[] = [];
-    for (const r of rows) {
-      const key = r.sourceKey ?? "";
-      const n = (perKeyCount.get(key) ?? 0) + 1;
-      perKeyCount.set(key, n);
-      if (n > MAX_SAVED) stale.push(r.id);
-    }
-    for (const id of stale) {
-      await db
-        .delete(savedShippingGuidesTable)
-        .where(
-          and(eq(savedShippingGuidesTable.scope, currentScope()), eq(savedShippingGuidesTable.id, id)),
+      const rows = await tx
+        .select({ id: savedShippingGuidesTable.id, sourceKey: savedShippingGuidesTable.sourceKey })
+        .from(savedShippingGuidesTable)
+        .where(eq(savedShippingGuidesTable.scope, scope))
+        .orderBy(desc(savedShippingGuidesTable.createdAt), desc(savedShippingGuidesTable.id));
+      const perKeyCount = new Map<string, number>();
+      const stale: number[] = [];
+      for (const r of rows) {
+        const key = r.sourceKey ?? "";
+        const n = (perKeyCount.get(key) ?? 0) + 1;
+        perKeyCount.set(key, n);
+        if (n > MAX_SAVED) stale.push(r.id);
+      }
+      if (stale.length > 0) {
+        await tx.delete(savedShippingGuidesTable).where(
+          and(eq(savedShippingGuidesTable.scope, scope), inArray(savedShippingGuidesTable.id, stale)),
         );
-    }
+      }
+    });
 
     const shippingGuides = await listAll();
     res.json({ shippingGuides });

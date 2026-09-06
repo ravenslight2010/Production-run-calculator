@@ -204,6 +204,16 @@ describe("saved-spec-sheets routes", () => {
     expect(sheets.map((s) => s.label)).toEqual(["third", "second"]);
   });
 
+  it("keeps the retention bound under concurrent saves", async () => {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        save(`concurrent-${index}`, specData(String(index)), "live", "concurrent-sheet"),
+      ),
+    );
+    const retained = (await list()).filter((sheet) => sheet.sourceKey === "concurrent-sheet");
+    expect(retained).toHaveLength(2);
+  });
+
   it("keeps the two most recent versions PER distinct sourceKey", async () => {
     // Two distinct files, three uploads each — each file keeps its newest two.
     await save("dough v1", specData("a"), "live", "dough-sheet");

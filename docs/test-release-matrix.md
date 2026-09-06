@@ -21,6 +21,7 @@ reported gap, not evidence of coverage.
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
 | PWA/service-worker handoff | `pwa-handoff.spec.ts` self-contained fixture | `test:pwa-handoff` | Required for PWA, service-worker, cache, or update-prompt changes |
 | Import and export pipelines | Import/export libraries and corpus fixtures | `pnpm --filter @workspace/spec-import run test`, `test:spec-reconcile`, `test:spec-export`, `test:corpus`, package-specific import tests | Required for import parsing, linking, aliases, merge, or export changes |
+| Import lifecycle integrity | Import-family parser/apply tests, merge-backfill libraries, reconciliation libraries, and saved-source API routes | `docs/import-lifecycle-integrity-audit-2026-09-06.md` and the focused suites listed there | Required when changing recipe-row identity, replacement/union rules, merge backfill, source snapshot retention, or re-import resurrection guards |
 | Startup and preview health | Workflow startup and clean-start harness | `check:clean-start` | Required before browser evidence and for run-command, proxy, or workflow changes |
 
 ## Required release sets by change category

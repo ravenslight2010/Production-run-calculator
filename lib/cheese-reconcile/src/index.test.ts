@@ -59,4 +59,60 @@ describe("reconcileCheeseRecipes", () => {
     const saved = applyCheeseRepairItem([current], item);
     expect(saved[0]).toMatchObject({ enabled: false, notes: "manager note", components: [{ lbs: 110 }] });
   });
+
+  it("compares duplicate components by total and reports changed rows as ambiguous", () => {
+    const current = recipe({
+      components: [
+        { ingredient: "Mozzarella", lbs: 40, sharePct: 20 },
+        { ingredient: "mozzarella", lbs: 60, sharePct: 30 },
+      ],
+    });
+    const source = recipe({
+      components: [
+        { ingredient: "Mozzarella", lbs: 45 },
+        { ingredient: "MOZZARELLA", lbs: 65 },
+      ],
+    });
+    const out = reconcileCheeseRecipes({ currentRecipes: [current], sourceRecipes: [source] });
+    expect(out.discrepancies.filter((d) => d.type === "amount-mismatch")).toHaveLength(1);
+    expect(out.items[0]?.status).toBe("ambiguous");
+    expect(out.items[0]?.suggestedRecipe).toBeUndefined();
+  });
+
+  it("does not guess manager-field mapping when duplicate source rows change weights", () => {
+    const current = recipe({
+      components: [
+        { ingredient: "Mozzarella", lbs: 40, sharePct: 20 },
+        { ingredient: "mozzarella", lbs: 60, sharePct: 30 },
+      ],
+    });
+    const source = recipe({
+      components: [
+        { ingredient: "MOZZARELLA", lbs: 65 },
+        { ingredient: "Mozzarella", lbs: 45 },
+      ],
+    });
+    const out = reconcileCheeseRecipes({ currentRecipes: [current], sourceRecipes: [source] });
+    expect(out.items[0]?.status).toBe("ambiguous");
+    expect(out.items[0]?.suggestedRecipe).toBeUndefined();
+  });
+
+  it("matches reordered duplicate manager fields by exact source weight", () => {
+    const current = recipe({
+      components: [
+        { ingredient: "Mozzarella", lbs: 40, sharePct: 20 },
+        { ingredient: "mozzarella", lbs: 60, sharePct: 30 },
+      ],
+      shredderSetting: "old",
+    });
+    const source = recipe({
+      components: [
+        { ingredient: "MOZZARELLA", lbs: 60 },
+        { ingredient: "Mozzarella", lbs: 40 },
+      ],
+      shredderSetting: "new",
+    });
+    const out = reconcileCheeseRecipes({ currentRecipes: [current], sourceRecipes: [source] });
+    expect(out.items[0]?.suggestedRecipe?.components.map((c) => c.sharePct)).toEqual([30, 20]);
+  });
 });

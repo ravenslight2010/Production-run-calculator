@@ -182,6 +182,16 @@ describe("saved-shipping-guides routes", () => {
     expect(guides.map((s) => s.label)).toEqual(["third", "second"]);
   });
 
+  it("keeps the retention bound under concurrent saves", async () => {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        save(`concurrent-${index}`, guideData(String(index)), "live", "concurrent-sheet"),
+      ),
+    );
+    const retained = (await list()).filter((guide) => guide.sourceKey === "concurrent-sheet");
+    expect(retained).toHaveLength(2);
+  });
+
   it("keeps the two most recent versions PER distinct sourceKey", async () => {
     await save("guide v1", guideData("a"), "live", "palletizing-sheet");
     await save("guide v2", guideData("b"), "live", "palletizing-sheet");

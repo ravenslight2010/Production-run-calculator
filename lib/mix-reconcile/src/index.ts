@@ -109,6 +109,30 @@ function productLabel(m: { brand: string; flavor: string }): string {
   return b || f || "(unnamed product)";
 }
 
+type AggregatedMixComponent = MixComponent & { perPizza: number; perBatchLbs?: number };
+
+/**
+ * Comparison is by ingredient total, but this deliberately does not change the
+ * component arrays themselves. Imports may contain separate, meaningful rows for
+ * the same ingredient and suggestions must retain those rows.
+ */
+function aggregateComponents(components: ReadonlyArray<MixComponent>): Map<string, AggregatedMixComponent> {
+  const totals = new Map<string, AggregatedMixComponent>();
+  for (const component of components) {
+    const key = ci(component.ingredient);
+    const existing = totals.get(key);
+    if (existing) {
+      existing.perPizza += component.perPizza;
+      if (component.perBatchLbs != null) {
+        existing.perBatchLbs = (existing.perBatchLbs ?? 0) + component.perBatchLbs;
+      }
+    } else {
+      totals.set(key, { ...component });
+    }
+  }
+  return totals;
+}
+
 export function mixReconcileSignature(mix: Mix): string {
   return JSON.stringify({
     id: mix.id,
@@ -121,11 +145,13 @@ export function mixReconcileSignature(mix: Mix): string {
     amountAlreadyMade: mix.amountAlreadyMade,
     enabled: mix.enabled,
     isPrep: mix.isPrep ?? false,
-    components: mix.components.map((component) => ({
-      ingredient: ci(component.ingredient),
-      perPizza: component.perPizza,
-      perBatchLbs: component.perBatchLbs ?? 0,
-    })).sort((a, b) => a.ingredient.localeCompare(b.ingredient)),
+    components: mix.components
+      .map((component) => ({
+        ingredient: ci(component.ingredient),
+        perPizza: component.perPizza,
+        perBatchLbs: component.perBatchLbs ?? 0,
+      }))
+      .sort((a, b) => a.ingredient.localeCompare(b.ingredient)),
   });
 }
 
@@ -235,12 +261,10 @@ export function reconcileMixesWithPremixSheet(input: {
     }
 
     const mixDiscs: MixDiscrepancy[] = [];
-    const currentByIng = new Map<string, MixComponent>();
-    for (const c of current.components) currentByIng.set(ci(c.ingredient), c);
-    const sheetByIng = new Map<string, MixComponent>();
-    for (const c of sheet.components) sheetByIng.set(ci(c.ingredient), c);
+    const currentByIng = aggregateComponents(current.components);
+    const sheetByIng = aggregateComponents(sheet.components);
 
-    for (const sc of sheet.components) {
+    for (const sc of sheetByIng.values()) {
       const cc = currentByIng.get(ci(sc.ingredient));
       if (!cc) {
         mixDiscs.push({
@@ -271,7 +295,7 @@ export function reconcileMixesWithPremixSheet(input: {
         });
       }
     }
-    for (const cc of current.components) {
+    for (const cc of currentByIng.values()) {
       if (!sheetByIng.has(ci(cc.ingredient))) {
         mixDiscs.push({
           source: "premix",
@@ -318,8 +342,6 @@ export function reconcileMixesWithPremixSheet(input: {
       daysEarly: sheet.daysEarly,
       components: sheet.components.map((c) => ({ ...c })),
     };
-    if (sheet.notes) suggestedMix.notes = sheet.notes;
-
     discrepancies.push(...mixDiscs);
     items.push({
       source: "premix",
@@ -365,27 +387,39 @@ export function reconcileMixesWithSpec(input: {
     const spec = specByProduct.get(productKey(mix.brand, mix.flavor));
     if (!spec) continue;
     const specByIngredient = new Map<string, MixSpecRow>();
-    for (const r of spec.rows) specByIngredient.set(ci(r.ingredient), r);
+    for (const row of spec.rows) {
+      const key = ci(row.ingredient);
+      const existing = specByIngredient.get(key);
+      if (existing) existing.perPizza += row.perPizza;
+      else specByIngredient.set(key, { ...row });
+    }
+    const mixByIngredient = aggregateComponents(mix.components);
 
     const mixDiscs: MixDiscrepancy[] = [];
     const newComponents: MixComponent[] = [];
+    const adjustedIngredients = new Set<string>();
     for (const comp of mix.components) {
-      const sr = specByIngredient.get(ci(comp.ingredient));
+      const key = ci(comp.ingredient);
+      const sr = specByIngredient.get(key);
+      const aggregate = mixByIngredient.get(key)!;
       if (!sr) {
-        mixDiscs.push({
-          source: "spec",
-          type: "extra-component",
-          brand: mix.brand,
-          flavor: mix.flavor,
-          mixName: mix.name,
-          ingredient: comp.ingredient,
-          mixPerPizza: comp.perPizza,
-          message: `"${mix.name}" includes ${comp.ingredient} (${fmt(comp.perPizza)} oz/pizza), which isn't in the spec sheet for ${productLabel(mix)}.`,
-        });
+        if (!adjustedIngredients.has(key)) {
+          mixDiscs.push({
+            source: "spec",
+            type: "extra-component",
+            brand: mix.brand,
+            flavor: mix.flavor,
+            mixName: mix.name,
+            ingredient: comp.ingredient,
+            mixPerPizza: aggregate.perPizza,
+            message: `"${mix.name}" includes ${comp.ingredient} (${fmt(aggregate.perPizza)} oz/pizza), which isn't in the spec sheet for ${productLabel(mix)}.`,
+          });
+        }
         newComponents.push({ ...comp });
+        adjustedIngredients.add(key);
         continue;
       }
-      if (Math.abs(comp.perPizza - sr.perPizza) > tol) {
+      if (!adjustedIngredients.has(key) && Math.abs(aggregate.perPizza - sr.perPizza) > tol) {
         mixDiscs.push({
           source: "spec",
           type: "amount-mismatch",
@@ -394,13 +428,25 @@ export function reconcileMixesWithSpec(input: {
           mixName: mix.name,
           ingredient: comp.ingredient,
           sheetPerPizza: sr.perPizza,
-          mixPerPizza: comp.perPizza,
-          message: `${comp.ingredient} in "${mix.name}" is ${fmt(comp.perPizza)} oz/pizza but the spec sheet calls for ${fmt(sr.perPizza)}.`,
+          mixPerPizza: aggregate.perPizza,
+          message: `${comp.ingredient} in "${mix.name}" is ${fmt(aggregate.perPizza)} oz/pizza but the spec sheet calls for ${fmt(sr.perPizza)}.`,
         });
-        newComponents.push({ ingredient: comp.ingredient, perPizza: sr.perPizza });
-      } else {
-        newComponents.push({ ...comp });
       }
+      // A single current row can safely adopt the aggregate source amount.
+      // Multiple same-ingredient rows may be intentionally separate; report
+      // their aggregate drift, but do not invent how the corrected total should
+      // be distributed across them.
+      const duplicateCount = mix.components.filter(
+        (candidate) => ci(candidate.ingredient) === key,
+      ).length;
+      newComponents.push(
+        duplicateCount === 1 &&
+        !adjustedIngredients.has(key) &&
+        Math.abs(aggregate.perPizza - sr.perPizza) > tol
+          ? { ...comp, perPizza: sr.perPizza }
+          : { ...comp },
+      );
+      adjustedIngredients.add(key);
     }
 
     if (mixDiscs.length === 0) continue;

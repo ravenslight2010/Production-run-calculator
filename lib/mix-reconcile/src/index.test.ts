@@ -5,6 +5,7 @@ import {
   reconcileMixesWithSpec,
   reconcileMixesWithPremixSheet,
   formatMixDiscrepanciesForPrompt,
+  mixReconcileSignature,
   type MixSpecProduct,
 } from "./index";
 
@@ -147,6 +148,38 @@ describe("reconcileMixesWithSpec", () => {
     });
     expect(out.discrepancies).toHaveLength(0);
   });
+
+  it("compares duplicate current and spec rows by total without guessing a redistribution", () => {
+    const current = mix({
+      components: [
+        { ingredient: "Onion", perPizza: 0.02, perBatchLbs: 1 },
+        { ingredient: " onion ", perPizza: 0.03, perBatchLbs: 2 },
+      ],
+    });
+    const out = reconcileMixesWithSpec({
+      currentMixes: [current],
+      specProducts: [{ brand: "Bobos", flavor: "Veggie", rows: [
+        { ingredient: "Onion", perPizza: 0.025 },
+        { ingredient: "ONION", perPizza: 0.035 },
+      ] }],
+    });
+    expect(out.discrepancies).toHaveLength(1);
+    expect(out.discrepancies[0]).toMatchObject({
+      type: "amount-mismatch",
+      ingredient: "Onion",
+    });
+    expect(out.discrepancies[0]?.mixPerPizza).toBeCloseTo(0.05);
+    expect(out.discrepancies[0]?.sheetPerPizza).toBeCloseTo(0.06);
+    expect(out.items[0]?.suggestedMix.components).toHaveLength(2);
+    expect(out.items[0]?.suggestedMix.components.reduce((sum, c) => sum + c.perPizza, 0)).toBeCloseTo(0.05);
+    expect(out.items[0]?.suggestedMix.components[0]?.perBatchLbs).toBe(1);
+  });
+
+  it("keeps duplicate-row structure in stale signatures", () => {
+    expect(mixReconcileSignature(mix({
+      components: [{ ingredient: "Onion", perPizza: 0.02 }, { ingredient: "onion", perPizza: 0.03 }],
+    }))).not.toBe(mixReconcileSignature(mix({ components: [{ ingredient: "ONION", perPizza: 0.05 }] })));
+  });
 });
 
 describe("reconcileMixesWithPremixSheet", () => {
@@ -229,6 +262,15 @@ describe("reconcileMixesWithPremixSheet", () => {
       "pull-timing-mismatch",
     ]);
     expect(out.items[0]?.suggestedMix.amountAlreadyMade).toBe(0);
+  });
+
+  it("compares duplicate sheet and current components by their totals while retaining sheet rows", () => {
+    const current = mix({ batchSize: 99, components: [{ ingredient: "Onion", perPizza: 0.02 }, { ingredient: "onion", perPizza: 0.03 }] });
+    const sheet = mix({ components: [{ ingredient: "Onion", perPizza: 0.01 }, { ingredient: "ONION", perPizza: 0.04 }] });
+    const out = reconcileMixesWithPremixSheet({ currentMixes: [current], sheetMixes: [sheet] });
+    expect(out.discrepancies.map((d) => d.type)).toEqual(["amount-mismatch"]);
+    expect(out.items[0]?.suggestedMix.components).toHaveLength(2);
+    expect(out.items[0]?.suggestedMix.components.reduce((sum, c) => sum + c.perPizza, 0)).toBeCloseTo(0.05);
   });
 });
 

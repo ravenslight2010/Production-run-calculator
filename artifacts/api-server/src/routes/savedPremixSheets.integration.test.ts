@@ -214,6 +214,16 @@ describe("saved-premix-sheets routes", () => {
     expect(sheets.map((s) => s.label)).toEqual(["third", "second"]);
   });
 
+  it("keeps the retention bound under concurrent saves", async () => {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        save(`concurrent-${index}`, premixData(String(index)), "live", "concurrent-sheet"),
+      ),
+    );
+    const retained = (await list()).filter((sheet) => sheet.sourceKey === "concurrent-sheet");
+    expect(retained).toHaveLength(2);
+  });
+
   it("DELETE removes a snapshot by id", async () => {
     await save("first", premixData("a"));
     const afterSecond = await save("second", premixData("b"));

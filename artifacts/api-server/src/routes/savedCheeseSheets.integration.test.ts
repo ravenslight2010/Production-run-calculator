@@ -119,4 +119,11 @@ describe("saved-cheese-sheets routes", () => {
     });
     expect(bad.status).toBe(400);
   });
+
+  it("keeps the retention bound under concurrent saves", async () => {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, index) => save(`concurrent-${index}`)),
+    );
+    expect(await list()).toHaveLength(2);
+  });
 });
