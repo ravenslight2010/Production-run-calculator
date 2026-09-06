@@ -19501,7 +19501,7 @@ function ScreenModeView() {
           <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
         </div>
 
-        <h1 className="text-4xl font-black">Warehouse Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
+        <h1 data-testid="warehouse-screen-heading" className="text-4xl font-black">Warehouse Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
 
         {/* Aggregate ingredient grid, grouped to match the interactive warehouse tab. */}
         {warehouseGroups.length > 0 ? (

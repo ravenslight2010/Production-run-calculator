@@ -1,5 +1,4 @@
 - [Packaging pause/resume flow](packaging-pause-clock-handoff.md) — pause stops the Press; downstream drains by zone, and Resume refills before packaging tracking restarts.
-- [Department browser evidence](department-browser-evidence.md) — responsive operational journeys should assert stable semantic state rather than layout-specific text nodes.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Cross-run autosave contamination](cross-run-autosave-contamination.md) — autosave useEffect([v]) reads run ID from dayStateRef (latest ref) but v can lag; lastFormRunIdRef guards prevent wrong product's data landing in another run's slot/profile.
 - [Dough families and variants](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) — one family recipe; specific-flavor matching must beat catch-all and may override a wrong stored weight.
@@ -15,7 +14,6 @@
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
 - [Profile/autosave clobber guards](autosave-edit-attribution.md) + [Open form clobbers profiles](open-form-profile-clobber.md) — save only attributed data and reload open forms after out-of-band profile rewrites.
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
-- [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
 - [Post-merge setup](post-merge-setup.md) — post-merge.sh must use `db push-force` (plain push hangs on TTY rename prompt) + generous timeout (~70s real runtime).
@@ -34,7 +32,6 @@
 - [Spec-sheet Excel importer](spec-import.md) + [scale harness](spec-import-scale-harness.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool; run BOTH real-AI harnesses after model changes; prompt cells wrap under PROMPT_MAX_CELL_CHARS.
 - [Spec/recipe/mix Excel export](spec-export.md) — mirror of the importers; TWO workbooks (AI spec vs deterministic premix, never combine); pure @workspace/spec-export; pep-B slots omitted; web-only (parity paused).
 - [AI memory and corrections](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) + [reviewer coverage](ai-corrections-full-coverage.md) + [health](ai-memory-health-audits.md) — shared corrections and aliases, fail-safe review, historic aliases are evidence.
-- [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded; gate dough trays/batches decrement on front-of-line feed completion; web+mobile.
 - [Schedule safety](multi-sheet-schedule-import.md) + [recipe warnings](scheduled-recipe-check.md) + [canonical moves](schedule-move-canonical-writes.md) — imported days, missing setups, and moves preserve canonical writes.
@@ -47,7 +44,6 @@
 - [Isolated env stale workspace links](isolated-env-stale-workspace-links.md) — task env may miss @workspace/* node_modules symlinks → "cannot find module"/build fails; fix with `pnpm install` (+ typecheck:libs), not code changes.
 - [Additive push-force schema](additive-push-force-schema.md) — adding a col to a POPULATED table must be additive or push-force prompts/breaks: uniqueIndex not .unique()/composite-PK-with-new-col; keep int singleton PKs (not serial).
 - [Temp substitutions](temp-substitutions.md) — day-state swap/add/remove overlays must affect both totals and consumption keys through shared inventory math.
-- [Recipe apply/undo shared lib](recipe-apply-shared-lib.md) — recipe-suggestion validate/sanitize/apply/undo decision logic now in @workspace/recipe-apply; apps keep only resolveTargetId/readPrevRows/write glue; lib owns RECIPE_FIELD_IDS.
 - [Sandbox scope isolation](sandbox-scope-isolation.md) + [auto-refresh](sandbox-auto-refresh.md) — sandboxAllowed() prod gate, requireLiveScope for global tables; sandbox re-copies from live on stale login (server reports staleness, client resets once/mount).
 - [Warehouse staging checklist](warehouse-staging-checklist.md) — per-run "What Each Run Needs" check-off in synced dayState.stagedItems keyed `${runId}::${label}__${unit}`; mirrors substitutions sync/reset; web+mobile parity.
 - [Notification re-fire](notification-view-refire.md) + [run-complete timing](run-complete-alert-timing.md) — completion alerts need armed-while-pending Set latches (not last-id refs) + explicit ppm>0 guards.
@@ -56,14 +52,10 @@
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
 - [Saved spec reconcile](saved-spec-reconcile.md) + [hash reuse](spec-import-hash-reuse.md) + [prune matching](saved-spec-snapshot-prune.md) — current recipes get deterministic diffs; re-imports reuse parses only while the parse version matches.
 - [Premix sheet import](premix-import.md) — premix .xlsx → Mixes (deterministic parse lib, AI name-only matcher); per-mix include/exclude review; invalidate `["mixes"]` after commit; web+mobile parity.
-- [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
 - [Scheduled-day safety](scheduled-day-client-date.md) + [response validation](scheduled-day-response-validation.md) — key sync by client date and reject 401/error envelopes before hydration.
-- [AI model routing + streaming](ai-model-routing-and-streaming.md) — pickModel is the only model source; vi.mock MUST export pickModel/AI_MODELS or routes 502; ask/recipe SSE opt-in.
-- [Merge category tabs](merge-category-tabs.md) — 6-tab scoped merge picker; full-universe (AI suggest) vs scoped-universe (pickers) split; Brand/Flavor is its own merge path; mobile Mixes always empty, empty-state below tabs not early-return.
 - [Server empty-over-populated guard](server-empty-over-populated-guard.md) — /api/sync protectRunValues rejects all-default-over-populated in BOTH the additive path AND the wholesale-adopt (reset) path; blank-over-populated during a rollover push keeps stored value + advances stamp.
 - [Pep applicator combine + B slot](pep-applicator-combine.md) — web-only pep1Combined (default true, doubles sticks) + per-app "B" pep type; EVERY DEFAULT-merge load path must call resolvePep1Combined or legacy 2-pep runs wrongly combine.
 - [Import "reload" causes](web-form-button-submit-reload.md) + [cold-start hang](cold-start-import-hang.md) — import blanks via sandbox auto-reset or dev HMR reload; autoscale scale-to-zero can hang fetches at the edge — blocking-dialog fetches need AbortSignal.timeout + Cancel.
-- [Web brand palette](web-brand-palette.md) — web app unified on brand amber #FF9500; Tailwind v4 @theme remaps amber-* AND orange-* to one ramp (orange==amber by design); theme-color lives in 3 synced spots.
 - [Recipe-merge sync-receive guards](recipe-merge-sync-receive.md) — web receive-side merge-survival logic extracted to storage.ts helpers (acceptRemoteRunValueOnSync, dropTombstonedPresetKeys); keep home.tsx wired to them, don't re-inline.
 - [Profile source-of-truth for pending runs](scheduled-run-profile-snapshot.md) — profile saves fan out to ALL not-started runs (today + scheduled) w/ LWW stamps; started runs keep their snapshot.
 - [Run lifecycle LWW stamp](run-meta-lww.md) — per-run metaUpdatedAt, newer-stamp wins at all 3 sync merge points; stamping is centralized, bypass paths must self-stamp; never bump on value edits.
@@ -72,11 +64,7 @@
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [One-time data heals](one-time-data-heals.md) + [data reset](one-time-data-purge.md) + [first-load form heal](sync-first-load-form-heal.md) — marker-guarded boot heals (monotonic stamps or poison resurrects); factory reset = per-scope epoch via POST /sync/reset; fresh-device form heal keys on currentRunId w/ guards.
 - [Seeded placeholder runs](seeded-placeholder-runs.md) — auto-created blank day placeholder is `seeded` + local-only (never pushed, dropped on receive) or fresh devices pile blank runs onto peers; clients must never hold 0 runs.
-- [Cheese server master-data](cheese-server-master-data.md) + [catch-all flavors](cheese-catch-all-flavors.md) + [mirror applicators](cheese-mirror-applicators.md) + [link-to-existing](cheese-import-link-to-existing.md) — server pool (per-BATCH lbs, NOT in Mixes), pick-only cards; "All Varieties"=EMPTY flavors; one-to-one link guard.
 - [Merges skip server master-data](merge-server-master-data-repoint.md) — merges/renames must re-point server pools AND learn spec-import aliases, or re-imports resurrect old brand/flavor names.
-- [Dough/Sauce server master-data](dough-sauce-server-master-data.md) — dough & sauce now server pools (@workspace/named-recipes, own tables, name-keyed); sauce==frontline; migration + spec-import push differ web vs mobile by design.
-- [Setup Profiles editor](setup-profiles-editor.md) — standalone brand/flavor setup editor via saveProfile/loadProfile, never touches run state; "Recipe Setup Needed" routes here not run-jump; web+mobile parity.
-- [Server ingredient catalog](ingredient-catalog.md) — factory-wide ingredients table w/ stable ids, recipe rows get optional ingredientId; hybrid alongside existing local lists; array-identity gotcha in hydration.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
 - [Import format gotchas](spec-import-batch-vs-perpizza.md) + [source semantics](import-source-file-semantics.md) — M&V/Cheese are per-BATCH lbs, premix per-pizza; order spec→dough/sauce→cheese/premix.
 - [Import order + dedup keys](import-order-dedup-keys.md) — spec-first is worst for dedup (AI match no-ops on empty pool); cheese dedup is EXACT name, mix/dough/sauce use LOOSE key; reorder/misspell drift now handled by name-match.
@@ -92,7 +80,6 @@
 - [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Learned ingredient batch weights](ingredient-batch-weights.md) — typed batch lbs follow the ingredient (server ci-store); learn only UI-visible fields, serialize saves, sauce branch checks rows lbs>0 not array truthiness.
 - [Mix applicator slots](mix-applicator-slots.md) — slot TYPE is generic "Mix"/"cheese", name lives in the CheeseRecipeName link; allowlist "mix"/"cheese" in stray filters; migration used targeted profile writes, not saveProfile.
-- [Local→server name consolidation](local-to-server-name-consolidation.md) — one-time migration of legacy local name lists into server pools: reconcile leftovers (never drop), tombstone wipes, stamp re-pointed runs.
 - [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere; import slots MANDATORY when pep rows exist (before pep=1/2, after=3/4); prompt changes bump SPEC_PARSE_VERSION.
 - [Name-first dough/sauce relink](spec-import-name-first-relink.md) — spec import assigns the dough/sauce NAME pre-recipe; later recipe import relinks by loose name; ghost guard + registry gotchas for tests.
 - [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.
@@ -100,7 +87,6 @@
 - [Import redirect aliases](import-redirect-aliases.md) — cheese/premix "use existing" picks share the context-free appType alias namespace; suggestion-only auto-apply, one-to-one claim guards.
 - [Profile autofill](profile-autofill-from-saved-sheets.md) — planner must mirror applySpecImport EXACTLY, incl. the dough/sauce RECIPE tie loop (not just profile names); form-only until Save Setup.
 - [Profile force-apply override](profile-force-apply.md) — explicit manager Apply (spec import) sends force:true upserts that bypass the brand-profile LWW guard + advance the stamp; never use force for autosaves.
-- [Brand-profile server pool](brand-profile-server-pool.md) — profiles are a server pool w/ per-profile LWW stamps (NOT in sync); marker keys under the blob prefix + snapshot-guard + orphan-purge gotchas.
 - [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Batch upsert atomicity](batch-upsert-transaction.md) — batch master-data POSTs need ONE db.transaction; client heals persist the rename map pre-write or a partial failure strands local refs forever.
 - [Spec-import brand backfill](spec-import-brand-backfill.md) — unscoped parses get customer tags from the applicator grid (collect-only), unbranded pool rows heal on re-import, curated brands never re-scoped.
