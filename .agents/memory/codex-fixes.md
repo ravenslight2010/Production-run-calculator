@@ -335,3 +335,21 @@ Each entry includes:
 **Context:** Refactor step 6b. Server logic unchanged (the schedule already computed `dueNow` in 6a); this PR makes the client consume it. Cross-device safety is unchanged: the claim endpoint still sequences/validates. Verified: mapping 5/5, sauce suite 12/12, auto-track suites 73/73, context suites 107/107, lib 100/100, web + api-server typechecks pass.
 
 *Last updated: 2026-09-06*
+
+## 2026-09-06 — Schedule-bearing SSE heartbeat (refactor step 6c)
+
+**File(s):**
+- `artifacts/api-server/src/routes/sync.ts` (SSE `/sync/events` heartbeat now carries the auto-track schedule; delta-only; `AUTO_TRACK_HEARTBEAT_MS` env override)
+- `artifacts/api-server/src/routes/sync.integration.test.ts` (heartbeat integration test with a short-timer override)
+
+**Problem:** The server computed the auto-track schedule (6a) but only pushed it on the initial SSE frame, peer broadcasts, and claim responses. A single-device operator (the common web case) never received a fresh schedule after load, so the client's local derivation remained effectively the only authority and convergence after data changes could lag on stale devices.
+
+**Fix:** Step 6c (server-owned tick detection/announcement; execution stays in the validated claim protocol):
+1. The existing 15s SSE keepalive ping now carries the server-computed schedule (`{ autoTrackSchedule, heartbeat: true }`) instead of an empty comment — same connection, same cadence, zero extra request traffic.
+2. Delta-only: the frame is skipped while the schedule is unchanged (`atMs` excluded from the comparison since it changes every compute), so a lone device with no peers sees next to nothing, and a change anywhere is announced within one beat.
+3. Per-request `AUTO_TRACK_HEARTBEAT_MS` env override (default 15s) lets the integration test drive a fast beat; a failed beat/read never tears the stream down (falls back to the comment ping).
+4. The client needed NO change: the 6a/6b wiring already adopts `autoTrackSchedule` on every SSE frame (`publishAutoTrackSchedule`) and uses the verdicts/due refs, with local math as the offline fallback.
+
+**Context:** Completes refactor step 6 as a safe server-authority layer: the server owns WHEN (schedule due times + due-now verdicts, now live for every device); the claim endpoint still owns WHAT gets written (validation, sequencing, manual-correction guards), which is what makes automatic writes safe against operator edits. Verified: api-server tsc + build + 18/18 coordination unit tests; full Postgres integration suite (incl. the new heartbeat test) runs in CI's test-db job.
+
+*Last updated: 2026-09-06*

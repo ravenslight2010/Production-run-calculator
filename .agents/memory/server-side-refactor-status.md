@@ -1,9 +1,13 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b (incl. foundation + server due-now verdict) done; 6c not started.
+description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c (schedule-bearing SSE heartbeat) done; server-authority layer complete on web.
 ---
 
 # Server-side refactor — current status (2026-09-06)
+
+## In PR (branch `refactor/autotrack-heartbeat`) — Step 6c: schedule-bearing SSE heartbeat
+
+**Step 6c: the 15s SSE keepalive ping now carries the server auto-track schedule (delta-only).** Reuses the existing connection/cadence (no extra traffic); clients already adopt it from 6a/6b with local math as the offline fallback. `AUTO_TRACK_HEARTBEAT_MS` env override for tests. This completes the server-authority layer for web: the server owns WHEN (due times + due-now verdicts, live for every device), the claim protocol still owns WHAT (validation/sequencing/manual-correction guards).
 
 ## Done (merged to main, PR #29) — Step 6b: server due-now verdict drives net-second claims
 
