@@ -303,4 +303,89 @@ describe("useAutoTrack applicator batches", () => {
       event.channel === "sauce-barrel" || event.channel.startsWith("app"),
     )).toBe(false);
   });
+
+  describe("server-owned net-second suppression", () => {
+    it("fires an app claim on a fresh due-now verdict before local elapsed", async () => {
+      const { form: fakeForm } = form();
+      const claim = vi.fn(async (event: any) => ({
+        outcome: "accepted" as const,
+        state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+        values: Object.fromEntries(event.mutations.map((m: any) => [m.field, m.to])),
+      }));
+      const initial = {
+        runId: "app-run", runStatus: "running" as const, nowTime: new Date(1_700_000_000_000),
+        elapsedBatchSec: 5, calc, v: values({ app1OzPerPizza: 7 }), form: fakeForm,
+        claimAutoTrackEvent: claim,
+      };
+      const { rerender } = renderHook((p) => useAutoTrack(p), { initialProps: initial });
+      publishAutoTrackSchedule({
+        runId: "app-run",
+        generation: "app-run:running:0",
+        atMs: Date.now(),
+        entries: [
+          { channel: "app1-batch", dueAt: 240 / 7, dueNow: true, nextDueAt: 480 / 7, canonical: false },
+        ],
+      });
+      rerender({ ...initial, elapsedBatchSec: 6 });
+      await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app1-batch")).toBe(true));
+      const appClaim = claim.mock.calls.map(([event]) => event).find((event) => event.channel === "app1-batch");
+      expect(appClaim.dueAt).toBeCloseTo(240 / 7);
+    });
+
+    it("skips the redundant local app claim while a fresh server schedule says not due", async () => {
+      const { form: fakeForm } = form();
+      const claim = vi.fn(async (event: any) => ({
+        outcome: "accepted" as const,
+        state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+        values: Object.fromEntries(event.mutations.map((m: any) => [m.field, m.to])),
+      }));
+      const initial = {
+        runId: "app-run", runStatus: "running" as const, nowTime: new Date(1_700_000_000_000),
+        elapsedBatchSec: 5, calc, v: values({ app1OzPerPizza: 7 }), form: fakeForm,
+        claimAutoTrackEvent: claim,
+      };
+      const { rerender } = renderHook((p) => useAutoTrack(p), { initialProps: initial });
+      publishAutoTrackSchedule({
+        runId: "app-run",
+        generation: "app-run:running:0",
+        atMs: Date.now(),
+        entries: [
+          { channel: "app1-batch", dueAt: 240 / 7, dueNow: false, nextDueAt: 480 / 7, canonical: false },
+        ],
+      });
+      rerender({ ...initial, elapsedBatchSec: 35 });
+      rerender({ ...initial, elapsedBatchSec: 40 });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(claim.mock.calls.some(([event]) => event.channel.startsWith("app"))).toBe(false);
+    });
+
+    it("restores the local app fallback after the fresh verdict goes stale", async () => {
+      const { form: fakeForm } = form();
+      const claim = vi.fn(async (event: any) => ({
+        outcome: "accepted" as const,
+        state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+        values: Object.fromEntries(event.mutations.map((m: any) => [m.field, m.to])),
+      }));
+      const initial = {
+        runId: "app-run", runStatus: "running" as const, nowTime: new Date(1_700_000_000_000),
+        elapsedBatchSec: 5, calc, v: values({ app1OzPerPizza: 7 }), form: fakeForm,
+        claimAutoTrackEvent: claim,
+      };
+      const { rerender } = renderHook((p) => useAutoTrack(p), { initialProps: initial });
+      publishAutoTrackSchedule({
+        runId: "app-run",
+        generation: "app-run:running:0",
+        atMs: Date.now(),
+        entries: [
+          { channel: "app1-batch", dueAt: 240 / 7, dueNow: false, nextDueAt: 480 / 7, canonical: false },
+        ],
+      });
+      rerender({ ...initial, elapsedBatchSec: 35 });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(claim.mock.calls.some(([event]) => event.channel.startsWith("app"))).toBe(false);
+
+      rerender({ ...initial, elapsedBatchSec: 36, nowTime: new Date(1_700_000_000_000 + 46_000) });
+      await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app1-batch")).toBe(true));
+    });
+  });
 });
