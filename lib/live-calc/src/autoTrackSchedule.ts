@@ -1,12 +1,14 @@
-// Server-side auto-track schedule (refactor step 6a).
+// Server-side auto-track schedule (refactor steps 6a + Task 2).
 //
 // "Tick detection" for the NET-SECOND channels (sauce barrel, applicator
 // batches) is pure stored-state math: anchor + cadence vs. pause-aware elapsed
 // net seconds. The server can therefore compute when those claims are due
 // WITHOUT any client having to tick first. The WALL-CLOCK channels (case,
-// trays, batches, hopper) depend on the client's arming state machine
-// (run-start / resume / rebase / per-tick period advance), so the server only
-// echoes the persisted coordination record's canonical nextDueAt for them.
+// trays, batches, hopper) mirror the client's arming state machine through the
+// shared wallClockEngine: canonical coordination records still win (echoed
+// verbatim), and otherwise the deterministic rearm-at-resume replay in
+// computeWallClockDueRefs derives the next due (compute-only verdicts, gated;
+// the client still executes wall-clock writes through the claim endpoint).
 //
 // Invariants mirrored from useAutoTrack.ts (see .agents/skills/state-accuracy-check):
 //   - Net-time excludes pause gaps. On resume the client REBASES
@@ -19,6 +21,7 @@
 //   - Paused/ended runs emit no sauce/applicator claims; case drain window is
 //     the only post-End exception and it only echoes canonical coordination.
 import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
+import { computeWallClockDueRefs, getAutoTrackTiming } from "./wallClockEngine";
 
 export const AUTO_TRACK_SCHEDULE_CHANNELS = [
   "case",
@@ -79,6 +82,8 @@ export type AutoTrackScheduleInput = {
   coordination?: Partial<
     Record<AutoTrackScheduleChannel, AutoTrackScheduleCoordinationState>
   >;
+  /** Measured machine times (run values) for dough timing: mixers + hopper. */
+  machine?: { spinSec?: number; hopperSec?: number };
   nowMs: number;
 };
 
@@ -148,6 +153,14 @@ export function computeAutoTrackSchedule(
     nowMs < endedAt + drainMs;
   const netMs = computeAutoTrackElapsedMs({ startedAt, pausedAt, nowMs, stoppages });
   const netSec = netMs / 1000;
+  const machine = input.machine ?? {};
+  const timing = getAutoTrackTiming(
+    calc.ppm,
+    toNumber(v.pizzasPerCase),
+    calc.perTray,
+    calc.perBatch,
+    { spinSec: toNumber(machine.spinSec), hopperSec: toNumber(machine.hopperSec) },
+  );
 
   const echoCanonical = (
     channel: AutoTrackScheduleChannel,
@@ -156,6 +169,7 @@ export function computeAutoTrackSchedule(
     const state = coordination?.[channel];
     const dueAt = toNumber(state?.nextDueAt);
     if (!active || !state || !(dueAt > 0)) return;
+    emittedWallClock.add(channel);
     entries.push({
       channel,
       dueAt,
@@ -165,14 +179,58 @@ export function computeAutoTrackSchedule(
       sequence: toNumber(state?.sequence),
     });
   };
+  /** Wall-clock channels already emitted above (canonical echo wins). */
+  const emittedWallClock = new Set<AutoTrackScheduleChannel>();
 
-  // ── Wall-clock channels: echo the canonical coordination record only. ──
+  // ── Wall-clock channels: canonical coordination echo first, then the
+  // pure-engine replay (compute-only verdicts, Task 2). ──
   echoCanonical("case", runIsLive || drainActive);
   echoCanonical("tray-consume", runIsLive);
   echoCanonical("tray-produce", runIsLive);
   echoCanonical("batch-consume", runIsLive);
   echoCanonical("batch-produce", runIsLive);
   echoCanonical("hopper", runIsLive);
+
+  // Deterministic rearm-at-resume replay for channels with no canonical
+  // record yet (fresh run, no claims). Gated to live runs within the replay
+  // window; a claim anywhere re-persists the canonical nextDueAt and takes
+  // over from the next beat. Compute-only: the client still executes the
+  // actual write through the validated claim endpoint.
+  const WALL_CLOCK_REPLAY_CAP_MS = 6 * 60 * 60 * 1000;
+  const replayDue =
+    !!startedAt && runIsLive && nowMs - startedAt <= WALL_CLOCK_REPLAY_CAP_MS
+      ? computeWallClockDueRefs({ startedAt, pausedAt, endedAt, nowMs, stoppages, timing })
+      : null;
+  const emitReplay = (
+    channel: AutoTrackScheduleChannel,
+    dueAt: number,
+    periodMs: number,
+  ): void => {
+    if (emittedWallClock.has(channel) || !Number.isFinite(dueAt) || dueAt <= 0 || periodMs <= 0) return;
+    entries.push({
+      channel,
+      dueAt,
+      dueNow: nowMs >= dueAt,
+      nextDueAt: dueAt + periodMs,
+      canonical: false,
+    });
+  };
+  if (replayDue) {
+    if (calc.ppm > 0 && toNumber(v.pizzasPerCase) > 0) {
+      emitReplay("case", replayDue.caseDueMs, timing.caseMs);
+    }
+    if (calc.ppm > 0 && calc.perTray > 0) {
+      emitReplay("tray-consume", replayDue.trayConsDueMs, timing.trayMs);
+      emitReplay("tray-produce", replayDue.trayProdDueMs, timing.trayProductionMs);
+    }
+    if (calc.ppm > 0 && calc.perBatch > 0) {
+      emitReplay("batch-consume", replayDue.batchConsDueMs, timing.batchConsumptionMs);
+      emitReplay("batch-produce", replayDue.batchProdDueMs, timing.batchProductionMs);
+    }
+    if ((machine.hopperSec ?? 0) > 0) {
+      emitReplay("hopper", replayDue.hopperDueMs, timing.hopperMs);
+    }
+  }
 
   // ── Sauce barrel: pure stored-state net-second math. ──
   if (runIsLive && !calc.pressDone) {
@@ -267,6 +325,12 @@ export function buildAutoTrackScheduleFromPayload(
     calc: calcResult.calc,
     progress: rawValues,
     coordination: coordinationForRun as AutoTrackScheduleInput["coordination"],
+    machine: {
+      spinSec:
+        (toNumber(rawValues.mixerLowSec) || 0) +
+        (toNumber(rawValues.mixerHighSec) || 0),
+      hopperSec: toNumber(rawValues.hopperSec) || 0,
+    },
     nowMs,
   });
 }
