@@ -37,6 +37,40 @@ export type ReleaseStep = {
   concurrencyLimit?: number;
 };
 
+export function assertUniqueReleaseSteps(
+  releaseSteps: readonly ReleaseStep[],
+): void {
+  const labels = new Set<string>();
+  const invocations = new Set<string>();
+  const duplicateLabels = new Set<string>();
+  const duplicateInvocations = new Set<string>();
+
+  for (const step of releaseSteps) {
+    if (labels.has(step.label)) duplicateLabels.add(step.label);
+    labels.add(step.label);
+
+    const invocation = JSON.stringify([step.command ?? "pnpm", step.args]);
+    if (invocations.has(invocation)) {
+      duplicateInvocations.add(`${step.command ?? "pnpm"} ${step.args.join(" ")}`);
+    }
+    invocations.add(invocation);
+  }
+
+  if (duplicateLabels.size > 0 || duplicateInvocations.size > 0) {
+    throw new Error(
+      [
+        "Release gates must be unique.",
+        ...(duplicateLabels.size > 0
+          ? [`Duplicate labels: ${[...duplicateLabels].join(", ")}`]
+          : []),
+        ...(duplicateInvocations.size > 0
+          ? [`Duplicate command invocations: ${[...duplicateInvocations].join(", ")}`]
+          : []),
+      ].join("\n"),
+    );
+  }
+}
+
 export type StepStatus =
   | "PASS"
   | "FAIL"
@@ -568,10 +602,6 @@ const steps: ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "spec import tests",
-    args: ["--filter", "@workspace/spec-import", "run", "test"],
-  },
-  {
     label: "scheduled recipe check tests",
     args: ["--filter", "@workspace/scheduled-recipe-check", "run", "test"],
     stage: "release-tests",
@@ -701,6 +731,8 @@ if (fixtureSteps !== undefined) {
     );
   }
 }
+
+assertUniqueReleaseSteps(steps);
 
 export function releaseStepStage(step: ReleaseStep, index: number): string {
   return step.stage ?? `serial-${index}`;

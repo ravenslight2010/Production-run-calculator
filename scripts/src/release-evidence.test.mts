@@ -16,6 +16,7 @@ import {
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  assertUniqueReleaseSteps,
   PRODUCTION_AUDIT_TIMEOUT_MS,
   PRODUCTION_AUDIT_WARNING_MS,
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
@@ -155,6 +156,31 @@ async function run(): Promise<void> {
   assert.ok(
     releaseGateLabelsForMode("standard").includes("spec import tests"),
     "the bounded release gate must explicitly cover spec-import",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "spec import tests",
+    ).length,
+    1,
+    "spec-import must be declared exactly once in the release contract",
+  );
+  assert.throws(
+    () =>
+      assertUniqueReleaseSteps([
+        { label: "duplicate gate", args: ["run", "first"] },
+        { label: "duplicate gate", args: ["run", "second"] },
+      ]),
+    /Duplicate labels: duplicate gate/,
+    "duplicate release gate labels must be rejected",
+  );
+  assert.throws(
+    () =>
+      assertUniqueReleaseSteps([
+        { label: "first label", args: ["run", "same"] },
+        { label: "second label", args: ["run", "same"] },
+      ]),
+    /Duplicate command invocations: pnpm run same/,
+    "duplicate release command invocations must be rejected even under different labels",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes("onboarding bypass guard"),
