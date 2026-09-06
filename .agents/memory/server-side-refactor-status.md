@@ -1,11 +1,11 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-5 done, Step 6a (server-computed auto-track schedule) in PR, 6b/6c not started.
+description: Where the server-side refactor stands — Steps 1-5 + 6a (server-computed auto-track schedule) done, 6b/6c not started.
 ---
 
 # Server-side refactor — current status (2026-09-06)
 
-## In PR (branch `refactor/auto-track-scheduler`) — Step 6a: server-computed auto-track schedule
+## Done (merged to main, PR #23) — Step 6a: server-computed auto-track schedule
 
 **Step 6a: server-computed auto-track schedule attached to SSE/claim payloads** — first slice of Step 6:
 - `lib/live-calc/src/autoTrackSchedule.ts` (new): pure-function server scheduler. Net-second channels (sauce-barrel, app1-4-batch) are derived from stored anchors + cadence vs pause-aware elapsed net seconds; wall-clock channels (case, tray/batch, hopper) echo the persisted coordination record's canonical `nextDueAt` + `sequence`.
