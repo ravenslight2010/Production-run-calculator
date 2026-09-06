@@ -179,6 +179,10 @@ export function tickWallClock(input: WallClockTickInput): {
     caseTrackingActive
     && input.calc.ppm > 0
     && input.v.pizzasPerCase > 0
+    // Mirrors the client's `!autoTrackSuggestion` effect gate (suggestion is
+    // null whenever casesPerSkid is missing), so the event builder's
+    // div-by-casesPerSkid can never produce an invalid mutation server-side.
+    && input.v.casesPerSkid > 0
     && input.nowMs >= next.caseNextDueMs
   ) {
     const casePeriodMs = clampWebPeriodMs((input.v.pizzasPerCase / input.calc.ppm) * 60000);

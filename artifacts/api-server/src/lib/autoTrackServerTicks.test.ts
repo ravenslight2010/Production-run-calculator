@@ -1,7 +1,13 @@
 // Pure unit tests for the server tick claim builder. Kept DB-free on purpose
 // (no module that binds @workspace/db at import), like protectRunValues.test.ts.
 import { describe, it, expect } from "vitest";
-import { buildNetSecondServerClaims, isServerTickChannel } from "./autoTrackServerTicks";
+import {
+  buildNetSecondServerClaims,
+  buildWallClockServerClaims,
+  isServerTickChannel,
+  sanitizeWallClockBookkeeping,
+  WALL_CLOCK_REPLAY_CAP_MS,
+} from "./autoTrackServerTicks";
 import { applyAutoTrackClaim, parseAutoTrackClaim } from "./autoTrackCoordination";
 
 const RUN = "run-7a";
@@ -256,5 +262,82 @@ describe("buildNetSecondServerClaims", () => {
     expect(isServerTickChannel("app4-batch")).toBe(true);
     expect(isServerTickChannel("case")).toBe(false);
     expect(isServerTickChannel("tray-consume")).toBe(false);
+  });
+});
+
+describe("buildWallClockServerClaims (step 7b)", () => {
+  it("builds due case/tray/batch claims for a fresh live run and advances bookkeeping", () => {
+    const plan = buildWallClockServerClaims(makePayload({ startedAt: NOW - 600_000 }), NOW);
+    expect(plan).not.toBeNull();
+    expect(plan!.runId).toBe(RUN);
+    const channels = plan!.claims.map((c) => c.channel);
+    // After 10 minutes the case (period ~7.2s), tray, and batch channels have
+    // fired; hopper is in its display-armed state once hopperSec > 0.
+    expect(channels).toContain("case");
+    expect(channels).toContain("tray-consume");
+    expect(channels).toContain("batch-consume");
+    const caseClaim = plan!.claims.find((c) => c.channel === "case")!;
+    expect(caseClaim.sequence).toBe(1);
+    expect(caseClaim.generation).toBe(`${RUN}:1`);
+    expect(caseClaim.baseUpdatedAt).toBe(1000);
+    expect(caseClaim.correctionGeneration).toBe(0);
+    expect(caseClaim.eventId.startsWith("srv:wc:1:case:")).toBe(true);
+    expect(caseClaim.mutations.map((m) => m.field)).toEqual(["skidsCompleted", "casesOnCurrentSkid"]);
+    // The persisted bookkeeping advanced the due refs past now.
+    expect(plan!.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+  });
+
+  it("returns nothing for paused, ended, or older-than-window runs", () => {
+    expect(buildWallClockServerClaims(makePayload({ pausedAt: NOW - 10_000 }), NOW)).toBeNull();
+    expect(buildWallClockServerClaims(makePayload({ endedAt: NOW - 10_000 }), NOW)).toBeNull();
+    expect(buildWallClockServerClaims(
+      makePayload({ startedAt: NOW - WALL_CLOCK_REPLAY_CAP_MS - 1000 }),
+      NOW,
+    )).toBeNull();
+  });
+
+  it("returns no channels once a wall-clock register is canonical (server hands back to clients)", () => {
+    const payload = makePayload({
+      coordination: {
+        "case": { generation: `${RUN}:1`, sequence: 5, nextDueAt: NOW, updatedAt: 0 },
+      },
+    });
+    const plan = buildWallClockServerClaims(payload, NOW);
+    // case is canonical; other channels are still replay-driven, so the plan is
+    // non-null but excludes the canonical case channel.
+    expect(plan).not.toBeNull();
+    expect(plan!.claims.find((c) => c.channel === "case")).toBeUndefined();
+  });
+
+  it("returns no claims for an un-computable (skeletal) row", () => {
+    expect(buildWallClockServerClaims({
+      dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: NOW - 60_000, metaUpdatedAt: 1 }] },
+      runValues: { [RUN]: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { [RUN]: 1 },
+    }, NOW)).toBeNull();
+  });
+
+  it("persists and re-uses prior bookkeeping across beats", () => {
+    const first = buildWallClockServerClaims(makePayload({ startedAt: NOW - 600_000 }), NOW)!;
+    const data = {
+      ...makePayload({ startedAt: NOW - 600_000 }) as Record<string, unknown>,
+      autoTrackServerState: {
+        version: 1,
+        wallClockBookkeeping: { [RUN]: first.bookkeeping },
+      },
+    } as Record<string, unknown>;
+    const second = buildWallClockServerClaims(data, NOW + 1000)!;
+    // The tray/batch seed flags persisted: no re-seed on the second beat.
+    expect(second.bookkeeping.traySeeded).toBe(true);
+    expect(second.bookkeeping.batchSeeded).toBe(true);
+    // Bookkeeping is preserved rather than re-bootstrapped from zero.
+    expect(second.bookkeeping.caseNextDueMs).toBe(first.bookkeeping.caseNextDueMs);
+  });
+
+  it("sanitizes malformed persisted bookkeeping back to a fresh baseline", () => {
+    const cleaned = sanitizeWallClockBookkeeping({ caseNextDueMs: NaN, traySeeded: "yes" });
+    expect(cleaned.caseNextDueMs).toBe(0);
+    expect(cleaned.traySeeded).toBe(false);
+    expect(cleaned.lastExpectedCases).toBe(-1);
   });
 });

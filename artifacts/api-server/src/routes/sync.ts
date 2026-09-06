@@ -51,7 +51,12 @@ import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
-import { buildNetSecondServerClaims } from "../lib/autoTrackServerTicks";
+import {
+  buildNetSecondServerClaims,
+  buildWallClockServerClaims,
+  withWallClockServerState,
+  type WallClockServerPlan,
+} from "../lib/autoTrackServerTicks";
 import { logger } from "../lib/logger";
 import { consumeSauceBarrelInTransaction } from "./inventory";
 export { detectConflicts } from "../lib/syncConflict";
@@ -1048,17 +1053,21 @@ router.post(
   },
 );
 
-// ── Server-owned auto-track tick loop (refactor step 7a) ────────────────────
-// Runs the NET-SECOND channels (sauce barrel, applicator batches) from the
-// server itself so runs keep auto-tracking even when every device is closed.
-// The wall-clock channels (case/tray/batch/hopper) stay client-driven — they
-// depend on arm-state machines (period advance, remainder carry, feed-complete
-// gates) the server does not model. Each server claim is applied through the
-// EXACT same parse/apply/transaction path as a client claim POST, so every
-// safety invariant (sequence, generation, correction generation, mutation
-// from-checks, sauce inventory idempotency) still holds; a competing client or
-// another server instance simply loses the row-lock race and is rejected as
-// stale/duplicate.
+// ── Server-owned auto-track tick loop (refactor steps 7a/7b) ────────────────
+// Runs the NET-SECOND channels (sauce barrel, applicator batches) AND the
+// WALL-CLOCK channels (case/tray/batch/hopper, step 7b) from the server itself
+// so runs keep auto-tracking even when every device is closed. Net-second
+// claims are pure stored-state math; wall-clock claims mirror the client's
+// arm-state machines through the shared tickWallClock engine, with per-run
+// bookkeeping persisted atomically under `autoTrackServerState`. Server
+// wall-clock execution is limited to FRESH runs (< 6h) with no canonical
+// coordination register yet — once any claim (server or client) re-persists a
+// canonical nextDueAt, that channel returns to client ownership. Every server
+// claim is applied through the EXACT same parse/apply/transaction path as a
+// client claim POST, so every safety invariant (sequence, generation,
+// correction generation, mutation from-checks, sauce inventory idempotency)
+// still holds; a competing client or another server instance simply loses the
+// row-lock race and is rejected as stale/duplicate.
 
 const SERVER_TICK_SENDER_ID = "server:tick";
 const SERVER_TICK_DEFAULT_MS = 15_000;
@@ -1197,6 +1206,133 @@ export async function runNetSecondServerTicks(opts: {
   return { examinedDates: rows.length, builtClaims, accepted, outcomes };
 }
 
+/** Apply one wall-clock beat for a single row inside a row-locked transaction:
+ * build from the LOCKED data + persisted bookkeeping, run every claim through
+ * the standard parse/apply path, then persist the next bookkeeping in the same
+ * upsert — even on beats with no event (case refs/baseline advance every
+ * tick, remainder carries must survive rejection beats). */
+async function applyWallClockServerTick(
+  date: string,
+  scope: Scope,
+  nowMs: number,
+  claimBudget: number,
+): Promise<{
+  plan: WallClockServerPlan | null;
+  claimsBuilt: number;
+  accepted: number;
+  outcomes: Record<string, number>;
+  broadcastData?: Record<string, unknown>;
+}> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select()
+          .from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
+          .for("update");
+        const stored = existing?.data ?? emptySyncData(date);
+        const plan = buildWallClockServerClaims(stored, nowMs);
+        if (!plan) {
+          return { plan: null, claimsBuilt: 0, accepted: 0, outcomes: {} };
+        }
+        const outcomes: Record<string, number> = {};
+        let accepted = 0;
+        let data: Record<string, unknown> = stored as Record<string, unknown>;
+        const claims = plan.claims.slice(0, claimBudget);
+        for (const raw of claims) {
+          const parsed = parseAutoTrackClaim(raw, nowMs);
+          if (!parsed) {
+            outcomes.invalid = (outcomes.invalid ?? 0) + 1;
+            continue;
+          }
+          const applied = applyAutoTrackClaim(data, parsed, nowMs);
+          outcomes[applied.outcome] = (outcomes[applied.outcome] ?? 0) + 1;
+          if (applied.outcome === "accepted") {
+            accepted++;
+            data = applied.data;
+          }
+        }
+        const nextData = withWallClockServerState(data, plan.runId, plan.bookkeeping);
+        const where = and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope));
+        if (existing) {
+          await tx.update(dailySyncTable)
+            .set({ data: nextData as any, updatedAt: new Date() })
+            .where(where);
+        } else {
+          await tx.insert(dailySyncTable)
+            .values({ date, scope, data: nextData as any, updatedAt: new Date() });
+        }
+        return {
+          plan,
+          claimsBuilt: claims.length,
+          accepted,
+          outcomes,
+          ...(accepted > 0 ? { broadcastData: nextData } : {}),
+        };
+      });
+    } catch (error) {
+      if (isUniqueViolation(error) && attempt < 3) continue;
+      throw error;
+    }
+  }
+  throw new Error("Server wall-clock auto-track tick did not complete");
+}
+
+/** Scan the live scope's recent days and apply due server-built wall-clock
+ * claims (case/tray/batch/hopper bootstrap for fresh runs). Purely additive to
+ * the net-second pass; each beat persists the run's arm-state bookkeeping so
+ * the state machine never re-bootstraps from zero. */
+export async function runWallClockServerTicks(opts: {
+  nowMs?: number;
+  maxClaims?: number;
+} = {}): Promise<ServerTickSummary> {
+  const nowMs = opts.nowMs ?? Date.now();
+  const maxClaims = opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS;
+  const rows = await db
+    .select()
+    .from(dailySyncTable)
+    .where(and(
+      eq(dailySyncTable.scope, "live"),
+      gte(dailySyncTable.date, dateDaysAgo(SERVER_TICK_LOOKBACK_DAYS)),
+    ));
+  let builtClaims = 0;
+  let accepted = 0;
+  const outcomes: Record<string, number> = {};
+  for (const row of rows) {
+    if (builtClaims >= maxClaims) break;
+    let result: Awaited<ReturnType<typeof applyWallClockServerTick>>;
+    try {
+      result = await applyWallClockServerTick(row.date, "live", nowMs, maxClaims - builtClaims);
+    } catch (error) {
+      logger.error({
+        err: error,
+        event: "server_wall_clock_tick",
+        date: row.date,
+      }, "Server wall-clock auto-track tick failed");
+      outcomes.error = (outcomes.error ?? 0) + 1;
+      continue;
+    }
+    if (!result.plan) continue;
+    builtClaims += result.claimsBuilt;
+    accepted += result.accepted;
+    for (const [outcome, count] of Object.entries(result.outcomes)) {
+      outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
+    }
+    if (result.broadcastData) broadcast(result.broadcastData, SERVER_TICK_SENDER_ID, "live", row.date);
+  }
+  if (builtClaims > 0) {
+    logger.info({
+      event: "server_wall_clock_tick",
+      examinedDates: rows.length,
+      builtClaims,
+      accepted,
+      outcomes,
+    }, "Server wall-clock auto-track tick pass completed");
+  }
+  return { examinedDates: rows.length, builtClaims, accepted, outcomes };
+}
+
 /** App-level ticker (deferred/unref'd so it never blocks shutdown). Reads the
  * interval from AUTO_TRACK_SERVER_TICK_MS (default 15s) and skips a pass that
  * is still running from the previous beat. */
@@ -1209,6 +1345,10 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
     runNetSecondServerTicks()
       .catch((err: unknown) => {
         logger.error({ err, event: "server_auto_track_tick" }, "Server auto-track tick pass failed");
+      })
+      .then(() => runWallClockServerTicks())
+      .catch((err: unknown) => {
+        logger.error({ err, event: "server_wall_clock_tick" }, "Server wall-clock auto-track tick pass failed");
       })
       .finally(() => { running = false; });
   };

@@ -16,8 +16,8 @@ describe("autoTrackScheduleToCoordination", () => {
   it("maps schedule entries to the coordination shape useAutoTrack adopts", () => {
     const coordination = autoTrackScheduleToCoordination(schedule);
     const run = coordination.autoTrackCoordination!.runs["run-1"];
-    expect(run.case).toEqual({ generation: "run-1:42", sequence: 4, nextDueAt: 100_000 + 63_000, dueNow: false, updatedAt: 1234 });
-    expect(run["sauce-barrel"]).toEqual({ generation: "run-1:42", sequence: 0, nextDueAt: 800, dueNow: true, updatedAt: 1234 });
+    expect(run.case).toEqual({ generation: "run-1:42", sequence: 4, nextDueAt: 100_000 + 63_000, dueNow: false, canonical: true, updatedAt: 1234 });
+    expect(run["sauce-barrel"]).toEqual({ generation: "run-1:42", sequence: 0, nextDueAt: 800, dueNow: true, canonical: false, updatedAt: 1234 });
   });
 
   it("keeps the client sequence out of the way when the entry is derived (no sequence)", () => {
@@ -26,6 +26,24 @@ describe("autoTrackScheduleToCoordination", () => {
       entries: [{ channel: "sauce-barrel", dueAt: 800, dueNow: true, nextDueAt: 1000, canonical: false }],
     });
     expect(coordination.autoTrackCoordination!.runs["run-1"]["sauce-barrel"].sequence).toBe(0);
+    expect(coordination.autoTrackCoordination!.runs["run-1"]["sauce-barrel"].canonical).toBe(false);
+  });
+});
+
+describe("autoTrackScheduleToCoordination canonical flag (step 7b)", () => {
+  it("carries the entry's canonical/replay flag so clients know the server owns fresh-run wall-clock channels", () => {
+    const coordination = autoTrackScheduleToCoordination({
+      ...schedule,
+      entries: [
+        { channel: "case", dueAt: 100_000 + 63_000, dueNow: false, nextDueAt: 100_000 + 126_000, canonical: false },
+        { channel: "tray-consume", dueAt: 100_000 + 30_000, dueNow: false, nextDueAt: 100_000 + 60_000, canonical: false },
+        { channel: "batch-consume", dueAt: 100_000 + 90_000, dueNow: true, nextDueAt: 100_000 + 180_000, canonical: true, sequence: 3 },
+      ],
+    });
+    const run = coordination.autoTrackCoordination!.runs["run-1"];
+    expect(run.case!.canonical).toBe(false);
+    expect(run["tray-consume"]!.canonical).toBe(false);
+    expect(run["batch-consume"]!.canonical).toBe(true);
   });
 });
 
