@@ -428,8 +428,8 @@ async function assertKeyboardReachable(
   tabCount = 10,
 ): Promise<void> {
   const controls = page.locator(
-    'button:visible, input:visible, select:visible, textarea:visible, [role="button"]:visible, [role="tab"]:visible',
-  );
+    'button, input, select, textarea, [role="button"], [role="tab"]',
+  ).filter({ visible: true });
   await expect(controls.first(), `${area} should expose a keyboard-reachable control`).toBeVisible();
   await controls.first().focus();
 
@@ -772,7 +772,7 @@ test.describe("phone layout smoke", () => {
     });
 
     await page.getByTestId("tab-run").click();
-    const editableNumber = page.locator('input[type="number"]:visible').first();
+    const editableNumber = page.locator('input[type="number"]').filter({ visible: true }).first();
     await expect(editableNumber).toBeVisible();
     await editableNumber.fill("1");
     const syncStatus = page.locator('button[title^="Sync"]');

@@ -106,7 +106,7 @@ async function openPhotoCount(page: Page): Promise<ReturnType<Page["getByTestId"
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
   await observationsLoaded;
-  const card = page.locator('[data-testid="photo-count-card"]:visible');
+  const card = page.getByTestId("photo-count-card").filter({ visible: true });
   await expect(card).toBeVisible();
   const start = card.locator("button").filter({ hasText: "Start count" });
   if (await start.count() > 0) await start.click();

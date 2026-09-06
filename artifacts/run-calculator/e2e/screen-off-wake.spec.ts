@@ -1089,7 +1089,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       if (!(await lineSetupDetails.evaluate((element) => (element as HTMLDetailsElement).open))) {
         await lineSetupDetails.locator("summary").click();
       }
-      const speedInput = page.locator('[data-testid="input-speedAdjustment"]:visible').first();
+      const speedInput = page.getByTestId("input-speedAdjustment").filter({ visible: true }).first();
       await expect(speedInput).toBeVisible();
       expect(Number(await speedInput.inputValue()), "baseline speed adjustment").toBe(1);
       await expect.poll(async () => {
@@ -1337,7 +1337,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       if (!(await lineSetupDetails.evaluate((element) => (element as HTMLDetailsElement).open))) {
         await lineSetupDetails.locator("summary").click();
       }
-      const speedInput = page.locator('[data-testid="input-speedAdjustment"]:visible').first();
+      const speedInput = page.getByTestId("input-speedAdjustment").filter({ visible: true }).first();
       await expect(speedInput).toBeVisible();
       const speedEditedAt = safeBaseMs + 1_000;
       await mockDateNow(page, speedEditedAt);

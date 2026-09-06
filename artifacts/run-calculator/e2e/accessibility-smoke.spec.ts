@@ -88,8 +88,8 @@ async function assertKeyboardTraversal(
   tabCount = 8,
 ): Promise<void> {
   const firstControl = page.locator(
-    "button:visible, input:visible, select:visible, textarea:visible, [role='button']:visible, [role='tab']:visible",
-  ).first();
+    "button, input, select, textarea, [role='button'], [role='tab']",
+  ).filter({ visible: true }).first();
   await expect(firstControl, `${screen} should expose keyboard controls`).toBeVisible();
   await firstControl.focus();
 
@@ -133,8 +133,8 @@ async function assertDialogContract(
   await expect(close, `${screen} should have a close action`).toBeVisible();
 
   const controls = dialog.locator(
-    "button:not([disabled]):visible, input:not([disabled]):visible, select:not([disabled]):visible, textarea:not([disabled]):visible, [role='button']:not([aria-disabled='true']):visible, [role='tab']:not([aria-disabled='true']):visible",
-  );
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [role='button']:not([aria-disabled='true']), [role='tab']:not([aria-disabled='true'])",
+  ).filter({ visible: true });
   const controlCount = await controls.count();
   expect(controlCount, `${screen} should expose focusable dialog controls`).toBeGreaterThan(0);
 
