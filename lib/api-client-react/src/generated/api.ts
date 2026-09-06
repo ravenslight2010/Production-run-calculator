@@ -73,6 +73,7 @@ import type {
   FreezerPullItemList,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
+  GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
@@ -127,6 +128,7 @@ import type {
   OkResponse,
   OperationalReport,
   OperationalReportInput,
+  OperationalRunView,
   ParseSpecImagesInput,
   ParseSpecImagesResult,
   ParseSpecSheetInput,
@@ -3529,7 +3531,7 @@ export const getExportOperationalReportUrl = () => {
 }
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates production facts derived from every canonical scoped daily-sync snapshot in the requested date range. The legacy runs field is accepted for compatibility but ignored; clients cannot supply report production facts. The report enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReport = async (operationalReportInput: OperationalReportInput, options?: Parameters<typeof customFetch>[1]): Promise<OperationalReport> => {
@@ -3598,6 +3600,91 @@ export const useExportOperationalReport = <TError = ErrorType<void>,
       > => {
       return useMutation(getExportOperationalReportMutationOptions(options));
     }
+
+export const getGetOperationalRunViewUrl = (params: GetOperationalRunViewParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational-view?${stringifiedParams}` : `/api/reports/operational-view`
+}
+
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
+export const getOperationalRunView = async (params: GetOperationalRunViewParams, options?: Parameters<typeof customFetch>[1]): Promise<OperationalRunView> => {
+
+  return customFetch<OperationalRunView>(getGetOperationalRunViewUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOperationalRunViewQueryKey = (params?: GetOperationalRunViewParams,) => {
+    return [
+    `/api/reports/operational-view`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOperationalRunViewQueryOptions = <TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(params: GetOperationalRunViewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOperationalRunViewQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOperationalRunView>>> = ({ signal }) => getOperationalRunView(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOperationalRunViewQueryResult = NonNullable<Awaited<ReturnType<typeof getOperationalRunView>>>
+export type GetOperationalRunViewQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read one manager-only server-derived operational run view
+ */
+
+export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(
+ params: GetOperationalRunViewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOperationalRunViewQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetShiftHandoffDigestUrl = (params: GetShiftHandoffDigestParams,) => {
   const normalizedParams = new URLSearchParams();

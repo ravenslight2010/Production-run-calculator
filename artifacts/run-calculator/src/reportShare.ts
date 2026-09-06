@@ -14,7 +14,12 @@ export function operationalReportTitle(report: OperationalReport): string {
   return `Operational ${report.scope} report — ${report.periodStart} to ${report.periodEnd}`;
 }
 
-export function operationalReportText(report: OperationalReport): string {
+export type OperationalReportSource = "authoritative" | "local-offline";
+
+export function operationalReportText(
+  report: OperationalReport,
+  source: OperationalReportSource = "authoritative",
+): string {
   const p = report.production;
   const lines = [
     "OPERATIONAL PRODUCTION REPORT",
@@ -23,7 +28,9 @@ export function operationalReportText(report: OperationalReport): string {
     `Scope date: ${report.date}`,
     `Generated: ${report.generatedAt}`,
     "",
-    "AUTHORITATIVE SOURCE STATISTICS",
+    source === "authoritative"
+      ? "AUTHORITATIVE SOURCE STATISTICS"
+      : "LOCAL/OFFLINE FALLBACK — NOT AUTHORITATIVE",
     `Runs: ${p.runsFinished} finished of ${p.runsPlanned} planned`,
     `Cases: ${p.casesProduced} produced of ${p.casesPlanned} planned (${p.attainmentPct}% attainment)`,
     `Downtime: ${p.totalDowntimeMinutes} minutes across ${p.totalStoppages} stoppages`,
@@ -41,8 +48,9 @@ export function operationalReportText(report: OperationalReport): string {
 
 export async function shareOperationalReport(
   report: OperationalReport,
+  source: OperationalReportSource = "authoritative",
 ): Promise<"shared" | "copied" | "failed"> {
-  const text = operationalReportText(report);
+  const text = operationalReportText(report, source);
   const title = operationalReportTitle(report);
 
   if (typeof navigator !== "undefined" && typeof navigator.share === "function") {

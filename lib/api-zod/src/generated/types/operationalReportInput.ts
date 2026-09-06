@@ -12,6 +12,9 @@ export interface OperationalReportInput {
   scope: OperationalReportInputScope;
   /** ISO date, or week-ending date for a weekly report */
   date: string;
-  /** @maxItems 600 */
-  runs: SummaryRunInput[];
+  /**
+     * Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.
+     * @maxItems 600
+     */
+  runs?: SummaryRunInput[];
 }

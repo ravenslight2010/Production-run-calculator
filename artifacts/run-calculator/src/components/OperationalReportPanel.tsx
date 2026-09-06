@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { BarChart2, Download, Lock, Loader2, Share2 } from "lucide-react";
-import type { OperationalReport } from "@workspace/day-summary";
+import { aggregateDaySummary, type OperationalReport } from "@workspace/day-summary";
 import type { SummaryInput } from "../aiSummary";
 import {
   operationalReportText,
@@ -11,6 +11,43 @@ import { useMe } from "../useRole";
 
 type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput };
 export type OperationalReportDetailRange = { start: string; end: string; scope: "day" | "week" };
+
+function periodStartFor(scope: "day" | "week", date: string): string {
+  if (scope === "day") return date;
+  const end = new Date(`${date}T12:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - 6);
+  return end.toISOString().slice(0, 10);
+}
+
+function localOfflineReport(
+  input: SummaryInput,
+  scope: "day" | "week",
+  date: string,
+): OperationalReport {
+  return {
+    scope,
+    date,
+    periodStart: periodStartFor(scope, date),
+    periodEnd: date,
+    generatedAt: new Date().toISOString(),
+    production: aggregateDaySummary({ scope, date, runs: input.runs }),
+    quality: {
+      availability: "unavailable",
+      value: null,
+      note: "Unavailable in local/offline fallback.",
+    },
+    incidents: {
+      availability: "unavailable",
+      value: null,
+      note: "Unavailable in local/offline fallback.",
+    },
+    inventory: {
+      availability: "unavailable",
+      value: null,
+      note: "Unavailable in local/offline fallback.",
+    },
+  };
+}
 
 function fmtDate(value: string): string {
   const d = new Date(`${value}T12:00:00`);
@@ -30,6 +67,7 @@ export default function OperationalReportPanel({
   const [scope, setScope] = useState<"day" | "week">("day");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [report, setReport] = useState<OperationalReport | null>(null);
+  const [reportSource, setReportSource] = useState<"authoritative" | "local-offline">("authoritative");
   const [busy, setBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -44,21 +82,27 @@ export default function OperationalReportPanel({
       const response = await fetch("/api/reports/operational", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope, date, runs: input.runs }),
+        body: JSON.stringify({ scope, date }),
       });
       if (!response.ok) throw new Error("Report request failed");
       const authoritative = (await response.json()) as OperationalReport;
       setReport(authoritative);
+      setReportSource("authoritative");
       setStatus("Report ready. Statistics are authoritative and deterministic.");
     } catch {
-      setError("Couldn’t generate the report. Please try again.");
+      setReport(localOfflineReport(input, scope, date));
+      setReportSource("local-offline");
+      setStatus("Local/offline fallback ready. Statistics are from this device and are not authoritative.");
     } finally {
       setBusy(false);
     }
   }
   function download() {
     if (!report) return;
-    const blob = new Blob([operationalReportText(report)], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob(
+      [operationalReportText(report, reportSource)],
+      { type: "text/plain;charset=utf-8" },
+    );
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -69,13 +113,17 @@ export default function OperationalReportPanel({
   async function share() {
     if (!report) return;
     setShareBusy(true);
-    const result = await shareOperationalReport(report);
-    setStatus(
+    const result = await shareOperationalReport(report, reportSource);
+    const shareStatus =
       result === "shared"
         ? "Report shared."
         : result === "copied"
           ? "Report copied to the clipboard."
-          : "Couldn’t share or copy the report. You can still export the text file.",
+          : "Couldn’t share or copy the report. You can still export the text file.";
+    setStatus(
+      reportSource === "local-offline"
+        ? `${shareStatus} Local/offline fallback statistics are not authoritative.`
+        : shareStatus,
     );
     setShareBusy(false);
   }
@@ -127,7 +175,12 @@ export default function OperationalReportPanel({
       {status && <p className="text-sm text-muted-foreground" role="status" aria-live="polite">{status}</p>}
       {report && (
         <div className="space-y-3 border-t border-border/60 pt-3">
-          <p className="text-xs text-muted-foreground">Scope: {fmtDate(report.periodStart)} – {fmtDate(report.periodEnd)}. The statistics below are authoritative source values.</p>
+          <p className="text-xs text-muted-foreground">
+            Scope: {fmtDate(report.periodStart)} – {fmtDate(report.periodEnd)}.{" "}
+            {reportSource === "authoritative"
+              ? "The statistics below are authoritative source values."
+              : "Local/offline fallback: the statistics below were calculated from this device and are not authoritative."}
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {[
               ["Cases", `${report.production.casesProduced}/${report.production.casesPlanned}`],

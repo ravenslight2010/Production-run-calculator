@@ -1143,7 +1143,7 @@ export const OperationsRecapResponse = zod.object({
 
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates production facts derived from every canonical scoped daily-sync snapshot in the requested date range. The legacy runs field is accepted for compatibility but ignored; clients cannot supply report production facts. The report enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReportBodyRunsMax = 600;
@@ -1161,7 +1161,7 @@ export const ExportOperationalReportBody = zod.object({
   "finished": zod.boolean().describe('Whether the run was completed'),
   "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
-}).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax)
+}).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
 
 export const ExportOperationalReportResponse = zod.object({
@@ -1213,6 +1213,105 @@ export const ExportOperationalReportResponse = zod.object({
   "flaggedItems": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
+})
+})
+
+
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
+export const GetOperationalRunViewQueryParams = zod.object({
+  "date": zod.date(),
+  "runId": zod.coerce.string()
+})
+
+export const GetOperationalRunViewResponse = zod.object({
+  "version": zod.literal(1),
+  "date": zod.coerce.date(),
+  "runId": zod.string(),
+  "observed": zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "status": zod.enum(['not-started', 'running', 'paused', 'ended']),
+  "startedAt": zod.number().optional(),
+  "pausedAt": zod.number().optional(),
+  "endedAt": zod.number().optional(),
+  "elapsedBatchSec": zod.number(),
+  "substitutionsApplied": zod.number().int(),
+  "packagingProgress": zod.union([zod.object({
+  "skidsCompleted": zod.number(),
+  "casesOnCurrentSkid": zod.number()
+}),zod.null()]),
+  "temporaryOverrides": zod.object({
+  "freezerTime": zod.boolean(),
+  "crustsPerCycle": zod.boolean(),
+  "cycleSpeed": zod.boolean()
+}),
+  "stoppages": zod.object({
+  "count": zod.number().int(),
+  "downtimeSeconds": zod.number()
+})
+}),
+  "recap": zod.object({
+  "casesNeeded": zod.number(),
+  "casesCompleted": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressDone": zod.boolean(),
+  "extraCases": zod.number()
+}),
+  "elapsed": zod.object({
+  "batchSec": zod.number(),
+  "phase": zod.object({
+  "stage1": zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['filling', 'active', 'paused', 'draining', 'resuming', 'empty']),
+  "remainMs": zod.number()
+}),
+  "stage2": zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['filling', 'active', 'paused', 'draining', 'resuming', 'empty']),
+  "remainMs": zod.number()
+}),
+  "stage3": zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['filling', 'active', 'paused', 'draining', 'resuming', 'empty']),
+  "remainMs": zod.number()
+})
+})
+}),
+  "pace": zod.object({
+  "ppm": zod.number(),
+  "paceStatus": zod.enum(['on-pace', 'ahead', 'behind']).nullable(),
+  "paceDelta": zod.number(),
+  "catchUpPpm": zod.union([zod.number(),zod.null()])
+}),
+  "advisory": zod.object({
+  "freezer": zod.object({
+  "cases": zod.number(),
+  "configuredMinutes": zod.number()
+}),
+  "line": zod.object({
+  "cases": zod.number()
+})
+}).describe('Read-only projections; never authoritative counter or inventory writes.'),
+  "calculatedAt": zod.number(),
+  "freshness": zod.object({
+  "status": zod.enum(['fresh', 'stale']),
+  "snapshotId": zod.string(),
+  "capturedAt": zod.number(),
+  "ageMs": zod.number(),
+  "maxAgeMs": zod.number()
+}),
+  "formulaProvenance": zod.object({
+  "policy": zod.enum(['operational-run-view']),
+  "policyVersion": zod.literal(1),
+  "calculator": zod.enum(['computeServerCalc']),
+  "calculatorVersion": zod.literal(1),
+  "temporaryOverrides": zod.enum(['applyTemporaryOverrides']),
+  "inventory": zod.array(zod.enum(['computeCasesOnLine', 'computeCasesInFreezer'])),
+  "linePhases": zod.enum(['computeLinePhases']),
+  "linePhasesVersion": zod.literal(1)
 })
 })
 

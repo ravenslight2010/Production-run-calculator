@@ -6,6 +6,8 @@ export interface CalcStoppage {
   type?: string;
   startedAt: number;
   endedAt?: number;
+  /** Missing legacy values use the safe stop-tunnel policy. */
+  stopTunnel?: boolean;
 }
 export interface CalcRunMeta {
   id?: string;
@@ -328,3 +330,5 @@ export function computeServerCalc(
 export * from "./autoTrackEngine";
 export * from "./autoTrackSchedule";
 export * from "./wallClockEngine";
+export * from "./linePhases";
+export * from "./operationalRunView";

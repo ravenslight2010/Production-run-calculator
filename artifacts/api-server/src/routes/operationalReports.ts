@@ -11,9 +11,16 @@ import {
   inventoryItemsTable,
   inventoryLotsTable,
   inventoryLedgerTable,
+  dailySyncTable,
   syncConflictLogsTable,
   qualityChecksTable,
 } from "@workspace/db";
+import {
+  deriveOperationalRunView,
+  OperationalRunViewError,
+  type OperationalSyncSnapshotV1,
+} from "@workspace/live-calc";
+import { syncSnapshotId } from "./sync";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { dataHealthWorkspace } from "./profileDataHealth";
@@ -36,7 +43,9 @@ const BodySchema = z.object({
     const parsed = new Date(`${value}T12:00:00Z`);
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
   }, "Invalid calendar date"),
-  runs: z.array(RunSchema).max(600),
+  // Legacy callers may still send runs. Production facts always come from
+  // canonical daily_sync rows, so this compatibility field is intentionally ignored.
+  runs: z.array(RunSchema).max(600).optional(),
 });
 
 function addDays(iso: string, amount: number): string {
@@ -47,6 +56,12 @@ function addDays(iso: string, amount: number): string {
 
 export function dateRange(scope: "day" | "week", date: string): [string, string] {
   return scope === "week" ? [addDays(date, -6), date] : [date, date];
+}
+
+function datesInRange(start: string, end: string): string[] {
+  const dates: string[] = [];
+  for (let date = start; date <= end; date = addDays(date, 1)) dates.push(date);
+  return dates;
 }
 
 export type OperationalReportValidationResult =
@@ -61,6 +76,40 @@ export function validateOperationalReportBody(
     return { ok: false, status: 400, error: "Invalid operational report input" };
   }
   return { ok: true, data: parsed.data };
+}
+
+const OperationalViewQuery = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+    const parsed = new Date(`${value}T12:00:00Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "Invalid calendar date"),
+  runId: z.string().min(1).max(500),
+});
+
+/** Adds transport metadata without modifying the durable canonical JSON payload. */
+export function adaptCanonicalOperationalSnapshot(data: unknown): OperationalSyncSnapshotV1 | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  return ({
+    ...(data as Record<string, unknown>),
+    syncVersion: 1,
+    completeness: "complete",
+  } as OperationalSyncSnapshotV1);
+}
+
+function operationalError(res: import("express").Response, status: number, code: string, message: string): void {
+  res.status(status).json({ error: { code, message } });
+}
+
+function viewToSummaryRun(view: ReturnType<typeof deriveOperationalRunView>): DaySummaryInput["runs"][number] {
+  return {
+    brand: view.observed.brand,
+    flavor: view.observed.flavor,
+    casesPlanned: view.recap.casesNeeded,
+    casesProduced: view.recap.casesCompleted,
+    finished: view.observed.status === "ended",
+    downtimeMinutes: view.observed.stoppages.downtimeSeconds / 60,
+    stoppageCount: view.observed.stoppages.count,
+  };
 }
 
 type HandoffSeverity = "urgent" | "high" | "medium" | "low" | "info";
@@ -160,6 +209,86 @@ router.get("/reports/handoff", requireCapability("review-incidents"), async (req
   res.json({ scope, date, generatedAt: new Date().toISOString(), items, sources } satisfies ShiftHandoffDigest);
 });
 
+// A point-in-time, server-derived operational read model. It deliberately reads
+// one scoped canonical row rather than accepting a browser snapshot.
+router.get(
+  "/reports/operational-view",
+  requireCapability("review-incidents"),
+  async (req, res): Promise<void> => {
+    const parsed = OperationalViewQuery.safeParse(req.query);
+    if (!parsed.success) {
+      operationalError(res, 400, "invalid-query", "Valid date and runId query parameters are required.");
+      return;
+    }
+    const { date, runId } = parsed.data;
+    const scope = currentScope();
+    const rows = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, scope),
+      eq(dailySyncTable.date, date),
+    ));
+    if (rows.length === 0) {
+      operationalError(res, 404, "snapshot-not-found", "No canonical snapshot exists for this date.");
+      return;
+    }
+    if (rows.length !== 1) {
+      operationalError(res, 409, "snapshot-ambiguous", "More than one canonical snapshot exists for this date.");
+      return;
+    }
+    const row = rows[0];
+    const snapshot = adaptCanonicalOperationalSnapshot(row.data);
+    if (!snapshot) {
+      operationalError(res, 400, "invalid-snapshot", "The canonical snapshot is not an object.");
+      return;
+    }
+    const resetAt = (snapshot.dayState as { resetAt?: unknown } | undefined)?.resetAt;
+    if (resetAt !== undefined && (typeof resetAt !== "number" || !Number.isFinite(resetAt) || resetAt < 0)) {
+      operationalError(res, 409, "reset-ambiguity", "The canonical snapshot has an ambiguous reset generation.");
+      return;
+    }
+    const nowMs = Date.now();
+    try {
+      const view = deriveOperationalRunView({
+        snapshot,
+        date,
+        runId,
+        nowMs,
+        snapshotMetadata: {
+          snapshotId: syncSnapshotId(row.data),
+          capturedAt: row.updatedAt.getTime(),
+          date,
+          ...(typeof resetAt === "number" ? { resetAt } : {}),
+        },
+      });
+      req.log.info({
+        event: "operational_view_derived",
+        scope,
+        date,
+        runId,
+        status: view.observed.status,
+        runCount: snapshot.dayState.runs.length,
+        stoppageCount: view.observed.stoppages.count,
+      }, "Operational view derived");
+      res.json(view);
+    } catch (error) {
+      if (error instanceof OperationalRunViewError) {
+        const status = error.code === "missing-run" ? 404
+          : error.code === "duplicate-run" || error.code === "reset-mismatch" ? 409 : 400;
+        req.log.info({
+          event: "operational_view_rejected",
+          scope,
+          date,
+          runId,
+          status: error.code,
+          runCount: Array.isArray(snapshot.dayState?.runs) ? snapshot.dayState.runs.length : 0,
+        }, "Operational view rejected");
+        operationalError(res, status, error.code, error.message);
+        return;
+      }
+      throw error;
+    }
+  },
+);
+
 router.post(
   "/reports/operational",
   requireCapability("review-incidents"),
@@ -172,7 +301,7 @@ router.post(
     const input = parsed.data;
     const [periodStart, periodEnd] = dateRange(input.scope, input.date);
     const scope = currentScope();
-    const [qualityRows, incidentRows, inventoryRows, lots] = await Promise.all([
+    const [qualityRows, incidentRows, inventoryRows, lots, syncRows] = await Promise.all([
       db.select().from(qualityChecksTable).where(
         and(
           eq(qualityChecksTable.scope, scope),
@@ -189,6 +318,11 @@ router.post(
       ),
       db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.scope, scope)),
       db.select().from(inventoryLotsTable).where(eq(inventoryLotsTable.scope, scope)),
+      db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, scope),
+        gte(dailySyncTable.date, periodStart),
+        lte(dailySyncTable.date, periodEnd),
+      )),
     ]);
     let historicalInventory: NonNullable<
       NonNullable<OperationalReport["inventory"]["value"]>["historical"]
@@ -224,10 +358,93 @@ router.post(
       (item) => item.reorderThreshold > 0 && (onHand.get(item.id) ?? 0) <= item.reorderThreshold,
     ).length;
     const qualityIssues = qualityRows.reduce((n, row) => n + (Array.isArray(row.issues) ? row.issues.length : 0), 0);
+    // Do not trust compatibility `input.runs`: production facts are derived
+    // solely from every canonical scoped daily_sync row in the requested period.
+    const nowMs = Date.now();
+    const canonicalRuns: DaySummaryInput["runs"] = [];
+    let canonicalFailure: { date: string; code: string } | null = null;
+    const expectedDates = datesInRange(periodStart, periodEnd);
+    const rowsByDate = new Map<string, typeof syncRows>();
+    for (const row of syncRows) {
+      const rows = rowsByDate.get(row.date) ?? [];
+      rows.push(row);
+      rowsByDate.set(row.date, rows);
+    }
+    for (const date of expectedDates) {
+      const rows = rowsByDate.get(date) ?? [];
+      if (rows.length !== 1) {
+        canonicalFailure = {
+          date,
+          code: rows.length === 0 ? "snapshot-not-found" : "snapshot-ambiguous",
+        };
+        break;
+      }
+    }
+    for (const row of syncRows) {
+      if (canonicalFailure) break;
+      const snapshot = adaptCanonicalOperationalSnapshot(row.data);
+      if (!snapshot || !Array.isArray(snapshot.dayState?.runs)) {
+        canonicalFailure = { date: row.date, code: "invalid-snapshot" };
+        break;
+      }
+      const resetAt = (snapshot.dayState as { resetAt?: unknown }).resetAt;
+      if (
+        resetAt !== undefined &&
+        (typeof resetAt !== "number" || !Number.isFinite(resetAt) || resetAt < 0)
+      ) {
+        canonicalFailure = { date: row.date, code: "reset-ambiguity" };
+        break;
+      }
+      for (const rawRun of snapshot.dayState.runs) {
+        if (!rawRun || typeof rawRun.id !== "string" || !rawRun.id) {
+          canonicalFailure = { date: row.date, code: "invalid-run" };
+          break;
+        }
+        try {
+          canonicalRuns.push(viewToSummaryRun(deriveOperationalRunView({
+            snapshot,
+            date: row.date,
+            runId: rawRun.id,
+            nowMs,
+            snapshotMetadata: {
+              snapshotId: syncSnapshotId(row.data),
+              capturedAt: row.updatedAt.getTime(),
+              date: row.date,
+              ...(typeof resetAt === "number" ? { resetAt } : {}),
+            },
+          })));
+        } catch (error) {
+          canonicalFailure = {
+            date: row.date,
+            code: error instanceof OperationalRunViewError
+              ? error.code
+              : "derivation-failed",
+          };
+          break;
+        }
+      }
+      if (canonicalFailure) break;
+    }
+    if (canonicalFailure) {
+      req.log.warn({
+        event: "operational_report_canonical_rejected",
+        scope,
+        date: canonicalFailure.date,
+        code: canonicalFailure.code,
+        acceptedRunCount: canonicalRuns.length,
+      }, "Canonical operational report input was invalid");
+      operationalError(
+        res,
+        409,
+        "canonical-snapshot-invalid",
+        "Canonical production facts are incomplete or ambiguous; no authoritative report was generated.",
+      );
+      return;
+    }
     const productionInput: DaySummaryInput = {
       scope: input.scope,
       date: input.date,
-      runs: input.runs,
+      runs: canonicalRuns,
       incidentCount: incidentRows.length,
       wasteFlaggedCount: flaggedItems,
     };

@@ -53,10 +53,24 @@ afterEach(() => {
 describe("operational report sharing", () => {
   it("formats scope, authoritative sections, and unavailable values", () => {
     const text = operationalReportText(report);
+    expect(text).toContain("AUTHORITATIVE SOURCE STATISTICS");
     expect(text).toContain("Period: 2026-08-29 to 2026-09-04");
     expect(text).toContain("Incidents: Unavailable — Incident history is unavailable.");
     expect(text).not.toContain("OPTIONAL NARRATIVE");
     expect(text).not.toContain("One run remains unfinished.");
+  });
+
+  it("labels local exports and shares as non-authoritative", async () => {
+    const text = operationalReportText(report, "local-offline");
+    expect(text).toContain("LOCAL/OFFLINE FALLBACK — NOT AUTHORITATIVE");
+    expect(text).not.toContain("AUTHORITATIVE SOURCE STATISTICS");
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    expect(await shareOperationalReport(report, "local-offline")).toBe("copied");
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("LOCAL/OFFLINE FALLBACK — NOT AUTHORITATIVE"),
+    );
   });
 
   it("uses the clipboard when native sharing is unavailable", async () => {

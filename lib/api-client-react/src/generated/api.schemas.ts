@@ -1430,8 +1430,227 @@ export interface OperationalReportInput {
   scope: OperationalReportInputScope;
   /** ISO date, or week-ending date for a weekly report */
   date: string;
-  /** @maxItems 600 */
-  runs: SummaryRunInput[];
+  /**
+     * Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.
+     * @maxItems 600
+     */
+  runs?: SummaryRunInput[];
+}
+
+export type OperationalRunViewVersion = typeof OperationalRunViewVersion[keyof typeof OperationalRunViewVersion];
+
+
+export const OperationalRunViewVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewObservedStatus = typeof OperationalRunViewObservedStatus[keyof typeof OperationalRunViewObservedStatus];
+
+
+export const OperationalRunViewObservedStatus = {
+  'not-started': 'not-started',
+  running: 'running',
+  paused: 'paused',
+  ended: 'ended',
+} as const;
+
+export type OperationalRunViewObservedPackagingProgress = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+} | null;
+
+export type OperationalRunViewObservedTemporaryOverrides = {
+  freezerTime: boolean;
+  crustsPerCycle: boolean;
+  cycleSpeed: boolean;
+};
+
+export type OperationalRunViewObservedStoppages = {
+  count: number;
+  downtimeSeconds: number;
+};
+
+export type OperationalRunViewObserved = {
+  brand: string;
+  flavor: string;
+  status: OperationalRunViewObservedStatus;
+  startedAt?: number;
+  pausedAt?: number;
+  endedAt?: number;
+  elapsedBatchSec: number;
+  substitutionsApplied: number;
+  packagingProgress: OperationalRunViewObservedPackagingProgress;
+  temporaryOverrides: OperationalRunViewObservedTemporaryOverrides;
+  stoppages: OperationalRunViewObservedStoppages;
+};
+
+export type OperationalRunViewRecap = {
+  casesNeeded: number;
+  casesCompleted: number;
+  casesLeftToRun: number;
+  pressDone: boolean;
+  extraCases: number;
+};
+
+export type OperationalLinePhaseState = typeof OperationalLinePhaseState[keyof typeof OperationalLinePhaseState];
+
+
+export const OperationalLinePhaseState = {
+  filling: 'filling',
+  active: 'active',
+  paused: 'paused',
+  draining: 'draining',
+  resuming: 'resuming',
+  empty: 'empty',
+} as const;
+
+export interface OperationalLinePhase {
+  label: string;
+  state: OperationalLinePhaseState;
+  remainMs: number;
+}
+
+export type OperationalRunViewElapsedPhase = {
+  stage1: OperationalLinePhase;
+  stage2: OperationalLinePhase;
+  stage3: OperationalLinePhase;
+};
+
+export type OperationalRunViewElapsed = {
+  batchSec: number;
+  phase: OperationalRunViewElapsedPhase;
+};
+
+export type OperationalRunViewPacePaceStatus = typeof OperationalRunViewPacePaceStatus[keyof typeof OperationalRunViewPacePaceStatus] | null;
+
+
+export const OperationalRunViewPacePaceStatus = {
+  'on-pace': 'on-pace',
+  ahead: 'ahead',
+  behind: 'behind',
+} as const;
+
+export type OperationalRunViewPace = {
+  ppm: number;
+  paceStatus: OperationalRunViewPacePaceStatus;
+  paceDelta: number;
+  catchUpPpm: number | null;
+};
+
+export type OperationalRunViewAdvisoryFreezer = {
+  cases: number;
+  configuredMinutes: number;
+};
+
+export type OperationalRunViewAdvisoryLine = {
+  cases: number;
+};
+
+/**
+ * Read-only projections; never authoritative counter or inventory writes.
+ */
+export type OperationalRunViewAdvisory = {
+  freezer: OperationalRunViewAdvisoryFreezer;
+  line: OperationalRunViewAdvisoryLine;
+};
+
+export type OperationalRunViewFreshnessStatus = typeof OperationalRunViewFreshnessStatus[keyof typeof OperationalRunViewFreshnessStatus];
+
+
+export const OperationalRunViewFreshnessStatus = {
+  fresh: 'fresh',
+  stale: 'stale',
+} as const;
+
+export type OperationalRunViewFreshness = {
+  status: OperationalRunViewFreshnessStatus;
+  snapshotId: string;
+  capturedAt: number;
+  ageMs: number;
+  maxAgeMs: number;
+};
+
+export type OperationalRunViewFormulaProvenancePolicy = typeof OperationalRunViewFormulaProvenancePolicy[keyof typeof OperationalRunViewFormulaProvenancePolicy];
+
+
+export const OperationalRunViewFormulaProvenancePolicy = {
+  'operational-run-view': 'operational-run-view',
+} as const;
+
+export type OperationalRunViewFormulaProvenancePolicyVersion = typeof OperationalRunViewFormulaProvenancePolicyVersion[keyof typeof OperationalRunViewFormulaProvenancePolicyVersion];
+
+
+export const OperationalRunViewFormulaProvenancePolicyVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewFormulaProvenanceCalculator = typeof OperationalRunViewFormulaProvenanceCalculator[keyof typeof OperationalRunViewFormulaProvenanceCalculator];
+
+
+export const OperationalRunViewFormulaProvenanceCalculator = {
+  computeServerCalc: 'computeServerCalc',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceCalculatorVersion = typeof OperationalRunViewFormulaProvenanceCalculatorVersion[keyof typeof OperationalRunViewFormulaProvenanceCalculatorVersion];
+
+
+export const OperationalRunViewFormulaProvenanceCalculatorVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewFormulaProvenanceTemporaryOverrides = typeof OperationalRunViewFormulaProvenanceTemporaryOverrides[keyof typeof OperationalRunViewFormulaProvenanceTemporaryOverrides];
+
+
+export const OperationalRunViewFormulaProvenanceTemporaryOverrides = {
+  applyTemporaryOverrides: 'applyTemporaryOverrides',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceInventoryItem = typeof OperationalRunViewFormulaProvenanceInventoryItem[keyof typeof OperationalRunViewFormulaProvenanceInventoryItem];
+
+
+export const OperationalRunViewFormulaProvenanceInventoryItem = {
+  computeCasesOnLine: 'computeCasesOnLine',
+  computeCasesInFreezer: 'computeCasesInFreezer',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceLinePhases = typeof OperationalRunViewFormulaProvenanceLinePhases[keyof typeof OperationalRunViewFormulaProvenanceLinePhases];
+
+
+export const OperationalRunViewFormulaProvenanceLinePhases = {
+  computeLinePhases: 'computeLinePhases',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceLinePhasesVersion = typeof OperationalRunViewFormulaProvenanceLinePhasesVersion[keyof typeof OperationalRunViewFormulaProvenanceLinePhasesVersion];
+
+
+export const OperationalRunViewFormulaProvenanceLinePhasesVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewFormulaProvenance = {
+  policy: OperationalRunViewFormulaProvenancePolicy;
+  policyVersion: OperationalRunViewFormulaProvenancePolicyVersion;
+  calculator: OperationalRunViewFormulaProvenanceCalculator;
+  calculatorVersion: OperationalRunViewFormulaProvenanceCalculatorVersion;
+  temporaryOverrides: OperationalRunViewFormulaProvenanceTemporaryOverrides;
+  inventory: OperationalRunViewFormulaProvenanceInventoryItem[];
+  linePhases: OperationalRunViewFormulaProvenanceLinePhases;
+  linePhasesVersion: OperationalRunViewFormulaProvenanceLinePhasesVersion;
+};
+
+export interface OperationalRunView {
+  version: OperationalRunViewVersion;
+  date: string;
+  runId: string;
+  observed: OperationalRunViewObserved;
+  recap: OperationalRunViewRecap;
+  elapsed: OperationalRunViewElapsed;
+  pace: OperationalRunViewPace;
+  /** Read-only projections; never authoritative counter or inventory writes. */
+  advisory: OperationalRunViewAdvisory;
+  calculatedAt: number;
+  freshness: OperationalRunViewFreshness;
+  formulaProvenance: OperationalRunViewFormulaProvenance;
 }
 
 export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
@@ -4277,6 +4496,11 @@ export const ListQualityChecksStatus = {
   warn: 'warn',
   fail: 'fail',
 } as const;
+
+export type GetOperationalRunViewParams = {
+date: string;
+runId: string;
+};
 
 export type GetShiftHandoffDigestParams = {
 date: string;

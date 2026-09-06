@@ -1036,7 +1036,10 @@ paths:
       tags: [audit]
       summary: Export a manager-only operational day or week report
       description: >-
-        Deterministically aggregates the supplied production run facts and
+        Deterministically aggregates production facts derived from every
+        canonical scoped daily-sync snapshot in the requested date range. The
+        legacy runs field is accepted for compatibility but ignored; clients
+        cannot supply report production facts. The report
         enriches them with date-filtered quality and incident records plus a
         clearly labeled current inventory snapshot plus date-scoped inventory
         ledger events. No AI is required and
@@ -1058,6 +1061,41 @@ paths:
           description: Invalid input
         "403":
           description: Manager capability required
+
+  /reports/operational-view:
+    get:
+      operationId: getOperationalRunView
+      tags: [audit]
+      summary: Read one manager-only server-derived operational run view
+      description: >-
+        Reads exactly one canonical scoped daily-sync snapshot and derives the
+        requested run using the server clock. The payload is never accepted from
+        the client. Missing snapshots or runs are reported distinctly; duplicate
+        runs and reset-generation ambiguity return conflict responses.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: runId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Server-derived operational run view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationalRunView"
+        "400":
+          description: Invalid request or malformed canonical snapshot
+        "403":
+          description: Manager capability required
+        "404":
+          description: Canonical snapshot or requested run not found
+        "409":
+          description: Duplicate run or reset/snapshot ambiguity
 
   /reports/handoff:
     get:
@@ -6318,7 +6356,7 @@ components:
 
     OperationalReportInput:
       type: object
-      required: [scope, date, runs]
+      required: [scope, date]
       properties:
         scope:
           type: string
@@ -6328,9 +6366,134 @@ components:
           description: ISO date, or week-ending date for a weekly report
         runs:
           type: array
+          description: Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.
           maxItems: 600
           items:
             $ref: "#/components/schemas/SummaryRunInput"
+
+    OperationalRunView:
+      type: object
+      required: [version, date, runId, observed, recap, elapsed, pace, advisory, calculatedAt, freshness, formulaProvenance]
+      properties:
+        version: { type: integer, enum: [1] }
+        date: { type: string, format: date }
+        runId: { type: string }
+        observed:
+          type: object
+          required: [brand, flavor, status, elapsedBatchSec, substitutionsApplied, packagingProgress, temporaryOverrides, stoppages]
+          properties:
+            brand: { type: string }
+            flavor: { type: string }
+            status: { type: string, enum: [not-started, running, paused, ended] }
+            startedAt: { type: number }
+            pausedAt: { type: number }
+            endedAt: { type: number }
+            elapsedBatchSec: { type: number }
+            substitutionsApplied: { type: integer }
+            packagingProgress:
+              oneOf:
+                - type: object
+                  required: [skidsCompleted, casesOnCurrentSkid]
+                  properties:
+                    skidsCompleted: { type: number }
+                    casesOnCurrentSkid: { type: number }
+                - type: "null"
+            temporaryOverrides:
+              type: object
+              required: [freezerTime, crustsPerCycle, cycleSpeed]
+              properties:
+                freezerTime: { type: boolean }
+                crustsPerCycle: { type: boolean }
+                cycleSpeed: { type: boolean }
+            stoppages:
+              type: object
+              required: [count, downtimeSeconds]
+              properties:
+                count: { type: integer }
+                downtimeSeconds: { type: number }
+        recap:
+          type: object
+          required: [casesNeeded, casesCompleted, casesLeftToRun, pressDone, extraCases]
+          properties:
+            casesNeeded: { type: number }
+            casesCompleted: { type: number }
+            casesLeftToRun: { type: number }
+            pressDone: { type: boolean }
+            extraCases: { type: number }
+        elapsed:
+          type: object
+          required: [batchSec, phase]
+          properties:
+            batchSec: { type: number }
+            phase:
+              type: object
+              required: [stage1, stage2, stage3]
+              properties:
+                stage1: { $ref: "#/components/schemas/OperationalLinePhase" }
+                stage2: { $ref: "#/components/schemas/OperationalLinePhase" }
+                stage3: { $ref: "#/components/schemas/OperationalLinePhase" }
+        pace:
+          type: object
+          required: [ppm, paceStatus, paceDelta, catchUpPpm]
+          properties:
+            ppm: { type: number }
+            paceStatus:
+              type: string
+              enum: [on-pace, ahead, behind]
+              nullable: true
+            paceDelta: { type: number }
+            catchUpPpm:
+              oneOf:
+                - type: number
+                - type: "null"
+        advisory:
+          type: object
+          description: Read-only projections; never authoritative counter or inventory writes.
+          required: [freezer, line]
+          properties:
+            freezer:
+              type: object
+              required: [cases, configuredMinutes]
+              properties:
+                cases: { type: number }
+                configuredMinutes: { type: number }
+            line:
+              type: object
+              required: [cases]
+              properties:
+                cases: { type: number }
+        calculatedAt: { type: number }
+        freshness:
+          type: object
+          required: [status, snapshotId, capturedAt, ageMs, maxAgeMs]
+          properties:
+            status: { type: string, enum: [fresh, stale] }
+            snapshotId: { type: string }
+            capturedAt: { type: number }
+            ageMs: { type: number }
+            maxAgeMs: { type: number }
+        formulaProvenance:
+          type: object
+          required: [policy, policyVersion, calculator, calculatorVersion, temporaryOverrides, inventory, linePhases, linePhasesVersion]
+          properties:
+            policy: { type: string, enum: [operational-run-view] }
+            policyVersion: { type: integer, enum: [1] }
+            calculator: { type: string, enum: [computeServerCalc] }
+            calculatorVersion: { type: integer, enum: [1] }
+            temporaryOverrides: { type: string, enum: [applyTemporaryOverrides] }
+            inventory:
+              type: array
+              items: { type: string, enum: [computeCasesOnLine, computeCasesInFreezer] }
+            linePhases: { type: string, enum: [computeLinePhases] }
+            linePhasesVersion: { type: integer, enum: [1] }
+
+    OperationalLinePhase:
+      type: object
+      required: [label, state, remainMs]
+      properties:
+        label: { type: string }
+        state: { type: string, enum: [filling, active, paused, draining, resuming, empty] }
+        remainMs: { type: number }
 
     OperationalReport:
       type: object

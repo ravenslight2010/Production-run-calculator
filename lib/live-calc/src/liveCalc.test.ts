@@ -5,6 +5,8 @@ import {
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
   computeServerCalc,
+  deriveOperationalRunView,
+  OperationalRunViewError,
   getAutoTrackTiming,
 } from "./index";
 
@@ -136,5 +138,52 @@ describe("shared live calculation boundary", () => {
       },
     }, [], 2000);
     expect(result?.calc.ppm).toBe(60);
+  });
+
+  it("derives active, paused, and ended-draining operational phase views", () => {
+    const snapshot = (run: Record<string, unknown>) => ({
+      syncVersion: 1 as const, completeness: "complete" as const,
+      dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, runs: [run] },
+      runValues: { "run-1": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10 } },
+      packagingProgress: { "run-1": { skidsCompleted: 2, casesOnCurrentSkid: 3 } },
+    });
+    const args = (run: Record<string, unknown>, nowMs: number) => ({
+      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
+      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
+    });
+    expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000 }, 6_000)).observed.status).toBe("running");
+    expect(deriveOperationalRunView(args({
+      id: "run-1", startedAt: 1_000, pausedAt: 2_000,
+      stoppages: [{ type: "pause", startedAt: 2_000, stopTunnel: true }],
+    }, 3_000)).elapsed.phase.stage1.state).toBe("draining");
+    expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000, endedAt: 2_000 }, 3_000))
+      .elapsed.phase.stage1.state).toBe("draining");
+    expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000, endedAt: 2_000 }, 602_000))
+      .elapsed.phase.stage3.state).toBe("empty");
+  });
+
+  it("marks stale snapshots and rejects reset mismatch, override-safe duplicate runs", () => {
+    const base = {
+      syncVersion: 1 as const, completeness: "complete" as const,
+      dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, substitutions: [{ action: "replace" }], runs: [{ id: "run-1", startedAt: 1_000 }] },
+      runValues: { "run-1": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, tempCycleSpeed: 12 } },
+    };
+    const request = { snapshot: base as never, date: "2026-09-06", runId: "run-1", nowMs: 100_000, snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 } };
+    const view = deriveOperationalRunView(request);
+    expect(view.freshness.status).toBe("stale");
+    expect(view.formulaProvenance).toMatchObject({
+      policy: "operational-run-view",
+      policyVersion: 1,
+      calculatorVersion: 1,
+      linePhasesVersion: 1,
+    });
+    expect(view.observed.temporaryOverrides.cycleSpeed).toBe(true);
+    expect(view.observed.substitutionsApplied).toBe(1);
+    expect(() => deriveOperationalRunView({ ...request, snapshotMetadata: { ...request.snapshotMetadata, resetAt: 11 } }))
+      .toThrow(OperationalRunViewError);
+    expect(() => deriveOperationalRunView({
+      ...request,
+      snapshot: { ...base, dayState: { ...base.dayState, runs: [{ id: "run-1" }, { id: "run-1" }] } } as never,
+    })).toThrow(OperationalRunViewError);
   });
 });
