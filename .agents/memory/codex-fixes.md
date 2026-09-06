@@ -340,16 +340,17 @@ Each entry includes:
 
 **File(s):**
 - `artifacts/api-server/src/routes/sync.ts` (SSE `/sync/events` heartbeat now carries the auto-track schedule; delta-only; `AUTO_TRACK_HEARTBEAT_MS` env override)
-- `artifacts/api-server/src/routes/sync.integration.test.ts` (heartbeat integration test with a short-timer override)
+- `artifacts/api-server/src/routes/sync.integration.test.ts` (heartbeat integration test with a short-timer override; realistic full-FormValues run fixture)
 
-**Problem:** The server computed the auto-track schedule (6a) but only pushed it on the initial SSE frame, peer broadcasts, and claim responses. A single-device operator (the common web case) never received a fresh schedule after load, so the client's local derivation remained effectively the only authority and convergence after data changes could lag on stale devices.
+**Problem:** The server computed the auto-track schedule (6a) but only pushed it on the initial SSE frame, peer broadcasts, and claim responses. A single-device operator (the common web case) never received a fresh schedule after load, so the client's local derivation remained effectively the only authority and convergence after data changes could lag on stale devices. The first version of the integration test used a skeletal run value (`{ casesNeeded: 240 }`), which cannot drive `computeServerCalc` (it throws on the missing form fields) — the beat fell back to the comment ping and the CI test failed.
 
 **Fix:** Step 6c (server-owned tick detection/announcement; execution stays in the validated claim protocol):
 1. The existing 15s SSE keepalive ping now carries the server-computed schedule (`{ autoTrackSchedule, heartbeat: true }`) instead of an empty comment — same connection, same cadence, zero extra request traffic.
 2. Delta-only: the frame is skipped while the schedule is unchanged (`atMs` excluded from the comparison since it changes every compute), so a lone device with no peers sees next to nothing, and a change anywhere is announced within one beat.
 3. Per-request `AUTO_TRACK_HEARTBEAT_MS` env override (default 15s) lets the integration test drive a fast beat; a failed beat/read never tears the stream down (falls back to the comment ping).
 4. The client needed NO change: the 6a/6b wiring already adopts `autoTrackSchedule` on every SSE frame (`publishAutoTrackSchedule`) and uses the verdicts/due refs, with local math as the offline fallback.
+5. Test fix: the fixture now mirrors a real running run — complete FormValues (every field a client stores) plus crusts-mode run meta so the server calc yields a real schedule (sauce-barrel + app1-batch entries) — and the assertion verifies delta-only behavior: exactly ONE schedule-carrying beat followed by comment-only beats.
 
-**Context:** Completes refactor step 6 as a safe server-authority layer: the server owns WHEN (schedule due times + due-now verdicts, now live for every device); the claim endpoint still owns WHAT gets written (validation, sequencing, manual-correction guards), which is what makes automatic writes safe against operator edits. Verified: api-server tsc + build + 18/18 coordination unit tests; full Postgres integration suite (incl. the new heartbeat test) runs in CI's test-db job.
+**Context:** Completes refactor step 6 as a safe server-authority layer: the server owns WHEN (schedule due times + due-now verdicts, now live for every device); the claim endpoint still owns WHAT gets written (validation, sequencing, manual-correction guards), which is what makes automatic writes safe against operator edits. Verified: PR #31 merged; api-server tsc + build + 18/18 coordination unit tests; CI green including `API tests (Postgres)` (74/74) — only the two known pre-existing failures (department journey, release gates) remain.
 
 *Last updated: 2026-09-06*
