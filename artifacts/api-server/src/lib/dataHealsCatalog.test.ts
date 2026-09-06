@@ -1,16 +1,17 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { registeredAutomaticDataHeals } from "./dataHeals";
-import { CRB_INGREDIENT_HEAL_CONTRACT } from "./crbIngredientHeal";
-import { repairDefinitionFingerprint, type RepairFingerprintSource } from "./repairDefinitionFingerprint";
+import {
+  REPAIR_FINGERPRINT_SOURCE_CONTRACTS,
+  repairDefinitionFingerprint,
+} from "./repairDefinitionFingerprint";
+import {
+  releasedRepairFingerprints,
+  renderReleasedRepairFingerprintManifest,
+} from "./repairDefinitionFingerprintManifest";
 import { RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS } from "./repairDefinitionFingerprints.manifest";
 import { liveProfileRecipeLinkRepairContract } from "./repairs/liveProfileRecipeLinkRepair";
-import { CRB_INGREDIENT_REPAIR_ID } from "./repairs/crbIngredientRepair";
 import { SOURCE_LIBRARY_RECONCILIATION_HEAL_ID } from "./sourceLibraryReconciliationHeal";
-
-const sourceOwnedContracts: Readonly<Record<string, RepairFingerprintSource>> = Object.freeze({
-  [liveProfileRecipeLinkRepairContract.id]: liveProfileRecipeLinkRepairContract,
-  [CRB_INGREDIENT_REPAIR_ID]: CRB_INGREDIENT_HEAL_CONTRACT,
-});
 
 describe("historical automatic repair registration", () => {
   it("preserves the released order and excludes manager commands from startup", () => {
@@ -55,19 +56,15 @@ describe("historical automatic repair registration", () => {
 
   it("matches the reviewed released-definition fingerprint manifest", () => {
     const repairs = registeredAutomaticDataHeals().list();
-    const actual = Object.fromEntries(repairs.map((repair) => [
-      repair.id,
-      repairDefinitionFingerprint(repair, sourceOwnedContracts[repair.id]),
-    ]));
+    const actual = releasedRepairFingerprints(repairs);
 
-    expect(actual).toEqual(RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS);
-    expect(sourceOwnedContracts[SOURCE_LIBRARY_RECONCILIATION_HEAL_ID]).toBeUndefined();
-  });
-
-  it("excludes runtime callbacks but detects metadata and source-contract changes", () => {
+    const checkedIn = await readFile(
+      new URL("./repairDefinitionFingerprints.manifest.ts", import.meta.url),
+      "utf8",
+    );
     const repair = registeredAutomaticDataHeals().list()
       .find((candidate) => candidate.id === liveProfileRecipeLinkRepairContract.id)!;
-    const source = sourceOwnedContracts[repair.id];
+    const source = REPAIR_FINGERPRINT_SOURCE_CONTRACTS[repair.id];
     const baseline = repairDefinitionFingerprint(repair, source);
 
     expect(repairDefinitionFingerprint({

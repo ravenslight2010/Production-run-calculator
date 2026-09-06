@@ -4,6 +4,9 @@
  * A mismatch requires either a new versioned repair id or an explicit review
  * and update of this manifest. The source-library plan payload is intentionally
  * absent because its independent immutable digest is verified separately.
+ *
+ * Preview: pnpm --filter @workspace/api-server run repair-fingerprints
+ * Rewrite after approval: pnpm --filter @workspace/api-server run repair-fingerprints:write
  */
 export const RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS: Readonly<Record<string, string>> = Object.freeze({
   "data-heal-result-backfill-v1": "c59385bc61d2c2c00260b1fa215713ba575c2063d21723a1a1b403de04d5f264",

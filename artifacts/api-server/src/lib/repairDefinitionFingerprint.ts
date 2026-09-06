@@ -1,7 +1,17 @@
 import { createHash } from "node:crypto";
 import type { RepairDefinition } from "./repairRegistry";
+import { CRB_INGREDIENT_HEAL_CONTRACT } from "./crbIngredientHeal";
+import { liveProfileRecipeLinkRepairContract } from "./repairs/liveProfileRecipeLinkRepair";
+import { CRB_INGREDIENT_REPAIR_ID } from "./repairs/crbIngredientRepair";
 
 export type RepairFingerprintSource = Readonly<Record<string, unknown>>;
+
+/** Explicit immutable source contracts that are part of released repair definitions. */
+export const REPAIR_FINGERPRINT_SOURCE_CONTRACTS:
+Readonly<Record<string, RepairFingerprintSource>> = Object.freeze({
+  [liveProfileRecipeLinkRepairContract.id]: liveProfileRecipeLinkRepairContract,
+  [CRB_INGREDIENT_REPAIR_ID]: CRB_INGREDIENT_HEAL_CONTRACT,
+});
 
 type FingerprintedRepairDefinition = Omit<RepairDefinition, "execute" | "validateResult">;
 
