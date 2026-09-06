@@ -210,9 +210,9 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     expect(homeSites.length).toBeGreaterThanOrEqual(20);
   });
 
-  it("saveRunValues is only written from home.tsx (no unguarded write surface elsewhere)", () => {
-    // The guard is scoped to home.tsx; if another app module starts importing
-    // the writer, it must be added to this guard first.
+  it("saveRunValues is only exposed through guarded orchestration and its persistence adapter", () => {
+    // The guard is scoped to the orchestration call sites. The browser adapter
+    // owns the localStorage write itself but must not add orchestration policy.
     const srcDir = __dirname;
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -230,6 +230,7 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
         if (
           rel === path.join("pages", "home.tsx") ||
           rel === "storage.ts" ||
+          rel === path.join("adapters", "browserRunPersistence.ts") ||
           rel === path.join("contexts", "LiveRunContext.tsx")
         ) continue;
         const text = fs.readFileSync(full, "utf8");
@@ -239,7 +240,7 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     walk(srcDir);
     expect(
       offenders,
-      "saveRunValues used outside home.tsx/storage.ts — extend runValueStampGuard.test.ts to cover it",
+      "saveRunValues used outside guarded orchestration/persistence boundaries — extend this source guard first",
     ).toEqual([]);
   });
 });

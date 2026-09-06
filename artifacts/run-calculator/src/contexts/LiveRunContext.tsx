@@ -26,7 +26,7 @@ import {
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
-import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
+import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../adapters/browserRunPersistence";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
 import { recordPerformance } from "../performanceDiagnostics";
