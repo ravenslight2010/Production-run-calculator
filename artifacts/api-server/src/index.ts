@@ -5,6 +5,7 @@ import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
+import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
 import { startAutoTrackServerTicks } from "./routes/sync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -140,11 +141,11 @@ async function initializeStartup(startedAt: number): Promise<void> {
       throw new Error("forced startup test failure");
     }
     await runDataHeals();
-  } catch {
-    const errorCode = "data_heals_failed";
+  } catch (err) {
+    const { repairId, errorCode } = classifyStartupRepairFailure(err);
     markStartupFailed("data_heals", errorCode);
     logger.error(
-      { stage: "data_heals", durationMs: performance.now() - startedAt, outcome: "degraded", errorCode },
+      { stage: "data_heals", repairId, durationMs: performance.now() - startedAt, outcome: "degraded", errorCode },
       "Startup initialization failed",
     );
     recordStartupEvent("data_heals", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode });

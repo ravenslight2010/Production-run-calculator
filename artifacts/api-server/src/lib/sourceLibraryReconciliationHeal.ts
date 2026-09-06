@@ -1,4 +1,5 @@
 import { gunzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import {
   brandProfilesTable,
@@ -32,6 +33,10 @@ export const SOURCE_LIBRARY_RECONCILIATION_MANIFEST = {
   excludedOlderDuplicates: 0,
 } as const;
 export const SOURCE_LIBRARY_RECONCILIATION_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
+// Independent, hand-reviewed release contract. Updating generated input alone
+// cannot alter this v1 payload; a changed plan needs a new repair/version.
+export const SOURCE_LIBRARY_RECONCILIATION_V1_EXPECTED_PLAN_SHA256 =
+  "c9a6295b3bd8868ea4f002472214a7ee8c4d05baf9eca99e12e787af3eb4a2ce";
 export const SOURCE_LIBRARY_RECONCILIATION_FROM_DATE = "2026-08-26";
 export type ReconciliationTable = "dough_recipes" | "sauce_recipes" | "cheese_recipes" | "mixes";
 export type ReconciliationProposal = {
@@ -48,6 +53,13 @@ export type SourceLibraryReconciliationPlan = {
 };
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  }
+  return value;
 }
 
 /** Reject every report field outside the reviewed automatic action boundary. */
@@ -82,14 +94,25 @@ export function parseSourceLibraryReconciliationPlan(value: unknown): SourceLibr
   const replacements = proposals.filter((proposal) => proposal.action === "replace-components-from-approved-source");
   const links = proposals.filter((proposal) => proposal.action === "link-source-identity");
   if (replacements.length !== 46 || links.length !== 22) throw new Error("Unexpected source-library automatic proposal count");
-  return { replacements, links, allZeroStubs };
+  return deepFreeze({ replacements, links, allZeroStubs });
 }
 export function loadSourceLibraryReconciliationPlan(): SourceLibraryReconciliationPlan {
   return SOURCE_LIBRARY_RECONCILIATION_PLAN;
 }
 export { SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256 };
+function generatedPlanJson(): string {
+  const json = gunzipSync(Buffer.from(SOURCE_LIBRARY_RECONCILIATION_PLAN_GZIP_BASE64, "base64")).toString("utf8");
+  const hash = createHash("sha256").update(json).digest("hex");
+  if (hash !== SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256) {
+    throw new Error("Source-library reconciliation generated plan hash does not match its reviewed contract");
+  }
+  if (hash !== SOURCE_LIBRARY_RECONCILIATION_V1_EXPECTED_PLAN_SHA256) {
+    throw new Error("Source-library reconciliation v1 plan differs from its immutable release contract");
+  }
+  return json;
+}
 export const SOURCE_LIBRARY_RECONCILIATION_PLAN = parseSourceLibraryReconciliationPlan(
-  JSON.parse(gunzipSync(Buffer.from(SOURCE_LIBRARY_RECONCILIATION_PLAN_GZIP_BASE64, "base64")).toString("utf8")),
+  JSON.parse(generatedPlanJson()),
 );
 
 type JsonRecord = Record<string, unknown>;

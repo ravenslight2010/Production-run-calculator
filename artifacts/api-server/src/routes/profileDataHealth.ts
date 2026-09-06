@@ -3,7 +3,6 @@ import { and, desc, eq, gte } from "drizzle-orm";
 import {
   auditLogsTable,
   brandProfilesTable,
-  dataHealsTable,
   dataHealthRepairBatchesTable,
   dailySyncTable,
   db,
@@ -19,6 +18,7 @@ import { requireCapability } from "../middlewares/requireCapability";
 import { buildMasterDataHealthReport, type MasterDataHealthReport } from "../lib/masterDataHealth";
 import { applyAiRetentionCleanup, buildAiRetentionReport, type AiRetentionReport } from "../lib/aiRetention";
 import { sourceLibraryReconciliationStatus, type SourceLibraryReconciliationStatus } from "../lib/sourceLibraryReconciliationHeal";
+import { findRepairResult } from "../lib/repairResultsRepository";
 
 type JsonRecord = Record<string, unknown>;
 type RecipeKind = "dough" | "sauce";
@@ -316,14 +316,7 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     buildAiRetentionReport(executor),
     sourceLibraryReconciliationStatus(executor, scope),
   ]);
-  const [marker] = await executor
-    .select({
-      appliedAt: dataHealsTable.appliedAt,
-      result: dataHealsTable.result,
-    })
-    .from(dataHealsTable)
-    .where(eq(dataHealsTable.id, "profile-name-link-stub-purge-v1"))
-    .limit(1);
+  const marker = await findRepairResult(executor, "profile-name-link-stub-purge-v1");
   const result = record(marker?.result);
   const removed = record(result.removedStubs);
   const cleanupHistory = marker ? {

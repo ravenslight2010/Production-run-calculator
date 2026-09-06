@@ -61,10 +61,6 @@ import {
   planBrandAliasRepoints,
 } from "./brandDriftHeal";
 import {
-  CRB_INGREDIENT_HEAL_ROWS,
-  isAffectedCrbIngredientRow,
-} from "./crbIngredientHeal";
-import {
   healSeaSaltComponents,
   SEA_SALT_DOUGH_TARGETS,
   SEA_SALT_SAUCE_TARGETS,
@@ -72,6 +68,17 @@ import {
 } from "./seaSaltHeal";
 import { planIngredientDuplicateMerges } from "./ingredientDuplicateHeal";
 import { loadSourceLibraryReconciliationPlan } from "./sourceLibraryReconciliationHeal";
+import {
+  RepairRegistry,
+  runAutomaticRepairs,
+  type RepairDefinition,
+  type RepairTransaction,
+} from "./repairRegistry";
+import {
+  liveProfileRecipeLinkRepair,
+  LIVE_PROFILE_RECIPE_LINK_REPAIR_ID,
+} from "./repairs/liveProfileRecipeLinkRepair";
+import { crbIngredientRepair, CRB_INGREDIENT_REPAIR_ID } from "./repairs/crbIngredientRepair";
 
 // One-time data heals, applied at boot (best-effort, after listen — like
 // seedRoles). Each heal claims its marker row in data_heals FIRST, inside the
@@ -86,63 +93,9 @@ const CHEESE_POISON_HEAL_ID = "cheese-import-poison-cleanup-v1";
 // twelve doughball variants), but a family-name backstop skipped the empty
 // landed "CRB Recipe" pool row. Repair only that proven stub; a non-empty row
 // is manager-entered data and must remain untouched.
-const CRB_INGREDIENT_HEAL_ID = "crb-ingredient-conversion-v1";
 const CRB_FAMILY_CONSOLIDATION_HEAL_ID = "crb-dough-family-consolidation-v1";
 // Only rewrite current and future day-state rows; past production history stays intact.
 const CRB_FAMILY_CONSOLIDATION_FROM_DATE = "2026-08-22";
-
-const LIVE_PROFILE_RECIPE_LINK_HEAL_ID = "live-profile-recipe-link-repair-v1";
-const LIVE_PROFILE_RECIPE_LINK_REPAIRS = [
-  { brand: "aldo's", flavor: "sausage", field: "frontlineRecipeName", from: "Aldo's Sauce (made in house)", to: "Aldo's Sauce" },
-  { brand: "basha's ultra thin crust", flavor: "5 cheese", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
-  { brand: "basha's ultra thin crust", flavor: "bbq chicken", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
-  { brand: "basha's ultra thin crust", flavor: "hawaiian", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
-  { brand: "basha's ultra thin crust", flavor: "ultimate pepperoni", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
-] as const;
-
-async function runLiveProfileRecipeLinkRepair(): Promise<void> {
-  await db.transaction(async (tx) => {
-    const claimed = await tx
-      .insert(dataHealsTable)
-      .values({ id: LIVE_PROFILE_RECIPE_LINK_HEAL_ID })
-      .onConflictDoNothing({ target: dataHealsTable.id })
-      .returning({ id: dataHealsTable.id });
-    if (claimed.length === 0) return;
-
-    const profiles = await tx.select().from(brandProfilesTable)
-      .where(eq(brandProfilesTable.scope, "live"))
-      .for("update");
-    const recipes = await tx.select().from(doughRecipesTable)
-      .where(eq(doughRecipesTable.scope, "live"));
-    const sauces = await tx.select().from(sauceRecipesTable)
-      .where(eq(sauceRecipesTable.scope, "live"));
-    let updated = 0;
-    for (const profile of profiles) {
-      const repair = LIVE_PROFILE_RECIPE_LINK_REPAIRS.find((candidate) =>
-        candidate.brand === profile.brand.trim().toLowerCase() &&
-        candidate.flavor === profile.flavor.trim().toLowerCase() &&
-        String((profile.values ?? {})[candidate.field] ?? "").trim() === candidate.from,
-      );
-      if (!repair) continue;
-      const targetRows = repair.field === "doughRecipeName" ? recipes : sauces;
-      const target = targetRows.find((row) => row.name.trim().toLowerCase() === repair.to.toLowerCase());
-      if (!target) continue;
-      const values = { ...(profile.values ?? {}) } as Record<string, unknown>;
-      values[repair.field] = target.name;
-      await tx.update(brandProfilesTable).set({
-        values,
-        updatedAtMs: Math.max((profile.updatedAtMs ?? 0) + 1, Date.now()),
-      }).where(and(
-        eq(brandProfilesTable.key, profile.key),
-        eq(brandProfilesTable.scope, profile.scope),
-      ));
-      updated++;
-    }
-    const result = { scanned: profiles.length, updated };
-    await tx.update(dataHealsTable).set({ result }).where(eq(dataHealsTable.id, LIVE_PROFILE_RECIPE_LINK_HEAL_ID));
-    logger.info({ heal: LIVE_PROFILE_RECIPE_LINK_HEAL_ID, ...result }, "Data heal applied");
-  });
-}
 
 function crbComponentsMatch(
   left: ReadonlyArray<{ ingredient?: string; lbs?: number }> | null | undefined,
@@ -290,35 +243,6 @@ async function runCrbDoughFamilyConsolidation(): Promise<void> {
       .set({ result })
       .where(eq(dataHealsTable.id, CRB_FAMILY_CONSOLIDATION_HEAL_ID));
     logger.info({ heal: CRB_FAMILY_CONSOLIDATION_HEAL_ID, ...result }, "Data heal applied");
-  });
-}
-
-async function runCrbIngredientHeal(): Promise<void> {
-  await db.transaction(async (tx) => {
-    const claimed = await tx
-      .insert(dataHealsTable)
-      .values({ id: CRB_INGREDIENT_HEAL_ID })
-      .onConflictDoNothing({ target: dataHealsTable.id })
-      .returning({ id: dataHealsTable.id });
-    if (claimed.length === 0) return;
-
-    const rows = await tx
-      .select()
-      .from(doughRecipesTable)
-      .where(and(eq(doughRecipesTable.scope, "live"), eq(sql`lower(${doughRecipesTable.name})`, "crb recipe")))
-      .for("update");
-    let updated = 0;
-    for (const row of rows) {
-      if (!isAffectedCrbIngredientRow(row)) continue;
-      await tx
-        .update(doughRecipesTable)
-        .set({ components: [...CRB_INGREDIENT_HEAL_ROWS], updatedAt: new Date() })
-        .where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, row.scope)));
-      updated++;
-    }
-    const result = { scanned: rows.length, updated, rowsAdded: CRB_INGREDIENT_HEAL_ROWS.length };
-    await tx.update(dataHealsTable).set({ result }).where(eq(dataHealsTable.id, CRB_INGREDIENT_HEAL_ID));
-    logger.info({ heal: CRB_INGREDIENT_HEAL_ID, ...result }, "Data heal applied");
   });
 }
 
@@ -3687,58 +3611,110 @@ async function runHistoricalHealResultBackfill(): Promise<void> {
   });
 }
 
+/** Registration-only view used by startup and contract tests; has no DB effects. */
+export function registeredAutomaticDataHeals(): RepairRegistry<RepairTransaction> {
+  // Do not sort or otherwise derive this sequence. Existing marker ids were
+  // released in this exact order; it is a historical contract.
+  const automaticRepairs: ReadonlyArray<readonly [string, () => Promise<void>]> = Object.freeze([
+    [HISTORICAL_HEAL_RESULT_BACKFILL_ID, runHistoricalHealResultBackfill],
+    [INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID, runIngredientActiveNameDedupe],
+    [LIVE_PROFILE_RECIPE_LINK_REPAIR_ID, async () => undefined],
+    [CRB_INGREDIENT_REPAIR_ID, async () => undefined],
+    [CRB_FAMILY_CONSOLIDATION_HEAL_ID, runCrbDoughFamilyConsolidation],
+    [CHEESE_POISON_HEAL_ID, runCheesePoisonCleanup],
+    [SPEC_ALIAS_HYGIENE_HEAL_ID, runSpecAliasHygienePurge],
+    [CHEESE_DUP_HEAL_ID, runCheeseDuplicateNamePurge],
+    [GENERIC_MIX_POISON_HEAL_ID, runGenericMixPoisonPurge],
+    [CHEESE_MIX_CROSSOVER_HEAL_ID, runCheeseMixCrossoverPurge],
+    [CHEESE_SHARE_BACKFILL_HEAL_ID, runCheeseShareBackfill],
+    [CHEESE_OZ_DEPOISON_HEAL_ID, runCheeseOzDepoison],
+    [NAMED_RECIPE_NAME_CLEANUP_HEAL_ID, runNamedRecipeNameCleanup],
+    [DOUGH_YIELD_DEPOISON_HEAL_ID, runDoughYieldDepoison],
+    [DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID, runDoughFamilyWeightDepoison],
+    [SMD_PEP_CHEESE_RESTORE_HEAL_ID, runSmdPepCheeseRestore],
+    [SEA_SALT_HEAL_ID, runSeaSaltAliasUndo],
+    [MIX_DUP_HEAL_ID, runMixDuplicateNamePurge],
+    [PURCHASED_CRUST_DIE_HEAL_ID, runPurchasedCrustDieDepoison],
+    [DOUGH_VARIANT_SUFFIX_DEDUPE_HEAL_ID, runDoughVariantSuffixDedupe],
+    [DOUGH_MERGE_VANISH_HEAL_ID, runDoughMergeVanishRestore],
+    [BOGUS_MERGE_ALIAS_HEAL_ID, runBogusMergeAliasPurge],
+    [CROSSLINK_PARSE_HEAL_ID, runCrosslinkedSavedParsePurge],
+    [ALDO_CHEESE_OZ_HEAL_ID, runAldoCheeseOzDepoison],
+    [BOBO_CROSS_FAMILY_HEAL_ID, runBoboCrossFamilyAliasUndo],
+    [NATURAL_PEP_HEAL_ID, runNaturalPepNameDepoison],
+    [BRAND_FAN_HEAL_ID, runBrandFanDoughDepoison],
+    [BRAND_DRIFT_HEAL_ID, runBrandDriftRename],
+    [CRB_LUCIA_CUSTOMERS_V2_HEAL_ID, runCrbLuciaVariantCustomersV2],
+    [JULY_2026_PROFILE_CORRECTIONS_V1, runJuly2026ProfileCorrections],
+    [JULY_2026_AUDIT_CORRECTIONS_V2, runJuly2026AuditCorrectionsV2],
+    [JULY_2026_AUDIT_CORRECTIONS_V3, runJuly2026AuditCorrectionsV3],
+    [APPLICATOR_CONTAMINATION_DEPOISON_ID, runApplicatorContaminationDepoison],
+    [SYNC_ROW_BRAND_RESTORE_ID, runSyncRowNameRegistryRestore],
+    [BRAND_DUPLICATE_PURGE_ID, runBrandDuplicatePurge],
+    [TUNNEL_PRE_POST_DEFAULT_HEAL_ID, runTunnelPrePostDefaultHeal],
+    [AUG2026_CHEESE_FIX_ID, runAugust2026ImportFixCheeseRecipes],
+    [AUG2026_MIXES_FIX_ID, runAugust2026ImportFixMixes],
+    [AUG2026_PROFILES_FIX_ID, runAugust2026ImportFixProfiles],
+    [AUG2026_SAUCE_FIX_ID, runAugust2026ImportFixSauces],
+    [AUG2026_CHEESE_LBS_ID, runAugust2026CheeseRecipeLbs],
+    [AUG2026_LOWES_MIX_STRAY_ID, runAugust2026LowesMixFixes],
+    [CHEESE_COMPONENT_OZ_STRIP_HEAL_ID, runCheeseComponentOzStrip],
+    [HANNAFORD_TIKKA_FIX_ID, runHannafordTikkaMasalaFix],
+    [PROFILE_NAME_LINK_STUB_PURGE_ID, runProfileNameLinkStubPurge],
+    [WORKBOOK_IMPORT_STUB_PURGE_ID, runWorkbookImportStubPurge],
+    [AUG19_SAVED_SPEC_PROFILE_REPAIR_ID, runAug19SavedSpecProfileRepair],
+    [AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID, runAug19SavedSpecProfileRepairV2],
+    [FRESH_DEVICE_RUN_CONTAMINATION_HEAL_ID, runFreshDeviceRunContaminationCleanup],
+    [RESOLVED_INCIDENT_WORKFLOW_RECONCILIATION_HEAL_ID, runResolvedIncidentWorkflowReconciliation],
+    [SOURCE_LIBRARY_RECONCILIATION_HEAL_ID, runSourceLibraryReconciliationHeal],
+  ]);
+  const registry = new RepairRegistry<RepairTransaction>();
+  let previous: string | undefined;
+  for (const [id, legacyRun] of automaticRepairs) {
+    const definition = id === LIVE_PROFILE_RECIPE_LINK_REPAIR_ID ? liveProfileRecipeLinkRepair
+      : id === CRB_INGREDIENT_REPAIR_ID ? crbIngredientRepair
+        : legacyRepairCompatibilityAdapter(id, legacyRun, previous);
+    registry.register(definition);
+    previous = id;
+  }
+  return registry;
+}
+
 export async function runDataHeals(): Promise<void> {
-  await runHistoricalHealResultBackfill();
-  await runIngredientActiveNameDedupe();
-  await runLiveProfileRecipeLinkRepair();
-  await runCrbIngredientHeal();
-  await runCrbDoughFamilyConsolidation();
-  await runCheesePoisonCleanup();
-  await runSpecAliasHygienePurge();
-  await runCheeseDuplicateNamePurge();
-  await runGenericMixPoisonPurge();
-  await runCheeseMixCrossoverPurge();
-  await runCheeseShareBackfill();
-  await runCheeseOzDepoison();
-  await runNamedRecipeNameCleanup();
-  await runDoughYieldDepoison();
-  await runDoughFamilyWeightDepoison();
-  await runSmdPepCheeseRestore();
-  await runSeaSaltAliasUndo();
-  await runMixDuplicateNamePurge();
-  await runPurchasedCrustDieDepoison();
-  await runDoughVariantSuffixDedupe();
-  await runDoughMergeVanishRestore();
-  await runBogusMergeAliasPurge();
-  await runCrosslinkedSavedParsePurge();
-  await runAldoCheeseOzDepoison();
-  await runBoboCrossFamilyAliasUndo();
-  await runNaturalPepNameDepoison();
-  await runBrandFanDoughDepoison();
-  await runBrandDriftRename();
-  await runCrbLuciaVariantCustomersV2();
-  await runJuly2026ProfileCorrections();
-  await runJuly2026AuditCorrectionsV2();
-  await runJuly2026AuditCorrectionsV3();
-  await runApplicatorContaminationDepoison();
-  await runSyncRowNameRegistryRestore();
-  await runBrandDuplicatePurge();
-  await runTunnelPrePostDefaultHeal();
-  await runAugust2026ImportFixCheeseRecipes();
-  await runAugust2026ImportFixMixes();
-  await runAugust2026ImportFixProfiles();
-  await runAugust2026ImportFixSauces();
-  await runAugust2026CheeseRecipeLbs();
-  await runAugust2026LowesMixFixes();
-  await runCheeseComponentOzStrip();
-  await runHannafordTikkaMasalaFix();
-  await runProfileNameLinkStubPurge();
-  await runWorkbookImportStubPurge();
-  await runAug19SavedSpecProfileRepair();
-  await runAug19SavedSpecProfileRepairV2();
-  await runFreshDeviceRunContaminationCleanup();
-  await runResolvedIncidentWorkflowReconciliation();
-  await runSourceLibraryReconciliationHeal();
+  await runAutomaticRepairs(registeredAutomaticDataHeals());
+}
+
+/**
+ * Older repairs predate the shared runner and already own an atomic
+ * transaction/marker pair.  This adapter makes their registration, ordering,
+ * mode filtering and startup attribution identical to new repairs without
+ * changing the released mutation bodies or double-claiming their marker.
+ */
+function legacyRepairCompatibilityAdapter(
+  id: string,
+  execute: () => Promise<void>,
+  previous?: string,
+): RepairDefinition<RepairTransaction> {
+  return {
+    id,
+    owner: "historical-data-repair",
+    dependencies: previous ? [previous] : [],
+    eligibility: "Released historical repair; its immutable implementation enforces the reviewed row predicate.",
+    mode: "automatic",
+    executionMode: "legacy-self-transactional",
+    resultOwnership: "legacy-marker",
+    managerAllowed: false,
+    safety: {
+      affectedScope: "The release-specific tables, scopes, and date boundary in the immutable historical implementation.",
+      excludedScope: "Rows outside that implementation's exact reviewed predicate, including protected manager values.",
+      rollback: "Markers and bounded stored results retain release evidence; reversal requires an explicit reviewed repair.",
+      evidence: "The shipped marker id and source-owned historical implementation are the release contract.",
+    },
+    async execute() {
+      await execute();
+      return {};
+    },
+  };
 }
 
 const INGREDIENT_ACTIVE_NAME_DEDUPE_HEAL_ID =
