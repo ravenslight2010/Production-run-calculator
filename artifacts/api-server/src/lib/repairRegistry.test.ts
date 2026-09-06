@@ -94,6 +94,27 @@ describe("registered repair runner", () => {
     });
     expect(memory.marker()).toBeUndefined();
   });
+
+  it("persists bounded released nested result evidence unchanged", async () => {
+    const memory = memoryDatabase();
+    const definition = repair("runner-nested-result-v1");
+    (definition as any).execute = async () => ({
+      removedStubs: { dough: 1, sauce: 0, cheese: 2, mix: 0 },
+      details: [{ profile: "bounded-id", fields: ["app1", "app2"] }],
+    });
+    await expect(runRegisteredRepair(definition as any, memory.database as any)).resolves.toEqual({
+      id: "runner-nested-result-v1",
+      status: "applied",
+      result: {
+        removedStubs: { dough: 1, sauce: 0, cheese: 2, mix: 0 },
+        details: [{ profile: "bounded-id", fields: ["app1", "app2"] }],
+      },
+    });
+    expect(memory.marker()?.result).toEqual({
+      removedStubs: { dough: 1, sauce: 0, cheese: 2, mix: 0 },
+      details: [{ profile: "bounded-id", fields: ["app1", "app2"] }],
+    });
+  });
 });
 
 describe("legacy marker result bounds", () => {

@@ -35,7 +35,8 @@ describe("historical automatic repair registration", () => {
       "sync-row-name-registry-restore-v1", "brand-duplicate-purge-v1", "tunnel-pre-post-default-v1",
       "aug2026-import-fix-cheese-recipes-v1", "aug2026-import-fix-mixes-v1", "aug2026-import-fix-profiles-v1",
       "aug2026-import-fix-sauce-recipes-v1", "aug2026-cheese-recipe-lbs-v1",
-      "aug2026-lowes-mix-stray-component-v1", "cheese-component-oz-strip-v2", "hannaford-tikka-masala-fix-v1",
+      "aug2026-lowes-mix-stray-component-v1", "cheese-component-oz-strip-v1", "cheese-component-oz-strip-v2",
+      "hannaford-tikka-masala-fix-v1",
       "profile-name-link-stub-purge-v1", "workbook-import-stub-purge-v1", "aug19-saved-spec-profile-repair-v1",
       "aug19-saved-spec-profile-repair-v2",
       "fresh-device-run-contamination-v1",
@@ -43,6 +44,10 @@ describe("historical automatic repair registration", () => {
       "source-library-reconciliation-2026-08-26-v1",
     ]);
     expect(repairs.every((repair) => repair.mode === "automatic" && !repair.managerAllowed)).toBe(true);
+    expect(repairs.every((repair) =>
+      repair.executionMode === "runner-transactional" &&
+      repair.resultOwnership === "runner-marker",
+    )).toBe(true);
     expect(repairs.every((repair) => Object.isFrozen(repair))).toBe(true);
     repairs.forEach((repair, index) => expect(repair.dependencies).toEqual(index === 0 || index === 2 || index === 3
       ? [] : [ids[index - 1]]));

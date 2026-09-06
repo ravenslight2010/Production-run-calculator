@@ -10,7 +10,27 @@ import { logger } from "./logger";
 export type RepairMode = "automatic" | "manager";
 export type RepairExecutionMode = "runner-transactional" | "legacy-self-transactional";
 export type RepairResultOwnership = "runner-marker" | "legacy-marker";
-export type RepairResult = Readonly<Record<string, number | boolean | string | null>>;
+/**
+ * Marker results are release evidence, not a telemetry transport.  A number of
+ * the repairs which predate the registry recorded small grouped counters and
+ * reviewed detail lists, so the runner must be able to own those exact marker
+ * values when those repairs are migrated.  The recursive bounds below remain
+ * the authority for both old and new results.
+ */
+export interface RepairResultObject {
+  readonly [key: string]: RepairResultValue;
+}
+export type RepairResultValue =
+  | number
+  | boolean
+  | string
+  | null
+  /** Optional object properties are represented as undefined by TS only;
+   * recursive runtime validation still rejects undefined payload values. */
+  | undefined
+  | readonly RepairResultValue[]
+  | RepairResultObject;
+export type RepairResult = RepairResultObject;
 export type RepairSafety = Readonly<{
   affectedScope: string;
   excludedScope: string;
@@ -61,15 +81,6 @@ function validId(id: string) {
   return /^[a-z0-9][a-z0-9-]{2,159}$/u.test(id);
 }
 
-function bounded(result: RepairResult): boolean {
-  const entries = Object.entries(result);
-  return entries.length <= 32 && entries.every(([key, value]) =>
-    /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/u.test(key) &&
-    (typeof value !== "number" || (Number.isFinite(value) && Math.abs(value) <= 1_000_000_000)) &&
-    (typeof value === "number" || typeof value === "boolean" || typeof value === "string" || value === null) &&
-    (typeof value !== "string" || value.length <= 256));
-}
-
 /** Historical marker results predate the flat runner contract. Preserve their
  * reviewed nested count/detail shapes while preventing unbounded telemetry. */
 export function isBoundedLegacyResult(value: unknown): value is Record<string, unknown> {
@@ -86,6 +97,10 @@ export function isBoundedLegacyResult(value: unknown): value is Record<string, u
       key.length <= 64 && /^[a-zA-Z][a-zA-Z0-9_:-]*$/u.test(key) && visit(child, depth + 1));
   };
   return !!value && !Array.isArray(value) && visit(value, 0);
+}
+
+function bounded(result: RepairResult): boolean {
+  return isBoundedLegacyResult(result);
 }
 
 export class RepairRegistry<Tx = unknown> {
@@ -132,12 +147,52 @@ export class RepairRegistry<Tx = unknown> {
 type Database = Pick<typeof db, "transaction" | "select">;
 export type RepairTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+async function runLegacySelfTransactionalRepair(
+  repair: RepairDefinition<RepairTransaction>,
+  database: Database,
+): Promise<RepairRunOutcome> {
+  const prior = await database.select({ id: dataHealsTable.id, result: dataHealsTable.result })
+    .from(dataHealsTable).where(eq(dataHealsTable.id, repair.id)).limit(1);
+  if (prior[0]) return { id: repair.id, status: "skipped" };
+  if (repair.dependencies.length) {
+    const completed = await database.select({ id: dataHealsTable.id }).from(dataHealsTable)
+      .where(inArray(dataHealsTable.id, [...repair.dependencies]));
+    if (completed.length !== repair.dependencies.length) {
+      throw new RepairExecutionError(repair.id, "dependency");
+    }
+  }
+  try {
+    await repair.execute(undefined as unknown as RepairTransaction);
+    const after = await database.select({ result: dataHealsTable.result }).from(dataHealsTable)
+      .where(eq(dataHealsTable.id, repair.id)).limit(1);
+    if (!after[0]) throw new RepairExecutionError(repair.id, "result");
+    const stored = after[0].result;
+    const result = isBoundedLegacyResult(stored) ? stored as RepairResult : {};
+    logger.info({
+      repair: repair.id,
+      owner: repair.owner,
+      resultTelemetry: isBoundedLegacyResult(stored) ? "valid" : "omitted",
+      safeCounts: {
+        topLevelKeys: stored && typeof stored === "object" && !Array.isArray(stored)
+          ? Math.min(Object.keys(stored).length, 64) : 0,
+      },
+    }, "Legacy data repair applied");
+    return { id: repair.id, status: "applied", result };
+  } catch (cause) {
+    if (cause instanceof RepairExecutionError) throw cause;
+    throw new RepairExecutionError(repair.id, "execution", cause);
+  }
+}
+
 /** Runs one registered command.  Marker claim and marker result are deliberately
  * in the same transaction as mutations, so a failure rolls all three back. */
 export async function runRegisteredRepair(
   repair: RepairDefinition<RepairTransaction>,
   database: Database = db,
 ): Promise<RepairRunOutcome> {
+  if (repair.executionMode === "legacy-self-transactional") {
+    return runLegacySelfTransactionalRepair(repair, database);
+  }
   try {
     return await database.transaction(async (tx) => {
       // Serialize marker claims across app instances without holding a
@@ -179,57 +234,7 @@ export async function runAutomaticRepairs(
   registry.validateOrder();
   const results: RepairRunOutcome[] = [];
   for (const repair of registry.list("automatic")) {
-    if (repair.executionMode !== "runner-transactional") {
-      const prior = await database.select({ id: dataHealsTable.id, result: dataHealsTable.result })
-        .from(dataHealsTable).where(eq(dataHealsTable.id, repair.id)).limit(1);
-      if (prior[0]) {
-        results.push({ id: repair.id, status: "skipped" });
-        continue;
-      }
-      if (repair.dependencies.length) {
-        const completed = await database.select({ id: dataHealsTable.id }).from(dataHealsTable)
-          .where(inArray(dataHealsTable.id, [...repair.dependencies]));
-        if (completed.length !== repair.dependencies.length) {
-          throw new RepairExecutionError(repair.id, "dependency");
-        }
-      }
-      try {
-        // Compatibility repair bodies already use marker-first transactions.
-        // Do not add an outer advisory transaction: doing so would create a
-        // nested transaction and change their published atomicity semantics.
-        await repair.execute(undefined as unknown as RepairTransaction);
-        const after = await database.select({ result: dataHealsTable.result }).from(dataHealsTable)
-          .where(eq(dataHealsTable.id, repair.id)).limit(1);
-        if (!after[0]) {
-          throw new RepairExecutionError(repair.id, "result");
-        }
-        const stored = after[0].result;
-        const recursivelyBounded = isBoundedLegacyResult(stored);
-        const flatResult = recursivelyBounded && bounded(stored as RepairResult) &&
-          (!repair.validateResult || repair.validateResult(stored as RepairResult))
-          ? stored as RepairResult
-          : {};
-        // A legacy transaction has already committed. Historical null or large
-        // detail payloads are valid released evidence and must never degrade
-        // startup afterward. Log classification/counts only, never raw payload.
-        logger.info({
-          repair: repair.id,
-          owner: repair.owner,
-          resultTelemetry: recursivelyBounded ? "valid" : "omitted",
-          safeCounts: {
-            topLevelKeys: stored && typeof stored === "object" && !Array.isArray(stored)
-              ? Math.min(Object.keys(stored).length, 64)
-              : 0,
-          },
-        }, "Legacy data repair applied");
-        results.push({ id: repair.id, status: "applied", result: flatResult });
-      } catch (cause) {
-        if (cause instanceof RepairExecutionError) throw cause;
-        throw new RepairExecutionError(repair.id, "execution", cause);
-      }
-    } else {
-      results.push(await runRegisteredRepair(repair, database));
-    }
+    results.push(await runRegisteredRepair(repair, database));
   }
   return results;
 }
