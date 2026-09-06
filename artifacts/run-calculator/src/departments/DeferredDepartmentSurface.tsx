@@ -1,6 +1,7 @@
 import {
   Component,
   lazy,
+  Suspense,
   useMemo,
   useState,
   type ComponentProps,
@@ -65,7 +66,7 @@ class DeferredRetryBoundary extends Component<RetryBoundaryProps, RetryBoundaryS
   }
 }
 
-function DeferredSurface<T extends ComponentType<any>>({
+export function DeferredSurface<T extends ComponentType<any>>({
   label,
   load,
   componentProps,
@@ -79,9 +80,17 @@ function DeferredSurface<T extends ComponentType<any>>({
       label={label}
       onRetry={() => setAttempt((current) => current + 1)}
     >
-      <div aria-live="polite">
-        <LazySurface {...componentProps} />
-      </div>
+      <Suspense
+        fallback={
+          <p className="text-xs text-muted-foreground" role="status">
+            Loading {label}…
+          </p>
+        }
+      >
+        <div aria-live="polite">
+          <LazySurface {...componentProps} />
+        </div>
+      </Suspense>
     </DeferredRetryBoundary>
   );
 }

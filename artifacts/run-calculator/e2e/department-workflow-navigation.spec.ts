@@ -204,3 +204,31 @@ test("production, warehouse, QC, and management remain connected after navigatio
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await screenshot(page, testInfo, "05-production-after-reload");
 });
+
+test("manager can open the Dough recipe editor without an uncaught page error", async ({
+  page,
+}, testInfo) => {
+  const username = uid();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  testUsernames.add(username);
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await dismissOnboarding(page);
+
+  await openMore(page);
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+  await expect(settings).toBeVisible();
+  await settings.getByRole("button", { name: "Recipes", exact: true }).click();
+
+  await expect(
+    settings.getByRole("heading", { name: "Dough Recipes", exact: true }),
+  ).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Add Dough Recipe" })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+  await screenshot(page, testInfo, "manager-dough-recipes");
+});
