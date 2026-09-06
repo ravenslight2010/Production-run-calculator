@@ -29,6 +29,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
+const FORM_LIFECYCLE_FILE = path.join(__dirname, "hooks", "useHomeFormLifecycle.ts");
 
 type CallSite = {
   line: number;
@@ -181,10 +182,15 @@ function analyzeSource(source: string, fileName = "home.tsx"): CallSite[] {
 
 const homeSrc = fs.readFileSync(HOME_FILE, "utf8");
 const homeSites = analyzeSource(homeSrc);
+const formLifecycleSites = analyzeSource(
+  fs.readFileSync(FORM_LIFECYCLE_FILE, "utf8"),
+  "useHomeFormLifecycle.ts",
+);
 
 describe("source guard: run-value writes in home.tsx must stamp before they sync", () => {
   it("every saveRunValues call site stamps (markRunValuesUpdated / saveRunValuesUpdated) or is a pure form flush", () => {
-    const violations = homeSites.filter((s) => s.verdict === "VIOLATION");
+    const violations = [...homeSites, ...formLifecycleSites]
+      .filter((s) => s.verdict === "VIOLATION");
     const report = violations
       .map((s) => `  home.tsx:${s.line} in ${s.enclosingName}() — ${s.detail}`)
       .join("\n");
@@ -225,13 +231,15 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
         if (/\.test\.(ts|tsx)$/.test(entry.name)) continue;
         const rel = path.relative(srcDir, full);
-        // contexts/LiveRunContext.tsx: pre-seeds next-run dough counters when the
-        // press finishes; the write is immediately followed by markRunValuesUpdated.
+        // The form lifecycle controller owns Home's extracted autosave write and
+        // is analyzed above by the same stamp guard. LiveRunContext pre-seeds
+        // next-run dough counters and stamps immediately afterward.
         if (
           rel === path.join("pages", "home.tsx") ||
           rel === "storage.ts" ||
           rel === path.join("adapters", "browserRunPersistence.ts") ||
-          rel === path.join("contexts", "LiveRunContext.tsx")
+          rel === path.join("contexts", "LiveRunContext.tsx") ||
+          rel === path.join("hooks", "useHomeFormLifecycle.ts")
         ) continue;
         const text = fs.readFileSync(full, "utf8");
         if (/\bsaveRunValues\b/.test(text)) offenders.push(rel);

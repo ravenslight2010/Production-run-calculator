@@ -3,6 +3,73 @@
   "description": "Focused evidence inventory for selective recovery from a checkpoint.",
   "entries": [
     {
+      "id": "home-deferred-import-dialog-boundary",
+      "feature": "Deferred import dialogs retain lazy chunks and deterministic close priority",
+      "files": [
+        "artifacts/run-calculator/src/pages/home.tsx",
+        "artifacts/run-calculator/src/hooks/useHomeImportDialogs.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "closeTopmostImportDialog"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "load={loadSpecImportDialog}"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/hooks/useHomeImportDialogs.test.ts",
+          "contains": "closeTopmostImportDialog"
+        }
+      ],
+      "intentionalDifference": "Home still owns DeferredSurface render conditions and loader functions; the hook moves only dialog state containers and close commands."
+    },
+    {
+      "id": "home-form-lifecycle-boundary",
+      "feature": "Home form identity fences keep current-run healing and autosave isolated",
+      "files": [
+        "artifacts/run-calculator/src/pages/home.tsx",
+        "artifacts/run-calculator/src/hooks/useHomeFormLifecycle.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "useHomeFormLifecycle"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/hooks/useHomeFormLifecycle.test.ts",
+          "contains": "shouldAutosaveHomeForm"
+        }
+      ],
+      "intentionalDifference": "Home remains the sole owner of canonical day state, the react-hook-form instance, provider composition, persistence commands, and sync scheduling."
+    },
+    {
+      "id": "home-sync-coordination-boundary",
+      "feature": "Home keeps sync, wake, reset, and push-generation coordination together",
+      "files": [
+        "artifacts/run-calculator/src/pages/home.tsx",
+        "artifacts/run-calculator/src/hooks/useHomeSyncCoordination.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "useHomeSyncCoordination"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/foregroundSyncWakeGuard.test.ts",
+          "contains": "foreground wake sync barrier"
+        }
+      ],
+      "intentionalDifference": "The hook owns only coordination containers; Home remains the single protocol executor and canonical day/form owner."
+    },
+    {
       "id": "import-history",
       "feature": "Saved import history can be reopened",
       "files": [

@@ -1,5 +1,11 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { useEvent } from "../hooks/useEvent";
+import {
+  useHomeFormIdentityFences,
+  useHomeFormLifecycle,
+} from "../hooks/useHomeFormLifecycle";
+import { useHomeSyncCoordination } from "../hooks/useHomeSyncCoordination";
+import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
@@ -7005,23 +7011,21 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
+  const {
+    showImportDialog, setShowImportDialog, importResult, setImportResult, importInputRef, scheduleImportInputRef,
+    showSpecImport, setShowSpecImport, specImportLoading, setSpecImportLoading, specImportApplying, setSpecImportApplying, specImportError, setSpecImportError, specImportPrepared, setSpecImportPrepared, specImportProgress, setSpecImportProgress, specImportInputRef,
+    showPremixImport, setShowPremixImport, premixImportLoading, setPremixImportLoading, premixImportApplying, setPremixImportApplying, premixImportError, setPremixImportError, premixImportPrepared, setPremixImportPrepared, premixImportProgress, setPremixImportProgress, premixImportInputRef,
+    showShippingImport, setShowShippingImport, shippingImportLoading, setShippingImportLoading, shippingImportApplying, setShippingImportApplying, shippingImportError, setShippingImportError, shippingImportPrepared, setShippingImportPrepared, shippingImportInputRef,
+    showSauceGuideImport, setShowSauceGuideImport, sauceGuideImportLoading, setSauceGuideImportLoading, sauceGuideImportApplying, setSauceGuideImportApplying, sauceGuideImportError, setSauceGuideImportError, sauceGuideImportPrepared, setSauceGuideImportPrepared, sauceGuideImportInputRef,
+    showDoughGuideImport, setShowDoughGuideImport, doughGuideImportLoading, setDoughGuideImportLoading, doughGuideImportApplying, setDoughGuideImportApplying, doughGuideImportError, setDoughGuideImportError, doughGuideImportPrepared, setDoughGuideImportPrepared, doughGuideImportInputRef,
+    showCheeseImport, setShowCheeseImport, cheeseImportLoading, setCheeseImportLoading, cheeseImportApplying, setCheeseImportApplying, cheeseImportError, setCheeseImportError, cheeseImportPrepared, setCheeseImportPrepared, cheeseImportProgress, setCheeseImportProgress, cheeseImportInputRef,
+  } = useHomeImportDialogs();
   // Re-import case-count offers for in-progress runs, awaiting the user's
   // per-run Accept/Keep choice (null = no dialog). Never auto-applied.
   const [caseUpdatePrompt, setCaseUpdatePrompt] = useState<CaseUpdateOffer[] | null>(null);
   const [caseUpdateAccepted, setCaseUpdateAccepted] = useState<Record<string, boolean>>({});
-  const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-  const scheduleImportInputRef = useRef<HTMLInputElement | null>(null);
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
-  const [showSpecImport, setShowSpecImport] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-  const [specImportLoading, setSpecImportLoading] = useState(false);
-  const [specImportApplying, setSpecImportApplying] = useState(false);
-  const [specImportError, setSpecImportError] = useState<string | null>(null);
-  const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
-  const [specImportProgress, setSpecImportProgress] = useState<{ done: number; total: number } | null>(null);
-  const specImportInputRef = useRef<HTMLInputElement | null>(null);
   const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
   const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
   const specPhotoPreviews = useMemo(
@@ -7031,38 +7035,6 @@ export default function Home() {
   useEffect(() => () => {
     for (const url of specPhotoPreviews) URL.revokeObjectURL(url);
   }, [specPhotoPreviews]);
-  const [showPremixImport, setShowPremixImport] = useState(false);
-  const [premixImportLoading, setPremixImportLoading] = useState(false);
-  const [premixImportApplying, setPremixImportApplying] = useState(false);
-  const [premixImportError, setPremixImportError] = useState<string | null>(null);
-  const [premixImportPrepared, setPremixImportPrepared] = useState<PremixImportPrepared | null>(null);
-  const [premixImportProgress, setPremixImportProgress] = useState<{ done: number; total: number } | null>(null);
-  const premixImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showShippingImport, setShowShippingImport] = useState(false);
-  const [shippingImportLoading, setShippingImportLoading] = useState(false);
-  const [shippingImportApplying, setShippingImportApplying] = useState(false);
-  const [shippingImportError, setShippingImportError] = useState<string | null>(null);
-  const [shippingImportPrepared, setShippingImportPrepared] = useState<ShippingImportPrepared | null>(null);
-  const shippingImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showSauceGuideImport, setShowSauceGuideImport] = useState(false);
-  const [sauceGuideImportLoading, setSauceGuideImportLoading] = useState(false);
-  const [sauceGuideImportApplying, setSauceGuideImportApplying] = useState(false);
-  const [sauceGuideImportError, setSauceGuideImportError] = useState<string | null>(null);
-  const [sauceGuideImportPrepared, setSauceGuideImportPrepared] = useState<SauceGuideImportPrepared | null>(null);
-  const sauceGuideImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showDoughGuideImport, setShowDoughGuideImport] = useState(false);
-  const [doughGuideImportLoading, setDoughGuideImportLoading] = useState(false);
-  const [doughGuideImportApplying, setDoughGuideImportApplying] = useState(false);
-  const [doughGuideImportError, setDoughGuideImportError] = useState<string | null>(null);
-  const [doughGuideImportPrepared, setDoughGuideImportPrepared] = useState<DoughGuideImportPrepared | null>(null);
-  const doughGuideImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showCheeseImport, setShowCheeseImport] = useState(false);
-  const [cheeseImportLoading, setCheeseImportLoading] = useState(false);
-  const [cheeseImportApplying, setCheeseImportApplying] = useState(false);
-  const [cheeseImportError, setCheeseImportError] = useState<string | null>(null);
-  const [cheeseImportPrepared, setCheeseImportPrepared] = useState<CheeseImportPrepared | null>(null);
-  const [cheeseImportProgress, setCheeseImportProgress] = useState<{ done: number; total: number } | null>(null);
-  const cheeseImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -7099,13 +7071,15 @@ export default function Home() {
     if (showEditReasonsDialog)  { setShowEditReasonsDialog(false);  return; }
     if (showManageDialog)       { setShowManageDialog(false);       return; }
     if (showScheduleDialog)     { setShowScheduleDialog(false); setScheduleView("list"); return; }
-    if (showImportDialog)       { setShowImportDialog(false);       return; }
-    if (showSpecImport)         { setShowSpecImport(false);         return; }
-    if (showPremixImport)       { setShowPremixImport(false);       return; }
-    if (showShippingImport)     { setShowShippingImport(false);     return; }
-    if (showSauceGuideImport)   { setShowSauceGuideImport(false);   return; }
-    if (showDoughGuideImport)   { setShowDoughGuideImport(false);   return; }
-    if (showCheeseImport)       { setShowCheeseImport(false);       return; }
+    if (closeTopmostImportDialog([
+      { open: showImportDialog, close: () => setShowImportDialog(false) },
+      { open: showSpecImport, close: () => setShowSpecImport(false) },
+      { open: showPremixImport, close: () => setShowPremixImport(false) },
+      { open: showShippingImport, close: () => setShowShippingImport(false) },
+      { open: showSauceGuideImport, close: () => setShowSauceGuideImport(false) },
+      { open: showDoughGuideImport, close: () => setShowDoughGuideImport(false) },
+      { open: showCheeseImport, close: () => setShowCheeseImport(false) },
+    ])) return;
     if (setupEditorOpen)        { setSetupEditorOpen(false);        return; }
     if (showScreensDialog)      { setShowScreensDialog(false);      return; }
     if (showReorderDialog)      { setShowReorderDialog(false);      return; }
@@ -7537,40 +7511,39 @@ export default function Home() {
   // (form.reset hasn't fired yet for the new run), the effect would stamp A's
   // applicator/recipe data onto B's localStorage slot — cross-run contamination.
   // Guard: skip the autosave whenever the form ID and the current run ID disagree.
-  const lastFormRunIdRef = useRef<string>("");
+  const { lastFormRunIdRef, formHandoffRef } = useHomeFormIdentityFences();
   // The first server snapshot must switch the run list and bind the live form as
   // one handoff. The fence rises immediately before that identity change; local
   // offline edits remain available before a connection establishes a baseline.
-  const formHandoffRef = useRef(false);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncBaselineGateRef = useRef(createSyncBaselineGate());
-  const isSyncApplyingRef = useRef(false);
+  const {
+    syncBaselineGateRef, isSyncApplyingRef, syncApplyPushPendingRef,
+    foregroundSyncBarrierRef, foregroundPushPendingRef, foregroundStopIntentRef,
+    foregroundRecoveryRetryRef, foregroundRecoveryNoticeTimerRef,
+    foregroundRecoveryOwnerRef, syncPushGenerationRef, syncPushAbortControllersRef,
+    autoTrackBlocked, setAutoTrackBlocked,
+    autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock,
+    pendingForegroundStopRunId, setPendingForegroundStopRunId,
+    foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement,
+    foregroundRecoveryNotice, setForegroundRecoveryNotice,
+  } = useHomeSyncCoordination();
   // A local lifecycle action can land in the same frame as an inbound SSE
   // snapshot. Keep that write queued instead of dropping it behind the
   // receive-side form/state handoff.
-  const syncApplyPushPendingRef = useRef(false);
   // Foreground reconciliation fence. A clock snap can arrive in the same
   // frame as a stale recovery push, so keep auto-track and outgoing pushes
   // blocked until the date-scoped shared row has been pulled and applied.
-  const foregroundSyncBarrierRef = useRef(false);
-  const foregroundPushPendingRef = useRef(false);
   // A lifecycle tap made during wake recovery is bound to the run visible at
   // tap time. It must not be replayed against whatever run becomes current.
-  const foregroundStopIntentRef = useRef<ForegroundStopIntent | null>(null);
-  const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
-  const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // React Strict Mode can tear down and re-run this effect while an initial
   // reconciliation is still settling. The owner token prevents the old
   // promise from releasing a newer recovery barrier, while still allowing a
   // cancelled first pass to release the fence it raised.
-  const foregroundRecoveryOwnerRef = useRef(0);
   // Every foreground reconciliation starts a new push generation and aborts
   // requests built before wake. The server's metaUpdatedAt merge is still the
   // durable last line of defense if an already-received request completes, but
   // stale responses/retries may no longer update this client's sync signature
   // or re-publish a captured running snapshot after a remote Stop is adopted.
-  const syncPushGenerationRef = useRef(0);
-  const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPushQueueRef = useRef(
     new SingleFlightSyncQueue<{
@@ -7584,8 +7557,6 @@ export default function Home() {
   const syncPushTimingRef = useRef<{ queuedAtPerf: number; queuedAtEpoch: number } | null>(null);
   const syncPushTriggerRef = useRef<SyncMeasurementTrigger>("edit");
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
-  const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
-  const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
   const applySyncCallbackRef = useRef<
     (
       p: SyncPayload,
@@ -7641,12 +7612,6 @@ export default function Home() {
   // from ordinary live updates.
   const lastSyncedHistorySigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
-  const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
-  const [foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement] = useState(0);
-  const [foregroundRecoveryNotice, setForegroundRecoveryNotice] = useState<{
-    kind: "recovering" | "failed" | "outcome";
-    message: string;
-  } | null>(null);
   function showForegroundRecoveryNotice(
     kind: "recovering" | "failed" | "outcome",
     message: string,
@@ -9687,141 +9652,25 @@ export default function Home() {
     replaceFrontline(vals.frontlineRecipe ?? []);
   }
 
-  // Heal the live form when the CURRENT RUN changes without going through an
-  // imperative run-switch handler (those form.reset the target run's values
-  // themselves). The main case: a fresh device's FIRST sync-apply right after
-  // sign-in. The initial SSE payload adopts the remote day (auto-selecting run
-  // 0) and saves every run's values to localStorage, but the apply callback's
-  // form-reset block reads the PRE-apply dayStateRef — whose blank local run id
-  // isn't in the payload — so it skips, leaving the form all-default ("0 cases
-  // needed") until some later remote push happens to land. Anything reading
-  // form.getValues() for the current run (the re-import case-update dialog's
-  // "from" count) sees that stale 0 too. When the current run id changes and
-  // the live form is all-default while the stored copy is populated, load the
-  // stored values. shouldHealFormFromStored (storage.ts) holds the pure
-  // decision: isEmptyOverPopulated (the same guard the sync receive path uses)
-  // means a genuinely edited or legitimately blank form is never touched, and
-  // the lastLocalEditRef window keeps a just-typed edit safe.
-  useEffect(() => {
-    if (!currentRunId) return;
-    const stored = loadRunValues(currentRunId);
-    if (
-      shouldHealFormFromStored(
-        form.getValues(),
-        stored,
-        lastLocalEditRef.current,
-        Date.now(),
-      )
-    ) {
-      const merged = mergeRunDefaults(stored);
-      lastFormRunIdRef.current = currentRunId;
-      form.reset(merged);
-      resetFieldArrays(merged);
-    } else if (
-      // The form was last settled for a DIFFERENT run and still shows values
-      // that differ from this run's stored copy — i.e. it is still displaying
-      // the PREVIOUS run's data. This happens when the current run id changes
-      // without an imperative run-switch handler (which would form.reset
-      // itself): a peer's day reset or a fully-tombstoned run union seeds a
-      // fresh blank placeholder and the sync-apply index clamp lands on it,
-      // but its id isn't in the payload so no reset fires. Settling here
-      // (the old else-branch behavior) let the next form.watch autosave copy
-      // the previous run's casesNeeded/skidsCompleted/recipes into the blank
-      // run's slot — the source of the daily contaminated "Unnamed Run" rows.
-      // Reset the form to the new run's stored copy instead.
-      shouldResetFormOnRunSwitch(
-        form.getValues(),
-        mergeRunDefaults(stored),
-        lastFormRunIdRef.current === currentRunId,
-      )
-    ) {
-      const merged = mergeRunDefaults(stored);
-      lastFormRunIdRef.current = currentRunId;
-      form.reset(merged);
-      resetFieldArrays(merged);
-    } else {
-      // Even when no heal is needed, record that the form is now settled for
-      // this run so the autosave guard doesn't block the first genuine edit.
-      lastFormRunIdRef.current = currentRunId;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRunId]);
-
-  // ──────────────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    let ds = dayStateRef.current;
-    const run = ds?.runs[ds?.currentIndex];
-    const runId = run?.id;
-    if (!runId) return;
-    // Guard: if the form hasn't been explicitly reset for this run yet (e.g. the
-    // dayState ref advanced to a new run but form.reset hasn't fired), `v` still
-    // carries the previous run's values. Saving them here would stamp the wrong
-    // product's applicator/recipe data onto the new run's localStorage slot and
-    // profile — the cross-run contamination bug. Only proceed once the form is
-    // confirmed settled for the current run.
-    if (lastFormRunIdRef.current !== runId) return;
-    if (formHandoffRef.current) return;
-    // Only treat this as a real user edit when the live form actually DIFFERS from
-    // the values already stored for this run. A programmatic form.reset() — run
-    // switch, sync-apply (the merge resets the live form to the accepted remote),
-    // daily rollover, or post-login load — re-emits the SAME persisted values
-    // through form.watch(). Without this guard the effect would re-stamp them with
-    // a fresh markRunValuesUpdated() time, defeating the per-run lost-update guard
-    // and letting a loaded/stale/empty value win the merge across devices and
-    // clobber a peer's genuine edit (the "I entered cases needed and it vanished"
-    // multi-device data loss). Mirrors mobile's primed-baseline diffStampRunEdits,
-    // which only stamps genuine changes.
-    if (deepEqual(loadRunValues(runId), v)) return;
-    // Safety net for the recurring "I entered cases-needed, waited, refreshed,
-    // and it all vanished" data loss on the shared day-state row. A genuine user
-    // edit never reduces EVERY field to its default at once — an all-default form
-    // is always a programmatic reset (mount/init race, daily rollover, or a
-    // sync-apply echo) re-emitting through form.watch() while localStorage still
-    // holds the real values. Saving + stamping it would mint a FRESH
-    // markRunValuesUpdated() time that then wins the per-run lost-update guard on
-    // every other connected tab/device and clobber the real run data. Never let
-    // an empty form overwrite a populated stored value. (Equality of stored ==
-    // DEFAULT is already short-circuited above, so this only blocks the
-    // populated→empty transition, never a legitimately blank run.)
-    if (isEmptyOverPopulated(v, loadRunValues(runId))) return;
-    const now = Date.now();
-    // Claim an automatic placeholder as soon as an actual operator edit lands.
-    // A clean programmatic form reset never reaches this point (the stored-value
-    // equality guard above returns), so stale form contamination stays local-only.
-    // Persisting the provenance before the delayed sync push means reconnects and
-    // offline recovery retain this intentional run instead of treating it as a
-    // disposable startup seed.
-    if (run.seeded) {
-      ds = {
-        ...ds,
-        runs: ds.runs.map((candidate) =>
-          candidate.id === runId ? { ...candidate, seeded: false } : candidate,
-        ),
-      };
-      dayStateRef.current = ds;
-      saveDayState(ds);
-      setDayState(ds);
-    }
-    saveRunValues(runId, v);
-    // Stamp this run's edit time so an in-flight stale remote can't clobber it
-    // (the "click away and my change disappeared" lost-update).
-    markRunValuesUpdated(runId, now);
-    // Profile writes are manager-only: floor staff editing the run form must
-    // never silently overwrite the manager-configured profile (run values
-    // above still save for everyone).
-    if (canManageProfiles && (run?.brand || run?.flavor)) {
-      if (saveProfile(run.brand, run.flavor, v)) {
-        void propagateProfileToPendingRuns(run.brand, run.flavor);
-      }
-    }
-    lastLocalEditRef.current = now;
-    // Keep the edit debounce below the one-second auto-track cadence so a
-    // normal edit is shared promptly while rapid edits still collapse into
-    // one newest-snapshot request.
-    schedulePush(ds, undefined, "edit");
-    flashSaved();
-  }, [v]);
+  // This hook owns the settled-form identity fence and its two coupled effects.
+  // Home remains the sole owner of the canonical day, form, and providers.
+  useHomeFormLifecycle({
+    currentRunId,
+    dayStateRef,
+    form,
+    values: v,
+    fences: { lastFormRunIdRef, formHandoffRef },
+    lastLocalEditRef,
+    resetFieldArrays,
+    mergeRunDefaults,
+    saveDayState,
+    setDayState,
+    canManageProfiles,
+    saveProfileForRun: saveProfile,
+    propagateProfileToPendingRuns,
+    schedulePush: (state, delay, trigger) => schedulePush(state, delay, trigger),
+    flashSaved,
+  });
 
   // ── Unified setup editing: edit once, updates everywhere ──────────────────
   // (1) Setup Profiles editor → open run form. After Save Setup persists a
