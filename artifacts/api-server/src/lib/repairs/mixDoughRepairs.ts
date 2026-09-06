@@ -259,22 +259,94 @@ export const doughVariantSuffixDedupeRepair: RepairDefinition<RepairTransaction>
 });
 
 export const CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_REPAIR_ID = "crb-dough-lucia-variant-customers-v2";
-export const LUCIA_CRAFT_CRB_ULTRA_THIN_FLAVORS = ["Backyard BBQ Chicken", "Sweet Chili Garden"];
+export const CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_CONTRACT = Object.freeze({
+  recipeName: "CRB Dough",
+  customerBrand: "Lucia's Craft",
+  weightToleranceOz: 0.15,
+  variants: Object.freeze([
+    Object.freeze({
+      weightOz: 7.8,
+      labelPatterns: Object.freeze([
+        Object.freeze({ source: "basha", flags: "i" }),
+        Object.freeze({ source: "ultra[\\s_-]*thin", flags: "i" }),
+      ]),
+      labelMatch: "any" as const,
+      flavors: Object.freeze(["Backyard BBQ Chicken", "Sweet Chili Garden"]),
+    }),
+    Object.freeze({
+      weightOz: 12,
+      labelPatterns: Object.freeze([
+        Object.freeze({ source: "lucia", flags: "i" }),
+        Object.freeze({ source: "heavy", flags: "i" }),
+      ]),
+      labelMatch: "all" as const,
+      flavors: Object.freeze(["Four Cheese Meltdown"]),
+    }),
+    Object.freeze({
+      weightOz: 13.8,
+      labelPatterns: Object.freeze([
+        Object.freeze({ source: "lucia", flags: "i" }),
+        Object.freeze({ source: "thick", flags: "i" }),
+      ]),
+      labelMatch: "all" as const,
+      flavors: Object.freeze([]),
+    }),
+  ]),
+});
+
+type CrbLuciaVariant = ReturnType<typeof normalizeDoughballVariants>[number];
+
+export function healCrbLuciaVariantCustomers(
+  variants: CrbLuciaVariant[],
+): { variants: CrbLuciaVariant[]; changed: boolean } {
+  const contract = CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_CONTRACT;
+  const brandKey = contract.customerBrand.toLowerCase();
+  let changed = false;
+  const healed = variants.map((variant) => {
+    const source = contract.variants.find((candidate) => {
+      if (Math.abs(Number(variant.weightOz ?? 0) - candidate.weightOz) >= contract.weightToleranceOz) {
+        return false;
+      }
+      const matches = candidate.labelPatterns.map((pattern) =>
+        new RegExp(pattern.source, pattern.flags).test(variant.label));
+      return candidate.labelMatch === "all" ? matches.every(Boolean) : matches.some(Boolean);
+    });
+    if (!source) return variant;
+    const existing = variant.customers ?? [];
+    const withoutBrand = existing.filter(
+      (customer) => customer.brand.trim().toLowerCase() !== brandKey,
+    );
+    const additions = source.flavors.map((flavor) => ({
+      brand: contract.customerBrand,
+      flavor,
+    }));
+    const currentBrandCustomers = existing.filter(
+      (customer) => customer.brand.trim().toLowerCase() === brandKey,
+    );
+    const alreadyCorrect =
+      currentBrandCustomers.length === additions.length &&
+      additions.every((addition) =>
+        currentBrandCustomers.some(
+          (customer) => customer.flavor.trim().toLowerCase() === addition.flavor.toLowerCase(),
+        ));
+    if (alreadyCorrect) return variant;
+    changed = true;
+    return { ...variant, customers: [...withoutBrand, ...additions] };
+  });
+  return { variants: healed, changed };
+}
+
 export const crbDoughLuciaVariantCustomersV2Repair: RepairDefinition<RepairTransaction> = Object.freeze({
   id: CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_REPAIR_ID, owner: "recipe-normalization", dependencies: Object.freeze(["brand-drift-rename-v1"]), eligibility: "Only CRB Dough variants matching the audited Lucia label and weight predicates change.", mode: "automatic", executionMode: "runner-transactional", resultOwnership: "runner-marker", managerAllowed: false,
   safety: Object.freeze({ affectedScope: "CRB Dough Lucia ultra-thin, heavy-plus, and thick variants.", excludedScope: "All non-CRB dough and unmatched variants.", rollback: "Variant customer changes require reviewed source restoration.", evidence: "CRB Mixing Procedure Rev. 39 and Lucia's Craft Spec Sheet Rev. 03." }),
   async execute(tx) {
-    const doughs = await tx.select().from(doughRecipesTable).for("update"), crbRows = doughs.filter((d) => specImportNamedRecipeNamesEqual(d.name, "CRB Dough"));
+    const contract = CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_CONTRACT;
+    const doughs = await tx.select().from(doughRecipesTable).for("update"), crbRows = doughs.filter((d) => specImportNamedRecipeNamesEqual(d.name, contract.recipeName));
     if (crbRows.length === 0) return { updated: 0, skipped: "no CRB Dough found" };
     let updated = 0;
     for (const row of crbRows) {
-      const variants = normalizeDoughballVariants(row.doughballVariants); let changed = false;
-      const next = variants.map((v) => {
-        if (Math.abs(Number(v.weightOz ?? 0) - 7.8) < 0.15 && /basha|ultra[\s_-]*thin/i.test(v.label)) { const withoutLucia = (v.customers ?? []).filter((c) => c.brand.trim().toLowerCase() !== "lucia's craft"); const additions = LUCIA_CRAFT_CRB_ULTRA_THIN_FLAVORS.filter((fl) => !withoutLucia.some((c) => c.brand.trim().toLowerCase() === "lucia's craft" && c.flavor.trim().toLowerCase() === fl.trim().toLowerCase())).map((fl) => ({ brand: "Lucia's Craft", flavor: fl })); if (additions.length === 0 && withoutLucia.length === (v.customers ?? []).length) return v; changed = true; return { ...v, customers: [...withoutLucia, ...additions] }; }
-        if (Math.abs(Number(v.weightOz ?? 0) - 12) < 0.15 && /lucia/i.test(v.label) && /heavy/i.test(v.label)) { const withoutLucia = (v.customers ?? []).filter((c) => c.brand.trim().toLowerCase() !== "lucia's craft"); const alreadyCorrect = withoutLucia.some((c) => c.brand.trim().toLowerCase() === "lucia's craft" && c.flavor.trim().toLowerCase() === "four cheese meltdown"); if (alreadyCorrect && withoutLucia.length === (v.customers ?? []).length) return v; changed = true; return { ...v, customers: [...withoutLucia, { brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" }] }; }
-        if (Math.abs(Number(v.weightOz ?? 0) - 13.8) < 0.15 && /lucia/i.test(v.label) && /thick/i.test(v.label)) { const filtered = (v.customers ?? []).filter((c) => c.brand.trim().toLowerCase() !== "lucia's craft"); if (filtered.length === (v.customers ?? []).length) return v; changed = true; return { ...v, customers: filtered }; }
-        return v;
-      });
+      const { variants: next, changed } =
+        healCrbLuciaVariantCustomers(normalizeDoughballVariants(row.doughballVariants));
       if (!changed) continue;
       await tx.update(doughRecipesTable).set({ doughballVariants: next }).where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, row.scope))); updated++;
     }

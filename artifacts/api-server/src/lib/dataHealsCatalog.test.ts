@@ -11,6 +11,10 @@ import {
 } from "./repairDefinitionFingerprintManifest";
 import { RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS } from "./repairDefinitionFingerprints.manifest";
 import { liveProfileRecipeLinkRepairContract } from "./repairs/liveProfileRecipeLinkRepair";
+import {
+  CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_REPAIR_ID,
+  healCrbLuciaVariantCustomers,
+} from "./repairs/mixDoughRepairs";
 import { SOURCE_LIBRARY_RECONCILIATION_HEAL_ID } from "./sourceLibraryReconciliationHeal";
 
 describe("historical automatic repair registration", () => {
@@ -54,7 +58,7 @@ describe("historical automatic repair registration", () => {
       ? [] : [ids[index - 1]]));
   });
 
-  it("matches the reviewed released-definition fingerprint manifest", () => {
+  it("matches the reviewed released-definition fingerprint manifest", async () => {
     const repairs = registeredAutomaticDataHeals().list();
     const actual = releasedRepairFingerprints(repairs);
 
@@ -62,6 +66,14 @@ describe("historical automatic repair registration", () => {
       new URL("./repairDefinitionFingerprints.manifest.ts", import.meta.url),
       "utf8",
     );
+    expect(checkedIn).toBe(renderReleasedRepairFingerprintManifest(repairs));
+    expect(REPAIR_FINGERPRINT_SOURCE_CONTRACTS[SOURCE_LIBRARY_RECONCILIATION_HEAL_ID])
+      .toBeUndefined();
+    expect(repairs
+      .filter((candidate) => candidate.id !== SOURCE_LIBRARY_RECONCILIATION_HEAL_ID)
+      .every((candidate) => REPAIR_FINGERPRINT_SOURCE_CONTRACTS[candidate.id] !== undefined))
+      .toBe(true);
+
     const repair = registeredAutomaticDataHeals().list()
       .find((candidate) => candidate.id === liveProfileRecipeLinkRepairContract.id)!;
     const source = REPAIR_FINGERPRINT_SOURCE_CONTRACTS[repair.id];
@@ -82,5 +94,38 @@ describe("historical automatic repair registration", () => {
         brand: "test", flavor: "test", field: "doughRecipeName", from: "old", to: "new",
       }],
     })).not.toBe(baseline);
+  });
+
+  it("drives every CRB Lucia assignment from its fingerprinted source contract", () => {
+    const result = healCrbLuciaVariantCustomers([
+      { label: "Basha's Ultra Thin", weightOz: 7.8, customers: [] },
+      { label: "Lucia's Craft CRB Heavy Plus", weightOz: 12, customers: [] },
+      {
+        label: "Lucia's Craft CRB Thick",
+        weightOz: 13.8,
+        customers: [{ brand: "Lucia's Craft", flavor: "Wrong Flavor" }],
+      },
+    ]);
+    expect(result.variants.map((variant) => variant.customers)).toEqual([
+      [
+        { brand: "Lucia's Craft", flavor: "Backyard BBQ Chicken" },
+        { brand: "Lucia's Craft", flavor: "Sweet Chili Garden" },
+      ],
+      [{ brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" }],
+      [],
+    ]);
+
+    const repair = registeredAutomaticDataHeals().list()
+      .find((candidate) => candidate.id === CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_REPAIR_ID)!;
+    const source = REPAIR_FINGERPRINT_SOURCE_CONTRACTS[repair.id];
+    const baseline = repairDefinitionFingerprint(repair, source);
+    for (const changedSource of [
+      { ...source, recipeName: "Changed" },
+      { ...source, customerBrand: "Changed" },
+      { ...source, weightToleranceOz: 0.2 },
+      { ...source, variants: [] },
+    ]) {
+      expect(repairDefinitionFingerprint(repair, changedSource)).not.toBe(baseline);
+    }
   });
 });

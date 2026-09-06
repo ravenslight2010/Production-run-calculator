@@ -19,8 +19,10 @@ export function seaSaltLooseKey(name: string): string {
 }
 
 export type SeaSaltTarget = {
-  /** Matches a pool recipe name (loose key) whose source sheet says Sea Salt. */
-  matchRecipe: (recipeLooseKey: string) => boolean;
+  /** Included in a pool recipe loose key whose source sheet says Sea Salt. */
+  recipeKeyIncludes: string;
+  /** Optional loose-key fragment that disqualifies an otherwise matching row. */
+  recipeKeyExcludes?: string;
   /**
    * Amounts the source sheet lists for its Sea Salt row (any bag/batch
    * column). A stored amount of 0 (import stub) is always accepted.
@@ -40,26 +42,27 @@ export const SEA_SALT_DOUGH_TARGETS: SeaSaltTarget[] = [
   {
     // "Modified Malted Barley Dough" — check BEFORE the plain malted-barley
     // matcher (its key contains the plain key).
-    matchRecipe: (k) => k.includes("modifiedmaltedbarley"),
+    recipeKeyIncludes: "modifiedmaltedbarley",
     sheetAmounts: [1.3],
   },
   {
-    matchRecipe: (k) => k.includes("maltedbarley") && !k.includes("modified"),
+    recipeKeyIncludes: "maltedbarley",
+    recipeKeyExcludes: "modified",
     sheetAmounts: [0.5, 1, 1.25],
   },
   {
     // Both Masa variants ("Masa Dough", "Masa Dough, Natural, (Lowe's)").
-    matchRecipe: (k) => k.includes("masa"),
+    recipeKeyIncludes: "masa",
     sheetAmounts: [2.5],
   },
 ];
 
 export const SEA_SALT_SAUCE_TARGETS: SeaSaltTarget[] = [
-  { matchRecipe: (k) => k.includes("aldo"), sheetAmounts: [1] },
+  { recipeKeyIncludes: "aldo", sheetAmounts: [1] },
 ];
 
 export const SEA_SALT_MIX_TARGETS: SeaSaltTarget[] = [
-  { matchRecipe: (k) => k.includes("grilledvegetable"), sheetAmounts: [0.03, 1.242] },
+  { recipeKeyIncludes: "grilledvegetable", sheetAmounts: [0.03, 1.242] },
 ];
 
 function isPlainSalt(name: string): boolean {
@@ -89,7 +92,9 @@ export function healSeaSaltComponents<T extends { ingredient: string }>(
   amountOf: (c: T) => number,
 ): T[] | null {
   const key = seaSaltLooseKey(recipeName);
-  const target = targets.find((t) => t.matchRecipe(key));
+  const target = targets.find((candidate) =>
+    key.includes(candidate.recipeKeyIncludes) &&
+    (!candidate.recipeKeyExcludes || !key.includes(candidate.recipeKeyExcludes)));
   if (!target) return null;
   if (components.some((c) => isSeaSalt(c.ingredient))) return null;
 
