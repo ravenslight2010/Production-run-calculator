@@ -3752,12 +3752,74 @@ export interface IncidentRecurrence {
 
 export interface IncidentDiagnosis {
   incidentId: string;
-  /** Plain-language explanation of what likely went wrong */
-  diagnosis: string;
-  /** Suggested next step / workaround for the user */
-  workaround: string;
+  /**
+     * Retained compatibility field; null for new reports
+     * @nullable
+     */
+  diagnosis: string | null;
+  /**
+     * Retained compatibility field; null for new reports
+     * @nullable
+     */
+  workaround: string | null;
   /** Recurrence signal, or null when this problem has no precedent */
   recurrence: IncidentRecurrence | null;
+  /** New reports do not use automated diagnosis */
+  aiGenerated: false;
+}
+
+export type AiRetentionReportScope = typeof AiRetentionReportScope[keyof typeof AiRetentionReportScope];
+
+
+export const AiRetentionReportScope = {
+  live: 'live',
+  sandbox: 'sandbox',
+} as const;
+
+export type AiRetentionReportCandidates = {
+  /** @minimum 0 */
+  conversationTurns: number;
+  /** @minimum 0 */
+  retiredFacilityFacts: number;
+  /** @minimum 0 */
+  incidentGeneratedTextToLabel: number;
+  /** @minimum 0 */
+  qualityThumbnailsToRedact: number;
+  /** @minimum 0 */
+  closedObservationsToRedact: number;
+  /** @minimum 0 */
+  total: number;
+};
+
+export type AiRetentionReportProtected = {
+  correctionAndAliasRecords: string;
+  /** @minimum 0 */
+  operationalIncidentRows: number;
+  /** @minimum 0 */
+  confirmedQualityRows: number;
+  /** @minimum 0 */
+  openInventoryObservations: number;
+  inventoryLedgerEffects: string;
+};
+
+export type AiRetentionReportCutoffs = {
+  conversationBefore: string;
+  thumbnailBefore: string;
+  observationBefore: string;
+};
+
+export interface AiRetentionReport {
+  policyVersion: string;
+  scope: AiRetentionReportScope;
+  /** @minimum 1 */
+  batchLimit: number;
+  canApply: boolean;
+  alreadyApplied: boolean;
+  /** @nullable */
+  appliedAt: string | null;
+  candidates: AiRetentionReportCandidates;
+  protected: AiRetentionReportProtected;
+  cutoffs: AiRetentionReportCutoffs;
 }
 
 export type IncidentSource = typeof IncidentSource[keyof typeof IncidentSource];
@@ -4093,6 +4155,10 @@ export const ListImportHistoryStatus = {
   partial: 'partial',
   failed: 'failed',
 } as const;
+
+export type ApplyAiRetentionCleanup200 = {
+  report: AiRetentionReport;
+};
 
 export type ListIncidentAssignees200Item = {
   userId: string;

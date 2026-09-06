@@ -3531,16 +3531,40 @@ paths:
         "403":
           description: Incident review capability required
 
+  /profile-data/ai-retention/apply:
+    post:
+      operationId: applyAiRetentionCleanup
+      tags: [profile-data]
+      summary: Apply the bounded retired-AI retention cleanup
+      description: >-
+        Manager-only, scope-aware cleanup. Returns the dry-run-compatible
+        report, records a bounded per-run audit marker, and can be repeated as
+        retained operational records age into the policy cutoffs.
+      responses:
+        "200":
+          description: Eligible cleanup applied, or no eligible records found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report]
+                properties:
+                  report:
+                    $ref: "#/components/schemas/AiRetentionReport"
+        "403":
+          description: Staff-management capability required
+        "409":
+          description: Candidate set exceeds the bounded cleanup limit
+
   /incidents:
     post:
       operationId: reportIncident
       tags: [incidents]
-      summary: Report an issue or a crash and get an AI diagnosis
+      summary: Report an issue or a crash for manager review
       description: >-
         Records an incident (a user-reported problem or an auto-captured crash)
-        and returns a plain-language AI diagnosis plus a suggested workaround.
-        Allowed for any signed-in user. The diagnosis is also stored on the
-        incident for managers to review later. Rate-limited per user.
+        for manager review. Retired automated diagnosis fields are returned as
+        null. Allowed for any signed-in user. Rate-limited per user.
       requestBody:
         required: true
         content:
@@ -3549,7 +3573,7 @@ paths:
               $ref: "#/components/schemas/ReportIncidentInput"
       responses:
         "200":
-          description: Incident recorded; diagnosis returned
+          description: Incident recorded
           content:
             application/json:
               schema:
@@ -9790,20 +9814,65 @@ components:
         - diagnosis
         - workaround
         - recurrence
+        - aiGenerated
       properties:
         incidentId:
           type: string
         diagnosis:
-          type: string
-          description: Plain-language explanation of what likely went wrong
+          type: [string, "null"]
+          description: Retained compatibility field; null for new reports
         workaround:
-          type: string
-          description: Suggested next step / workaround for the user
+          type: [string, "null"]
+          description: Retained compatibility field; null for new reports
         recurrence:
           oneOf:
             - $ref: "#/components/schemas/IncidentRecurrence"
             - type: "null"
           description: Recurrence signal, or null when this problem has no precedent
+        aiGenerated:
+          type: boolean
+          enum: [false]
+          description: New reports do not use automated diagnosis
+
+    AiRetentionReport:
+      type: object
+      required: [policyVersion, scope, batchLimit, canApply, alreadyApplied, appliedAt, candidates, protected, cutoffs]
+      properties:
+        policyVersion: { type: string }
+        scope: { type: string, enum: [live, sandbox] }
+        batchLimit: { type: integer, minimum: 1 }
+        canApply: { type: boolean }
+        alreadyApplied: { type: boolean }
+        appliedAt: { type: [string, "null"], format: date-time }
+        candidates:
+          type: object
+          additionalProperties: false
+          required: [conversationTurns, retiredFacilityFacts, incidentGeneratedTextToLabel, qualityThumbnailsToRedact, closedObservationsToRedact, total]
+          properties:
+            conversationTurns: { type: integer, minimum: 0 }
+            retiredFacilityFacts: { type: integer, minimum: 0 }
+            incidentGeneratedTextToLabel: { type: integer, minimum: 0 }
+            qualityThumbnailsToRedact: { type: integer, minimum: 0 }
+            closedObservationsToRedact: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+        protected:
+          type: object
+          additionalProperties: false
+          required: [correctionAndAliasRecords, operationalIncidentRows, confirmedQualityRows, openInventoryObservations, inventoryLedgerEffects]
+          properties:
+            correctionAndAliasRecords: { type: string }
+            operationalIncidentRows: { type: integer, minimum: 0 }
+            confirmedQualityRows: { type: integer, minimum: 0 }
+            openInventoryObservations: { type: integer, minimum: 0 }
+            inventoryLedgerEffects: { type: string }
+        cutoffs:
+          type: object
+          additionalProperties: false
+          required: [conversationBefore, thumbnailBefore, observationBefore]
+          properties:
+            conversationBefore: { type: string, format: date-time }
+            thumbnailBefore: { type: string, format: date-time }
+            observationBefore: { type: string, format: date-time }
 
     Incident:
       type: object

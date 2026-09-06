@@ -78,7 +78,40 @@ export type DataHealthWorkspace = {
     id: string; actor: string; appliedAt: string; undoneAt: string | null; status: string;
     summary: { applied: number; skipped: number; failed: number; repairedRuns: number; undoable?: boolean };
   }>;
+  aiRetention: {
+    policyVersion: string;
+    scope: string;
+    batchLimit: number;
+    canApply: boolean;
+    alreadyApplied: boolean;
+    appliedAt: string | null;
+    candidates: {
+      conversationTurns: number;
+      retiredFacilityFacts: number;
+      incidentGeneratedTextToLabel: number;
+      qualityThumbnailsToRedact: number;
+      closedObservationsToRedact: number;
+      total: number;
+    };
+    protected: {
+      correctionAndAliasRecords: string;
+      operationalIncidentRows: number;
+      confirmedQualityRows: number;
+      openInventoryObservations: number;
+      inventoryLedgerEffects: string;
+    };
+    cutoffs: { conversationBefore: string; thumbnailBefore: string; observationBefore: string };
+  };
 };
+
+export async function applyAiRetentionCleanup(): Promise<DataHealthWorkspace["aiRetention"]> {
+  const res = await fetch("/api/profile-data/ai-retention/apply", {
+    method: "POST",
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`Failed to apply AI retention cleanup: ${res.status}`);
+  return ((await res.json()) as { report: DataHealthWorkspace["aiRetention"] }).report;
+}
 
 export type ProfileDataHealthReport = {
   findings: ProfileDataHealthFinding[];

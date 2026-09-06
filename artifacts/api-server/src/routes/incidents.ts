@@ -1,5 +1,4 @@
 import { Router, type IRouter } from "express";
-import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -14,23 +13,7 @@ import {
   countActionableIncidents,
   updateIncidentWorkflow,
 } from "../lib/incidents";
-import {
-  analyzeIncidentHistory,
-  appendIncidentHistoryBlock,
-  buildDiagnosisPrompt,
-  buildIncidentContext,
-  buildIncidentMemoryFact,
-  FALLBACK_DIAGNOSIS,
-  FALLBACK_WORKAROUND,
-  INCIDENT_MEMORY_DOMAIN,
-  sanitizeDiagnosis,
-  validateReportBody,
-} from "./incidentsAi";
-import {
-  loadFacilityKnowledge,
-  appendFacilityMemoryBlock,
-  recordFacilityKnowledge,
-} from "./aiMemoryContext";
+import { buildIncidentContext, validateReportBody } from "./incidentsAi";
 import {
   buildFallbackClusters,
   CLUSTER_MIN_INCIDENTS,
@@ -108,55 +91,11 @@ router.post(
     // Ask the AI for a plain-language diagnosis + safe workaround. Any failure
     // (provider error, non-JSON) falls back to canned text; the incident is
     // still recorded with that same text so the manager sees what the user saw.
-    const { system, user } = buildDiagnosisPrompt({
-      source: data.source,
-      screen: data.screen,
-      appPlatform: data.appPlatform,
-      appVersion: data.appVersion ?? null,
-      context,
-    });
-    // Ground the diagnosis in history: pull the shared facility-memory pool,
-    // match this report against past incidents, and inject both the general
-    // operational facts AND a focused, ranked "similar past incidents" block so
-    // recurring problems get history-aware recovery steps. The incidents domain
-    // is excluded from the general block so it isn't double-listed alongside the
-    // focused one. This route is open to EVERY signed-in user (no capability
-    // required to report a problem), so privileged domains (e.g. "forecast",
-    // "proactive-alerts") must be excluded from the general block the same way
-    // other staff-facing summary routes are — otherwise reporting an issue becomes a
-    // side-channel for reading manager-gated facility knowledge.
-    const knowledge = await loadFacilityKnowledge(req.log);
-    const history = analyzeIncidentHistory(knowledge, {
-      screen: data.screen,
-      appPlatform: data.appPlatform,
-      context,
-    });
-    const generalKnowledge = knowledge.filter(
-      (k) => k.domain.trim().toLowerCase() !== INCIDENT_MEMORY_DOMAIN,
-    );
-    let userPrompt = appendFacilityMemoryBlock(user, generalKnowledge, undefined, false);
-    userPrompt = appendIncidentHistoryBlock(userPrompt, history.similar);
-
-    let diagnosis = FALLBACK_DIAGNOSIS;
-    let workaround = FALLBACK_WORKAROUND;
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      const content = response.choices[0]?.message?.content ?? "";
-      const parsed = JSON.parse(content);
-      const sanitized = sanitizeDiagnosis(parsed);
-      diagnosis = sanitized.diagnosis;
-      workaround = sanitized.workaround;
-    } catch (err) {
-      req.log.warn({ err }, "incident diagnosis failed; using fallback");
-    }
+    // Generated diagnosis was retired before retention cleanup. Incident capture,
+    // human notes, assignment, and workflow history remain fully operational.
+    const history = { recurrence: null as null };
+    const diagnosis = null;
+    const workaround = null;
 
     const incident = await createIncident({
       source: data.source,
@@ -172,29 +111,12 @@ router.post(
       recurrence: history.recurrence,
     });
 
-    // Contribute this incident back into the shared facility-memory pool so the
-    // next similar report is grounded in it. Best-effort: a memory write failure
-    // must never fail the report the user just submitted.
-    void recordFacilityKnowledge([
-      {
-        domain: INCIDENT_MEMORY_DOMAIN,
-        key: history.signature,
-        fact: buildIncidentMemoryFact(
-          { screen: data.screen, appPlatform: data.appPlatform, context },
-          history.priorExactCount + 1,
-          workaround,
-        ),
-        source: "incident-diagnosis",
-      },
-    ]).catch((err) => {
-      req.log.warn({ err }, "failed to record incident to facility memory");
-    });
-
     res.json({
       incidentId: incident.id,
       diagnosis,
       workaround,
       recurrence: history.recurrence,
+      aiGenerated: false,
     });
   },
 );

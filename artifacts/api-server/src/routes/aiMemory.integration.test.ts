@@ -230,18 +230,17 @@ describe("POST /ai-memory/facility — response scoping (read-bypass fix)", () =
     expect(rows[0].fact).toBe(SECRET_FACT.fact);
   });
 
-  it("still returns the full pool to a caller WITH use-ai-tools", async () => {
+  it("rejects retired quality-memory writes even for a caller WITH use-ai-tools", async () => {
     const manager = await freshUser("manager");
     await seedSecretRow();
 
     const res = await req(manager, "POST", "/api/ai-memory/facility", {
       knowledge: [qualityCheck("2026-09-01")],
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as KnowledgeResponse;
-    expect(body.knowledge.length).toBe(2);
-    const facts = body.knowledge.map((k) => k.fact);
-    expect(facts.some((f) => f.includes("Confidential"))).toBe(true);
+    expect(res.status).toBe(403);
+    const rows = await db.select().from(facilityKnowledgeTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fact).toBe(SECRET_FACT.fact);
   });
 
   it("GET /ai-memory/facility stays gated to use-ai-tools", async () => {
@@ -259,8 +258,8 @@ describe("POST /ai-memory/facility — response scoping (read-bypass fix)", () =
   });
 });
 
-describe("POST /ai-memory/facility — flood resistance (eviction fix)", () => {
-  it("accepts at most ONE entry per request (extras silently dropped)", async () => {
+describe("POST /ai-memory/facility — retired write stop", () => {
+  it("rejects every entry in a batch without writing a partial row", async () => {
     const manager = await freshUser("manager");
 
     const res = await req(manager, "POST", "/api/ai-memory/facility", {
@@ -270,32 +269,10 @@ describe("POST /ai-memory/facility — flood resistance (eviction fix)", () => {
         qualityCheck("2026-09-03", "fail"),
       ],
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
 
     const rows = await db.select().from(facilityKnowledgeTable);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].key).toBe("check:pizza:2026-09-01");
-  });
-
-  it("rate-limits a single user's writes (429 after the per-minute budget)", async () => {
-    const manager = await freshUser("manager");
-
-    // Budget is 5/min per user; the 6th request in the window must be rejected
-    // WITHOUT being written.
-    for (let i = 0; i < 5; i++) {
-      const ok = await req(manager, "POST", "/api/ai-memory/facility", {
-        knowledge: [qualityCheck(`2026-09-0${i + 1}`)],
-      });
-      expect(ok.status).toBe(200);
-    }
-    const blocked = await req(manager, "POST", "/api/ai-memory/facility", {
-      knowledge: [qualityCheck("2026-09-06")],
-    });
-    expect(blocked.status).toBe(429);
-
-    const rows = await db.select().from(facilityKnowledgeTable);
-    expect(rows).toHaveLength(5);
-    expect(rows.every((r) => r.key !== "check:pizza:2026-09-06")).toBe(true);
+    expect(rows).toHaveLength(0);
   });
 });
 

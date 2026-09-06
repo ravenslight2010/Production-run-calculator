@@ -206,18 +206,21 @@ const userReport = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe("POST /incidents — reporting + diagnosis", () => {
-  it("lets an operator report an issue, persists it, and returns the diagnosis", async () => {
+describe("POST /incidents — operational reporting without generated diagnosis", () => {
+  it("lets an operator report an issue without generating or persisting diagnosis text", async () => {
     const res = await req(OPERATOR, "POST", "/api/incidents", userReport());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       incidentId: string;
-      diagnosis: string;
-      workaround: string;
+      diagnosis: string | null;
+      workaround: string | null;
+      aiGenerated: boolean;
     };
     expect(body.incidentId).toBeTruthy();
-    expect(body.diagnosis).toBe("The save didn't go through.");
-    expect(body.workaround).toBe("Try again in a moment.");
+    expect(body.diagnosis).toBeNull();
+    expect(body.workaround).toBeNull();
+    expect(body.aiGenerated).toBe(false);
+    expect(mock.calls).toBe(0);
 
     const [row] = await db
       .select()
@@ -228,7 +231,8 @@ describe("POST /incidents — reporting + diagnosis", () => {
     expect(row.reporterName).toBe("operator");
     expect(row.reporterRole).toBe("operator");
     expect(row.status).toBe("new");
-    expect(row.diagnosis).toBe("The save didn't go through.");
+    expect(row.diagnosis).toBeNull();
+    expect(row.workaround).toBeNull();
     expect((row.context as { description?: string }).description).toContain("Save button");
   });
 
@@ -254,20 +258,20 @@ describe("POST /incidents — reporting + diagnosis", () => {
     expect(ctx.errorStack).toContain("InventoryScreen");
   });
 
-  it("records the incident with fallback text when the AI provider fails", async () => {
+  it("does not depend on the retired AI provider", async () => {
     mock.shouldThrow = true;
     const res = await req(OPERATOR, "POST", "/api/incidents", userReport());
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { incidentId: string; diagnosis: string; workaround: string };
-    expect(body.diagnosis).toBeTruthy();
-    expect(body.workaround).toBeTruthy();
+    const body = (await res.json()) as { incidentId: string; diagnosis: string | null; workaround: string | null };
+    expect(body.diagnosis).toBeNull();
+    expect(body.workaround).toBeNull();
+    expect(mock.calls).toBe(0);
     const [row] = await db
       .select()
       .from(incidentsTable)
       .where(eq(incidentsTable.id, body.incidentId));
-    // The incident is still recorded, with the same fallback text the user saw.
-    expect(row.diagnosis).toBe(body.diagnosis);
-    expect(row.workaround).toBe(body.workaround);
+    expect(row.diagnosis).toBeNull();
+    expect(row.workaround).toBeNull();
   });
 
   it("rejects an empty submission with 400 and never calls the model", async () => {
@@ -480,7 +484,7 @@ describe("resolved incident workflow reconciliation", () => {
   });
 });
 
-describe("history-aware diagnosis — grounding + write-back", () => {
+describe("retired incident generation boundary", () => {
   // The per-user report rate limit (in-memory, keyed by userId) is NOT reset
   // between tests, and the earlier describe blocks burn through OPERATOR's
   // budget. Give each test here its own fresh reporter so its single POST always
@@ -494,131 +498,14 @@ describe("history-aware diagnosis — grounding + write-back", () => {
     return id;
   }
 
-  it("records a brand-new incident into facility memory with no recurrence", async () => {
+  it("records the operational incident without model grounding or facility-memory write-back", async () => {
     const reporter = await freshReporter();
     const res = await req(reporter, "POST", "/api/incidents", userReport());
     expect(res.status).toBe(200);
     const body = (await res.json()) as { recurrence: unknown };
-    // First sighting: nothing to recur against.
     expect(body.recurrence).toBeNull();
-    // No SIMILAR PAST INCIDENTS block when memory is empty.
-    expect(mock.lastUserPrompt).not.toContain("SIMILAR PAST INCIDENTS");
-
-    // The diagnosed incident is contributed back into the shared pool under the
-    // incidents domain (write-back is best-effort/async, so poll briefly).
-    let rows: Array<{ domain: string; fact: string }> = [];
-    for (let i = 0; i < 20 && rows.length === 0; i++) {
-      rows = await db.select().from(facilityKnowledgeTable);
-      if (rows.length === 0) await new Promise((r) => setTimeout(r, 25));
-    }
-    expect(rows.length).toBe(1);
-    expect(rows[0].domain).toBe("incidents");
-    expect(rows[0].fact).toContain("Seen 1x");
-    expect(rows[0].fact).toContain("What helped last time");
-  });
-
-  it("grounds the prompt in a similar past incident and surfaces recurrence", async () => {
-    // Seed a prior incident memory whose signature matches the new report
-    // (same platform/screen + overlapping tokens: "save"/"button").
-    // Exact signature for the report below (tokens de-duped+sorted, stopwords
-    // like "does" dropped) so this is an EXACT match and the stored "Seen 2x"
-    // count drives the recurrence signal.
-    await db.insert(facilityKnowledgeTable).values({
-      domain: "incidents",
-      key: "web|run|button-nothing-save-tap",
-      fact: 'Seen 2x on "Run" (web). Problem: Save button does nothing. What helped last time: Reload the page and re-enter the value.',
-      source: "incident-diagnosis",
-    });
-
-    const reporter = await freshReporter();
-    const res = await req(reporter, "POST", "/api/incidents", userReport());
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      recurrence: { count: number; lastWorkaround: string | null } | null;
-    };
-
-    // The model prompt was grounded in the matching past incident.
-    expect(mock.lastUserPrompt).toContain("SIMILAR PAST INCIDENTS");
-    expect(mock.lastUserPrompt).toContain("Reload the page and re-enter the value");
-
-    // The reporter gets a "seen before" signal echoing the prior workaround.
-    expect(body.recurrence).not.toBeNull();
-    expect(body.recurrence?.count).toBeGreaterThanOrEqual(2);
-    expect(body.recurrence?.lastWorkaround).toContain("Reload the page");
-  });
-
-  it("excludes the incidents domain from the general facility-memory block", async () => {
-    // A general operational fact AND a prior incident both live in the pool. The
-    // incident must appear only in the focused history block, never the general
-    // one, so it isn't double-counted against the prompt budget.
-    await db.insert(facilityKnowledgeTable).values([
-      {
-        domain: "operations",
-        key: "line-1-speed",
-        fact: "Line 1 runs slower on Mondays.",
-        source: "test",
-      },
-      {
-        domain: "incidents",
-        key: "web|run|button-does-nothing-save-tap",
-        // Distinctive marker so the assertion below can't accidentally match the
-        // reporter's own description text earlier in the prompt.
-        fact: 'Seen 1x on "Run" (web). Problem: ZZZ-PRIOR-INCIDENT-MARKER. What helped last time: Reload the page.',
-        source: "incident-diagnosis",
-      },
-    ]);
-
-    const reporter = await freshReporter();
-    const res = await req(reporter, "POST", "/api/incidents", userReport());
-    expect(res.status).toBe(200);
-    await res.json();
-
-    const prompt = mock.lastUserPrompt;
-    // General operational fact is grounded in.
-    expect(prompt).toContain("Line 1 runs slower on Mondays.");
-    // The incident is surfaced only under the focused history heading.
-    expect(prompt).toContain("SIMILAR PAST INCIDENTS");
-    const historyIdx = prompt.indexOf("SIMILAR PAST INCIDENTS");
-    const incidentIdx = prompt.indexOf("ZZZ-PRIOR-INCIDENT-MARKER");
-    expect(incidentIdx).toBeGreaterThan(historyIdx);
-  });
-
-  it("excludes privileged facility domains from the report route (any signed-in user is reachable here)", async () => {
-    // /incidents is open to every signed-in user, unlike GET /ai-memory/facility
-    // (use-ai-tools only). A privileged fact (e.g. a persisted forecast plan)
-    // must never leak into this route's grounding, or reporting an issue
-    // becomes a side-channel for reading manager-gated facility knowledge.
-    await db.insert(facilityKnowledgeTable).values({
-      domain: "forecast",
-      key: "plan:2026-07-09",
-      fact: "ZZZ-PRIVILEGED-FORECAST-MARKER",
-      source: "test",
-    });
-
-    const reporter = await freshReporter();
-    const res = await req(reporter, "POST", "/api/incidents", userReport());
-    expect(res.status).toBe(200);
-    await res.json();
-
-    expect(mock.lastUserPrompt).not.toContain("ZZZ-PRIVILEGED-FORECAST-MARKER");
-  });
-
-  it("still records the incident when the report has no precedent (fail-safe baseline)", async () => {
-    const reporter = await freshReporter();
-    // A deliberately unique signal so no other test's (async, best-effort)
-    // write-back can leak a matching memory row into this one.
-    const res = await req(reporter, "POST", "/api/incidents", {
-      source: "user_report",
-      screen: "Reports",
-      appPlatform: "web",
-      description: "The quarterly throughput export froze halfway through downloading.",
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { incidentId: string; recurrence: unknown };
-    expect(body.incidentId).toBeTruthy();
-    // No prior similar incident in memory, so no recurrence is surfaced and the
-    // prompt carried no history block — but the incident is still recorded.
-    expect(body.recurrence).toBeNull();
-    expect(mock.lastUserPrompt).not.toContain("SIMILAR PAST INCIDENTS");
+    expect(mock.calls).toBe(0);
+    expect(mock.lastUserPrompt).toBe("");
+    expect(await db.select().from(facilityKnowledgeTable)).toHaveLength(0);
   });
 });

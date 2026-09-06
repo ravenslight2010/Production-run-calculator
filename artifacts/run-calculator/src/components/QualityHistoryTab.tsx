@@ -92,6 +92,11 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
             <span className="text-[11px] text-muted-foreground">
               {Math.round(check.confidence * 100)}% conf.
             </span>
+            {(check.summary || check.issues.length > 0) && (
+              <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                Unverified generated assessment
+              </span>
+            )}
           </div>
           <div className="text-[11px] text-muted-foreground mt-0.5">
             {formatWhen(check.createdAt)}
@@ -114,7 +119,12 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
               className="mt-3 w-full max-h-64 rounded-md object-contain bg-muted/30 border border-border"
             />
           )}
-          {check.summary && <p className="text-xs text-foreground/80 mt-2">{check.summary}</p>}
+          {(check.summary || check.issues.length > 0) && (
+            <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 mt-2">
+              Unverified generated text — retain for audit only
+            </p>
+          )}
+          {check.summary && <p className="text-xs text-foreground/80">{check.summary}</p>}
           {check.issues.length > 0 && (
             <ul className="space-y-1.5 mt-1">
               {check.issues.map((issue, i) => (

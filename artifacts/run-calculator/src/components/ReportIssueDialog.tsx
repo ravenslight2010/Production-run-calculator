@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { LifeBuoy, Loader2, Lightbulb, Wrench, AlertTriangle, History } from "lucide-react";
+import { LifeBuoy, Loader2, AlertTriangle, History } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,9 +24,8 @@ function serverMessage(error: unknown, fallback: string): string {
     : fallback;
 }
 
-// Any signed-in user can describe a problem and get an immediate plain-language
-// diagnosis + workaround back. The report is also stored server-side so managers
-// can review it. `screen` records where the user was when they hit the issue.
+// Any signed-in user can describe a problem for manager review. Generated
+// diagnosis was retired; `screen` records where the user was when they reported it.
 export default function ReportIssueDialog({
   open,
   onOpenChange,
@@ -74,8 +73,8 @@ export default function ReportIssueDialog({
           </DialogTitle>
           <DialogDescription>
             {result
-              ? "Here's what's likely happening and what to try."
-              : "Describe what went wrong. We'll explain it in plain language and suggest a workaround."}
+              ? "Your report was recorded for manager review."
+              : "Describe what went wrong. Your report will be sent to a manager for review."}
           </DialogDescription>
         </DialogHeader>
 
@@ -96,24 +95,8 @@ export default function ReportIssueDialog({
                 </p>
               </div>
             ) : null}
-            <div className="rounded-md border border-border bg-muted/40 p-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Lightbulb className="w-4 h-4 text-amber-400" /> What's happening
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap">
-                {result.diagnosis}
-              </p>
-            </div>
-            <div className="rounded-md border border-border bg-muted/40 p-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Wrench className="w-4 h-4 text-sky-400" /> What to try
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap">
-                {result.workaround}
-              </p>
-            </div>
             <p className="text-xs text-muted-foreground">
-              This report was sent to your manager for review.
+              No automated diagnosis was generated. Add any immediate workaround you discover to the incident notes.
             </p>
           </div>
         ) : (

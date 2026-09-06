@@ -282,7 +282,7 @@ function IncidentRow({
           {incident.diagnosis && (
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Diagnosis
+                Unverified generated diagnosis
               </p>
               <p className="text-sm text-foreground whitespace-pre-wrap mt-0.5">
                 {incident.diagnosis}
@@ -292,7 +292,7 @@ function IncidentRow({
           {incident.workaround && (
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Suggested workaround
+                Unverified generated workaround
               </p>
               <p className="text-sm text-foreground whitespace-pre-wrap mt-0.5">
                 {incident.workaround}

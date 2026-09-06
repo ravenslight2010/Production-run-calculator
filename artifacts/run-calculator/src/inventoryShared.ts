@@ -1325,9 +1325,10 @@ export type IncidentRecurrence = {
 };
 export type IncidentDiagnosis = {
   incidentId: string;
-  diagnosis: string;
-  workaround: string;
+  diagnosis: string | null;
+  workaround: string | null;
   recurrence: IncidentRecurrence | null;
+  aiGenerated: boolean;
 };
 export type Incident = {
   id: string;

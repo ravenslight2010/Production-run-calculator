@@ -4306,8 +4306,65 @@ export const ConfirmHardwareFieldCheckResponse = zod.object({
 
 
 /**
- * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
- * @summary Report an issue or a crash and get an AI diagnosis
+ * Manager-only, scope-aware cleanup. Returns the dry-run-compatible report, records a bounded per-run audit marker, and can be repeated as retained operational records age into the policy cutoffs.
+ * @summary Apply the bounded retired-AI retention cleanup
+ */
+
+export const applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesTotalMin = 0;
+
+export const applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin = 0;
+
+
+
+export const ApplyAiRetentionCleanupResponse = zod.object({
+  "report": zod.object({
+  "policyVersion": zod.string(),
+  "scope": zod.enum(['live', 'sandbox']),
+  "batchLimit": zod.number().int().min(1),
+  "canApply": zod.boolean(),
+  "alreadyApplied": zod.boolean(),
+  "appliedAt": zod.coerce.date().nullable(),
+  "candidates": zod.object({
+  "conversationTurns": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin),
+  "retiredFacilityFacts": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin),
+  "incidentGeneratedTextToLabel": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin),
+  "qualityThumbnailsToRedact": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin),
+  "closedObservationsToRedact": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin),
+  "total": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesTotalMin)
+}),
+  "protected": zod.object({
+  "correctionAndAliasRecords": zod.string(),
+  "operationalIncidentRows": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin),
+  "confirmedQualityRows": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin),
+  "openInventoryObservations": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin),
+  "inventoryLedgerEffects": zod.string()
+}),
+  "cutoffs": zod.object({
+  "conversationBefore": zod.coerce.date(),
+  "thumbnailBefore": zod.coerce.date(),
+  "observationBefore": zod.coerce.date()
+})
+})
+})
+
+
+/**
+ * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
+ * @summary Report an issue or a crash for manager review
  */
 export const reportIncidentBodyScreenMax = 200;
 
@@ -4336,12 +4393,13 @@ export const ReportIncidentBody = zod.object({
 
 export const ReportIncidentResponse = zod.object({
   "incidentId": zod.string(),
-  "diagnosis": zod.string().describe('Plain-language explanation of what likely went wrong'),
-  "workaround": zod.string().describe('Suggested next step \/ workaround for the user'),
+  "diagnosis": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
+  "workaround": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
   "recurrence": zod.union([zod.object({
   "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+  "aiGenerated": zod.literal(false).describe('New reports do not use automated diagnosis')
 })
 
 

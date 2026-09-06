@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   applyDataHealthRepairs,
+  applyAiRetentionCleanup,
   fetchDataHealthWorkspace,
   undoProfileDataHealthRepair,
   type DataHealthFinding,
@@ -81,6 +82,10 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
       setResult(next.outcome ?? { applied: next.summary.repairedProfiles, skipped: 0, failed: 0, repairedRuns: next.summary.repairedRuns });
     },
   });
+  const retentionMutation = useMutation({
+    mutationFn: applyAiRetentionCleanup,
+    onSuccess: () => query.refetch(),
+  });
   const workspace = query.data;
   const safeFindings = useMemo(
     () => (workspace?.findings ?? []).filter((finding) => finding.repairability === "safe"),
@@ -152,6 +157,43 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
               <span className="rounded bg-muted px-2 py-0.5">{workspace.summary.review ?? 0} review-only</span>
                <span className="rounded bg-destructive/10 text-destructive px-2 py-0.5">{workspace.summary.errors ?? 0} errors</span>
                <span className="rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5">{workspace.summary.warnings ?? 0} warnings</span>
+            </div>
+            <div data-testid="ai-retention-report" className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">Retired AI data retention</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[10px]"
+                  disabled={!workspace.aiRetention.canApply || retentionMutation.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Apply the reviewed retention policy to ${workspace.aiRetention.candidates.total} generated record targets? Protected operational records will be skipped.`)) {
+                      retentionMutation.mutate();
+                    }
+                  }}
+                >
+                  {retentionMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  {workspace.aiRetention.canApply ? "Apply retention cleanup" : "No eligible records"}
+                </Button>
+              </div>
+              <p className="text-muted-foreground">
+                Dry run: {workspace.aiRetention.candidates.total} bounded target{workspace.aiRetention.candidates.total === 1 ? "" : "s"} —
+                {" "}{workspace.aiRetention.candidates.conversationTurns} conversation turns, {workspace.aiRetention.candidates.retiredFacilityFacts} retired facility facts,
+                {" "}{workspace.aiRetention.candidates.incidentGeneratedTextToLabel} incident records to label, {workspace.aiRetention.candidates.qualityThumbnailsToRedact} thumbnails,
+                {" "}{workspace.aiRetention.candidates.closedObservationsToRedact} closed photo-count drafts.
+              </p>
+              {workspace.aiRetention.appliedAt && (
+                <p className="text-muted-foreground">Last cleanup run: {new Date(workspace.aiRetention.appliedAt).toLocaleString()}.</p>
+              )}
+              <p className="text-muted-foreground">
+                Protected and skipped: operational incidents ({workspace.aiRetention.protected.operationalIncidentRows}), confirmed quality history ({workspace.aiRetention.protected.confirmedQualityRows}),
+                {" "}open count drafts ({workspace.aiRetention.protected.openInventoryObservations}), all correction aliases, import evidence, human notes, and inventory ledger effects.
+              </p>
+              {!workspace.aiRetention.canApply && workspace.aiRetention.candidates.total > workspace.aiRetention.batchLimit && (
+                <p className="text-destructive">The candidate set exceeds the {workspace.aiRetention.batchLimit}-record safety bound. Nothing was changed.</p>
+              )}
+              {retentionMutation.isError && <p className="text-destructive">Cleanup did not run. No partial result was accepted.</p>}
             </div>
             <div className="flex flex-wrap gap-2">
               <select aria-label="Filter data health category" className={selectClass} value={category} onChange={(event) => setCategory(event.target.value)}>

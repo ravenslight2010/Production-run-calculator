@@ -99,7 +99,6 @@ import {
   type PhotoGuess,
   type InventoryCategory,
 } from "../inventoryShared";
-import { saveFacilityKnowledge } from "../aiMemory";
 import { useMe } from "../useRole";
 import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
@@ -1598,12 +1597,8 @@ function QualityCheckCard() {
     if (lastImageRef.current) void analyze(lastImageRef.current);
   }
 
-  // Record the reviewed outcome. This is the ONLY write — the assessment itself
-  // is never auto-saved. Two things happen on confirm:
-  //   1. A structured row is persisted into the browsable manager Quality
-  //      History (date, product, verdict, confidence, issues, optional photo).
-  //   2. A free-text fact is recorded into shared facility memory so future AI
-  //      checks are grounded in it.
+  // Record the reviewed outcome. The structured history row is the only write;
+  // retired AI facility memory must not be repopulated.
   async function confirmOutcome() {
     if (!result) return;
     const a = result.assessment;
@@ -1624,24 +1619,6 @@ function QualityCheckCard() {
       });
       qc.invalidateQueries({ queryKey: ["qualityChecks"] });
 
-      // Best-effort: the structured record above is the source of truth, so a
-      // facility-memory write failure must not undo a successful save.
-      // Server-enforced closed-vocabulary template — no free text (e.g. the
-      // AI summary/issue notes) may appear here. See CLIENT_WRITABLE_KNOWLEDGE
-      // in artifacts/api-server/src/routes/aiMemory.ts.
-      try {
-        await saveFacilityKnowledge([
-          {
-            domain: "quality",
-            key: `check:${productType}:${todayStr()}`,
-            fact:
-              `On ${todayStr()}, a ${productType} quality check was reviewed and confirmed as ` +
-              `"${a.status}" (${Math.round(a.confidence * 100)}% confidence).`,
-          },
-        ]);
-      } catch {
-        // ignore — the history record persisted
-      }
       setConfirmed(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save outcome");

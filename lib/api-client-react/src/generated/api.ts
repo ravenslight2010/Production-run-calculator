@@ -25,6 +25,7 @@ import type {
   AiMemoryHealthApplyResult,
   AnomalyInput,
   AnomalyResult,
+  ApplyAiRetentionCleanup200,
   ApprovePasswordResetResult,
   AuditAiMemoryHealth200,
   AuditProfileDataHealth200,
@@ -11911,6 +11912,79 @@ export const useConfirmHardwareFieldCheck = <TError = ErrorType<void>,
       return useMutation(getConfirmHardwareFieldCheckMutationOptions(options));
     }
 
+export const getApplyAiRetentionCleanupUrl = () => {
+
+
+
+
+  return `/api/profile-data/ai-retention/apply`
+}
+
+/**
+ * Manager-only, scope-aware cleanup. Returns the dry-run-compatible report, records a bounded per-run audit marker, and can be repeated as retained operational records age into the policy cutoffs.
+ * @summary Apply the bounded retired-AI retention cleanup
+ */
+export const applyAiRetentionCleanup = async ( options?: Parameters<typeof customFetch>[1]): Promise<ApplyAiRetentionCleanup200> => {
+
+  return customFetch<ApplyAiRetentionCleanup200>(getApplyAiRetentionCleanupUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getApplyAiRetentionCleanupMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, TError,void, TContext> => {
+
+const mutationKey = ['applyAiRetentionCleanup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, void> = () => {
+
+
+          return  applyAiRetentionCleanup(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyAiRetentionCleanupMutationResult = NonNullable<Awaited<ReturnType<typeof applyAiRetentionCleanup>>>
+
+    export type ApplyAiRetentionCleanupMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Apply the bounded retired-AI retention cleanup
+ */
+export const useApplyAiRetentionCleanup = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyAiRetentionCleanup>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getApplyAiRetentionCleanupMutationOptions(options));
+    }
+
 export const getReportIncidentUrl = () => {
 
 
@@ -11920,8 +11994,8 @@ export const getReportIncidentUrl = () => {
 }
 
 /**
- * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
- * @summary Report an issue or a crash and get an AI diagnosis
+ * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
+ * @summary Report an issue or a crash for manager review
  */
 export const reportIncident = async (reportIncidentInput: ReportIncidentInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentDiagnosis> => {
 
@@ -11977,7 +12051,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReportIncidentMutationVariables = {data: BodyType<ReportIncidentInput>}
 
     /**
- * @summary Report an issue or a crash and get an AI diagnosis
+ * @summary Report an issue or a crash for manager review
  */
 export const useReportIncident = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportIncident>>, TError,ReportIncidentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

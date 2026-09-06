@@ -70,14 +70,7 @@ type FacilityEntryInput = { domain: string; key: string; fact: string };
 const CLIENT_WRITABLE_KNOWLEDGE: Record<
   string,
   { keyPattern: RegExp; factPattern: RegExp; requireCapability?: Capability }
-> = {
-  quality: {
-    keyPattern: /^check:(pizza|crust|other):\d{4}-\d{2}-\d{2}$/,
-    factPattern:
-      /^On \d{4}-\d{2}-\d{2}, a (pizza|crust|other) quality check was reviewed and confirmed as "(pass|warn|fail)" \(\d{1,3}% confidence\)\.$/,
-    requireCapability: "use-ai-tools",
-  },
-};
+> = {};
 
 function matchesWriteRule(entry: FacilityEntryInput): boolean {
   const rule = CLIENT_WRITABLE_KNOWLEDGE[entry.domain.trim().toLowerCase()];

@@ -17,6 +17,7 @@ import {
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { buildMasterDataHealthReport, type MasterDataHealthReport } from "../lib/masterDataHealth";
+import { applyAiRetentionCleanup, buildAiRetentionReport, type AiRetentionReport } from "../lib/aiRetention";
 
 type JsonRecord = Record<string, unknown>;
 type RecipeKind = "dough" | "sauce";
@@ -103,6 +104,7 @@ export type DataHealthWorkspace = {
     id: string; actor: string; appliedAt: Date; undoneAt: Date | null; status: string;
     summary: { applied: number; skipped: number; failed: number; repairedRuns: number };
   }>;
+  aiRetention: AiRetentionReport;
 };
 
 const router = Router();
@@ -305,8 +307,11 @@ function previewValue(value: unknown): string {
 
 export async function dataHealthWorkspace(executor: HealthExecutor): Promise<DataHealthWorkspace> {
   const scope = currentScope();
-  const report = await profileDataHealthReport(executor);
-  const master = await buildMasterDataHealthReport(executor, scope);
+  const [report, master, aiRetention] = await Promise.all([
+    profileDataHealthReport(executor),
+    buildMasterDataHealthReport(executor, scope),
+    buildAiRetentionReport(executor),
+  ]);
   const [marker] = await executor
     .select({
       appliedAt: dataHealsTable.appliedAt,
@@ -436,6 +441,7 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     ],
     summary,
     cleanupHistory,
+    aiRetention,
     repairBatches: batches.map((batch) => {
       const value = record(batch.summary);
       return { ...batch, summary: {
@@ -460,6 +466,21 @@ router.get("/profile-data/health-check", requireCapability("manage-staff"), asyn
   } catch (err) {
     req.log.error({ err }, "failed to audit profile data health");
     res.status(500).json({ error: "Failed to audit profile data health" });
+  }
+});
+
+router.post("/profile-data/ai-retention/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    const report = await applyAiRetentionCleanup();
+    req.log.info({
+      policyVersion: report.policyVersion,
+      scope: report.scope,
+      candidateCounts: report.candidates,
+    }, "AI retention cleanup completed");
+    res.json({ report });
+  } catch (err) {
+    req.log.error({ err }, "AI retention cleanup failed");
+    res.status(409).json({ error: "AI retention cleanup could not run within its bounded batch" });
   }
 });
 

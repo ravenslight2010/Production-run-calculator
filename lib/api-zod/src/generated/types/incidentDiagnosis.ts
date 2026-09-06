@@ -9,10 +9,18 @@ import type { IncidentRecurrence } from './incidentRecurrence';
 
 export interface IncidentDiagnosis {
   incidentId: string;
-  /** Plain-language explanation of what likely went wrong */
-  diagnosis: string;
-  /** Suggested next step / workaround for the user */
-  workaround: string;
+  /**
+     * Retained compatibility field; null for new reports
+     * @nullable
+     */
+  diagnosis: string | null;
+  /**
+     * Retained compatibility field; null for new reports
+     * @nullable
+     */
+  workaround: string | null;
   /** Recurrence signal, or null when this problem has no precedent */
   recurrence: IncidentRecurrence | null;
+  /** New reports do not use automated diagnosis */
+  aiGenerated: false;
 }

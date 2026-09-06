@@ -51,6 +51,10 @@ let doughRecipesTable: DbModule["doughRecipesTable"];
 let sauceRecipesTable: DbModule["sauceRecipesTable"];
 let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let incidentsTable: DbModule["incidentsTable"];
+let inventoryObservationsTable: DbModule["inventoryObservationsTable"];
+let qualityChecksTable: DbModule["qualityChecksTable"];
+let dataHealsTable: DbModule["dataHealsTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
 
@@ -108,6 +112,10 @@ beforeAll(async () => {
   sauceRecipesTable = dbMod.sauceRecipesTable;
   savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
   dailySyncTable = dbMod.dailySyncTable;
+  incidentsTable = dbMod.incidentsTable;
+  inventoryObservationsTable = dbMod.inventoryObservationsTable;
+  qualityChecksTable = dbMod.qualityChecksTable;
+  dataHealsTable = dbMod.dataHealsTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   pool.on("error", () => {});
 
@@ -142,7 +150,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${specImportAliasesTable}, ${dataHealthRepairBatchesTable}, ${auditLogsTable}, ${ingredientsTable}, ${brandProfilesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${savedSpecSheetsTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${specImportAliasesTable}, ${dataHealthRepairBatchesTable}, ${dataHealsTable}, ${incidentsTable}, ${inventoryObservationsTable}, ${qualityChecksTable}, ${auditLogsTable}, ${ingredientsTable}, ${brandProfilesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${savedSpecSheetsTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
 });
@@ -189,6 +197,125 @@ async function listCorrections(userId: string): Promise<Array<{ id: number; doma
   const body = await res.json() as { corrections: Array<{ id: number; domain: string; fromText: string; toText: string }> };
   return body.corrections;
 }
+
+describe("retired AI data retention", () => {
+  it("reports a scoped dry run, preserves protected records, and applies exactly once", async () => {
+    const manager = await freshManager();
+    const sandboxUser = `sandbox-${nextUser++}`;
+    await db.insert(usersTable).values({
+      id: sandboxUser,
+      username: sandboxUser,
+      passwordHash: "x",
+      sandbox: true,
+    });
+    const old = new Date("2026-01-01T00:00:00.000Z");
+    await db.insert(aiConversationTurnsTable).values([
+      { userId: manager, role: "user", content: "live private turn", createdAt: old },
+      { userId: sandboxUser, role: "user", content: "sandbox private turn", createdAt: old },
+    ]);
+    await db.insert(facilityKnowledgeTable).values([
+      { scope: "live", domain: "forecast", key: "old-plan", fact: "generated forecast" },
+      { scope: "sandbox", domain: "forecast", key: "sandbox-plan", fact: "sandbox forecast" },
+    ]);
+    await db.insert(aiCorrectionsTable).values({
+      scope: "live", domain: "brand", fromText: "Old", toText: "Canonical",
+    });
+    await db.insert(incidentsTable).values({
+      id: "retention-incident", scope: "live", source: "user_report",
+      screen: "Run", appPlatform: "web", context: { description: "human report" },
+      diagnosis: "generated diagnosis", workaround: "generated workaround",
+      notes: [{ id: "note-1", authorName: "Manager", text: "human note", createdAt: old.toISOString() }],
+    });
+    await db.insert(incidentsTable).values({
+      id: "partially-labeled-incident", scope: "live", source: "user_report",
+      screen: "Inventory", appPlatform: "web", context: { description: "second human report" },
+      diagnosis: "[Unverified generated text] already labeled",
+      workaround: "generated workaround only",
+    });
+    await db.insert(qualityChecksTable).values({
+      scope: "live", productType: "pizza", status: "warn", confidence: 0.5,
+      summary: "generated summary", issues: [], notes: "human note",
+      thumbnail: "data:image/jpeg;base64,AA==", createdAt: old,
+    });
+    await db.insert(inventoryObservationsTable).values({
+      scope: "live", status: "applied", photos: [{ index: 0, mimeType: "image/jpeg" }],
+      draft: { quantity: 10 }, createdAt: old, updatedAt: old, appliedAt: old,
+    });
+
+    const dryRun = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(dryRun.status).toBe(200);
+    const workspace = (await dryRun.json()) as { workspace: { aiRetention: { candidates: { total: number; conversationTurns: number }; canApply: boolean } } };
+    expect(workspace.workspace.aiRetention.candidates.conversationTurns).toBe(1);
+    expect(workspace.workspace.aiRetention.candidates.total).toBe(6);
+    expect(workspace.workspace.aiRetention.canApply).toBe(true);
+
+    const apply = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(apply.status).toBe(200);
+    const second = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(second.status).toBe(200);
+
+    const turns = await db.select().from(aiConversationTurnsTable);
+    expect(turns.map((row) => row.content)).toEqual(["sandbox private turn"]);
+    const facts = await db.select().from(facilityKnowledgeTable);
+    expect(facts.map((row) => row.fact)).toEqual(["sandbox forecast"]);
+    expect(await db.select().from(aiCorrectionsTable)).toHaveLength(1);
+    const incidents = await db.select().from(incidentsTable);
+    const incident = incidents.find((row) => row.id === "retention-incident")!;
+    const partial = incidents.find((row) => row.id === "partially-labeled-incident")!;
+    expect(incident.diagnosis).toMatch(/^\[Unverified generated text\]/);
+    expect((incident.notes as unknown[])).toHaveLength(1);
+    expect(partial.diagnosis).toBe("[Unverified generated text] already labeled");
+    expect(partial.workaround).toBe("[Unverified generated text] generated workaround only");
+    const [quality] = await db.select().from(qualityChecksTable);
+    expect(quality.thumbnail).toBeNull();
+    expect(quality.notes).toBe("human note");
+    const [observation] = await db.select().from(inventoryObservationsTable);
+    expect(observation.draft).toEqual({ retention: "redacted" });
+    expect(await db.select().from(dataHealsTable)).toHaveLength(1);
+
+    await db.insert(qualityChecksTable).values({
+      scope: "live", productType: "crust", status: "pass", confidence: 0.9,
+      summary: "later generated summary", issues: [],
+      thumbnail: "data:image/jpeg;base64,BB==", createdAt: old,
+    });
+    const laterApply = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(laterApply.status).toBe(200);
+    const qualityAfterLaterRun = await db.select().from(qualityChecksTable);
+    expect(qualityAfterLaterRun.every((row) => row.thumbnail === null)).toBe(true);
+    expect(await db.select().from(dataHealsTable)).toHaveLength(2);
+  });
+
+  it("refuses an oversized candidate set without mutating rows or writing a marker", async () => {
+    const manager = await freshManager();
+    await db.insert(facilityKnowledgeTable).values(
+      Array.from({ length: 501 }, (_, index) => ({
+        scope: "live" as const,
+        domain: "forecast",
+        key: `oversized-${index}`,
+        fact: "bounded generated fact",
+      })),
+    );
+
+    const apply = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(apply.status).toBe(409);
+    expect(await db.select().from(facilityKnowledgeTable)).toHaveLength(501);
+    expect(await db.select().from(dataHealsTable)).toHaveLength(0);
+  });
+});
 
 describe("GET, POST, and DELETE /ai-corrections — capability gating", () => {
   it("allows any authenticated operator to read corrections", async () => {
