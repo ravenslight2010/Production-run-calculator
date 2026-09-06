@@ -94,6 +94,9 @@ let passwordResetRequestsTable: DbModule["passwordResetRequestsTable"];
 
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
+let getRequiredCapabilities: (
+  middleware: unknown,
+) => readonly Capability[] | undefined;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -159,6 +162,8 @@ beforeAll(async () => {
   passwordResetRequestsTable = dbMod.passwordResetRequestsTable;
   const rolesMod = await import("../lib/roles");
   seedRoles = rolesMod.seedRoles;
+  const capabilityMod = await import("../middlewares/requireCapability");
+  getRequiredCapabilities = capabilityMod.getRequiredCapabilities;
 
   // Minimal app: the real router, behind a no-op req.log so handlers that log
   // don't crash without pino-http. Mounted at /api to match production paths.
@@ -816,6 +821,59 @@ const ROUTES: GatedRoute[] = [
   },
 ];
 
+type ExpressRouteLayer = {
+  route?: {
+    path: string;
+    methods: Record<string, boolean>;
+    stack: Array<{ handle: unknown }>;
+  };
+};
+
+function declaredAuthorizationRoutes(
+  ownedRouters: readonly {
+    name: string;
+    router: { stack: Array<{ route?: unknown }> };
+    authOnlyRoutes?: readonly string[];
+  }[],
+) {
+  const capabilityRoutes: Array<{ name: string; capability: Capability }> = [];
+  const authOnlyRoutes: string[] = [];
+
+  for (const owned of ownedRouters) {
+    const declaredAuthOnly = new Set(owned.authOnlyRoutes ?? []);
+    for (const rawLayer of owned.router.stack) {
+      const layer = rawLayer as ExpressRouteLayer;
+      if (!layer.route) continue;
+      const methods = Object.entries(layer.route.methods)
+        .filter(([, enabled]) => enabled)
+        .map(([method]) => method.toUpperCase());
+      for (const method of methods) {
+        const name = `${method} ${layer.route.path}`;
+        const required = layer.route.stack.flatMap(
+          ({ handle }) => getRequiredCapabilities(handle) ?? [],
+        );
+        if (required.length > 0) {
+          for (const capability of required) capabilityRoutes.push({ name, capability });
+        } else if (declaredAuthOnly.has(name)) {
+          authOnlyRoutes.push(name);
+          declaredAuthOnly.delete(name);
+        } else {
+          throw new Error(
+            `${owned.name} route ${name} has no direct authorization coverage classification`,
+          );
+        }
+      }
+    }
+    if (declaredAuthOnly.size > 0) {
+      throw new Error(
+        `${owned.name} has stale auth-only classifications: ${[...declaredAuthOnly].join(", ")}`,
+      );
+    }
+  }
+
+  return { capabilityRoutes, authOnlyRoutes };
+}
+
 const USER_BY_ROLE: Record<string, string> = {
   manager: MANAGER,
   operator: OPERATOR,
@@ -827,6 +885,22 @@ const USER_BY_ROLE: Record<string, string> = {
 };
 
 describe("capability-based access control", () => {
+  it("keeps owned operations routes in the direct authorization inventory", async () => {
+    const { directAuthorizationCoverageRouters } = await import("./index");
+    const declared = declaredAuthorizationRoutes(directAuthorizationCoverageRouters);
+    const covered = ROUTES.map(({ name, capability }) => ({ name, capability }));
+
+    for (const route of declared.capabilityRoutes) {
+      expect(covered, `${route.name} direct capability coverage`).toContainEqual(route);
+    }
+    expect(declared.authOnlyRoutes.sort()).toEqual([
+      "DELETE /run-templates",
+      "GET /run-templates",
+      "GET /runs",
+      "POST /run-templates",
+    ]);
+  });
+
   it("rejects every protected route with 401 when signed out", async () => {
     const itemId = await makeItem("ingredient:Target:lbs");
     for (const route of ROUTES) {

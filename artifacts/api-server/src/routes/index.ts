@@ -54,6 +54,25 @@ import { startupGate } from "../lib/startupGate";
 
 const router: IRouter = Router();
 
+export const directAuthorizationCoverageRouters = [
+  {
+    name: "production runs",
+    router: runsRouter,
+    authOnlyRoutes: ["GET /runs"],
+  },
+  { name: "profile data health", router: profileDataHealthRouter },
+  { name: "master data health", router: masterDataHealthRouter },
+  {
+    name: "run templates",
+    router: runTemplatesRouter,
+    authOnlyRoutes: [
+      "GET /run-templates",
+      "POST /run-templates",
+      "DELETE /run-templates",
+    ],
+  },
+] as const;
+
 // Stale-data protection, on by default: every GET response gets the no-store
 // triplet automatically unless its route is in CACHE_CONTROL_EXCLUSIONS (the SSE
 // streams, the public health probe, /auth/username-available). The sync DATA

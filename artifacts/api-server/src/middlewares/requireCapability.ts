@@ -2,6 +2,9 @@ import type { Request, Response, NextFunction } from "express";
 import { getOrCreateUserRole, getRole, type Capability } from "../lib/roles";
 import { currentScope } from "../lib/requestScope";
 
+type CapabilityMiddleware = ReturnType<typeof requireCapabilities>;
+const requiredCapabilitiesByMiddleware = new WeakMap<CapabilityMiddleware, readonly Capability[]>();
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -73,7 +76,22 @@ function requireCapabilities(capabilitiesRequired: readonly Capability[], match:
 }
 
 export function requireCapability(capability: Capability) {
-  return requireCapabilities([capability], "all");
+  const middleware = requireCapabilities([capability], "all");
+  requiredCapabilitiesByMiddleware.set(middleware, [capability]);
+  return middleware;
+}
+
+/**
+ * Test-only route ownership hook. Express keeps middleware functions on each
+ * route layer, so authorization inventory checks can discover capability gates
+ * without duplicating route declarations or invoking the middleware.
+ */
+export function getRequiredCapabilities(
+  middleware: unknown,
+): readonly Capability[] | undefined {
+  return typeof middleware === "function"
+    ? requiredCapabilitiesByMiddleware.get(middleware as CapabilityMiddleware)
+    : undefined;
 }
 
 /**
@@ -90,5 +108,7 @@ export function requireManagerRole(req: Request, res: Response, next: NextFuncti
 
 /** Gate a shared operational read surface that is valid for either role. */
 export function requireAnyCapability(capabilities: readonly Capability[]) {
-  return requireCapabilities(capabilities, "any");
+  const middleware = requireCapabilities(capabilities, "any");
+  requiredCapabilitiesByMiddleware.set(middleware, capabilities);
+  return middleware;
 }
