@@ -2,7 +2,14 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, Re
 import { useLayoutEffect, useRef, useState } from "react";
 import type { SyncDiagnostic } from "../syncDiagnostics";
 import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, type AttentionState } from "../attentionStates";
-import { OPERATIONAL_INTENT_OUTBOX_EVENT, operationalIntentSummary } from "../operationalIntentOutbox";
+import {
+  discardOperationalIntent,
+  flushOperationalIntentOutbox,
+  OPERATIONAL_INTENT_OUTBOX_EVENT,
+  operationalIntentSummary,
+  readOperationalIntentOutbox,
+  retryOperationalIntent,
+} from "../operationalIntentOutbox";
 
 export type SyncStatus = "connected" | "syncing" | "retrying" | "synchronized" | "delayed" | "failed";
 
@@ -37,6 +44,7 @@ export default function SyncStatusPopover(props: Props) {
   const [open, setOpen] = useState(false);
   const [horizontalOffset, setHorizontalOffset] = useState(0);
   const [intentSummary, setIntentSummary] = useState(() => operationalIntentSummary());
+  const [intents, setIntents] = useState(() => readOperationalIntentOutbox());
   const panelRef = useRef<HTMLDivElement>(null);
   const horizontalOffsetRef = useRef(0);
   const failed = props.status === "failed";
@@ -77,9 +85,17 @@ export default function SyncStatusPopover(props: Props) {
     return () => window.removeEventListener("resize", clampToViewport);
   }, [open]);
   useLayoutEffect(() => {
-    const refresh = () => setIntentSummary(operationalIntentSummary());
+    const refresh = () => {
+      setIntentSummary(operationalIntentSummary());
+      setIntents(readOperationalIntentOutbox());
+    };
     window.addEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
-    return () => window.removeEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
+    // The custom event updates this tab; storage updates the other open tabs.
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
   }, []);
 
   return (
@@ -115,7 +131,12 @@ export default function SyncStatusPopover(props: Props) {
             <span>Last acknowledgment</span><strong className="text-right">{time(props.lastAcknowledgedAt)}</strong>
             <span>Pending writes</span><strong className="text-right">{props.pendingCount}</strong>
             <span>Failed writes</span><strong className="text-right">{props.failedCount}</strong>
-             <span>Offline actions</span><strong className="text-right">{intentSummary.pending} pending</strong>
+             <span>Offline actions</span><strong className="text-right">
+               {intentSummary.pending + intentSummary.sending} active
+               {intentSummary.blocked + intentSummary["permanently-rejected"] > 0
+                 ? ` · ${intentSummary.blocked + intentSummary["permanently-rejected"]} need action`
+                 : ""}
+             </strong>
           </div>
            {(intentSummary.accepted + intentSummary.rebased + intentSummary["review-required"]) > 0 && (
              <p className="mt-2 text-muted-foreground">
@@ -123,8 +144,45 @@ export default function SyncStatusPopover(props: Props) {
                {intentSummary["review-required"] ? `, ${intentSummary["review-required"]} need manager review` : ""}.
              </p>
            )}
+           {intents.length > 0 && (
+             <div className="mt-3 border-t border-border pt-2">
+               <p className="mb-1 font-semibold">Offline action queue</p>
+               <div className="max-h-52 space-y-2 overflow-auto">
+                 {intents.slice().reverse().map((intent) => {
+                   const label = intent.state === "pending" ? "Saved locally · pending"
+                     : intent.state === "sending" ? "Sending"
+                       : intent.state === "review-required" ? "Review required"
+                         : intent.state === "permanently-rejected" ? "Permanently rejected"
+                           : intent.state === "blocked" ? "Blocked" : intent.state;
+                   return (
+                     <div key={intent.id} className="rounded border border-border bg-muted/20 p-2 text-[11px]">
+                       <div className="flex items-start justify-between gap-2">
+                         <span className="font-semibold capitalize">{intent.action} · {label}</span>
+                         <span className="text-muted-foreground">#{intent.id.slice(-6)}</span>
+                       </div>
+                       <p className="mt-1 text-muted-foreground">
+                         {intent.guidance ?? (intent.state === "review-required"
+                           ? "A manager must review this action. It is retained and cannot be discarded."
+                           : `Attempt ${intent.attempts ?? 0}`)}
+                       </p>
+                       {intent.state === "review-required" ? (
+                         <p className="mt-1 font-medium text-amber-500">Open the manager conflict monitor for review guidance.</p>
+                        ) : !["accepted", "rebased", "sending"].includes(intent.state) && (
+                         <div className="mt-2 flex gap-2">
+                           <button type="button" onClick={() => { if (retryOperationalIntent(intent.id)) void flushOperationalIntentOutbox(); }}
+                              className="min-h-11 rounded border border-border px-3 font-semibold hover:bg-muted/50">Retry</button>
+                           <button type="button" onClick={() => discardOperationalIntent(intent.id)}
+                              className="min-h-11 rounded border border-border px-3 text-muted-foreground hover:bg-muted/50">Discard</button>
+                         </div>
+                       )}
+                     </div>
+                   );
+                 })}
+               </div>
+             </div>
+           )}
           {(failed || delayed || props.pendingCount > 0) && (
-            <button type="button" onClick={props.onRetry} className="mt-3 flex w-full items-center justify-center gap-2 rounded bg-primary px-2 py-1.5 font-semibold text-primary-foreground hover:opacity-90">
+              <button type="button" onClick={() => { props.onRetry(); void flushOperationalIntentOutbox(); }} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded bg-primary px-2 py-1.5 font-semibold text-primary-foreground hover:opacity-90">
               <RefreshCw className="h-3.5 w-3.5" /> Retry latest retained change
             </button>
           )}

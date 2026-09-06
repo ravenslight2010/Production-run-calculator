@@ -26,3 +26,9 @@ Run completion is one durable server finalization command. While it is pending, 
 **Why:** Separate End and inventory requests can leave a canonically completed run without inventory consumption. Stripping only `endedAt` is insufficient for a paused run because clearing its pause fields can accidentally resume canonical tracking.
 
 **How to apply:** Capture the complete bounded pre-End lifecycle before optimistic mutation, publish that lifecycle while completion is pending, and let stable command IDs make retries exactly-once across instances.
+
+Recoverable browser commands are bound to the authenticated user and live/sandbox scope. Retry eligibility is a persisted deadline, rate-limit waits cannot be manually bypassed, and a sending record is neither retryable nor discardable. Cross-tab delivery uses a renewable lease plus a per-attempt token; every post-network transition must still match both the captured identity and token.
+
+**Why:** A late response after sign-out or lease loss can otherwise adopt another scope's canonical state, resurrect a terminal command, or lift an End fence before atomic finalization. Event-only retries also strand work when connectivity stays online after a transient server failure.
+
+**How to apply:** Schedule one wake-up for the earliest retry deadline, keep review-required records outside terminal-history eviction, quarantine legacy unowned records until explicit recovery, and keep blocked or rejected Ends fenced until retry or explicit discard.

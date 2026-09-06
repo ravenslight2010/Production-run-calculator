@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   flushOperationalIntentOutbox,
   fencePendingEndSnapshots,
@@ -6,10 +6,19 @@ import {
   operationalIntentSummary,
   queueOperationalIntent,
   readOperationalIntentOutbox,
+  retryOperationalIntent,
+  discardOperationalIntent,
+  setOperationalIntentIdentity,
 } from "./operationalIntentOutbox";
 
 describe("operational intent outbox", () => {
-  afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); });
+  beforeEach(() => setOperationalIntentIdentity({ scope: "live", userId: "operator-1" }));
+  afterEach(() => {
+    setOperationalIntentIdentity(null);
+    localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
   it("persists the exact correction and retains it for retry until canonical outcome", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn()
@@ -23,6 +32,8 @@ describe("operational intent outbox", () => {
     expect(readOperationalIntentOutbox()[0]).toMatchObject({ id: intent.id, values: { traysOnLine: 5, batchesReady: 2 }, state: "pending" });
     await flushOperationalIntentOutbox();
     expect(operationalIntentSummary().pending).toBe(1);
+    expect(readOperationalIntentOutbox()[0]).toMatchObject({ failure: "network", attempts: 1 });
+    retryOperationalIntent(intent.id);
     await flushOperationalIntentOutbox();
     expect(operationalIntentSummary().accepted).toBe(1);
     expect(fetch.mock.calls[0][1].body).toContain('"traysOnLine":5');
@@ -68,5 +79,97 @@ describe("operational intent outbox", () => {
     vi.stubGlobal("fetch", fetch);
     await flushOperationalIntentOutbox();
     expect(fetch.mock.calls[0][1].body).not.toContain("preEndLifecycle");
+  });
+  it("uses bounded backoff and honors Retry-After instead of retrying in a storm", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false, status: 429, headers: { get: () => "120" }, json: async () => ({}),
+    }));
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 123, action: "pause" });
+    await flushOperationalIntentOutbox();
+    const saved = readOperationalIntentOutbox().find((x) => x.id === intent.id)!;
+    expect(saved).toMatchObject({ state: "pending", failure: "rate-limited", attempts: 1 });
+    expect(saved.nextRetryAt!).toBeGreaterThanOrEqual(Date.now() + 119_000);
+    expect(retryOperationalIntent(intent.id)).toBe(false);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("terminalizes validation and auth failures, with auth recoverable only by manual retry", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetch);
+    const auth = queueOperationalIntent({ runId: "auth", observedGeneration: "auth:1", effectiveAt: 1, action: "pause" });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox().find((x) => x.id === auth.id)).toMatchObject({ state: "blocked", failure: "authentication" });
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(retryOperationalIntent(auth.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox().find((x) => x.id === auth.id)).toMatchObject({ state: "permanently-rejected", failure: "validation" });
+  });
+  it("keeps blocked and rejected Ends fenced until explicit discard", () => {
+    const base = {
+      version: 1 as const,
+      id: "offline:end",
+      date: "2026-09-06",
+      runId: "run-1",
+      observedGeneration: "run-1:100",
+      resetEpoch: 0,
+      effectiveAt: 200,
+      action: "lifecycle" as const,
+      lifecycle: "end" as const,
+      inventoryLines: [],
+      preEndLifecycle: { startedAt: 50, metaUpdatedAt: 100 },
+    };
+    const projected = [{ id: "run-1", startedAt: 50, endedAt: 200, metaUpdatedAt: 201 }];
+    expect(fencePendingEndSnapshots(projected, [{ ...base, state: "blocked" }])[0].endedAt).toBeUndefined();
+    expect(fencePendingEndSnapshots(projected, [{ ...base, state: "permanently-rejected" }])[0].endedAt).toBeUndefined();
+  });
+  it("discards only discardable work and keeps review-required evidence", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "review-required" }) });
+    vi.stubGlobal("fetch", fetch);
+    const review = queueOperationalIntent({ runId: "review", observedGeneration: "review:1", effectiveAt: 1, action: "pause" });
+    const pending = queueOperationalIntent({ runId: "discard", observedGeneration: "discard:1", effectiveAt: 2, action: "resume" });
+    expect(discardOperationalIntent(pending.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(discardOperationalIntent(review.id)).toBe(false);
+    expect(readOperationalIntentOutbox()).toHaveLength(1);
+  });
+  it("uses per-ID terminal keys so another tab's terminal record is not clobbered", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "rebased" }) });
+    vi.stubGlobal("fetch", fetch);
+    queueOperationalIntent({ runId: "one", observedGeneration: "one:1", effectiveAt: 1, action: "pause" });
+    queueOperationalIntent({ runId: "two", observedGeneration: "two:1", effectiveAt: 2, action: "resume" });
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary()).toMatchObject({ accepted: 1, rebased: 1 });
+    expect([...Array(localStorage.length)].map((_, i) => localStorage.key(i)).filter((key) => key?.includes(":terminal:"))).toHaveLength(2);
+  });
+  it("does not expose or flush another authenticated user's queued work", () => {
+    const intent = queueOperationalIntent({ runId: "one", observedGeneration: "one:1", effectiveAt: 1, action: "pause" });
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-2" });
+    expect(readOperationalIntentOutbox()).toEqual([]);
+    expect(retryOperationalIntent(intent.id)).toBe(false);
+  });
+  it("does not discard an in-flight action or apply its response after identity changes", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    let release!: (value: unknown) => void;
+    const response = new Promise((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(response));
+    const intent = queueOperationalIntent({ runId: "one", observedGeneration: "one:1", effectiveAt: 1, action: "pause" });
+    const flushing = flushOperationalIntentOutbox();
+    await vi.waitFor(() => expect(readOperationalIntentOutbox()[0]?.state).toBe("sending"));
+    expect(discardOperationalIntent(intent.id)).toBe(false);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-2" });
+    release({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    await flushing;
+    expect(readOperationalIntentOutbox()).toEqual([]);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(readOperationalIntentOutbox()[0]).toMatchObject({ id: intent.id, state: "sending" });
   });
 });

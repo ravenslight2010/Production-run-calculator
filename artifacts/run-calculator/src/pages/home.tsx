@@ -515,7 +515,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
@@ -2988,6 +2988,10 @@ export default function Home() {
   } = useAuth();
   useEffect(() => {
     setImportHistoryIdentity(me ? {
+      scope: me.sandbox ? "sandbox" : "live",
+      userId: me.userId,
+    } : null);
+    setOperationalIntentIdentity(me ? {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     } : null);
