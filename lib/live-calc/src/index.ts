@@ -451,3 +451,16 @@ export function computeServerCalc(
   });
   return { runId: run.id, calc };
 }
+
+// ── Server-side auto-track schedule (refactor step 6a) ─────────────────────
+export {
+  AUTO_TRACK_SCHEDULE_CHANNELS,
+  computeAutoTrackElapsedMs,
+  computeAutoTrackSchedule,
+  type AutoTrackSchedule,
+  type AutoTrackScheduleChannel,
+  type AutoTrackScheduleCoordinationState,
+  type AutoTrackScheduleEntry,
+  type AutoTrackScheduleInput,
+  type AutoTrackScheduleProgress,
+} from "./autoTrackSchedule";

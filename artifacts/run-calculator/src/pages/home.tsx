@@ -494,6 +494,7 @@ import {
 } from "../hooks/useAutoTrack";
 import {
   publishAutoTrackCoordination,
+  publishAutoTrackSchedule,
   subscribeAutoTrackCoordination,
 } from "../autoTrackCoordinationClient";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
@@ -7464,6 +7465,7 @@ export default function Home() {
       state?: AutoTrackEventResult["state"];
       values?: AutoTrackEventResult["values"];
       data?: SyncPayload;
+      autoTrackSchedule?: import("@workspace/live-calc").AutoTrackSchedule | null;
       snapshotId?: string;
     } | null;
     if (!response.ok || !body?.outcome || !body.state || !body.values) {
@@ -7475,6 +7477,7 @@ export default function Home() {
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
       publishAutoTrackCoordination(body.data);
+      if (body.autoTrackSchedule) publishAutoTrackSchedule(body.autoTrackSchedule);
       canonicalRunValuesUpdatedAtRef.current = { ...(body.data.runValuesUpdatedAt ?? {}) };
       if (body.outcome === "accepted" || body.outcome === "duplicate") {
         lastAcceptedAutoTrackStampRef.current[claim.runId] =
@@ -8412,6 +8415,7 @@ export default function Home() {
           resetEpoch?: number;
           initial?: boolean;
           serverCalc?: { runId: string; calc: Calc } | null;
+          autoTrackSchedule?: import("@workspace/live-calc").AutoTrackSchedule | null;
         };
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
@@ -8460,8 +8464,12 @@ export default function Home() {
           }
         }
       
-        // Store server-computed calc for parity diagnostics and future auto-track use.
+        // Store server-computed calc and adopt the server's auto-track schedule
+        // (refactor step 6a): the schedule arms due refs via the same
+        // coordination event claims use, so a device opening mid-run or waking
+        // converges onto the canonical tick times without re-deriving them.
         if (msg.serverCalc) serverCalcRef.current = msg.serverCalc;
+        if (msg.autoTrackSchedule) publishAutoTrackSchedule(msg.autoTrackSchedule);
 } catch {}
     };
     es.onerror = () => {

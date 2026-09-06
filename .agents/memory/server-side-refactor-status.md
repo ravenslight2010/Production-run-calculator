@@ -1,9 +1,18 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands after Codex 2026-09-05 session — Steps 1-5 done, 6 not started.
+description: Where the server-side refactor stands — Steps 1-5 done, Step 6a (server-computed auto-track schedule) in PR, 6b/6c not started.
 ---
 
-# Server-side refactor — current status (2026-09-05)
+# Server-side refactor — current status (2026-09-06)
+
+## In PR (branch `refactor/auto-track-scheduler`) — Step 6a: server-computed auto-track schedule
+
+**Step 6a: server-computed auto-track schedule attached to SSE/claim payloads** — first slice of Step 6:
+- `lib/live-calc/src/autoTrackSchedule.ts` (new): pure-function server scheduler. Net-second channels (sauce-barrel, app1-4-batch) are derived from stored anchors + cadence vs pause-aware elapsed net seconds; wall-clock channels (case, tray/batch, hopper) echo the persisted coordination record's canonical `nextDueAt` + `sequence`.
+- `artifacts/api-server/src/routes/sync.ts`: `buildAutoTrackSchedule()` attaches `autoTrackSchedule` to every SSE broadcast frame, the initial SSE frame, and claim POST responses.
+- `artifacts/run-calculator`: `autoTrackScheduleToCoordination()`/`publishAutoTrackSchedule()` map the schedule into the existing `AUTO_TRACK_COORDINATION_EVENT`; `home.tsx` publishes it on SSE receive + claim response.
+- Generation strings match the claim endpoint's `expectedGeneration` (`${runId}:${metaUpdatedAt ?? startedAt ?? 0}`), so claimed sequences stay in parity with the server.
+- Advisory only: live-claim validation still lives in `applyAutoTrackClaim` (unchanged).
 
 ## Done (merged to main)
 
@@ -57,7 +66,7 @@ description: Where the server-side refactor stands after Codex 2026-09-05 sessio
 
 ## Not started
 
-**Step 6: Server-side auto-track** — `useAutoTrack` is 1,645 lines, deeply coupled to React refs, timers, form values, and state. Moving tick detection server-side is a multi-day architectural change. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
+**Step 6b/6c: Full server-side auto-track tick execution** — Step 6a (server schedule) is in PR; the remaining work is client adoption of server-driven tick fires and eventually server-owned tick execution. `useAutoTrack` is 1,645 lines, deeply coupled to React refs, timers, form values, and state — that decomposition is needed before 6b/6c. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
 
 **Step 4c (if wanted): Schedule panel** — the Schedule editor stays inline; it is dialog-heavy by design (schedule dialog fields are DIALOG_REGISTRY-excluded elsewhere), so it may not benefit from a narrow ctx. The AI panel also stays inline (lazy, closures-only).
 
@@ -71,5 +80,5 @@ description: Where the server-side refactor stands after Codex 2026-09-05 sessio
 ## What the next agent should do
 
 1. Verify PR #22 (Setup/Summary extraction, step 5) is merged to main.
-2. Step 6 (server-side auto-track) is next — the big remaining prize, but it requires understanding the full 1,645-line useAutoTrack hook first.
+2. Step 6a (server-computed schedule) shipped as the first slice of server-side auto-track; 6b/6c (client adoption of server tick fires, then server-owned tick execution) require decomposing the 1,645-line useAutoTrack hook first — scope carefully.
 3. When extracting any remaining panel, reuse the recipe: narrow per-concern ctx + dep registry + Suite 4 freeze-guard test; keep dialog/manage/merge/import fields out of the dep lists.
