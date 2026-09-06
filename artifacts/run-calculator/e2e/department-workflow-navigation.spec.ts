@@ -225,10 +225,9 @@ test("manager can open the Dough recipe editor without an uncaught page error", 
   await expect(settings).toBeVisible();
   await settings.getByRole("button", { name: "Recipes", exact: true }).click();
 
-  await expect(
-    settings.getByRole("heading", { name: "Dough Recipes", exact: true }),
-  ).toBeVisible();
-  await expect(settings.getByRole("button", { name: "Add Dough Recipe" })).toBeVisible();
+  const doughEditor = settings.getByTestId("dough-recipe-editor");
+  await expect(doughEditor).toBeVisible();
+  await expect(doughEditor.getByRole("button", { name: "Add Dough Recipe" })).toBeVisible();
   expect(pageErrors).toEqual([]);
   await screenshot(page, testInfo, "manager-dough-recipes");
 });

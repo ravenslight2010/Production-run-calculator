@@ -15220,10 +15220,12 @@ export default function Home() {
                         Cheese tabs. The run form's Dough / Sauce cards pick one
                         by name and hydrate their rows from the chosen recipe. */}
                     {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
-                      <DeferredNamedRecipesManager
-                        kind={manageCategory === "dough" ? "dough" : "sauce"}
-                        ingredientSuggestions={unifiedIngredientUniverse}
-                      />
+                      <div data-testid={`${manageCategory}-recipe-editor`}>
+                        <DeferredNamedRecipesManager
+                          kind={manageCategory === "dough" ? "dough" : "sauce"}
+                          ingredientSuggestions={unifiedIngredientUniverse}
+                        />
+                      </div>
                     )}
                   </div>
                 )}
