@@ -1,9 +1,13 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c (schedule-bearing SSE heartbeat) done; server-authority layer complete on web.
+description: Where the server-side refactor stands — Steps 1-6 + 7a (server-owned net-second auto-track execution) done; server-authority layer complete on web; wall-clock channels still client-driven.
 ---
 
 # Server-side refactor — current status (2026-09-06)
+
+## Done (merged to main, PR #33) — Step 7a: server-owned net-second auto-track execution
+
+**Step 7a: the server fires due sauce-barrel / applicator-batch claims itself** — an app-level tick loop (`runNetSecondServerTicks` + `startAutoTrackServerTicks`, default 15s, `AUTO_TRACK_SERVER_TICK_MS`, bounded to 24 claims/pass) scans the live scope's recent days, builds due claims from the shared schedule, and applies them through the SAME parse/apply/row-lock transaction as a client claim POST (sauce inventory idempotency included). Runs now keep auto-tracking while every device is closed; a competing client/instance just loses the row-lock race and lands stale/duplicate. Pure claim builder lives in `api-server/lib/autoTrackServerTicks.ts` (DB-free, 10 unit tests); `buildAutoTrackScheduleFromPayload` moved into `@workspace/live-calc` so SSE/claim/tick paths share one derivation. Wall-clock channels (case/tray/batch/hopper) deliberately stay client-driven (they need arm-state machines the server doesn't model). Client unchanged (local tick stays the offline fallback; online devices keep the 6b server-verdict path). Also relaxed the claim parser so sauce anchors may be fractional net-seconds (matches the client's real cadence math and the app-slot behavior; the made counter stays integer-gated).
 
 ## Done (merged to main, PR #31) — Step 6c: schedule-bearing SSE heartbeat
 
@@ -76,9 +80,9 @@ description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c 
 
 **First attempt (Step 4): Warehouse panel via `useHomeTabCtx()`** — failed because the panel references ~20 Home-scope variables not in the context (`markCountedMutation`, `activeRunNeedDetails`, `activePackagingRows`, `cycleCountSchedules`, `runValuesById`, `fmtTime`, `runLabel`, `computeSummaryStats`, `WarehouseNeedsList`, `DEFAULT_VALUES`, etc.). Threading them through would widen re-render scope. **Lesson:** management-heavy panels need their OWN narrow context (per concern), not the live-tab context — that is what `WarehouseTabCtx` provides.
 
-## Not started
+## Partially started / not started
 
-**Server-owned auto-track tick EXECUTION (post-6c)** — 6a/6b/6c delivered the server-authority WHEN layer (schedule + due-now verdicts live on every device). A future step could have the SERVER write the claims itself (a server tick loop calling the claim protocol), removing the client tick entirely. Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`.
+**Server-owned auto-track tick EXECUTION (post-7a)** — 7a executes the NET-SECOND channels server-side. Remaining: the WALL-CLOCK channels (case/tray/batch/hopper), which need server models of the client's arm-state machines (period advance, remainder carry, feed-complete gates, dough-timer pauses) BEFORE the server can safely write them — do not attempt without porting those state machines. Also open: letting connected clients skip their redundant net-second tick when the server is authoritative (battery win, needs care with offline fallback). Key files: `hooks/useAutoTrack.ts`, `autoTrackCoordinationClient.ts`, `lib/autoTrackCoordination.ts`, `lib/autoTrackServerTicks.ts`.
 
 **Step 4c (if wanted): Schedule panel** — the Schedule editor stays inline; it is dialog-heavy by design (schedule dialog fields are DIALOG_REGISTRY-excluded elsewhere), so it may not benefit from a narrow ctx. The AI panel also stays inline (lazy, closures-only).
 
@@ -92,5 +96,5 @@ description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b + 6c 
 ## What the next agent should do
 
 1. Verify PR #22 (Setup/Summary extraction, step 5) is merged to main.
-2. Steps 6a/6b/6c shipped (server schedule → client adoption → schedule-bearing SSE heartbeat). Remaining prize: server-owned tick EXECUTION (server writes claims itself via the claim protocol), which would need a server tick loop reusing `autoTrackEngine` — scope carefully.
+2. Steps 6a/6b/6c + 7a shipped (server schedule → client adoption → heartbeat → server-owned net-second execution). Remaining: wall-clock channels server-side (port arm-state machines first) and the client battery-win of skipping redundant net-second ticks while connected.
 3. When extracting any remaining panel, reuse the recipe: narrow per-concern ctx + dep registry + Suite 4 freeze-guard test; keep dialog/manage/merge/import fields out of the dep lists.

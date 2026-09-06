@@ -354,3 +354,20 @@ Each entry includes:
 **Context:** Completes refactor step 6 as a safe server-authority layer: the server owns WHEN (schedule due times + due-now verdicts, now live for every device); the claim endpoint still owns WHAT gets written (validation, sequencing, manual-correction guards), which is what makes automatic writes safe against operator edits. Verified: PR #31 merged; api-server tsc + build + 18/18 coordination unit tests; CI green including `API tests (Postgres)` (74/74) — only the two known pre-existing failures (department journey, release gates) remain.
 
 *Last updated: 2026-09-06*
+## 2026-09-06 — Server-owned net-second auto-track execution (refactor step 7a)
+
+**File(s):**
+- `lib/live-calc/src/autoTrackSchedule.ts` + `lib/live-calc/src/index.ts` (shared `buildAutoTrackScheduleFromPayload`)
+- `artifacts/api-server/src/lib/autoTrackServerTicks.ts` (+ DB-free unit tests)
+- `artifacts/api-server/src/routes/sync.ts` (tick runner + app ticker; SSE/claim now reuse the shared builder)
+- `artifacts/api-server/src/index.ts` (starts the unref'd ticker)
+- `artifacts/api-server/src/lib/autoTrackCoordination.ts` (sauce anchor parser relaxed)
+- `artifacts/api-server/src/routes/sync.integration.test.ts` (server-tick integration suite)
+
+**Problem:** Auto-track only advanced while at least one client tab was open and running its local tick. With no device open (or all sleeping), sauce barrels and applicator batches fell behind — bad for a production floor that wants counts correct when the first person checks in.
+
+**Fix:** A bounded app-level tick loop (`runNetSecondServerTicks`, 24 claims/pass; `startAutoTrackServerTicks` on a 15s unref'd interval, `AUTO_TRACK_SERVER_TICK_MS`) scans the live scope's recent days, builds due net-second claims from the shared schedule, and applies each through the EXACT same `parseAutoTrackClaim` → `applyAutoTrackClaim` → row-lock transaction (with sauce inventory consumption) as a client claim POST. A competing client or another server instance simply loses the row-lock race and is rejected as stale/duplicate — so the change is safe both single-node and multi-instance. The claim parser now allows fractional (net-second) sauce anchors, matching the client's true cadence math and app-slot behavior; `sauceBarrelsMade` stays integer-gated and sauce inventory idempotency is unchanged. Started in `index.ts` inside the "listening" handler; unref'd so it never blocks shutdown.
+
+**Context:** Completes the net-second half of server-owned execution (refactor step 7a). Wall-clock channels (case/tray/batch/hopper) intentionally stay client-driven — the server would need to port the client's arm-state machines (period advance, remainder carry, feed-complete gates, dough-timer pauses) before it can safely write them; that's the only remaining step toward full server ownership. Also fixed during CI iteration: the integration fixture's shared `FULL_RUN_VALUES` had an empty `frontlineRecipeName`, so sauce claims couldn't validate inventory (conflict every beat) while app batches succeeded. Verified: api-server tsc + build; DB-free unit suites 120/120; live-calc 100/100; web tsc; CI `API tests (Postgres)` green including the new server-tick integration; only the two known pre-existing failures (department journey, release gates) remain. PR #33 merged.
+
+*Last updated: 2026-09-06*
