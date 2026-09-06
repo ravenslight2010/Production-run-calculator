@@ -160,3 +160,111 @@ export function shouldResetFormOnRunSwitch(live: FormValues, stored: FormValues,
 export function acceptRemoteRunValueOnSync(remote: FormValues, local: FormValues, remoteTs: number, localTs: number): boolean {
   return !isEmptyOverPopulated(remote, local) && !(localTs > remoteTs);
 }
+
+type OperationalCanonicalIntent = {
+  runId: string;
+  action: "pause" | "resume" | "lifecycle" | "correction";
+  lifecycle?: "start" | "end";
+  values?: Record<string, number>;
+};
+
+type OperationalCanonicalPayload = {
+  dayState: { runs: RunMeta[] };
+  runValues: Record<string, FormValues>;
+  runValuesUpdatedAt?: Record<string, number>;
+};
+
+const OPERATIONAL_CORRECTION_FIELDS = new Set<keyof FormValues>([
+  "skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady",
+  "sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration",
+  "app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration",
+  "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
+  "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
+  "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
+]);
+
+/**
+ * Force-adopts only the fields governed by a rejected/rebased operational
+ * command. This runs before ordinary LWW receive so the rejected local command
+ * cannot win merely because it minted a newer browser stamp.
+ */
+export function reconcileOperationalIntentCanonical(args: {
+  dayState: DayState;
+  runValues: FormValues;
+  runValuesUpdatedAt: Record<string, number>;
+  payload: OperationalCanonicalPayload;
+  intent: OperationalCanonicalIntent;
+  outcome: "accepted" | "rebased" | "review-required";
+}): {
+  dayState: DayState;
+  runValues: FormValues;
+  runValuesUpdatedAt: Record<string, number>;
+  lifecycleChanged: boolean;
+  valueFields: Array<keyof FormValues>;
+} {
+  const unchanged = {
+    dayState: args.dayState,
+    runValues: args.runValues,
+    runValuesUpdatedAt: args.runValuesUpdatedAt,
+    lifecycleChanged: false,
+    valueFields: [] as Array<keyof FormValues>,
+  };
+  // Accepted finalization is special: the server owns the completion stamp and
+  // committed inventory in the same transaction. Adopt that exact lifecycle
+  // before the outbox drops its snapshot fence. Other accepted commands already
+  // match their optimistic local projection.
+  if (args.outcome === "accepted"
+    && !(args.intent.action === "lifecycle" && args.intent.lifecycle === "end")) return unchanged;
+
+  let dayState = args.dayState;
+  let lifecycleChanged = false;
+  if (args.intent.action !== "correction") {
+    const localIndex = args.dayState.runs.findIndex((run) => run.id === args.intent.runId);
+    const canonical = args.payload.dayState.runs.find((run) => run.id === args.intent.runId);
+    if (localIndex >= 0 && canonical) {
+      const local = args.dayState.runs[localIndex];
+      const restored: RunMeta = {
+        ...local,
+        startedAt: canonical.startedAt,
+        pausedAt: canonical.pausedAt,
+        pausedStoppageId: canonical.pausedStoppageId,
+        endedAt: canonical.endedAt,
+        stoppages: canonical.stoppages,
+        metaUpdatedAt: canonical.metaUpdatedAt,
+      };
+      if (!deepEqual(local, restored)) {
+        const runs = [...args.dayState.runs];
+        runs[localIndex] = restored;
+        dayState = { ...args.dayState, runs };
+        lifecycleChanged = true;
+      }
+    }
+  }
+
+  let runValues = args.runValues;
+  let runValuesUpdatedAt = args.runValuesUpdatedAt;
+  const valueFields: Array<keyof FormValues> = [];
+  if (args.intent.action === "correction") {
+    const canonical = args.payload.runValues[args.intent.runId];
+    if (canonical) {
+      const restored = { ...args.runValues };
+      for (const field of Object.keys(args.intent.values ?? {})) {
+        if (!OPERATIONAL_CORRECTION_FIELDS.has(field as keyof FormValues)) continue;
+        if (!Object.prototype.hasOwnProperty.call(canonical, field)) continue;
+        const value = canonical[field as keyof FormValues];
+        if (typeof value !== "number" || !Number.isFinite(value)) continue;
+        (restored as unknown as Record<string, unknown>)[field] = value;
+        valueFields.push(field as keyof FormValues);
+      }
+      if (valueFields.length) {
+        runValues = restored;
+        runValuesUpdatedAt = {
+          ...args.runValuesUpdatedAt,
+          [args.intent.runId]: args.payload.runValuesUpdatedAt?.[args.intent.runId] ?? 0,
+        };
+      }
+    }
+  }
+
+  return { dayState, runValues, runValuesUpdatedAt, lifecycleChanged, valueFields };
+}

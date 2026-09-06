@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, Re
 import { useLayoutEffect, useRef, useState } from "react";
 import type { SyncDiagnostic } from "../syncDiagnostics";
 import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, type AttentionState } from "../attentionStates";
+import { OPERATIONAL_INTENT_OUTBOX_EVENT, operationalIntentSummary } from "../operationalIntentOutbox";
 
 export type SyncStatus = "connected" | "syncing" | "retrying" | "synchronized" | "delayed" | "failed";
 
@@ -35,6 +36,7 @@ function time(at: number | null): string {
 export default function SyncStatusPopover(props: Props) {
   const [open, setOpen] = useState(false);
   const [horizontalOffset, setHorizontalOffset] = useState(0);
+  const [intentSummary, setIntentSummary] = useState(() => operationalIntentSummary());
   const panelRef = useRef<HTMLDivElement>(null);
   const horizontalOffsetRef = useRef(0);
   const failed = props.status === "failed";
@@ -74,6 +76,11 @@ export default function SyncStatusPopover(props: Props) {
     window.addEventListener("resize", clampToViewport);
     return () => window.removeEventListener("resize", clampToViewport);
   }, [open]);
+  useLayoutEffect(() => {
+    const refresh = () => setIntentSummary(operationalIntentSummary());
+    window.addEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
+    return () => window.removeEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
+  }, []);
 
   return (
     <div className="relative">
@@ -108,7 +115,14 @@ export default function SyncStatusPopover(props: Props) {
             <span>Last acknowledgment</span><strong className="text-right">{time(props.lastAcknowledgedAt)}</strong>
             <span>Pending writes</span><strong className="text-right">{props.pendingCount}</strong>
             <span>Failed writes</span><strong className="text-right">{props.failedCount}</strong>
+             <span>Offline actions</span><strong className="text-right">{intentSummary.pending} pending</strong>
           </div>
+           {(intentSummary.accepted + intentSummary.rebased + intentSummary["review-required"]) > 0 && (
+             <p className="mt-2 text-muted-foreground">
+               Offline actions: {intentSummary.accepted} accepted, {intentSummary.rebased} rebased
+               {intentSummary["review-required"] ? `, ${intentSummary["review-required"]} need manager review` : ""}.
+             </p>
+           )}
           {(failed || delayed || props.pendingCount > 0) && (
             <button type="button" onClick={props.onRetry} className="mt-3 flex w-full items-center justify-center gap-2 rounded bg-primary px-2 py-1.5 font-semibold text-primary-foreground hover:opacity-90">
               <RefreshCw className="h-3.5 w-3.5" /> Retry latest retained change

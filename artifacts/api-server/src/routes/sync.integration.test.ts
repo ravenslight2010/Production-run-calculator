@@ -28,6 +28,8 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
+let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 
@@ -78,6 +80,8 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
+  dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
 
@@ -122,7 +126,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -145,6 +149,156 @@ function authHeaders(): Record<string, string> {
 function managerAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(MANAGER)}` };
 }
+
+describe("POST /sync/operational-intents — atomic run finalization", () => {
+  const DATE = "2030-03-10";
+  const RUN = "final-run";
+
+  async function seedFinalization() {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: RUN,
+            brand: "Acme",
+            flavor: "Pep",
+            startedAt: 50,
+            pausedAt: 75,
+            pausedStoppageId: "pause-1",
+            stoppages: [{ id: "pause-1", type: "pause", reason: "Break", startedAt: 75 }],
+            metaUpdatedAt: 100,
+          }],
+        },
+        runValues: { [RUN]: { casesNeeded: 10 } },
+        runValuesUpdatedAt: { [RUN]: 100 },
+      },
+    }).where(eq(dailySyncTable.date, DATE));
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:Flour:lbs", category: "ingredient", name: "Flour", unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id, qtyReceived: 20, qtyRemaining: 20,
+    });
+  }
+
+  function finalization(id: string, observedGeneration = `${RUN}:100`) {
+    return {
+      senderId: "end-client",
+      intent: {
+        version: 1,
+        id,
+        date: DATE,
+        runId: RUN,
+        observedGeneration,
+        resetEpoch: 0,
+        effectiveAt: Date.now(),
+        action: "lifecycle",
+        lifecycle: "end",
+        inventoryLines: [{ itemKey: "ingredient:Flour:lbs", qty: 4 }],
+      },
+    };
+  }
+
+  async function postFinalization(body: ReturnType<typeof finalization>) {
+    return fetch(`${baseUrl}/api/sync/operational-intents?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("keeps a fenced pre-intent snapshot open, then commits End, inventory, and retained day state once", async () => {
+    await seedFinalization();
+    // This is the ordinary snapshot emitted after the local UI projected End:
+    // the pending-intent fence has removed endedAt and restored its observed stamp.
+    const snapshot = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "end-client",
+        payload: {
+          dayState: {
+            date: DATE,
+            runs: [{
+              id: RUN,
+              startedAt: 50,
+              pausedAt: 75,
+              pausedStoppageId: "pause-1",
+              stoppages: [{ id: "pause-1", type: "pause", reason: "Break", startedAt: 75 }],
+              metaUpdatedAt: 100,
+            }],
+          },
+          runValues: { [RUN]: { casesNeeded: 10 } },
+          runValuesUpdatedAt: { [RUN]: 100 },
+        },
+      }),
+    });
+    expect(snapshot.status).toBe(200);
+    const fencedRun = ((await snapshot.json()) as any).data.dayState.runs.find((r: any) => r.id === RUN);
+    expect(fencedRun).toMatchObject({
+      startedAt: 50,
+      pausedAt: 75,
+      pausedStoppageId: "pause-1",
+      stoppages: [{ id: "pause-1", type: "pause", reason: "Break", startedAt: 75 }],
+      metaUpdatedAt: 100,
+    });
+    expect(fencedRun.endedAt).toBeUndefined();
+
+    const first = await postFinalization(finalization("offline:final-one"));
+    const firstBody = await first.json() as any;
+    expect(firstBody.outcome).toBe("accepted");
+    expect(firstBody.duplicate).toBe(false);
+    expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
+    expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
+    // Completed history is the retained daily document flow: the canonical ended
+    // run remains in dayState for archive/history synchronization.
+    expect(firstBody.data.dayState.runs.some((r: any) => r.id === RUN)).toBe(true);
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+
+    const replay = await postFinalization(finalization("offline:final-one"));
+    expect(await replay.json()).toMatchObject({ outcome: "accepted", duplicate: true });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+  });
+
+  it("returns review-required for stale generation and leaves inventory unchanged", async () => {
+    await seedFinalization();
+    const response = await postFinalization(finalization("offline:stale-end", `${RUN}:99`));
+    expect(await response.json()).toMatchObject({ outcome: "review-required", duplicate: false });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+  });
+
+  it("lets a reset holding the first lock force review without inventory side effects", async () => {
+    await seedFinalization();
+    const client = await pool.connect();
+    let pending: Promise<Response>;
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "INSERT INTO data_reset (scope, epoch, reset_at) VALUES ('live', 0, NOW()) ON CONFLICT (scope) DO NOTHING",
+      );
+      await client.query("SELECT * FROM data_reset WHERE scope = 'live' FOR UPDATE");
+      await client.query("UPDATE data_reset SET epoch = 1, reset_at = NOW() WHERE scope = 'live'");
+      await client.query("DELETE FROM daily_sync WHERE scope = 'live'");
+      pending = postFinalization(finalization("offline:reset-race"));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    expect(await (await pending).json()).toMatchObject({ outcome: "review-required" });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+});
 
 describe("POST /sync/auto-track/claim", () => {
   const DATE = "2030-03-10";

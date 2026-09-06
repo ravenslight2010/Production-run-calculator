@@ -1384,18 +1384,33 @@ export async function consumeRun(
   runId: string,
   lines: ConsumeLine[],
 ): Promise<{ applied: boolean; consumed: number }> {
-  return db.transaction(async (tx) => {
-    // Production only ever pulls from onsite/line stock. `onsiteId` is null when
-    // no location rows exist (all stock implicitly onsite), in which case the
-    // drawdown spans the still-null lots — same result as before this feature.
-    const onsiteId = await resolveOnsiteLocationId();
-    const onsiteCond = onsiteLotCond(onsiteId);
-    return applyRunConsumption(
+  return db.transaction((tx) => consumeRunInTransaction(tx, runId, lines));
+}
+
+/**
+ * Apply a completed run's immutable consumption lines inside a caller-owned
+ * transaction. Finalization uses this so endedAt, the intent outcome, the
+ * run-once marker, lot drawdown, and ledger entries commit or roll back together.
+ */
+export async function consumeRunInTransaction(
+  tx: InventoryExecutor,
+  runId: string,
+  lines: ConsumeLine[],
+): Promise<{ applied: boolean; consumed: number }> {
+  const scope = currentScope();
+  // Production only ever pulls from onsite/line stock. Resolve this through the
+  // same transaction as the drawdown; no inventory read escapes finalization.
+  const [onsite] = await tx.select({ id: inventoryLocationsTable.id })
+    .from(inventoryLocationsTable)
+    .where(and(eq(inventoryLocationsTable.scope, scope), eq(inventoryLocationsTable.isOnsite, true)))
+    .limit(1);
+  const onsiteCond = onsiteLotCond(onsite?.id ?? null);
+  return applyRunConsumption(
       {
         claimRun: async (rid) => {
           const [claim] = await tx
             .insert(inventoryConsumedRunsTable)
-            .values({ runId: rid, scope: currentScope() })
+            .values({ runId: rid, scope })
             .onConflictDoNothing({
               target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
             })
@@ -1406,13 +1421,13 @@ export async function consumeRun(
           const parts = itemKey.match(/^ingredient:(.*):(lbs|batches)$/);
           const ingredients = await tx.select({
             id: ingredientsTable.id, name: ingredientsTable.name, mergedInto: ingredientsTable.mergedInto,
-          }).from(ingredientsTable).where(eq(ingredientsTable.scope, currentScope()));
+          }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope));
           const expectedName = parts?.[1]?.trim().toLowerCase();
           const expectedIngredient = expectedName
             ? ingredients.find((i) => i.name.trim().toLowerCase() === expectedName)
             : undefined;
           const allItems = await tx.select().from(inventoryItemsTable)
-            .where(eq(inventoryItemsTable.scope, currentScope()));
+            .where(eq(inventoryItemsTable.scope, scope));
           const candidates = allItems
             .filter((item) => {
               if (item.productionIngredientId && expectedIngredient) {
@@ -1444,7 +1459,7 @@ export async function consumeRun(
           for (const entry of entries) {
             await tx.insert(inventoryLedgerTable).values({
               itemId,
-              scope: currentScope(),
+              scope,
               lotId: entry.lotId,
               type: "consume",
               qtyDelta: -entry.qty,
@@ -1457,7 +1472,6 @@ export async function consumeRun(
       runId,
       lines,
     );
-  });
 }
 
 // Draw down one manually-confirmed sauce barrel. The barrel index is folded

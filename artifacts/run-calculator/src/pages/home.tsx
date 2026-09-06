@@ -28,6 +28,7 @@ import {
   useAutomaticUpdateReloadBlocker,
 } from "../updateReloadSafety";
 import {
+  browserIsOnline,
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
@@ -250,6 +251,7 @@ import {
   isEmptyOverPopulated,
   isPristineSeedRun,
   pickCurrentRunPushValue,
+  reconcileOperationalIntentCanonical,
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
@@ -439,7 +441,6 @@ import {
   computeRunConsumptionLines,
   consumeSauceBarrel,
   deriveCandidateItems,
-  consumeRun,
   scoreNameMatch,
 } from "../inventoryShared";
 import {
@@ -513,6 +514,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
+import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter } from "../operationalIntentOutbox";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
@@ -3062,6 +3064,17 @@ export default function Home() {
   // One identity adapter feeds autosave, packaging progress, rollover, and
   // station composition. It does not own selection or persistence.
   const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
+  // Keep operational corrections on explicit operator paths only.  Autosave and
+  // automatic ticks deliberately never call this helper.
+  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>) => {
+    const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
+    if (!run) return;
+    queueOperationalIntent({
+      runId, values, effectiveAt: Date.now(), action: "correction",
+      observedGeneration: `${runId}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
+    });
+    void flushOperationalIntentOutbox();
+  }, []);
   const persistManualPackagingProgress = useCallback((
     runId: string,
     skidsCompleted: number,
@@ -3078,13 +3091,17 @@ export default function Home() {
     });
     markRunValuesUpdated(runId, now);
     lastLocalEditRef.current = now;
+    queueManualCorrection(runId, {
+      skidsCompleted: Math.max(0, skidsCompleted),
+      casesOnCurrentSkid: Math.max(0, casesOnCurrentSkid),
+    });
     if (runId === currentRunIdRef.current) {
       autoSuppressUntilRef.current = Math.max(
         autoSuppressUntilRef.current,
         manualOverrideUntil,
       );
     }
-  }, []);
+  }, [queueManualCorrection]);
   const persistAutomaticPackagingProgress = useCallback((
     skidsCompleted: number,
     casesOnCurrentSkid: number,
@@ -7640,6 +7657,99 @@ export default function Home() {
         : lastAcknowledgedAt
           ? "synchronized"
           : "connected";
+  // The normal snapshot sync remains a recovery path; this separate queue keeps
+  // operator occurrence times and can be retried after a tab/browser restart.
+  useEffect(() => {
+    setOperationalIntentCanonicalAdopter((data, intent, outcome) => {
+      const payload = data as SyncPayload;
+      const acceptedFinalization =
+        outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
+      if (outcome === "accepted" && !acceptedFinalization) {
+        applySyncCallbackRef.current(payload);
+        return;
+      }
+      if (outcome !== "accepted" && outcome !== "rebased" && outcome !== "review-required") {
+        applySyncCallbackRef.current(payload);
+        return;
+      }
+
+      // A finalization/review/rebase response is authoritative for the command it resolves,
+      // even when the rejected browser edit minted a newer LWW stamp. Restore
+      // only that command's lifecycle/correction fields before ordinary inbound
+      // reconciliation, then feed the ordinary path the preserved hybrid so it
+      // cannot replace unrelated newer local fields from the same run.
+      const localDay = dayStateRef.current;
+      const localValues = loadRunValues(intent.runId);
+      const localUpdated = loadRunValuesUpdated();
+      const forced = reconcileOperationalIntentCanonical({
+        dayState: localDay,
+        runValues: localValues,
+        runValuesUpdatedAt: localUpdated,
+        payload,
+        intent,
+        outcome,
+      });
+      let inbound = payload;
+      if (forced.lifecycleChanged || forced.valueFields.length) {
+        if (forced.lifecycleChanged) {
+          saveDayState(forced.dayState, { stampMeta: false });
+          dayStateRef.current = forced.dayState;
+          setDayState(forced.dayState);
+        }
+        if (forced.valueFields.length) {
+          saveRunValues(intent.runId, forced.runValues);
+          saveRunValuesUpdated(forced.runValuesUpdatedAt);
+          canonicalRunValuesUpdatedAtRef.current = {
+            ...canonicalRunValuesUpdatedAtRef.current,
+            [intent.runId]: forced.runValuesUpdatedAt[intent.runId] ?? 0,
+          };
+        }
+
+        const selectedId =
+          forced.dayState.runs[forced.dayState.currentIndex]?.id;
+        if (selectedId === intent.runId && forced.valueFields.length) {
+          const restored = mergeRunDefaults(forced.runValues);
+          lastFormRunIdRef.current = intent.runId;
+          form.reset(restored);
+          resetFieldArrays(restored);
+        }
+        // The rejected edit is no longer a local write candidate. In particular,
+        // do not let the quiet-window guard preserve it over this response.
+        lastLocalEditRef.current = 0;
+
+        inbound = {
+          ...payload,
+          dayState: forced.lifecycleChanged
+            ? {
+                ...payload.dayState,
+                runs: payload.dayState.runs.map((run) =>
+                  run.id === intent.runId
+                    ? forced.dayState.runs.find((local) => local.id === run.id) ?? run
+                    : run,
+                ),
+              }
+            : payload.dayState,
+          runValues: forced.valueFields.length
+            ? { ...payload.runValues, [intent.runId]: forced.runValues }
+            : payload.runValues,
+          runValuesUpdatedAt: forced.valueFields.length
+            ? {
+                ...(payload.runValuesUpdatedAt ?? {}),
+                [intent.runId]: forced.runValuesUpdatedAt[intent.runId] ?? 0,
+              }
+            : payload.runValuesUpdatedAt,
+        };
+      }
+      applySyncCallbackRef.current(inbound);
+    });
+    const flush = () => { void flushOperationalIntentOutbox(); };
+    flush();
+    window.addEventListener("online", flush);
+    return () => {
+      setOperationalIntentCanonicalAdopter(undefined);
+      window.removeEventListener("online", flush);
+    };
+  }, []);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
@@ -9106,19 +9216,29 @@ export default function Home() {
         // Auto-end any active run before archiving yesterday
         const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
         if (prevDs && stored.date) {
-          // Auto-deduct inventory for every run being closed by the rollover, the
-          // same as an explicit endRun. consume is idempotent per runId, so runs
-          // already deducted via endRun won't double-count.
+          const rolloverEndedAt = Date.now();
+          // Rollover completion uses the same durable atomic finalization as an
+          // explicit End. Preserve yesterday's date in the intent outbox.
           for (const r of prevDs.runs) {
             if (r.startedAt && !r.endedAt) {
               const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+              queueOperationalIntent({
+                date: stored.date,
+                runId: r.id,
+                observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
+                effectiveAt: rolloverEndedAt,
+                action: "lifecycle",
+                lifecycle: "end",
+                preEndLifecycle: capturePreEndLifecycle(r),
+                inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, vals)),
+              });
             }
           }
+          if (browserIsOnline()) void flushOperationalIntentOutbox();
           const finalDs: DayState = {
             ...prevDs,
             runs: prevDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+              r.startedAt && !r.endedAt ? { ...r, endedAt: rolloverEndedAt, pausedAt: undefined } : r
             ),
           };
           archiveDayToHistory(finalDs, stored.date);
@@ -9548,7 +9668,7 @@ export default function Home() {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
-      dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,
       ...(() => {
@@ -11086,6 +11206,8 @@ export default function Home() {
     if (!activeRun) return;
     const activeRunId = activeRun.id;
     const now = Date.now();
+    queueOperationalIntent({ runId: activeRunId, observedGeneration: `${activeRunId}:${activeRun.metaUpdatedAt ?? activeRun.startedAt ?? 0}`, effectiveAt: now, action: "lifecycle", lifecycle: "start" });
+    void flushOperationalIntentOutbox();
     // A pending run owns no Packaging completion. If a run-switch handoff ever
     // leaked the prior run's counters into this form/storage, clear them before
     // the lifecycle starts so the new run cannot begin already "complete".
@@ -11110,14 +11232,22 @@ export default function Home() {
     initialFinishTimestampRef.current =
       now + (calcRef.current?.totalTimeSec ?? 0) * 1000;
     // Starting a run stops any other run that is currently running. Finalize each
-    // like an explicit endRun: deduct its own inventory (idempotent per runId,
-    // from its stored values) before marking it ended.
+    // through the same durable intent as an explicit End.
     for (const r of base.runs) {
       if (r.id !== activeRunId && r.startedAt && !r.endedAt) {
         const runValues = loadRunValues(r.id);
-        void consumeRun(r.id, computeRunConsumptionLines(effectiveValuesForRun(r, runValues))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+        queueOperationalIntent({
+          runId: r.id,
+          observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
+          effectiveAt: now,
+          action: "lifecycle",
+          lifecycle: "end",
+          preEndLifecycle: capturePreEndLifecycle(r),
+          inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, runValues)),
+        });
       }
     }
+    if (browserIsOnline()) void flushOperationalIntentOutbox();
     // An explicit Warehouse allocation is carried into the live packaging
     // register once, so the operator sees the confirmed opening count while
     // the original casesNeeded target remains intact in the run form.
@@ -11188,6 +11318,8 @@ export default function Home() {
     // records for one lifecycle.
     if (!run?.startedAt || run.pausedAt || run.endedAt) return;
     const now = Date.now();
+    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "pause" });
+    void flushOperationalIntentOutbox();
     // Persist the conservative default before displaying the question. This is
     // intentionally not deferred to the ten-second timer: a reload, a lost
     // foreground event, or another tablet must all see the same safe choice.
@@ -11260,6 +11392,8 @@ export default function Home() {
     const run = base.runs[index];
     if (!run) return;
     const now = Date.now();
+    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "resume" });
+    void flushOperationalIntentOutbox();
     const resumed = applyResumeToRun(run, now);
     if (!resumed) return;
     const newRuns = base.runs.map((r, i) =>
@@ -11479,10 +11613,21 @@ export default function Home() {
         void propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
       }
     }
-    // Auto-deduct this run's materials from inventory (idempotent by runId;
-    // no-op for any material that has no inventory item).
-    void consumeRun(activeRunId, computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
     const endedAt = Date.now();
+    // Online and offline completion use the same durable command. The bounded
+    // canonical lines are captured now (not recomputed after recipes change).
+    // Until this commits, buildSyncPayload removes the optimistic endedAt.
+    const observedRun = overlayRunMetaStamps([activeRun])[0];
+    queueOperationalIntent({
+      runId: activeRunId,
+      observedGeneration: `${activeRunId}:${observedRun.metaUpdatedAt ?? observedRun.startedAt ?? 0}`,
+      effectiveAt: endedAt,
+      action: "lifecycle",
+      lifecycle: "end",
+      preEndLifecycle: capturePreEndLifecycle(observedRun),
+      inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur)),
+    });
+    if (browserIsOnline()) void flushOperationalIntentOutbox();
     const newRuns = base.runs.map((r, i) =>
       i === index ? { ...r, pausedAt: undefined, endedAt } : r
     );
@@ -13781,19 +13926,28 @@ export default function Home() {
           catch { return null; }
         })();
         if (storedDs?.date && storedDs.date !== todayStr()) {
-          // Auto-deduct inventory for every run closed by the midnight rollover,
-          // matching endRun. consume is idempotent per runId — no double-count.
+          const rolloverEndedAt = Date.now();
           for (const r of storedDs.runs) {
             if (r.startedAt && !r.endedAt) {
               const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+              queueOperationalIntent({
+                date: storedDs.date,
+                runId: r.id,
+                observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
+                effectiveAt: rolloverEndedAt,
+                action: "lifecycle",
+                lifecycle: "end",
+                preEndLifecycle: capturePreEndLifecycle(r),
+                inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, vals)),
+              });
             }
           }
+          if (browserIsOnline()) void flushOperationalIntentOutbox();
           // Auto-end any run that was still active when midnight hit
           const finalDs: DayState = {
             ...storedDs,
             runs: storedDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+              r.startedAt && !r.endedAt ? { ...r, endedAt: rolloverEndedAt, pausedAt: undefined } : r
             ),
           };
           archiveDayToHistory(finalDs, storedDs.date);
@@ -14321,7 +14475,7 @@ export default function Home() {
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
     premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
-    persistManualPackagingProgress,
+    persistManualPackagingProgress, queueManualCorrection,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
     removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
@@ -20782,7 +20936,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
-    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, setWriteError,
+    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection, setWriteError,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
@@ -20837,7 +20991,11 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     const now = Date.now();
     markRunValuesUpdated(currentRunId, now);
     lastLocalEditRef.current = now;
-  }, [currentRunId, form, lastLocalEditRef]);
+    queueManualCorrection(currentRunId, {
+      sauceBarrelsMade: made, sauceBarrelAnchorNetSec: anchor,
+      sauceBarrelCorrectionGeneration: correctionGeneration,
+    });
+  }, [currentRunId, form, lastLocalEditRef, queueManualCorrection]);
   const setShowSauceBarrelDue = useCallback(
     (val: boolean) => {
       getSauceBarrelEntry(currentRunId).showBarrelDue = val;
@@ -21228,7 +21386,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
 
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef } = hx;
+  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection } = hx;
   const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
 
   // These are canonical run values, not tab-local state: switching Frontline
@@ -21240,9 +21398,10 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     const generationField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
     form.setValue(madeField, Math.max(0, Math.floor(made)) as never, { shouldDirty: true });
     form.setValue(anchorField, Math.max(0, elapsedBatchSec) as never, { shouldDirty: true });
+    const correctionGeneration = Math.max(0, Number(form.getValues(generationField)) || 0) + 1;
     form.setValue(
       generationField,
-      (Math.max(0, Number(form.getValues(generationField)) || 0) + 1) as never,
+      correctionGeneration as never,
       { shouldDirty: true },
     );
     // The shared one-minute correction fence means a due automatic tick cannot
@@ -21251,7 +21410,12 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     const now = Date.now();
     markRunValuesUpdated(currentRunId, now);
     lastLocalEditRef.current = now;
-  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef]);
+    queueManualCorrection(currentRunId, {
+      [madeField]: Math.max(0, Math.floor(made)),
+      [anchorField]: Math.max(0, elapsedBatchSec),
+      [generationField]: correctionGeneration,
+    });
+  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
 
@@ -21498,7 +21662,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRunId, dayState, dayStateRef, doughSubTab,
-    form, isSupervisor, persistManualPackagingProgress, runStatus, runToTime,
+    form, isSupervisor, persistManualPackagingProgress, queueManualCorrection, runStatus, runToTime,
     schedulePush, setDayState, setRunToTime, v,
   } = hx;
 
@@ -21848,7 +22012,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         hopperSec: Math.max(0, Number(v.hopperSec) || 0),
                       },
                     );
-                    const onManual = () => {
+                    const onManual = (values: Record<string, number>) => {
                       const now = Date.now();
                       if (timing.trayMs > 0) {
                         doughAutoSuppressUntilRef.current = now + timing.trayMs;
@@ -21861,6 +22025,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         resumeDoughTimers();
                       }
                       markRunValuesUpdated(currentRunId, now);
+                      queueManualCorrection(currentRunId, values);
                     };
                     // Stop auto-track TickBars once the press is done — no more
                     // batches are needed for this run at that point.
@@ -21886,8 +22051,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
                                 : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
                               suggestion={!trayAutoActive ? suggestedTrays : null}
-                              onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true }); }}
-                              onManualChange={onManual}
+                              onSuggest={() => { const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }); }}
+                              onManualChange={(next) => onManual({ traysOnLine: next })}
                             />
                             {doughSubTab !== "crusts" && (
                               <div className="mt-1.5 space-y-1" data-testid="tray-section-capacity-guide">
@@ -21938,8 +22103,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
                                 max={3}
                                 suggestion={!batchAutoActive ? suggestedBatches : null}
-                                onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true }); }}
-                                onManualChange={onManual}
+                              onSuggest={() => { const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }); }}
+                              onManualChange={(next) => onManual({ batchesReady: next })}
                               />
                               {v.batchesReady >= 3 && (
                                 <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  browserIsOnline,
+  resolveEndRunRoute,
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "./foregroundLifecycleIntent";
@@ -36,5 +38,19 @@ describe("foreground Stop intent", () => {
         { id: "run-2", brand: "C", flavor: "D", startedAt: 300 },
       ),
     ).toEqual({ kind: "not-applied", reason: "changed" });
+  });
+});
+
+describe("End run route", () => {
+  it("uses inventory consumption only when the browser explicitly reports online", () => {
+    expect(resolveEndRunRoute(true)).toBe("online-consume");
+    expect(browserIsOnline({ onLine: true })).toBe(true);
+  });
+
+  it("uses the durable review intent when offline or browser status is unavailable", () => {
+    expect(resolveEndRunRoute(false)).toBe("offline-intent");
+    expect(resolveEndRunRoute(undefined)).toBe("offline-intent");
+    expect(browserIsOnline({ onLine: false })).toBe(false);
+    expect(browserIsOnline(null)).toBe(false);
   });
 });

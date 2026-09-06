@@ -42,6 +42,7 @@ import {
   proactiveAlertSettingsTable,
   auditLogsTable,
   syncConflictLogsTable,
+  operationalIntentLedgerTable,
   completedRunHistoryTable,
 } from "@workspace/db";
 import { and, eq, gt, gte, lte, asc, sql } from "drizzle-orm";
@@ -56,7 +57,8 @@ import {
   buildNetSecondServerClaims,
   buildWallClockServerClaims,
 } from "../lib/autoTrackServerTicks";
-import { consumeSauceBarrelInTransaction } from "./inventory";
+import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
+import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
 import {
   computeAutoTrackSchedule,
@@ -119,6 +121,7 @@ type ProtectedUpsertResult = {
   wrote: boolean;
   partialFallback: boolean;
   retries: number;
+  staleEpoch?: number;
 };
 
 function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
@@ -486,12 +489,22 @@ async function upsertProtected(
   scope: Scope,
   payload: unknown,
   clientTodayDate: string,
+  expectedEpoch: number,
   clientIp?: string,
 ): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
       let existingData: unknown = undefined;
       const merged = await db.transaction(async (tx) => {
+        // Scope reset fence is always acquired before the daily document,
+        // matching /sync/reset and operational intents.
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+          .onConflictDoNothing();
+        const [reset] = await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
+        if ((reset?.epoch ?? 0) !== expectedEpoch) {
+          return { data: null, wrote: false, partialFallback: false, retries: attempt, staleEpoch: reset?.epoch ?? 0 };
+        }
         const [existing] = await tx
           .select()
           .from(dailySyncTable)
@@ -625,7 +638,13 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const result = await upsertProtected(today, scope, sanitized, today, req.ip);
+  const expectedEpoch = await getResetEpoch(scope);
+  const result = await upsertProtected(today, scope, sanitized, today, expectedEpoch, req.ip);
+  if (result.staleEpoch !== undefined) {
+    res.setHeader("X-Sync-Response", "stale");
+    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    return;
+  }
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
@@ -647,6 +666,75 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       };
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   res.json(responseBody);
+});
+
+// Offline operational commands are not snapshots. Their stable ID is retained
+// with a bounded outcome trail so retries after a timeout/restart return the
+// original answer instead of applying a second pause or correction.
+router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
+  const now = Date.now();
+  const intent = parseOperationalIntent(req.body?.intent, now);
+  if (!intent || intent.date !== clientToday(req)) {
+    res.status(400).json({ error: "Invalid operational intent or production date" }); return;
+  }
+  const scope = currentScope();
+  try {
+    let result: ReturnType<typeof applyOperationalIntent> | undefined;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await db.transaction(async (tx) => {
+          // Fence reset and intent under one transaction. A reset that wins
+          // this lock makes the command review-required; it cannot resurrect
+          // state between a preflight epoch read and the document write.
+          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+            .onConflictDoNothing();
+          const [reset] = await tx.select().from(dataResetTable)
+            .where(eq(dataResetTable.scope, scope)).for("update");
+          const [existing] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope))).for("update");
+          const [seen] = await tx.select().from(operationalIntentLedgerTable)
+            .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, intent.date), eq(operationalIntentLedgerTable.intentId, intent.id)))
+            .for("update");
+          if (seen) return { data: existing?.data ?? emptySyncData(intent.date), outcome: seen.outcome as any, duplicate: true };
+          if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
+            await tx.insert(operationalIntentLedgerTable).values({
+              scope, date: intent.date, intentId: intent.id, outcome: "review-required",
+            });
+            return {
+              data: existing?.data ?? emptySyncData(intent.date),
+              outcome: "review-required" as const,
+              duplicate: false,
+            };
+          }
+          const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
+          if (
+            applied.outcome === "accepted" &&
+            intent.action === "lifecycle" &&
+            intent.lifecycle === "end"
+          ) {
+            await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
+          }
+          if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
+            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
+          else await tx.insert(dailySyncTable).values({ date: intent.date, scope, data: applied.data as any, updatedAt: new Date() });
+          await tx.insert(operationalIntentLedgerTable).values({
+            scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
+          });
+          return applied;
+        });
+        break;
+      } catch (error) {
+        if (isUniqueViolation(error) && attempt < 3) continue;
+        throw error;
+      }
+    }
+    if (!result) throw new Error("Operational intent did not complete");
+    if (!result.duplicate) broadcast(result.data, typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "", scope, intent.date);
+    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, data: result.data, snapshotId: syncSnapshotId(result.data) });
+  } catch (error) {
+    req.log.error({ err: error, event: "operational_intent" }, "Operational intent reconciliation failed");
+    res.status(500).json({ error: "Operational intent could not sync. Please retry." });
+  }
 });
 
 router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promise<void> => {
@@ -883,7 +971,13 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const result = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
+  const expectedEpoch = await getResetEpoch(scope);
+  const result = await upsertProtected(date, scope, sanitized, clientToday(req), expectedEpoch, req.ip);
+  if (result.staleEpoch !== undefined) {
+    res.setHeader("X-Sync-Response", "stale");
+    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    return;
+  }
   const merged = result.data;
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
@@ -935,14 +1029,17 @@ router.post(
     const scope = currentScope();
     const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
+      // Every writer locks this scope fence before a daily row. Establish it
+      // first so reset cannot deadlock with an intent's daily-row lock.
+      await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+        .onConflictDoNothing();
+      await tx.select().from(dataResetTable).where(eq(dataResetTable.scope, scope)).for("update");
+      await tx.delete(operationalIntentLedgerTable).where(eq(operationalIntentLedgerTable.scope, scope));
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
       const [row] = await tx
-        .insert(dataResetTable)
-        .values({ scope, epoch: 1, resetAt: new Date() })
-        .onConflictDoUpdate({
-          target: dataResetTable.scope,
-          set: { epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() },
-        })
+        .update(dataResetTable)
+        .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
+        .where(eq(dataResetTable.scope, scope))
         .returning();
       return row?.epoch ?? 0;
     });
@@ -979,6 +1076,7 @@ router.post(
     const scope = currentScope();
     const scopedTables = [
       dailySyncTable,
+      operationalIntentLedgerTable,
       brandProfilesTable,
       cheeseRecipesTable,
       doughRecipesTable,
@@ -1027,6 +1125,13 @@ router.post(
       sandboxMetaTable,
     ] as const;
     const epoch = await db.transaction(async (tx) => {
+      // Match every normal snapshot/reset/intent writer: establish and lock the
+      // scope fence before touching any scoped or global data. This prevents a
+      // concurrent writer from recreating rows partway through the purge.
+      await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+        .onConflictDoNothing();
+      await tx.select().from(dataResetTable)
+        .where(eq(dataResetTable.scope, scope)).for("update");
       for (const t of scopedTables) {
         await tx.execute(sql`DELETE FROM ${t} WHERE scope = ${scope}`);
       }
@@ -1034,12 +1139,9 @@ router.post(
         await tx.execute(sql`DELETE FROM ${t}`);
       }
       const [row] = await tx
-        .insert(dataResetTable)
-        .values({ scope, epoch: 1, resetAt: new Date() })
-        .onConflictDoUpdate({
-          target: dataResetTable.scope,
-          set: { epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() },
-        })
+        .update(dataResetTable)
+        .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
+        .where(eq(dataResetTable.scope, scope))
         .returning();
       return row?.epoch ?? 0;
     });
