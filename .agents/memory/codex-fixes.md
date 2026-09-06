@@ -313,3 +313,25 @@ Each entry includes:
 **Context:** Engine PR #2 of the Step 6b foundation. Behavior preserved exactly (verified by the 83-test auto-track suite, 157-test context/memo/adjacent suites, 100-test lib suite, and all typechecks). Refs, effect order, and claim plumbing untouched. Remaining for Steps 6b/6c: adopt server net-second due-times on the client, then server-owned tick execution reusing this engine.
 
 *Last updated: 2026-09-06*
+
+## 2026-09-06 — Server due-now verdict drives net-second claims (refactor step 6b)
+
+**File(s):**
+- `artifacts/run-calculator/src/types.ts` (`autoTrackCoordination` channel state + `dueNow?: boolean`)
+- `artifacts/run-calculator/src/autoTrackCoordinationClient.ts` (schedule→coordination mapping carries `dueNow`)
+- `artifacts/run-calculator/src/autoTrackCoordinationClient.test.ts` (mapping verdict tests)
+- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` (`serverDueNowRef` + adopt-handler verdict recording + sauce/applicator effects)
+- `artifacts/run-calculator/src/hooks/__tests__/useAutoTrack.sauceBarrel.test.tsx` (verdict fire / stale-generation / local-fallback tests)
+
+**Problem:** Net-second claims (sauce barrel, applicator batches) were driven ONLY by the client's local elapsed-time comparison. The server already computed when they're due (`dueNow` in the Step 6a schedule) but the client ignored that verdict — so the server wasn't authoritative despite having the full picture.
+
+**Fix:** Step 6b — the server's `dueNow` verdict is now a first-class signal:
+1. `autoTrackScheduleToCoordination` carries each entry's `dueNow` through the existing `AUTO_TRACK_COORDINATION_EVENT` (wire type extended; old echoes simply omit the field).
+2. The adopt handler records the verdict per channel into `serverDueNowRef` — and clears it when the schedule generation doesn't match the client run identity (a verdict from a different run must never fire claims here).
+3. The sauce/applicator effects fire immediately on a fresh `dueNow === true` verdict, then clear it (one-shot per arrival); the local `elapsedBatchSec` check remains the fallback for devices with no live schedule (offline), so single-device and offline operation is unchanged.
+4. Wall-clock channels are deliberately NOT verdict-driven (the server only echoes their coordination due refs; the client's `nowMs >= dueRef` check already matches).
+5. `resetBookkeeping` clears `serverDueNowRef` on run change/stop.
+
+**Context:** Refactor step 6b. Server logic unchanged (the schedule already computed `dueNow` in 6a); this PR makes the client consume it. Cross-device safety is unchanged: the claim endpoint still sequences/validates. Verified: mapping 5/5, sauce suite 12/12, auto-track suites 73/73, context suites 107/107, lib 100/100, web + api-server typechecks pass.
+
+*Last updated: 2026-09-06*

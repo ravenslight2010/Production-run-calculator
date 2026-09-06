@@ -467,6 +467,10 @@ export type SyncPayload = {
         generation: string;
         sequence: number;
         nextDueAt: number;
+        /** Server auto-track schedule verdict (Step 6b): true when the server
+         * says this channel's claim is due RIGHT NOW. Advisory — the client
+         * keeps its local elapsed fallback. */
+        dueNow?: boolean;
         acceptedEventId?: string;
             acceptedRunValuesUpdatedAt?: number;
         updatedAt: number;

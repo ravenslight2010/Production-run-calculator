@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useAutoTrack } from "../useAutoTrack";
+import { publishAutoTrackSchedule } from "../../autoTrackCoordinationClient";
 
 const form = {
   getValues: () => 0,
@@ -165,5 +166,71 @@ describe("useAutoTrack sauce barrel coordination", () => {
     }, { calc: calcAt(20) }));
     await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
     expect(claim.mock.calls[0][0]).toMatchObject({ dueAt: 50, nextDueAt: 70 });
+  });
+});
+describe("useAutoTrack server due-now verdict (step 6b)", () => {
+  it("fires the sauce claim on a fresh server verdict before local elapsed", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    const { rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(5, claim), // elapsed 5 < cadence 10 — NOT due locally
+    });
+
+    publishAutoTrackSchedule({
+      runId: "sauce-auto",
+      generation: "sauce-auto:started",
+      atMs: Date.now(),
+      entries: [
+        { channel: "sauce-barrel", dueAt: 10, dueNow: true, nextDueAt: 20, canonical: false },
+      ],
+    });
+
+    // Any effect-dep change re-runs the sauce effect; the verdict is what fires it.
+    rerender(props(6, claim));
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+    expect(claim.mock.calls[0][0]).toMatchObject({
+      channel: "sauce-barrel",
+      dueAt: 10,
+      nextDueAt: 20,
+      sequence: 1,
+    });
+  });
+
+  it("ignores a verdict whose generation does not match the client run identity", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    const { rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(5, claim),
+    });
+
+    publishAutoTrackSchedule({
+      runId: "sauce-auto",
+      generation: "sauce-auto:OTHER-RUN", // stale identity
+      atMs: Date.now(),
+      entries: [
+        { channel: "sauce-barrel", dueAt: 10, dueNow: true, nextDueAt: 20, canonical: false },
+      ],
+    });
+
+    rerender(props(6, claim));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("keeps the local elapsed fallback when no schedule verdict has arrived", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    renderHook((p) => useAutoTrack(p), { initialProps: props(25, claim) });
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+    expect(claim.mock.calls[0][0]).toMatchObject({ channel: "sauce-barrel", dueAt: 10 });
   });
 });
