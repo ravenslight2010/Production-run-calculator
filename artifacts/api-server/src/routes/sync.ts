@@ -50,8 +50,13 @@ import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
-import { applyAutoTrackClaim, parseAutoTrackClaim } from "../lib/autoTrackCoordination";
+import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
+import {
+  buildNetSecondServerClaims,
+  buildWallClockServerClaims,
+} from "../lib/autoTrackServerTicks";
 import { consumeSauceBarrelInTransaction } from "./inventory";
+import { logger } from "../lib/logger";
 import {
   computeAutoTrackSchedule,
   computeServerCalc,
@@ -164,6 +169,7 @@ type BroadcastPayload = {
   runValues?: Record<string, Record<string, unknown>>;
   packagingProgress?: Record<string, unknown>;
   autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
+  autoTrackServerState?: { netOwnership?: Record<string, Record<string, unknown>> };
 };
 
 export function buildAutoTrackSchedule(
@@ -187,6 +193,10 @@ export function buildAutoTrackSchedule(
     calc: calcResult.calc,
     progress: rawValues,
     coordination: payload.autoTrackCoordination?.runs?.[runId] as AutoTrackScheduleInput["coordination"],
+    serverNetOwnership: payload.autoTrackServerState?.netOwnership?.[runId] as AutoTrackScheduleInput["serverNetOwnership"],
+    serverWallOwnership: (
+      payload.autoTrackServerState as any
+    )?.wallClockBookkeeping?.[runId]?.serverSequences as AutoTrackScheduleInput["serverWallOwnership"],
     nowMs,
   });
 }
@@ -781,9 +791,25 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   client = { res, clientId, scope, watchDate };
   clients.add(client);
 
+  // Refresh schedule leases on the established heartbeat. A schedule never
+  // outlives its SSE freshness window: a failed read simply sends a normal
+  // keepalive and clients resume their local fallback after the lease expires.
   heartbeat = setInterval(() => {
-    try { res.write(": heartbeat\n\n"); } catch {}
-  }, 15_000);
+    void (async () => {
+      try {
+        const [fresh] = await db.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
+        const live = fresh?.data ? computeServerLiveState(fresh.data) : null;
+        if (live?.autoTrackSchedule) {
+          res.write(`data: ${JSON.stringify({ autoTrackSchedule: live.autoTrackSchedule, heartbeat: true })}\n\n`);
+        } else {
+          res.write(": heartbeat\n\n");
+        }
+      } catch {
+        try { res.write(": heartbeat\n\n"); } catch {}
+      }
+    })();
+  }, Math.max(1_000, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000));
 });
 
 // ── Scheduled (future) days ──────────────────────────────────────────────────
@@ -1019,5 +1045,128 @@ router.post(
     res.json({ ok: true, epoch });
   },
 );
+
+const SERVER_TICK_DEFAULT_MS = 15_000;
+const SERVER_TICK_MAX_CLAIMS = 24;
+const SERVER_TICK_LOOKBACK_DAYS = 45;
+
+function serverTickStartDate(nowMs: number): string {
+  const date = new Date(nowMs - SERVER_TICK_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  return date.toISOString().slice(0, 10);
+}
+
+export type ServerTickSummary = {
+  examinedDates: number;
+  builtClaims: number;
+  accepted: number;
+  outcomes: Record<string, number>;
+};
+
+/** Executes automatic claims under the same locked, idempotent path as the
+ * public claim route. A beat writes wall-clock bookkeeping even without an
+ * accepted claim, which prevents a restart from replaying elapsed time. */
+export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?: number } = {}): Promise<ServerTickSummary> {
+  const nowMs = opts.nowMs ?? Date.now();
+  const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
+  const rows = await db.select().from(dailySyncTable).where(and(
+    eq(dailySyncTable.scope, "live"),
+    gte(dailySyncTable.date, serverTickStartDate(nowMs)),
+    // Client-local dates may be one calendar day ahead of server UTC.
+    lte(dailySyncTable.date, new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
+  ));
+  let builtClaims = 0;
+  let accepted = 0;
+  const outcomes: Record<string, number> = {};
+  for (const row of rows) {
+    if (builtClaims >= maxClaims) break;
+    try {
+      const result = await db.transaction(async (tx) => {
+        const [locked] = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live"))).for("update");
+        const stored = locked?.data ?? emptySyncData(row.date);
+        const wall = buildWallClockServerClaims(stored, nowMs);
+        const netClaims = buildNetSecondServerClaims(stored, nowMs);
+        const remainingBudget = maxClaims - builtClaims;
+        // Never persist an arm-state that has advanced past a claim omitted by
+        // this pass's global budget. A later pass must see that due event.
+        const wallFitsBudget = !wall || wall.claims.length <= Math.max(0, remainingBudget - netClaims.length);
+        const rawClaims = [...netClaims, ...(wallFitsBudget ? (wall?.claims ?? []) : [])]
+          .slice(0, remainingBudget);
+        let data = stored as Record<string, unknown>;
+        let acceptedHere = 0;
+        const acceptedNet: AutoTrackClaim[] = [];
+        const outcomesHere: Record<string, number> = {};
+        for (const rawClaim of rawClaims) {
+          const claim = parseAutoTrackClaim(rawClaim, nowMs);
+          if (!claim) { outcomesHere.invalid = (outcomesHere.invalid ?? 0) + 1; continue; }
+          const applied = applyAutoTrackClaim(data, claim, nowMs);
+          outcomesHere[applied.outcome] = (outcomesHere[applied.outcome] ?? 0) + 1;
+          if (applied.outcome !== "accepted") continue;
+          if (applied.inventoryConsumption?.kind === "sauce-barrel") {
+            const consumption = applied.inventoryConsumption;
+            await consumeSauceBarrelInTransaction(tx, consumption.runId, consumption.barrelIndex, consumption.itemKey, consumption.qty, true, consumption.eventId);
+          }
+          data = applied.data;
+          acceptedHere++;
+          if (/^(sauce-barrel|app[1-4]-batch)$/.test(claim.channel)) acceptedNet.push(claim);
+        }
+        // A no-event bootstrap arm is safe to persist. Eventful arm-state is
+        // committed only after every wall event in that state was accepted;
+        // stale/rejected/truncated events remain rearmed for the next beat.
+        const allWallAccepted = !!wall && wallFitsBudget
+          && wall.claims.every((claim) => {
+            const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
+            return state?.acceptedEventId === claim.eventId;
+          });
+        if (wall && (wall.claims.length === 0 || allWallAccepted)) {
+          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+            ? data.autoTrackServerState as Record<string, unknown> : {};
+          const book = previous.wallClockBookkeeping && typeof previous.wallClockBookkeeping === "object"
+            ? previous.wallClockBookkeeping as Record<string, unknown> : {};
+          data = { ...data, autoTrackServerState: { ...previous, version: 1, wallClockBookkeeping: { ...book, [wall.runId]: wall.bookkeeping } } };
+        }
+        if (acceptedNet.length) {
+          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+            ? data.autoTrackServerState as Record<string, any> : {};
+          const ownership = { ...(previous.netOwnership ?? {}) };
+          for (const claim of acceptedNet) {
+            ownership[claim.runId] = {
+              ...(ownership[claim.runId] ?? {}),
+              [claim.channel]: {
+                generation: claim.generation, sequence: claim.sequence, updatedAt: nowMs,
+              },
+            };
+          }
+          data = { ...data, autoTrackServerState: { ...previous, version: 1, netOwnership: ownership } };
+        }
+        if (locked) await tx.update(dailySyncTable).set({ data: data as any, updatedAt: new Date() })
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live")));
+        return { data, claims: rawClaims.length, accepted: acceptedHere, outcomes: outcomesHere };
+      });
+      builtClaims += result.claims;
+      accepted += result.accepted;
+      for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
+      if (result.accepted) broadcast(result.data, "server:tick", "live", row.date);
+    } catch (err) {
+      logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
+      outcomes.error = (outcomes.error ?? 0) + 1;
+    }
+  }
+  return { examinedDates: rows.length, builtClaims, accepted, outcomes };
+}
+
+export function startAutoTrackServerTicks(): NodeJS.Timeout {
+  const intervalMs = Math.max(5_000, Number(process.env.AUTO_TRACK_SERVER_TICK_MS) || SERVER_TICK_DEFAULT_MS);
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    void runAutoTrackServerTicks().catch((err) => {
+      logger.error({ err, event: "server_auto_track_tick" }, "Server auto-track tick pass failed");
+    }).finally(() => { running = false; });
+  }, intervalMs);
+  timer.unref();
+  return timer;
+}
 
 export default router;

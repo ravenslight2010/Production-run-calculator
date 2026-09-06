@@ -5,6 +5,7 @@ import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
+import { startAutoTrackServerTicks } from "./routes/sync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import {
@@ -156,6 +157,10 @@ async function initializeStartup(startedAt: number): Promise<void> {
     "API startup initialization complete",
   );
   recordStartupEvent("ready", { durationMs: performance.now() - startedAt, outcome: "success" });
+
+  // Best-effort, bounded ownership for live automatic production tracking.
+  // The runner shares the claim transaction path with connected clients.
+  startAutoTrackServerTicks();
 
   // Ensure the seeded sandbox account exists with a known password + manager
   // role on every boot. Best-effort and non-production only.

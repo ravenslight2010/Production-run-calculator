@@ -486,7 +486,10 @@ import {
 } from "../hooks/useAutoTrack";
 import {
   publishAutoTrackCoordination,
+  publishAutoTrackSchedule,
   subscribeAutoTrackCoordination,
+  DOUGH_TIMER_CONTROL_EVENT,
+  DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
@@ -8555,6 +8558,14 @@ export default function Home() {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
+  // Dough pause/resume is immediate in the hook; this listener durably queues
+  // the corresponding server-visible control without coupling the hook to Home.
+  useEffect(() => {
+    const sync = () => schedulePush(dayStateRef.current, 0, "edit");
+    window.addEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
+    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
+  }, []);
+
   // SSE connection — receives updates from other clients
   useEffect(() => {
     syncBaselineGateRef.current.beginConnection();
@@ -8584,7 +8595,10 @@ export default function Home() {
           autoTrackSchedule?: AutoTrackSchedule | null;
         };
         if (msg.serverCalc) serverCalcRef.current = msg.serverCalc;
-        if (msg.autoTrackSchedule) autoTrackScheduleRef.current = msg.autoTrackSchedule;
+        if (msg.autoTrackSchedule) {
+          autoTrackScheduleRef.current = msg.autoTrackSchedule;
+          publishAutoTrackSchedule(msg.autoTrackSchedule);
+        }
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
         if (msg.reset && typeof msg.resetEpoch === "number") {
@@ -8596,6 +8610,15 @@ export default function Home() {
           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
+          if (msg.data.doughTimerControls) {
+            localStorage.setItem(
+              "run-calculator:dough-timer-controls",
+              JSON.stringify(msg.data.doughTimerControls),
+            );
+            window.dispatchEvent(new CustomEvent(DOUGH_TIMER_CONTROL_ADOPT_EVENT, {
+              detail: msg.data.doughTimerControls,
+            }));
+          }
           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
@@ -9515,6 +9538,12 @@ export default function Home() {
       dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,
+      ...(() => {
+        try {
+          const controls = JSON.parse(localStorage.getItem("run-calculator:dough-timer-controls") ?? "{}");
+          return controls && typeof controls === "object" ? { doughTimerControls: controls } : {};
+        } catch { return {}; }
+      })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
       ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
     };

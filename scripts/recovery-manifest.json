@@ -135,7 +135,39 @@
           "contains": "describe("
         }
       ],
-      "intentionalDifference": "The current recovery preserves the 1-second client cadence floor and publishes server schedules only as advisory SSE/claim metadata. Periodic server-owned ticks and client skip-latches remain intentionally excluded for the existing downstream ownership task."
+      "intentionalDifference": "The current recovery preserves the 1-second client cadence floor while server ownership is bounded to fresh live rows and clients retain an expiring schedule-lease fallback."
+    },
+    {
+      "id": "server-auto-track-ownership",
+      "feature": "Fresh live runs receive bounded server-owned net-second and wall-clock automatic claims",
+      "files": [
+        "artifacts/api-server/src/lib/autoTrackServerTicks.ts",
+        "artifacts/api-server/src/routes/sync.ts",
+        "artifacts/run-calculator/src/hooks/useAutoTrack.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/api-server/src/index.ts",
+          "contains": "startAutoTrackServerTicks()"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "publishAutoTrackSchedule"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "artifacts/api-server/src/lib/autoTrackCoordination.ts",
+          "contains": "applyAutoTrackClaim"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/api-server/src/lib/autoTrackCoordination.test.ts",
+          "contains": "describe("
+        }
+      ],
+      "intentionalDifference": "Server bookkeeping remains an internal sync-blob detail: no schema or public API contract is changed. It is preserved only by ordinary same-date additive merges and intentionally discarded by reset/replacement flows."
     },
     {
       "id": "recovery-contract-freshness",

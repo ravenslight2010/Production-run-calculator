@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useAutoTrack } from "../useAutoTrack";
 
@@ -86,6 +86,48 @@ describe("useAutoTrack sauce barrel coordination", () => {
     renderHook(() => useAutoTrack(props(30, claim, {}, overrides) as any));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("suppresses only a fresh canonical explicit-not-due schedule and falls back for non-canonical schedules", async () => {
+    const authoritative = vi.fn();
+    const authoritativeHook = renderHook((p) => useAutoTrack(p), { initialProps: props(0, authoritative) as any });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("run-calculator:auto-track-schedule", {
+        detail: {
+          runId: "sauce-auto", generation: "sauce-auto:started", atMs: Date.now(),
+          entries: [{ channel: "sauce-barrel", canonical: true, dueNow: false }],
+        },
+      }));
+    });
+    authoritativeHook.rerender(props(30, authoritative) as any);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(authoritative).not.toHaveBeenCalled();
+
+    const fallback = vi.fn();
+    const fallbackHook = renderHook((p) => useAutoTrack(p), { initialProps: props(0, fallback) as any });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("run-calculator:auto-track-schedule", {
+        detail: {
+          runId: "sauce-auto", generation: "sauce-auto:started", atMs: Date.now(),
+          entries: [{ channel: "sauce-barrel", canonical: false, dueNow: false }],
+        },
+      }));
+    });
+    fallbackHook.rerender(props(30, fallback) as any);
+    await waitFor(() => expect(fallback).toHaveBeenCalledTimes(1));
+
+    const stale = vi.fn();
+    const staleHook = renderHook((p) => useAutoTrack(p), { initialProps: props(0, stale) as any });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("run-calculator:auto-track-schedule", {
+        detail: {
+          runId: "sauce-auto", generation: "sauce-auto:started", atMs: 0,
+          entries: [{ channel: "sauce-barrel", canonical: true, dueNow: false }],
+        },
+      }));
+    });
+    staleHook.rerender(props(30, stale) as any);
+    await waitFor(() => expect(stale).toHaveBeenCalledTimes(1));
   });
 
   it("uses the corrected canonical anchor and generation for the next barrel identity", async () => {

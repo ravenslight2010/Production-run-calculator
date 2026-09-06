@@ -473,6 +473,12 @@ export type SyncPayload = {
       }
     >>>;
   };
+  doughTimerControls?: Record<string, {
+    generation: string;
+    pausedAt: number;
+    resumeAt: number;
+    updatedAt: number;
+  }>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
   ingredientTypes?: string[];

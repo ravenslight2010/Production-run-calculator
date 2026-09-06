@@ -42,13 +42,13 @@ describe("shared live calculation boundary", () => {
     })).toMatchObject({ expectedCases: 12, expectedCasesRaw: 60, skids: 1, casesOnSkid: 2 });
   });
 
-  it("uses canonical coordination due times in the server schedule", () => {
-    const schedule = computeAutoTrackSchedule({
+  it("requires matching private server ownership before a wall schedule is canonical", () => {
+    const input = {
       runId: "run-1",
       startedAt: 1000,
       nowMs: 5000,
       v: {
-        freezerTime: 30,
+        freezerTime: 30, pizzasPerCase: 12,
         app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
         app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
         app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
@@ -57,9 +57,18 @@ describe("shared live calculation boundary", () => {
       calc: {
         pressDone: false, sauceDepletionSec: 0,
         app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
-        ppm: 60,
+        ppm: 60, perTray: 60, perBatch: 600,
       } as never,
-      coordination: { case: { nextDueAt: 4000, sequence: 3 } },
+      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
+    };
+    const localFallback = computeAutoTrackSchedule(input);
+    expect(localFallback.entries.find((entry) => entry.channel === "case")).toMatchObject({
+      canonical: false,
+    });
+
+    const schedule = computeAutoTrackSchedule({
+      ...input,
+      serverWallOwnership: { case: 3 },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
@@ -68,6 +77,27 @@ describe("shared live calculation boundary", () => {
       dueNow: true,
       canonical: true,
       sequence: 3,
+    });
+  });
+
+  it("treats stale-generation coordination as noncanonical fallback", () => {
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
+      v: {
+        pizzasPerCase: 12, freezerTime: 30,
+        app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
+        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
+        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
+        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
+      } as never,
+      calc: {
+        pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
+        app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
+      } as never,
+      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
+    });
+    expect(schedule.entries.find((entry) => entry.channel === "case")).toMatchObject({
+      canonical: false,
     });
   });
 

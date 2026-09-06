@@ -186,3 +186,96 @@ export function computeCaseTickWrite(input: {
     caseClaimRetryReset: false, formResetSkippedNew: false,
   };
 }
+
+export type TrayTickResult = {
+  prodDueMsNew: number;
+  consDueMsNew: number;
+  lastMsNew: number;
+  delta: number;
+  remainderNew: number;
+  seededNew: boolean;
+  seed: { from: number; to: number } | null;
+};
+export function computeTrayTick(input: {
+  nowMs: number; prodDueMs: number; consDueMs: number; lastMs: number; periodMs: number;
+  suppressed: boolean; feedComplete: boolean; deficitOpen: boolean; seeded: boolean;
+  current: number; seed: number | null; ppm: number; perTray: number; remainder: number;
+}): TrayTickResult {
+  let prodDueMsNew = input.prodDueMs;
+  let consDueMsNew = input.consDueMs;
+  let lastMsNew = input.lastMs;
+  let delta = 0;
+  let remainderNew = input.remainder;
+  let seededNew = input.seeded;
+  let seed: { from: number; to: number } | null = null;
+  if (prodDueMsNew === 0) {
+    prodDueMsNew = input.nowMs + input.periodMs / 2;
+  } else if (input.nowMs >= prodDueMsNew) {
+    prodDueMsNew = input.nowMs + input.periodMs;
+    if (!input.suppressed && !input.feedComplete && input.deficitOpen) delta += 1;
+  }
+  if (input.nowMs >= consDueMsNew) {
+    const durationMin = lastMsNew > 0
+      ? Math.min((input.periodMs * 2) / 60000, (input.nowMs - lastMsNew) / 60000)
+      : input.periodMs / 60000;
+    consDueMsNew = input.nowMs + input.periodMs;
+    lastMsNew = input.nowMs;
+    if (!input.suppressed && !input.feedComplete) {
+      if (!seededNew) {
+        seededNew = true;
+        if (input.current === 0 && input.seed !== null) seed = { from: input.current, to: input.seed };
+      }
+      if (seed === null) {
+        const traysExact = durationMin * input.ppm / input.perTray + remainderNew;
+        const traysConsumed = Math.floor(traysExact);
+        remainderNew = traysExact - traysConsumed;
+        delta -= traysConsumed;
+      }
+    }
+  }
+  return { prodDueMsNew, consDueMsNew, lastMsNew, delta, remainderNew, seededNew, seed };
+}
+
+export type BatchTickResult = {
+  prodDueMsNew: number; consDueMsNew: number; lastMsNew: number; delta: number;
+  seededNew: boolean; seed: { from: number; to: number } | null;
+};
+export function computeBatchTick(input: {
+  nowMs: number; prodDueMs: number; consDueMs: number; lastMs: number; periodMs: number;
+  fullBatchMs: number; effDrainMs: number; suppressed: boolean; feedComplete: boolean;
+  deficitOpen: boolean; seeded: boolean; current: number; traysSeededAmount: number;
+  traysNeeded: number; batchesNeeded: number;
+}): BatchTickResult {
+  let prodDueMsNew = input.prodDueMs;
+  let consDueMsNew = input.consDueMs;
+  let lastMsNew = input.lastMs;
+  let delta = 0;
+  let seededNew = input.seeded;
+  let seed: { from: number; to: number } | null = null;
+  if (prodDueMsNew === 0) {
+    prodDueMsNew = input.nowMs + input.fullBatchMs;
+  } else if (input.nowMs >= prodDueMsNew) {
+    prodDueMsNew = input.nowMs + input.fullBatchMs;
+    if (!input.suppressed && !input.feedComplete && input.deficitOpen) delta += 1;
+  }
+  if (input.nowMs >= consDueMsNew) {
+    const durationMin = lastMsNew > 0
+      ? Math.min((input.periodMs * 2) / 60000, (input.nowMs - lastMsNew) / 60000)
+      : input.periodMs / 60000;
+    consDueMsNew = input.nowMs + input.periodMs;
+    lastMsNew = input.nowMs;
+    if (!input.suppressed && !input.feedComplete) {
+      if (!seededNew) {
+        seededNew = true;
+        const remainingBatchesNeeded = input.traysSeededAmount > 0 && input.traysNeeded > 0
+          ? Math.max(0, input.batchesNeeded * (input.traysNeeded - input.traysSeededAmount) / input.traysNeeded)
+          : input.batchesNeeded;
+        const seedValue = remainingBatchesNeeded > 0
+          ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded)))) : null;
+        if (input.current === 0 && seedValue !== null) seed = { from: input.current, to: seedValue };
+      }
+      if (seed === null) delta -= durationMin * 60000 / input.effDrainMs;
+    }
+  }
+  return { prodDueMsNew, consDueMsNew, lastMsNew, delta, seededNew, seed };
+}

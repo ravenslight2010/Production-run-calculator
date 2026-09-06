@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { type FormValues } from "../types";
-import { AUTO_TRACK_COORDINATION_EVENT } from "../autoTrackCoordinationClient";
+import {
+  AUTO_TRACK_COORDINATION_EVENT,
+  AUTO_TRACK_SCHEDULE_EVENT,
+  publishDoughTimerControl,
+  DOUGH_TIMER_CONTROL_ADOPT_EVENT,
+} from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
   computeAutoTrackSuggestion,
@@ -429,10 +434,18 @@ export function useAutoTrack({
     app3: useRef(0),
     app4: useRef(0),
   };
+  // Fresh, non-canonical server schedule entries temporarily own net-second
+  // writes. The lease intentionally expires so disconnected/stale clients
+  // retain the established local fallback.
+  const serverScheduleAtRef = useRef(0);
+  const serverOwnedNetChannelsRef = useRef<Partial<Record<AutoTrackChannel, boolean>>>({});
   const coordinationIdentity =
     `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
   const coordinationIdentityRef = useRef(coordinationIdentity);
   coordinationIdentityRef.current = coordinationIdentity;
+  const serverOwnsNetChannel = (channel: AutoTrackChannel): boolean =>
+    serverOwnedNetChannelsRef.current[channel] === true
+    && Date.now() - serverScheduleAtRef.current <= 30_000;
   const dueRefForChannel = (channel: AutoTrackChannel) => {
     if (channel === "case") return caseNextDueMsRef;
     if (channel === "tray-consume") return trayNextDueMsRef;
@@ -466,7 +479,9 @@ useEffect(() => {
         if (state.generation !== generation) {
           coordinationSequenceRef.current[channel] = 0;
           const dueRef = dueRefForChannel(channel);
-          dueRef.current = state.nextDueAt;
+          // A lifecycle-stale register is fallback/invalidation only. Never
+          // import its arm into the new start/resume generation.
+          dueRef.current = 0;
           continue;
         }
         coordinationSequenceRef.current[channel] = Math.max(
@@ -480,6 +495,34 @@ useEffect(() => {
     window.addEventListener(AUTO_TRACK_COORDINATION_EVENT, adopt);
     return () => window.removeEventListener(AUTO_TRACK_COORDINATION_EVENT, adopt);
   }, [endedAt, runGeneration, runId, runStatus]);
+
+  useEffect(() => {
+    const adopt = (event: Event) => {
+      const schedule = (event as CustomEvent<{
+        runId?: string; generation?: string; atMs?: number;
+        entries?: Array<{ channel?: AutoTrackChannel; canonical?: boolean; dueNow?: boolean }>;
+      }>).detail;
+      if (
+        !schedule || schedule.runId !== runId
+        || schedule.generation !== coordinationIdentityRef.current
+        || !Array.isArray(schedule.entries)
+      ) return;
+      const owned: Partial<Record<AutoTrackChannel, boolean>> = {};
+      for (const entry of schedule.entries) {
+        // A schedule is ownership only when it is canonical and explicitly
+        // says this channel is not due. Non-canonical/missing verdicts retain
+        // the local fallback; an explicit due verdict also lets the existing
+        // claim path race safely through the server's idempotent row lock.
+        if (entry.channel && entry.canonical === true && entry.dueNow === false) {
+          owned[entry.channel] = true;
+        }
+      }
+      serverOwnedNetChannelsRef.current = owned;
+      serverScheduleAtRef.current = typeof schedule.atMs === "number" ? schedule.atMs : Date.now();
+    };
+    window.addEventListener(AUTO_TRACK_SCHEDULE_EVENT, adopt);
+    return () => window.removeEventListener(AUTO_TRACK_SCHEDULE_EVENT, adopt);
+  }, [runId]);
 
   // Freezer-drain window: after End Run, packaging keeps casing product for as
   // long as the tunnel takes to empty. Case/skid auto-track keeps ticking
@@ -545,6 +588,10 @@ useEffect(() => {
     appNextDueNetSecRefs.app2.current = 0;
     appNextDueNetSecRefs.app3.current = 0;
     appNextDueNetSecRefs.app4.current = 0;
+    // Schedule leases are run-scoped. Never let an ended/switched run's
+    // server verdict suppress the next run before it receives its own frame.
+    serverOwnedNetChannelsRef.current = {};
+    serverScheduleAtRef.current = 0;
     setCoordinationPendingCount(0);
     setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
@@ -771,13 +818,41 @@ useEffect(() => {
         ? nowMs + durationMs
         : 0;
     setIsDoughTimerPaused(true);
-  }, []);
+    publishDoughTimerControl({
+      runId, generation: coordinationIdentityRef.current, pausedAt: nowMs,
+      resumeAt: doughTimerResumeAtRef.current, updatedAt: nowMs,
+    });
+  }, [runId]);
 
   // Resume dough-timer countdowns through the same re-arm path as automatic
   // resume so either action starts from a full, clean interval.
   const resumeDoughTimers = useCallback(() => {
-    rearmDoughTimers(Date.now());
-  }, [rearmDoughTimers]);
+    const nowMs = Date.now();
+    rearmDoughTimers(nowMs);
+    publishDoughTimerControl({
+      runId, generation: coordinationIdentityRef.current,
+      pausedAt: 0, resumeAt: 0, updatedAt: nowMs,
+    });
+  }, [rearmDoughTimers, runId]);
+
+  useEffect(() => {
+    const adopt = (event: Event) => {
+      const controls = (event as CustomEvent<Record<string, {
+        generation?: string; pausedAt?: number; resumeAt?: number;
+      }>>).detail;
+      const control = controls?.[runId];
+      if (!control || control.generation !== coordinationIdentityRef.current) return;
+      if ((control.pausedAt ?? 0) > 0) {
+        doughTimerPausedRef.current = control.pausedAt!;
+        doughTimerResumeAtRef.current = Math.max(0, control.resumeAt ?? 0);
+        setIsDoughTimerPaused(true);
+      } else {
+        rearmDoughTimers(Date.now());
+      }
+    };
+    window.addEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
+    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
+  }, [rearmDoughTimers, runId]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
@@ -1118,6 +1193,7 @@ useEffect(() => {
       runStatus !== "running" ||
       calc.pressDone ||
       nextRunPrepActive
+      || serverOwnsNetChannel("sauce-barrel")
     ) return;
     const cadence = Number(calc.sauceDepletionSec) || 0;
     if (!Number.isFinite(cadence) || cadence <= 0 || !Number.isFinite(elapsedBatchSec)) return;
@@ -1223,7 +1299,11 @@ useEffect(() => {
       // At most one sequenced event is claimed at a time. The canonical
       // acknowledgement advances the persisted anchor, then this effect claims
       // the next overdue fractional cadence without losing accumulated time.
-      if (elapsedBatchSec < dueAt || made >= Math.ceil(slot.required)) continue;
+      if (
+        elapsedBatchSec < dueAt
+        || made >= Math.ceil(slot.required)
+        || serverOwnsNetChannel(slot.channel)
+      ) continue;
       dueRefForChannel(slot.channel).current = dueAt;
       commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
         { field: slot.madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(slot.required), made + 1) },
@@ -1273,6 +1353,8 @@ useEffect(() => {
     const doughSuppressed =
       Date.now() < doughAutoSuppressUntilRef.current
       || Date.now() < autoSuppressUntilRef.current;
+    const serverOwnsWallClock = (channel: AutoTrackChannel): boolean =>
+      serverOwnsNetChannel(channel);
 
     // ── Cases (and skids, derived from the same total): tick once per case. ──
     if (
@@ -1305,7 +1387,7 @@ useEffect(() => {
       const prevFreezer = drainFreezerRef.current;
       drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
 
-      if (!caseSuppressed) {
+      if (!caseSuppressed && !serverOwnsWallClock("case")) {
         const cps = v.casesPerSkid;
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
@@ -1367,6 +1449,10 @@ useEffect(() => {
       && nowMs >= doughTimerResumeAtRef.current
     ) {
       rearmDoughTimers(nowMs);
+      publishDoughTimerControl({
+        runId, generation: coordinationIdentityRef.current,
+        pausedAt: 0, resumeAt: 0, updatedAt: nowMs,
+      });
       return;
     }
     if (doughTimerPausedRef.current > 0) return;
@@ -1402,7 +1488,7 @@ useEffect(() => {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
       } else if (nowMs >= trayProdNextDueMsRef.current) {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
-        if (!doughSuppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
+        if (!doughSuppressed && !serverOwnsWallClock("tray-produce") && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
           delta += 1;
         }
       }
@@ -1418,7 +1504,7 @@ useEffect(() => {
           : trayPeriodMs / 60000;
         trayNextDueMsRef.current = nowMs + trayPeriodMs;
         trayLastMsRef.current = nowMs;
-        if (!doughSuppressed && !doughFeedComplete) {
+        if (!doughSuppressed && !serverOwnsWallClock("tray-consume") && !doughFeedComplete) {
           // First tray tick of a run where the operator never entered staged
           // dough (counter still 0): seed the suggested staging (the same number
           // the "Suggest" button applies) so the counter has real stock to track
@@ -1480,7 +1566,7 @@ useEffect(() => {
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
       } else if (nowMs >= batchProdNextDueMsRef.current) {
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
-        if (!doughSuppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
+        if (!doughSuppressed && !serverOwnsWallClock("batch-produce") && !doughFeedComplete && calc.batchesNeeded > 0) {
           delta += 1;
         }
       }
@@ -1493,7 +1579,7 @@ useEffect(() => {
           : batchPeriodMs / 60000;
         batchNextDueMsRef.current = nowMs + batchPeriodMs;
         batchLastMsRef.current = nowMs;
-        if (!doughSuppressed && !doughFeedComplete) {
+        if (!doughSuppressed && !serverOwnsWallClock("batch-consume") && !doughFeedComplete) {
           // Same one-shot seed as trays: an untouched 0 counter gets the
           // suggested staging on its first tick so it has stock to track.
           if (!batchSeededRef.current) {
