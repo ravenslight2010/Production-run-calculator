@@ -415,6 +415,14 @@ export function useAutoTrack({
   // serverVerdictDue path. Explicit `false` is required — an absent verdict +
   // fresh schedule (wall-clock channels) must NOT suppress the local fallback.
   const serverScheduleAtMsRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
+  // Server fresh-run wall-clock replay latch (step 7b / Task 1 mirror). A
+  // non-canonical schedule entry means the server still OWNS that channel's
+  // next wall-clock claim (it executes case/tray/batch/hopper claims from
+  // persisted bookkeeping while no canonical register exists). While the entry
+  // is fresh AND dueNow:false, a connected tab skips its redundant local
+  // write; once canonical (any claim landed) the client resumes executing.
+  // Old servers without the field leave this ref false — never suppress.
+  const serverReplayEntryRef = useRef<Partial<Record<AutoTrackChannel, boolean>>>({});
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   // Claims for different channels can become due in the same render. Keep
   // them FIFO so the later claim is built from the first acknowledgement's
@@ -462,7 +470,7 @@ export function useAutoTrack({
       if (!channels) return;
       for (const [channel, state] of Object.entries(channels) as Array<[
         AutoTrackChannel,
-        { generation: string; sequence: number; nextDueAt: number; dueNow?: boolean },
+        { generation: string; sequence: number; nextDueAt: number; dueNow?: boolean; canonical?: boolean },
       ]>) {
         const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
         if (state.generation !== generation) {
@@ -474,6 +482,7 @@ export function useAutoTrack({
           // stamp the freshness latch (a stale-identity schedule must not
           // suppress this run's local fallback).
           serverDueNowRef.current[channel] = false;
+          serverReplayEntryRef.current[channel] = false;
           continue;
         }
         coordinationSequenceRef.current[channel] = Math.max(
@@ -482,6 +491,7 @@ export function useAutoTrack({
         );
         serverDueNowRef.current[channel] = state.dueNow === true;
         serverScheduleAtMsRef.current[channel] = nowTimeRef.current;
+        serverReplayEntryRef.current[channel] = state.canonical === false;
         const dueRef = dueRefForChannel(channel);
         dueRef.current = state.nextDueAt;
       }
@@ -551,6 +561,7 @@ export function useAutoTrack({
     coordinationPendingRef.current.clear();
     serverDueNowRef.current = {};
     serverScheduleAtMsRef.current = {};
+    serverReplayEntryRef.current = {};
     sauceNextDueNetSecRef.current = 0;
     appNextDueNetSecRefs.app1.current = 0;
     appNextDueNetSecRefs.app2.current = 0;
@@ -1267,6 +1278,15 @@ export function useAutoTrack({
     const doughSuppressed =
       Date.now() < doughAutoSuppressUntilRef.current
       || Date.now() < autoSuppressUntilRef.current;
+    // Step 7b (Task 1 mirror for wall-clock channels): while the server's
+    // fresh-run replay still owns a channel (non-canonical schedule entry,
+    // fresh verdict, explicitly NOT due), a connected tab skips its redundant
+    // local write — the server executes the bootstrap claim itself. Once any
+    // claim lands the entry is canonical and the client resumes executes.
+    const serverOwnsWallClock = (channel: AutoTrackChannel): boolean =>
+      serverReplayEntryRef.current[channel] === true &&
+      serverDueNowRef.current[channel] === false &&
+      nowTimeRef.current - (serverScheduleAtMsRef.current[channel] ?? 0) <= SERVER_SCHEDULE_TTL_MS;
 
     // ── Cases (and skids, derived from the same total): tick once per case. ──
     if (
@@ -1293,7 +1313,7 @@ export function useAutoTrack({
       const prevFreezer = drainFreezerRef.current;
       drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
 
-      if (!caseSuppressed) {
+      if (!caseSuppressed && !serverOwnsWallClock("case")) {
         const cps = v.casesPerSkid;
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
@@ -1397,7 +1417,9 @@ export function useAutoTrack({
         consDueMs: trayNextDueMsRef.current,
         lastMs: trayLastMsRef.current,
         periodMs: timing.trayMs,
-        suppressed: doughSuppressed,
+        suppressed: doughSuppressed
+          || serverOwnsWallClock("tray-consume")
+          || serverOwnsWallClock("tray-produce"),
         feedComplete: doughFeedComplete,
         deficitOpen: calc.traysNeeded > 0 || v.batchesReady > 0,
         seeded: traySeededRef.current,
@@ -1442,7 +1464,9 @@ export function useAutoTrack({
           machine && machine.hopperSec > 0 ? machine.hopperSec * 1000 : 0,
           (calc.perBatch / calc.ppm) * 60000,
         ),
-        suppressed: doughSuppressed,
+        suppressed: doughSuppressed
+          || serverOwnsWallClock("batch-consume")
+          || serverOwnsWallClock("batch-produce"),
         feedComplete: doughFeedComplete,
         deficitOpen: calc.batchesNeeded > 0,
         seeded: batchSeededRef.current,

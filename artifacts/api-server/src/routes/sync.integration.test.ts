@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
-import { runNetSecondServerTicks } from "../routes/sync";
+import { runNetSecondServerTicks, runWallClockServerTicks } from "../routes/sync";
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
 // driven by the CLIENT's local midnight, but the server runs in UTC in
@@ -2286,6 +2286,106 @@ describe("runNetSecondServerTicks — server-owned net-second execution (step 7a
     const [lot] = await db.select().from(inventoryLotsTable);
     expect(lot.qtyRemaining).toBe(100);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
+  });
+});
+
+describe("runWallClockServerTicks — server wall-clock bootstrap (step 7b)", () => {
+  const DATE = "2030-04-07";
+  const RUN = "wall-clock-run";
+
+  async function seedRun(options: {
+    startedAtMs: number;
+    pausedAt?: number;
+    values?: Record<string, unknown>;
+    date?: string;
+  }) {
+    const date = options.date ?? DATE;
+    const response = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "wc-seed",
+        payload: {
+          dayState: {
+            runs: [{
+              id: RUN,
+              brand: "Acme",
+              flavor: "Pep",
+              subTab: "crusts",
+              startedAt: options.startedAtMs,
+              ...(options.pausedAt ? { pausedAt: options.pausedAt } : {}),
+              metaUpdatedAt: 2,
+            }],
+          },
+          runValues: { [RUN]: options.values ?? { ...FULL_RUN_VALUES, traysOnLine: 10, batchesReady: 4 } },
+          runValuesUpdatedAt: { [RUN]: 1 },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  async function storedData(date = DATE): Promise<Record<string, any>> {
+    const [row] = await db
+      .select()
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")));
+    return row?.data as Record<string, any>;
+  }
+
+  it("advances case/tray/batch/hopper for a fresh live run and persists bookkeeping", async () => {
+    const nowMs = Date.now();
+    // 5 minutes in: past the 3.5 min freezer tunnel so the case channel has
+    // expected output, and with staged dough on the line to consume.
+    await seedRun({ startedAtMs: nowMs - 300_000 });
+
+    // Loop over beats: the hopper channel arms on its first encounter and
+    // fires on a later beat, and once case/tray/batch claim they go canonical.
+    // Persisted bookkeeping carries the arm-state so later beats fire hopper.
+    let totalAccepted = 0;
+    for (let pass = 0; pass < 8; pass++) {
+      const beatMs = nowMs + pass * 90_000; // advance past the hopper's 70s cycle
+      const summary = await runWallClockServerTicks({ nowMs: beatMs, maxClaims: 12 });
+      totalAccepted += summary.accepted;
+      if (summary.builtClaims === 0) break;
+    }
+    expect(totalAccepted).toBeGreaterThan(0);
+
+    const data = await storedData();
+    const values = data.runValues[RUN] as Record<string, unknown>;
+    const coordination = data.autoTrackCoordination.runs[RUN] as Record<string, { sequence: number }>;
+    expect(Number(values.casesOnCurrentSkid) + Number(values.skidsCompleted) * 48).toBeGreaterThan(0);
+    expect(Number(values.traysOnLine)).toBeLessThan(10);
+    expect(Number(values.batchesReady)).toBeLessThan(4);
+    expect(coordination.case?.sequence ?? 0).toBeGreaterThan(0);
+    expect(coordination["tray-consume"]).toBeDefined();
+    expect(coordination["batch-consume"]).toBeDefined();
+    expect(coordination.hopper).toBeDefined();
+    // Per-run arm-state persisted atomically with the accepted claims.
+    const bookkeeping = data.autoTrackServerState?.wallClockBookkeeping?.[RUN];
+    expect(bookkeeping).toBeDefined();
+    expect(bookkeeping.caseNextDueMs).toBeGreaterThan(nowMs);
+  });
+
+  it("never ticks paused runs and leaves no server bookkeeping", async () => {
+    const nowMs = Date.now();
+    await seedRun({ startedAtMs: nowMs - 300_000, pausedAt: nowMs - 10_000 });
+    const summary = await runWallClockServerTicks({ nowMs, maxClaims: 12 });
+    expect(summary.accepted).toBe(0);
+    const data = await storedData();
+    expect(data.autoTrackServerState).toBeUndefined();
+  });
+
+  it("stops driving a channel once any claim makes its register canonical", async () => {
+    const nowMs = Date.now();
+    await seedRun({ startedAtMs: nowMs - 300_000 });
+    await runWallClockServerTicks({ nowMs, maxClaims: 12 });
+    const before = await storedData();
+    const caseSeq = before.autoTrackCoordination.runs[RUN].case.sequence as number;
+    const again = await runWallClockServerTicks({ nowMs, maxClaims: 12 });
+    expect(again.accepted).toBe(0);
+    const after = await storedData();
+    expect(after.autoTrackCoordination.runs[RUN].case.sequence).toBe(caseSeq);
   });
 });
 

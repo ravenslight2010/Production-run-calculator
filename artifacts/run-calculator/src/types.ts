@@ -471,6 +471,13 @@ export type SyncPayload = {
          * says this channel's claim is due RIGHT NOW. Advisory — the client
          * keeps its local elapsed fallback. */
         dueNow?: boolean;
+        /** False when this channel is still in the server's fresh-run wall-clock
+         * replay (no canonical claim yet). Step 7b: while a non-canonical entry
+         * is fresh AND dueNow:false, the server owns the next wall-clock claim,
+         * so connected tabs skip redundant local case/tray/batch writes.
+         * Absent on servers that never carried the field — treated as canonical
+         * so old servers never suppress the local fallback. */
+        canonical?: boolean;
         acceptedEventId?: string;
             acceptedRunValuesUpdatedAt?: number;
         updatedAt: number;

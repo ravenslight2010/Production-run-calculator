@@ -832,6 +832,19 @@ export function protectRunValues(
   // names are filtered out in the UI even if they persist in the union. The
   // brand→flavor map is merged per-brand with the same union semantics.
   const exData = existing as Record<string, unknown>;
+  // Server-owned auto-track bookkeeping (wall-clock arm-state for fresh-run
+  // bootstrap, step 7b). The server writes it inside its tick transactions;
+  // ordinary client pushes never carry it (sanitize drops unknown keys), so
+  // without this the stored copy would be erased on every same-day push and
+  // the next beat would re-bootstrap from zero (double-seeding trays/batches).
+  // A wholesale reset replacement intentionally drops it with the old day.
+  if (
+    !(options.allowRunListReplacement && exReset > 0 && inReset > exReset)
+    && Object.prototype.hasOwnProperty.call(exData, "autoTrackServerState")
+    && !Object.prototype.hasOwnProperty.call(incoming, "autoTrackServerState")
+  ) {
+    out.autoTrackServerState = exData.autoTrackServerState;
+  }
   const ADDITIVE_LIST_FIELDS = [
     "brands",
     "ingredientTypes",

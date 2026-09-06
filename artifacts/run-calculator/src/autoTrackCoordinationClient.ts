@@ -41,6 +41,7 @@ export function autoTrackScheduleToCoordination(
       sequence: entry.sequence ?? 0,
       nextDueAt: entry.dueAt,
       dueNow: entry.dueNow,
+      canonical: entry.canonical,
       updatedAt: schedule.atMs,
     };
   }

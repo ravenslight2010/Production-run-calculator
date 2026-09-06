@@ -294,6 +294,25 @@ Each entry includes:
 **Context:** Step 6b foundation. Re-exports (`getAutoTrackTiming`, `suggestedDoughStaging`, `AutoTrackTiming`, `SuggestedDoughStagingReturn`) keep existing consumers untouched. Refs, effect declaration order, and coordination/claim plumbing unchanged. Verified: lib 70/70, auto-track suites 85/85, memo/context suites 130/130, adjacent timing/suppression suites 72/72, web + api-server typechecks pass. Per-tick case/tray/batch delta extraction is the follow-up engine PR.
 
 *Last updated: 2026-09-06*
+## 2026-09-06 — Step 7b: server executes wall-clock claims + client wall-clock skip-latch (PR #37)
+
+**File(s):**
+- `artifacts/api-server/src/lib/autoTrackServerTicks.ts` — `buildWallClockServerClaims`, `sanitizeWallClockBookkeeping`, `withWallClockServerState`
+- `artifacts/api-server/src/routes/sync.ts` — `runWallClockServerTicks` (+ tx helper), ticker wiring
+- `artifacts/api-server/src/lib/protectRunValues.ts` — `autoTrackServerState` preservation
+- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` — `serverReplayEntryRef` + block gates
+- `artifacts/run-calculator/src/autoTrackCoordinationClient.ts` + `types.ts` — `canonical` flag through the coordination event
+- `lib/live-calc/src/wallClockEngine.ts` — case gate hardening (`casesPerSkid > 0`)
+
+**Problem:** Task 2 (engine + compute-only verdicts) still left the WALL-CLOCK channels (case/tray/batch/hopper) 100% client-owned, so a fresh run started with no device open got no wall-clock claims, and connected tabs could double-fire against the server's bootstrap once it ran.
+
+**Fix:**
+1. **Server execution (bootstrap-only):** `buildWallClockServerClaims` (pure) runs `tickWallClock` for a FRESH live run (`nowMs - startedAt <= 6h`) using stored run values, converting engine events into standard `parse/apply` claims. It drives ONLY channels whose schedule entry is non-canonical (no coordination register yet) — once ANY claim (server or client) re-persists a canonical `nextDueAt`, the channel returns to client ownership and the server echoes it only.
+2. **Persisted bookkeeping:** per-run arm-state lives under `data.autoTrackServerState.wallClockBookkeeping[runId]`. `runWallClockServerTicks` applies each beat inside the SAME row-lock transaction as a client claim POST (build from locked data + prior bookkeeping → apply claims → persist next bookkeeping even on no-claim beats) so refs/baseline/remainders never re-bootstrap from zero.
+3. **Merge survival:** `protectRunValues` preserves `autoTrackServerState` through ordinary client pushes (client payloads never carry it — sanitize drops unknown keys); a wholesale reset replacement drops it with the old day.
+4. **Client skip-latch (Task 1 mirror):** the schedule→coordination mapping now carries `canonical`; `useAutoTrack` stores `serverReplayEntryRef[channel] = state.canonical === false`. While a wall-clock channel's entry is non-canonical AND fresh (≤45s) AND `dueNow:false`, the local case write is skipped (`!caseSuppressed && !serverOwnsWallClock("case")`) and tray/batch ticks pass `suppressed: doughSuppressed || serverOwns...` (refs still advance). Once canonical, the client resumes executing. Hopper stays display-only (no skip).
+
+**Context:** Completes the server-side refactor's wall-clock leg. The 6h fresh-run cap + non-canonical-only gate deliberately avoid fighting active clients: the server bootstraps fresh runs (seeds/consumes/baselines from persisted state) and hands back the moment a claim exists. Verified: lib 120/120, api-server units 120/120 + protectRunValues 88/88 + build OK, web auto-track suites (sauce/apps/pause-resume/skip-latch) 55/55, web tsc clean. PR #37.
 
 ## 2026-09-06 — Per-tick write decisions extracted to live-calc engine (engine PR #2)
 

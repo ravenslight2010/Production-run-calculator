@@ -1331,3 +1331,49 @@ describe("auto-track coordination snapshot invalidation", () => {
     expect(state.acceptedEventId).toBeUndefined();
   });
 });
+
+describe("protectRunValues server-owned autoTrackServerState (step 7b)", () => {
+  const serverState = {
+    version: 1,
+    wallClockBookkeeping: {
+      "r1": {
+        caseNextDueMs: 1_800_000_100_000,
+        trayConsNextDueMs: 1_800_000_200_000,
+        lastExpectedCases: 65,
+        traySeeded: true,
+      },
+    },
+  };
+
+  it("preserves the stored server bookkeeping when an ordinary push omits it", () => {
+    const existing = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 },
+      runValues: { r1: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { r1: 10 },
+      autoTrackServerState: serverState,
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 },
+      runValues: { r1: { casesNeeded: 240, casesOnCurrentSkid: 15 } },
+      runValuesUpdatedAt: { r1: 11 },
+    };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.autoTrackServerState).toEqual(serverState);
+  });
+
+  it("drops stored bookkeeping on a wholesale reset replacement", () => {
+    const existing = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 10 },
+      runValues: { r1: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { r1: 10 },
+      autoTrackServerState: serverState,
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "r2" }], resetAt: 20 },
+      runValues: { r2: { casesNeeded: 120 } },
+      runValuesUpdatedAt: { r2: 20 },
+    };
+    const out = protectRunValues(incoming, existing, { allowRunListReplacement: true }) as Record<string, unknown>;
+    expect(out.autoTrackServerState).toBeUndefined();
+  });
+});
