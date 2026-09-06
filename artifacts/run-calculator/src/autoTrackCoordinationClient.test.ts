@@ -16,8 +16,8 @@ describe("autoTrackScheduleToCoordination", () => {
   it("maps schedule entries to the coordination shape useAutoTrack adopts", () => {
     const coordination = autoTrackScheduleToCoordination(schedule);
     const run = coordination.autoTrackCoordination!.runs["run-1"];
-    expect(run.case).toEqual({ generation: "run-1:42", sequence: 4, nextDueAt: 100_000 + 63_000, updatedAt: 1234 });
-    expect(run["sauce-barrel"]).toEqual({ generation: "run-1:42", sequence: 0, nextDueAt: 800, updatedAt: 1234 });
+    expect(run.case).toEqual({ generation: "run-1:42", sequence: 4, nextDueAt: 100_000 + 63_000, dueNow: false, updatedAt: 1234 });
+    expect(run["sauce-barrel"]).toEqual({ generation: "run-1:42", sequence: 0, nextDueAt: 800, dueNow: true, updatedAt: 1234 });
   });
 
   it("keeps the client sequence out of the way when the entry is derived (no sequence)", () => {
@@ -26,5 +26,27 @@ describe("autoTrackScheduleToCoordination", () => {
       entries: [{ channel: "sauce-barrel", dueAt: 800, dueNow: true, nextDueAt: 1000, canonical: false }],
     });
     expect(coordination.autoTrackCoordination!.runs["run-1"]["sauce-barrel"].sequence).toBe(0);
+  });
+});
+
+describe("autoTrackScheduleToCoordination dueNow verdict (step 6b)", () => {
+  it("carries each entry's server due-now verdict into the adopted state", () => {
+    const coordination = autoTrackScheduleToCoordination({
+      ...schedule,
+      entries: [
+        { channel: "sauce-barrel", dueAt: 800, dueNow: false, nextDueAt: 1000, canonical: false },
+        { channel: "app3-batch", dueAt: 900, dueNow: true, nextDueAt: 1100, canonical: false },
+      ],
+    });
+    const run = coordination.autoTrackCoordination!.runs["run-1"];
+    expect(run["sauce-barrel"]!.dueNow).toBe(false);
+    expect(run["app3-batch"]!.dueNow).toBe(true);
+  });
+
+  it("round-trips a full dueNow map for every channel kind", () => {
+    const coordination = autoTrackScheduleToCoordination(schedule);
+    const run = coordination.autoTrackCoordination!.runs["run-1"];
+    expect(run.case!.dueNow).toBe(false);
+    expect(run["sauce-barrel"]!.dueNow).toBe(true);
   });
 });

@@ -380,6 +380,13 @@ export function useAutoTrack({
   const resumeRearmPendingRef = useRef(false);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
+  // Server auto-track schedule verdicts (Step 6b): one-shot per fresh SSE/claim
+  // schedule — true means the server says this net-second channel's claim is
+  // due RIGHT NOW. The sauce/applicator effects fire on it immediately and
+  // clear it; the local elapsed check remains the fallback (offline / no
+  // schedule yet). Wall-clock channels are NOT verdict-driven (the server only
+  // echoes their canonical due refs).
+  const serverDueNowRef = useRef<Partial<Record<AutoTrackChannel, boolean>>>({});
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   // Claims for different channels can become due in the same render. Keep
   // them FIFO so the later claim is built from the first acknowledgement's
@@ -420,25 +427,30 @@ export function useAutoTrack({
           generation: string;
           sequence: number;
           nextDueAt: number;
+          dueNow?: boolean;
         }>>>;
       }>).detail;
       const channels = coordination?.runs?.[runId];
       if (!channels) return;
       for (const [channel, state] of Object.entries(channels) as Array<[
         AutoTrackChannel,
-        { generation: string; sequence: number; nextDueAt: number },
+        { generation: string; sequence: number; nextDueAt: number; dueNow?: boolean },
       ]>) {
         const generation = `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
         if (state.generation !== generation) {
           coordinationSequenceRef.current[channel] = 0;
           const dueRef = dueRefForChannel(channel);
           dueRef.current = state.nextDueAt;
+          // A generation mismatch means the verdict belongs to a different run
+          // identity — never let it fire claims against this run.
+          serverDueNowRef.current[channel] = false;
           continue;
         }
         coordinationSequenceRef.current[channel] = Math.max(
           coordinationSequenceRef.current[channel] ?? 0,
           state.sequence,
         );
+        serverDueNowRef.current[channel] = state.dueNow === true;
         const dueRef = dueRefForChannel(channel);
         dueRef.current = state.nextDueAt;
       }
@@ -506,6 +518,7 @@ export function useAutoTrack({
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
+    serverDueNowRef.current = {};
     sauceNextDueNetSecRef.current = 0;
     appNextDueNetSecRefs.app1.current = 0;
     appNextDueNetSecRefs.app2.current = 0;
@@ -1049,7 +1062,12 @@ export function useAutoTrack({
       anchor,
       cadence,
     });
-    if (elapsedBatchSec < dueAtNetSec) return;
+    // Step 6b: the server's due-now verdict (fresh schedule) fires the claim
+    // immediately; the local elapsed check remains the fallback for devices
+    // without a live schedule (offline). The verdict is one-shot per arrival.
+    const serverVerdictDue = serverDueNowRef.current["sauce-barrel"] === true;
+    if (!serverVerdictDue && elapsedBatchSec < dueAtNetSec) return;
+    serverDueNowRef.current["sauce-barrel"] = false;
     const currentCount = Math.max(0, Number(v.sauceBarrelsMade) || 0);
     const correctionGeneration = Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0);
     sauceNextDueNetSecRef.current = dueAtNetSec;
@@ -1148,7 +1166,11 @@ export function useAutoTrack({
       // At most one sequenced event is claimed at a time. The canonical
       // acknowledgement advances the persisted anchor, then this effect claims
       // the next overdue fractional cadence without losing accumulated time.
-      if (elapsedBatchSec < dueAt || made >= Math.ceil(slot.required)) continue;
+      // Step 6b: a fresh server due-now verdict fires immediately; the local
+      // elapsed check remains the fallback. Verdicts are one-shot per arrival.
+      const serverVerdictDue = serverDueNowRef.current[slot.channel] === true;
+      if ((!serverVerdictDue && elapsedBatchSec < dueAt) || made >= Math.ceil(slot.required)) continue;
+      serverDueNowRef.current[slot.channel] = false;
       dueRefForChannel(slot.channel).current = dueAt;
       commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, buildAppSlotClaimMutations({
         slot: slot.slot,
