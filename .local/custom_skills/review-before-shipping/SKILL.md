@@ -1,20 +1,56 @@
 ---
-name: Review before shipping
-description: Use this skill before committing, opening a pull request, merging, deploying, or publishing, or when the user says the app is "done", "ready to ship", or "ready to go live".
+name: review-before-shipping
+description: Review security, privacy, dependency, authorization, reversibility, and deployment-fit risks before merging or publishing. Use for shipping-risk review; route repository verification to verify-before-commit, release evidence to release-checklist, and final production GO/NO-GO decisions to production-go.
 ---
-**Activation:** On-demand — fires before merge/publish or when you say it's "ready." Agent-actionable: it runs the gate checks; the final ship decision is yours.
 
-# Instructions
+# Review Before Shipping
 
-"It runs" is not "it's ready." Before telling the user an app is ready to merge or publish, work through this gate and resolve anything that fails. Do not declare it ready until each item holds.
+This skill owns the generic shipping-risk review. It does not duplicate the
+repository's verification or release evidence commands:
 
-- Secrets: no hardcoded credentials anywhere; every secret is read from an environment variable / Secret, and nothing secret is sent to the browser.
-- Authorization: every per-user resource is scoped to its owner on the server, and a cross-user isolation test passes (one user cannot read or modify another's data; anonymous requests are rejected).
-- Sensitive data: no PII or secrets written to logs; regulated data is minimized and protected; errors don't leak internal details to users.
-- Dependencies: every dependency was verified to exist and is not a typosquat; the vulnerability audit is clean of unresolved high/critical advisories; licenses are acceptable for this product.
-- Core flows verified: the main user journeys actually work when exercised in a real browser, not just compiled. On Replit, use App Testing where available.
-- Production data: the app publishes against a production database, not the development database.
-- Revertibility: destructive or hard-to-reverse changes (schema drops, irreversible migrations, breaking API changes) are isolated and considered; prefer additive, reversible changes.
-- Deployment fit (Replit): pick the deployment type for the workload — Static for a pure frontend, Autoscale for most web apps and APIs, Reserved VM for always-on or websocket/worker apps, Scheduled for cron jobs — and turn on monitoring after publishing.
+- Before a commit, push, pull request, or green-build claim, use
+  `.agents/skills/verify-before-commit/SKILL.md`.
+- Before publishing, use `.agents/skills/release-checklist/SKILL.md` to select,
+  run, and record repository-specific gates.
+- When the user asks whether the application is production-ready or requests a
+  final GO/NO-GO decision, use `.agents/skills/production-go/SKILL.md`. That
+  skill composes this review with the release checklist and owns the decision.
 
-When done, give a short go / no-go summary listing each item as pass or fail. If anything fails, it is no-go — say so plainly instead of shipping.
+## Shipping-risk review
+
+Inspect the changed surface and report each applicable item as PASS, FAIL, or
+N/A with concise evidence:
+
+- **Secrets:** no credentials are hardcoded, logged, committed, or sent to the
+  browser; runtime secrets use the supported environment/secret mechanism.
+- **Authorization:** server-side resource and capability boundaries reject
+  anonymous and cross-scope access; do not rely on hidden UI controls.
+- **Sensitive data:** logs and errors omit secrets, personal data, and raw
+  operational payloads; collect only data the feature needs.
+- **Dependencies:** packages are genuine, maintained, license-compatible, and
+  free of unresolved high/critical findings under the repository's security
+  policy.
+- **Revertibility:** destructive schema/data operations and breaking API
+  changes have explicit safeguards, rollback ownership, and recovery evidence;
+  prefer additive changes.
+- **Deployment fit:** the selected deployment model matches the workload and
+  its state, connection, worker, and monitoring needs. Verify current Replit
+  behavior from official documentation rather than relying on stale examples.
+
+Stop on any failed security or authorization item. Do not turn missing release
+evidence into a PASS, and do not issue a production decision from this skill.
+
+## Output contract
+
+```text
+Shipping risk review
+- Secrets: PASS/FAIL/N/A — <evidence>
+- Authorization: PASS/FAIL/N/A — <evidence>
+- Sensitive data: PASS/FAIL/N/A — <evidence>
+- Dependencies: PASS/FAIL/N/A — <evidence>
+- Revertibility: PASS/FAIL/N/A — <evidence>
+- Deployment fit: PASS/FAIL/N/A — <evidence>
+
+Blocking risks: <list or none>
+Next owner: verify-before-commit / release-checklist / production-go
+```

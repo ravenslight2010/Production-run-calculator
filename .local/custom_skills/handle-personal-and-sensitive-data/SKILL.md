@@ -1,5 +1,5 @@
 ---
-name: Handle personal and sensitive data
+name: handle-personal-and-sensitive-data
 description: Use when building anything that collects, stores, logs, or transmits user data — sign-up, profiles, payments, uploads, analytics, logging — or when the user mentions PII, GDPR, CCPA, HIPAA, PCI, or privacy.
 ---
 **Activation:** On-demand — fires when handling user data. Guardrail: it shapes how Agent stores/logs data; new regulated-data collection is escalated to you for review.

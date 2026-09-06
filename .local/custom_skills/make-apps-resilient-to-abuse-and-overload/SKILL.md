@@ -1,5 +1,5 @@
 ---
-name: Make apps resilient to abuse and overload
+name: make-apps-resilient-to-abuse-and-overload
 description: Use when building public endpoints, APIs, auth/login routes, forms, file uploads, search, or any endpoint that calls a paid service (AI, email, SMS) — to add rate limiting, timeouts, and quotas that prevent abuse, runaway cost, and denial of service.
 ---
 

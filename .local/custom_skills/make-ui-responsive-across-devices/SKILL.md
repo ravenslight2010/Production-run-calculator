@@ -1,5 +1,5 @@
 ---
-name: Make UI responsive across devices
+name: make-ui-responsive-across-devices
 description: Use when building or changing any web UI that real people will use on different screens — pages, dashboards, forms, marketing sites, customer-facing apps — so the layout works on phone, tablet, and desktop, not just the preview width.
 ---
 **Activation:** On-demand — fires when building user-facing UI. Guardrail: it shapes Agent's layout/markup and it verifies phone/tablet/desktop widths.

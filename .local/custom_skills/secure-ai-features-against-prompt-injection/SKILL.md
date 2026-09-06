@@ -1,5 +1,5 @@
 ---
-name: Secure AI features against prompt injection
+name: secure-ai-features-against-prompt-injection
 description: Use when building any feature that sends user input or external content (web pages, files, emails, documents) to an LLM — chatbots, AI assistants, summarizers, RAG, or agents that can call tools or take actions. Defends against prompt injection and excessive agency.
 ---
 

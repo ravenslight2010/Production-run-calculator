@@ -1,5 +1,5 @@
 ---
-name: Instrument observability and graceful errors
+name: instrument-observability-and-graceful-errors
 description: Use when building backend services, APIs, scheduled jobs, or anything going to production — to add structured logging, health checks, and graceful error handling so the app is debuggable in production without leaking internals to users.
 ---
 

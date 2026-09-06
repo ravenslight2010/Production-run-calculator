@@ -1,5 +1,5 @@
 ---
-name: Validate and encode untrusted input
+name: validate-and-encode-untrusted-input
 description: Use whenever the app accepts input from any source the server doesn't control — form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output — to prevent SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation, parameterized/safe APIs, and contextual output encoding.
 ---
 
