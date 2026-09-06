@@ -6,7 +6,10 @@ import {
   clampWebPeriodMs,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
+  computeBatchTick,
+  computeCaseTickWrite,
   computeNetSecondDue,
+  computeTrayTick,
   getAutoTrackTiming,
   suggestedDoughStaging,
 } from "./autoTrackEngine";
@@ -227,5 +230,271 @@ describe("claim mutation builders", () => {
       { field: "app3BatchAnchorNetSec", from: 50, to: 90 },
       { field: "app3BatchCorrectionGeneration", from: 0, to: 0 },
     ]);
+  });
+});
+
+describe("computeCaseTickWrite", () => {
+  const base = {
+    prevExpected: 50,
+    expectedRaw: 52,
+    expectedCases: 52,
+    prevFreezer: 0,
+    nextFreezer: 0,
+    curTotal: 50,
+    casesPerSkid: 12,
+    casesNeeded: 100,
+    drainActive: false,
+    packagingDrainActive: false,
+    caseClaimRetry: false,
+    formResetSkipped: false,
+  };
+
+  it("writes the incremental delta from the unclamped expected baseline", () => {
+    const d = computeCaseTickWrite(base);
+    expect(d.action).toBe("write");
+    if (d.action === "write") expect(d.newTotal).toBe(52);
+    expect(d.formResetSkippedNew).toBe(false);
+  });
+
+  it("clamps writes at casesNeeded but keeps raw as the delta source", () => {
+    const d = computeCaseTickWrite({ ...base, expectedRaw: 120, curTotal: 90 });
+    expect(d.action).toBe("write");
+    if (d.action === "write") expect(d.newTotal).toBe(100);
+  });
+
+  it("never pulls the total down below the operator's floor", () => {
+    const d = computeCaseTickWrite({ ...base, curTotal: 200 });
+    expect(d.action).toBe("none");
+  });
+
+  it("skips one tick on a stale delta after a form reset to zero", () => {
+    const d = computeCaseTickWrite({ ...base, curTotal: 0, prevExpected: 50, expectedRaw: 52, formResetSkipped: false });
+    expect(d.action).toBe("reset-skip");
+    expect(d.formResetSkippedNew).toBe(true);
+  });
+
+  it("writes ~1 case on the tick after the reset skip when flagged", () => {
+    // expectedRaw advanced past the skip; flagged formResetSkipped lets it write.
+    const d = computeCaseTickWrite({ ...base, curTotal: 0, prevExpected: 50, expectedRaw: 51, formResetSkipped: true });
+    expect(d.action).toBe("write");
+    if (d.action === "write") expect(d.newTotal).toBe(1);
+    expect(d.formResetSkippedNew).toBe(false);
+  });
+
+  it("clears the reset flag when a delta tick finds no reset condition", () => {
+    const d = computeCaseTickWrite({ ...base, curTotal: 60, formResetSkipped: true });
+    expect(d.action).toBe("write");
+    if (d.action === "write") expect(d.newTotal).toBe(62);
+    expect(d.formResetSkippedNew).toBe(false);
+  });
+
+  it("clears the reset flag on a zero-delta tick", () => {
+    const d = computeCaseTickWrite({ ...base, expectedRaw: 50 });
+    expect(d.action).toBe("none");
+    expect(d.formResetSkippedNew).toBe(false);
+  });
+
+  it("seeds the absolute count on the first tick when no progress exists", () => {
+    const d = computeCaseTickWrite({ ...base, prevExpected: -1, curTotal: 0, expectedCases: 5, expectedRaw: 0 });
+    expect(d.action).toBe("seed");
+    if (d.action === "seed") expect(d.newTotal).toBe(5);
+    expect(d.caseClaimRetryReset).toBe(true);
+  });
+
+  it("seeds clamped to casesNeeded", () => {
+    const d = computeCaseTickWrite({ ...base, prevExpected: -1, curTotal: 0, expectedCases: 300, casesNeeded: 100 });
+    expect(d.action).toBe("seed");
+    if (d.action === "seed") expect(d.newTotal).toBe(100);
+  });
+
+  it("does not seed when progress already exists on the first tick", () => {
+    const d = computeCaseTickWrite({ ...base, prevExpected: -1, curTotal: 50, expectedCases: 5 });
+    expect(d.action).toBe("none");
+  });
+
+  it("measures the ended-run drain by Freeze tunnel WIP drop", () => {
+    const d = computeCaseTickWrite({
+      ...base,
+      drainActive: true,
+      prevFreezer: 100,
+      nextFreezer: 90,
+      curTotal: 40,
+      prevExpected: 100,
+      expectedRaw: 100,
+    });
+    expect(d.action).toBe("write");
+    if (d.action === "write") expect(d.newTotal).toBe(50);
+  });
+
+  it("uses the pause-relative stage clock during a packaging drain", () => {
+    const d = computeCaseTickWrite({
+      ...base,
+      packagingDrainActive: true,
+      prevExpected: 100,
+      expectedRaw: 112,
+      curTotal: 40,
+    });
+    expect(d.action).toBe("write");
+    if (d.action === "write") expect(d.newTotal).toBe(52);
+  });
+
+  it("writes nothing when the tunnel did not drop", () => {
+    const d = computeCaseTickWrite({ ...base, drainActive: true, prevFreezer: 90, nextFreezer: 90, curTotal: 40 });
+    expect(d.action).toBe("none");
+    expect(d.formResetSkippedNew).toBe(false);
+  });
+});
+
+describe("computeTrayTick", () => {
+  const base = {
+    nowMs: 1000,
+    prodDueMs: 0,
+    consDueMs: 0,
+    lastMs: 0,
+    periodMs: 15000,
+    suppressed: false,
+    feedComplete: false,
+    deficitOpen: true,
+    seeded: false,
+    current: 0,
+    seed: 12,
+    ppm: 120,
+    perTray: 30,
+    remainder: 0,
+  };
+
+  it("arms production half a period out of phase without writing on first encounter", () => {
+    const t = computeTrayTick({ ...base, consDueMs: 200000 });
+    expect(t.prodDueMsNew).toBe(1000 + 15000 / 2);
+    expect(t.delta).toBe(0);
+    expect(t.seed).toBeNull();
+  });
+
+  it("seeds an untouched zero counter on its first consumption tick", () => {
+    const t = computeTrayTick({ ...base, consDueMs: 500 });
+    expect(t.seed).toEqual({ from: 0, to: 12 });
+    expect(t.seededNew).toBe(true);
+    expect(t.delta).toBe(0);
+    expect(t.consDueMsNew).toBe(1000 + 15000);
+    expect(t.lastMsNew).toBe(1000);
+  });
+
+  it("marks seeded even when the counter already has stock (no seed write)", () => {
+    const t = computeTrayTick({ ...base, seeded: false, current: 15, consDueMs: 500 });
+    expect(t.seed).toBeNull();
+    expect(t.seededNew).toBe(true);
+  });
+
+  it("consumes one full period's trays with remainder carry on first consumption", () => {
+    const t = computeTrayTick({ ...base, seeded: true, current: 12, consDueMs: 500, lastMs: 0 });
+    // durationMin = 15000/60000 = 0.25 min; traysExact = 0.25*120/30 = 1
+    expect(t.delta).toBe(-1);
+    expect(t.remainderNew).toBe(0);
+  });
+
+  it("carries the fractional remainder between ticks", () => {
+    // exactly 1.5 trays consumed → floor 1 + carry 0.5
+    const t = computeTrayTick({
+      ...base, seeded: true, current: 12, consDueMs: 500, lastMs: 0,
+      perTray: 20,
+    });
+    // durationMin = 0.25 min; traysExact = 0.25*120/20 = 1.5 → floor 1 + carry 0.5
+    expect(t.delta).toBe(-1);
+    expect(t.remainderNew).toBeCloseTo(0.5);
+  });
+
+  it("adds +1 on a production tick while the tray deficit or batches remain", () => {
+    const t = computeTrayTick({ ...base, seeded: true, prodDueMs: 500, consDueMs: 200000 });
+    expect(t.delta).toBe(1);
+    expect(t.prodDueMsNew).toBe(1000 + 15000);
+  });
+
+  it("does not produce once the press is done", () => {
+    const t = computeTrayTick({ ...base, seeded: true, prodDueMs: 500, feedComplete: true, consDueMs: 400000 });
+    expect(t.delta).toBe(0);
+  });
+
+  it("advances refs but writes nothing while suppressed", () => {
+    const t = computeTrayTick({ ...base, seeded: true, current: 12, consDueMs: 500, suppressed: true });
+    expect(t.delta).toBe(0);
+    expect(t.seed).toBeNull();
+    expect(t.consDueMsNew).toBe(1000 + 15000);
+    expect(t.lastMsNew).toBe(1000);
+  });
+
+  it("caps consumption to two periods of elapsed time", () => {
+    // lastMs far in the past → durationMin capped at 2 * period
+    const t = computeTrayTick({
+      ...base, seeded: true, current: 12, consDueMs: 500, lastMs: 10,
+      nowMs: 13000 + 15000 * 10,
+    });
+    const cappedMin = (15000 * 2) / 60000;
+    expect(t.delta).toBe(-Math.floor((cappedMin * 120) / 30));
+  });
+});
+
+describe("computeBatchTick", () => {
+  const base = {
+    nowMs: 1000,
+    prodDueMs: 0,
+    consDueMs: 0,
+    lastMs: 0,
+    periodMs: 15000,
+    fullBatchMs: 60000,
+    effDrainMs: 60000,
+    suppressed: false,
+    feedComplete: false,
+    deficitOpen: true,
+    seeded: false,
+    current: 0,
+    traysSeededAmount: 0,
+    traysNeeded: 0,
+    batchesNeeded: 3,
+  };
+
+  it("arms the first batch production one full batch-time out without writing", () => {
+    const t = computeBatchTick(base);
+    expect(t.prodDueMsNew).toBe(1000 + 60000);
+    expect(t.delta).toBe(0);
+  });
+
+  it("produces +1 and fractionally consumes on the same due tick", () => {
+    const t = computeBatchTick({ ...base, seeded: true, prodDueMs: 500, consDueMs: 500 });
+    expect(t.delta).toBe(1 - (0.25 * 60000) / 60000); // +1 - 0.25 = 0.75
+    expect(t.delta).toBeCloseTo(0.75);
+  });
+
+  it("seeds a zero counter minus tray coverage seeded this tick", () => {
+    const t = computeBatchTick({ ...base, consDueMs: 500, traysSeededAmount: 12, traysNeeded: 36, batchesNeeded: 3 });
+    // remaining = 3 * (36-12)/36 = 2
+    expect(t.seed).toEqual({ from: 0, to: 2 });
+  });
+
+  it("clamps the batch seed at the 3-batch stepper max", () => {
+    const t = computeBatchTick({ ...base, consDueMs: 500, batchesNeeded: 9 });
+    expect(t.seed).toEqual({ from: 0, to: 3 });
+  });
+
+  it("seeds without tray coverage at the full batch deficit", () => {
+    const t = computeBatchTick({ ...base, consDueMs: 500, batchesNeeded: 2 });
+    expect(t.seed).toEqual({ from: 0, to: 2 });
+  });
+
+  it("does not seed when the counter already has stock (marks seeded)", () => {
+    const t = computeBatchTick({ ...base, seeded: false, current: 2, consDueMs: 500 });
+    expect(t.seed).toBeNull();
+    expect(t.seededNew).toBe(true);
+  });
+
+  it("does not produce once the deficit is closed", () => {
+    const t = computeBatchTick({ ...base, seeded: true, prodDueMs: 500, deficitOpen: false, consDueMs: 200000 });
+    expect(t.delta).toBe(0);
+  });
+
+  it("writes nothing and marks no seed while suppressed but still advances refs", () => {
+    const t = computeBatchTick({ ...base, consDueMs: 500, suppressed: true });
+    expect(t.delta).toBe(0);
+    expect(t.seed).toBeNull();
+    expect(t.consDueMsNew).toBe(1000 + 15000);
   });
 });
