@@ -5,18 +5,18 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { RunTemplateValues } from './runTemplateValues';
+import type { RunTemplateInputValues } from './runTemplateInputValues';
 
 /**
- * A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to/from its own local form shape).
+ * A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.
  */
-export interface RunTemplate {
+export interface RunTemplateInput {
   /** Stable client-generated id */
   id: string;
   /** Human-readable template name */
   name: string;
   /** Run configuration (cross-platform wire shape; opaque to the server) */
-  values: RunTemplateValues;
+  values: RunTemplateInputValues;
   brand?: string;
   flavor?: string;
   /** ISO-8601 timestamp the template was created */
@@ -26,7 +26,7 @@ export interface RunTemplate {
      * @minimum 0
      * @maximum 9007199254740991
      */
-  revision: number;
+  revision?: number;
   /** Whether this record is a deletion tombstone */
   deleted?: boolean;
 }

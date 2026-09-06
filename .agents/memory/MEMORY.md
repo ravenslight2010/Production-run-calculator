@@ -138,3 +138,4 @@
 - [Operations API compatibility window](operations-api-compatibility-window.md) — deterministic contracts stay provider-neutral while retired names remain temporary aliases for older clients.
 - [Operational read-model integrity](operational-read-model-integrity.md) — canonical reports fail closed on rejected snapshot facts; offline exports must preserve non-authoritative provenance.
 - [Import lifecycle row identity](import-lifecycle-row-identity.md) — compare repeated ingredient rows by totals, but preserve structure; ambiguous manager fields stay review-only.
+- [Scoped offline master-data queues](scoped-offline-master-data-queues.md) — partition caches/outboxes by auth scope, fence async handoffs, and reserve revision zero for non-overwriting legacy seeds.

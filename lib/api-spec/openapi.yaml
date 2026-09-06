@@ -2098,10 +2098,9 @@ paths:
       tags: [runTemplates]
       summary: Create or update run templates
       description: >-
-        Upserts a batch of run templates by id. Each template is normalized and
-        validated server-side; malformed templates are dropped. Any signed-in
-        user may save (matching the previous local behavior where anyone could
-        create a template).
+        Upserts a batch of run templates by id and revision. A write applies only
+        when its revision is strictly newer than the stored revision; equal
+        revisions are idempotent. Any signed-in user may save.
       requestBody:
         required: true
         content:
@@ -2120,9 +2119,10 @@ paths:
     delete:
       operationId: deleteRunTemplates
       tags: [runTemplates]
-      summary: Delete run templates by id
+      summary: Tombstone run templates by id and revision
       description: >-
-        Removes a batch of run templates by id. Any signed-in user may delete.
+        Persists a deletion tombstone for each item when its revision is strictly
+        newer than the stored revision. Any signed-in user may delete.
       requestBody:
         required: true
         content:
@@ -2131,7 +2131,7 @@ paths:
               $ref: "#/components/schemas/DeleteRunTemplatesInput"
       responses:
         "200":
-          description: The full updated template list after removal
+          description: The full updated template list, including tombstones
           content:
             application/json:
               schema:
@@ -8572,6 +8572,7 @@ components:
         - name
         - values
         - createdAt
+        - revision
       properties:
         id:
           type: string
@@ -8590,6 +8591,15 @@ components:
         createdAt:
           type: string
           description: ISO-8601 timestamp the template was created
+        revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Monotonically increasing client revision (a JS-safe integer)
+        deleted:
+          type: boolean
+          default: false
+          description: Whether this record is a deletion tombstone
 
     RunTemplateList:
       type: object
@@ -8610,16 +8620,76 @@ components:
           type: array
           description: The batch of run templates to create or update (by id)
           items:
-            $ref: "#/components/schemas/RunTemplate"
+            $ref: "#/components/schemas/RunTemplateInput"
+
+    RunTemplateInput:
+      type: object
+      description: >-
+        A run template mutation. `revision` is optional solely for compatibility
+        with cached legacy clients; when omitted, the server assigns a revision
+        newer than the stored record atomically.
+      required:
+        - id
+        - name
+        - values
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Human-readable template name
+        values:
+          type: object
+          additionalProperties: true
+          description: Run configuration (cross-platform wire shape; opaque to the server)
+        brand:
+          type: string
+        flavor:
+          type: string
+        createdAt:
+          type: string
+          description: ISO-8601 timestamp the template was created
+        revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Monotonically increasing client revision (a JS-safe integer)
+        deleted:
+          type: boolean
+          default: false
+          description: Whether this record is a deletion tombstone
 
     DeleteRunTemplatesInput:
       type: object
-      required:
-        - ids
+      description: >-
+        Revisioned deletion tombstones and/or legacy template ids. At least one
+        of `items` or `ids` must be supplied.
+      anyOf:
+        - required: [items]
+        - required: [ids]
       properties:
+        items:
+          type: array
+          description: Deletion tombstones to apply by id and revision
+          items:
+            type: object
+            required:
+              - id
+              - revision
+            properties:
+              id:
+                type: string
+                description: Stable client-generated id
+              revision:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Monotonically increasing client revision (a JS-safe integer)
         ids:
           type: array
-          description: The ids of the run templates to delete
+          description: Legacy deletion ids. The server atomically assigns a newer revision.
           items:
             type: string
 

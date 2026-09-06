@@ -279,12 +279,12 @@ import {
   flushFactoryQueue,
   FACTORY_KV_CACHED_KEYS,
   runFactoryKvMigration,
-  runTemplatesMigration,
 } from "../factoryDataSync";
 import {
   useRunTemplates,
   saveRunTemplateApi,
   deleteRunTemplatesApi,
+  runTemplatesQueryKey,
   RUN_TEMPLATES_QUERY_KEY,
 } from "../hooks/useRunTemplates";
 import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
@@ -4471,7 +4471,7 @@ export default function Home() {
   async function saveServerTemplate(tpl: import("../types").RunTemplate): Promise<void> {
     try {
       const updated = await saveRunTemplateApi(tpl);
-      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
+      cycleCountQc.setQueryData(runTemplatesQueryKey(), updated);
     } catch {
       void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
     }
@@ -4479,7 +4479,7 @@ export default function Home() {
   async function deleteServerTemplate(id: string): Promise<void> {
     try {
       const updated = await deleteRunTemplatesApi([id]);
-      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
+      cycleCountQc.setQueryData(runTemplatesQueryKey(), updated);
     } catch {
       void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
     }
@@ -8530,7 +8530,6 @@ export default function Home() {
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
         void runFactoryKvMigration(data);
-        void runTemplatesMigration();
       } catch {
         // Offline / error — keep whatever is in localStorage already
       }

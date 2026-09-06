@@ -5,9 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { RunTemplate } from './runTemplate';
+import type { RunTemplateInput } from './runTemplateInput';
 
 export interface SaveRunTemplatesInput {
   /** The batch of run templates to create or update (by id) */
-  templates: RunTemplate[];
+  templates: RunTemplateInput[];
 }

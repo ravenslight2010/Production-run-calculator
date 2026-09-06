@@ -201,14 +201,24 @@ async function deleteRun(userId: string, id: number): Promise<Response> {
   });
 }
 
-type RunTemplate = { id: string; name: string; values: Record<string, unknown> };
+type RunTemplate = {
+  id: string;
+  name: string;
+  values: Record<string, unknown>;
+  revision?: number;
+  deleted?: boolean;
+};
 
 async function saveTemplate(userId: string, template: RunTemplate): Promise<Response> {
   return fetch(`${baseUrl}/api/run-templates`, {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeader(userId) },
     body: JSON.stringify({
-      templates: [{ ...template, createdAt: "2026-09-06T00:00:00.000Z" }],
+      templates: [{
+        ...template,
+        revision: template.revision ?? 1,
+        createdAt: "2026-09-06T00:00:00.000Z",
+      }],
     }),
   });
 }
@@ -219,7 +229,28 @@ async function listTemplates(userId: string): Promise<RunTemplate[]> {
   return ((await res.json()) as { templates: RunTemplate[] }).templates;
 }
 
-async function deleteTemplates(userId: string, ids: string[]): Promise<Response> {
+async function deleteTemplates(
+  userId: string,
+  items: Array<{ id: string; revision: number }>,
+): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({ items }),
+  });
+}
+
+async function saveLegacyTemplate(userId: string, template: Omit<RunTemplate, "revision">): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({
+      templates: [{ ...template, createdAt: "2026-09-06T00:00:00.000Z" }],
+    }),
+  });
+}
+
+async function deleteLegacyTemplates(userId: string, ids: string[]): Promise<Response> {
   return fetch(`${baseUrl}/api/run-templates`, {
     method: "DELETE",
     headers: { "content-type": "application/json", ...authHeader(userId) },
@@ -355,7 +386,7 @@ describe("run templates — authenticated shared convenience with scope isolatio
       fetch(`${baseUrl}/api/run-templates`, {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids: [] }),
+        body: JSON.stringify({ items: [] }),
       }),
     ]);
 
@@ -364,7 +395,7 @@ describe("run templates — authenticated shared convenience with scope isolatio
     expect(deleteRes.status).toBe(401);
   });
 
-  it("allows an authenticated operator to read, save, and delete templates", async () => {
+  it("allows an authenticated operator to read, save, and tombstone templates", async () => {
     const saved = await saveTemplate(LIVE_OPERATOR, {
       id: "operator-template",
       name: "Operator Template",
@@ -374,10 +405,11 @@ describe("run templates — authenticated shared convenience with scope isolatio
     expect((await listTemplates(LIVE_OPERATOR)).map((template) => template.id))
       .toContain("operator-template");
 
-    const deleted = await deleteTemplates(LIVE_OPERATOR, ["operator-template"]);
+    const deleted = await deleteTemplates(LIVE_OPERATOR, [{ id: "operator-template", revision: 2 }]);
     expect(deleted.status).toBe(200);
-    expect((await listTemplates(LIVE_OPERATOR)).map((template) => template.id))
-      .not.toContain("operator-template");
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "operator-template", revision: 2, deleted: true }),
+    ]));
   });
 
   it("keeps same-id templates independent across live and sandbox scopes", async () => {
@@ -398,9 +430,147 @@ describe("run templates — authenticated shared convenience with scope isolatio
     expect((await listTemplates(sandboxUserId)).map((template) => template.name))
       .toEqual(["Sandbox Template"]);
 
-    expect((await deleteTemplates(sandboxUserId, [id])).status).toBe(200);
-    expect((await listTemplates(sandboxUserId))).toEqual([]);
+    expect((await deleteTemplates(sandboxUserId, [{ id, revision: 2 }])).status).toBe(200);
+    expect(await listTemplates(sandboxUserId)).toEqual([
+      expect.objectContaining({ id, name: "Sandbox Template", revision: 2, deleted: true }),
+    ]);
     expect((await listTemplates(LIVE_MANAGER)).map((template) => template.name))
       .toEqual(["Live Template"]);
+  });
+
+  it("keeps the highest revision through stale saves, retries, tombstones, and stale resurrection", async () => {
+    const id = "revisioned-template";
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Version one",
+      values: { version: 1 },
+      revision: 1,
+    })).status).toBe(200);
+
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Version three",
+      values: { version: 3 },
+      revision: 3,
+    })).status).toBe(200);
+
+    // A delayed revision must not overwrite the newer authoritative record.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Stale version",
+      values: { version: 2 },
+      revision: 2,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 3, deleted: false }),
+    ]);
+
+    // Retrying the same mutation is an idempotent no-op.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Conflicting duplicate",
+      values: { version: "wrong" },
+      revision: 3,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 3, deleted: false }),
+    ]);
+
+    expect((await deleteTemplates(LIVE_OPERATOR, [{ id, revision: 4 }])).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 4, deleted: true }),
+    ]);
+
+    // A pre-delete save cannot resurrect a newer deletion tombstone.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Stale resurrection",
+      values: { version: 3 },
+      revision: 3,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 4, deleted: true }),
+    ]);
+  });
+
+  it("atomically upgrades legacy saves while revisioned duplicates remain idempotent", async () => {
+    const id = "legacy-save-template";
+    expect((await saveLegacyTemplate(LIVE_OPERATOR, {
+      id, name: "Legacy version one", values: { version: 1 },
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Legacy version one", revision: 1, deleted: false }),
+    ]);
+
+    // A cached legacy retry/update has no client revision, so the server assigns
+    // the next revision inside its conflict statement rather than dropping it.
+    expect((await saveLegacyTemplate(LIVE_OPERATOR, {
+      id, name: "Legacy version two", values: { version: 2 },
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Legacy version two", values: { version: 2 }, revision: 2 }),
+    ]);
+
+    // Revision-aware equal-revision retries keep their strict idempotent behavior.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id, name: "Conflicting duplicate", values: { version: "wrong" }, revision: 2,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Legacy version two", values: { version: 2 }, revision: 2 }),
+    ]);
+  });
+
+  it("turns legacy DELETE ids into retained tombstones", async () => {
+    const id = "legacy-delete-template";
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id, name: "To tombstone", values: { keep: "envelope" }, revision: 4,
+    })).status).toBe(200);
+
+    expect((await deleteLegacyTemplates(LIVE_OPERATOR, [id])).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({
+        id, name: "To tombstone", values: { keep: "envelope" }, revision: 5, deleted: true,
+      }),
+    ]);
+  });
+
+  it("rejects legacy mutations when the revision is already at the JS-safe limit", async () => {
+    const id = "saturated-legacy-template";
+    await db.insert(runTemplatesTable).values({
+      id,
+      scope: "live",
+      name: "Saturated",
+      values: {},
+      createdAt: "2026-09-06T00:00:00.000Z",
+      revision: Number.MAX_SAFE_INTEGER,
+      deleted: false,
+    });
+
+    expect((await saveLegacyTemplate(LIVE_OPERATOR, {
+      id, name: "Unsafe increment", values: { unsafe: true },
+    })).status).toBe(409);
+    expect((await deleteLegacyTemplates(LIVE_OPERATOR, [id])).status).toBe(409);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({
+        id,
+        name: "Saturated",
+        revision: Number.MAX_SAFE_INTEGER,
+        deleted: false,
+      }),
+    ]);
+  });
+
+  it("creates a complete tombstone envelope for a never-seen deletion", async () => {
+    expect((await deleteTemplates(LIVE_OPERATOR, [{ id: "never-seen-template", revision: 7 }])).status)
+      .toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({
+        id: "never-seen-template",
+        name: "Deleted template",
+        values: {},
+        revision: 7,
+        deleted: true,
+      }),
+    ]);
   });
 });

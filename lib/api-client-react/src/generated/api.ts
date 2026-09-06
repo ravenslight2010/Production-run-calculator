@@ -6863,7 +6863,7 @@ export const getSaveRunTemplatesUrl = () => {
 }
 
 /**
- * Upserts a batch of run templates by id. Each template is normalized and validated server-side; malformed templates are dropped. Any signed-in user may save (matching the previous local behavior where anyone could create a template).
+ * Upserts a batch of run templates by id and revision. A write applies only when its revision is strictly newer than the stored revision; equal revisions are idempotent. Any signed-in user may save.
  * @summary Create or update run templates
  */
 export const saveRunTemplates = async (saveRunTemplatesInput: SaveRunTemplatesInput, options?: Parameters<typeof customFetch>[1]): Promise<RunTemplateList> => {
@@ -6942,8 +6942,8 @@ export const getDeleteRunTemplatesUrl = () => {
 }
 
 /**
- * Removes a batch of run templates by id. Any signed-in user may delete.
- * @summary Delete run templates by id
+ * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
+ * @summary Tombstone run templates by id and revision
  */
 export const deleteRunTemplates = async (deleteRunTemplatesInput: DeleteRunTemplatesInput, options?: Parameters<typeof customFetch>[1]): Promise<RunTemplateList> => {
 
@@ -6999,7 +6999,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteRunTemplatesMutationVariables = {data: BodyType<DeleteRunTemplatesInput>}
 
     /**
- * @summary Delete run templates by id
+ * @summary Tombstone run templates by id and revision
  */
 export const useDeleteRunTemplates = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRunTemplates>>, TError,DeleteRunTemplatesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

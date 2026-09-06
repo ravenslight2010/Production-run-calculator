@@ -2528,6 +2528,11 @@ export const DeleteDieTypesResponse = zod.object({
  * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
  * @summary List facility-wide run templates
  */
+export const listRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const listRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+
+export const listRunTemplatesResponseTemplatesItemDeletedDefault = false;
+
 export const ListRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -2535,15 +2540,22 @@ export const ListRunTemplatesResponse = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(listRunTemplatesResponseTemplatesItemRevisionMin).max(listRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(listRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
 /**
- * Upserts a batch of run templates by id. Each template is normalized and validated server-side; malformed templates are dropped. Any signed-in user may save (matching the previous local behavior where anyone could create a template).
+ * Upserts a batch of run templates by id and revision. A write applies only when its revision is strictly newer than the stored revision; equal revisions are idempotent. Any signed-in user may save.
  * @summary Create or update run templates
  */
+export const saveRunTemplatesBodyTemplatesItemRevisionMin = 0;
+export const saveRunTemplatesBodyTemplatesItemRevisionMax = 9007199254740991;
+
+export const saveRunTemplatesBodyTemplatesItemDeletedDefault = false;
+
 export const SaveRunTemplatesBody = zod.object({
   "templates": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -2551,9 +2563,16 @@ export const SaveRunTemplatesBody = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
-}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).')).describe('The batch of run templates to create or update (by id)')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(saveRunTemplatesBodyTemplatesItemRevisionMin).max(saveRunTemplatesBodyTemplatesItemRevisionMax).optional().describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(saveRunTemplatesBodyTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
+}).describe('A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.')).describe('The batch of run templates to create or update (by id)')
 })
+
+export const saveRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const saveRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+
+export const saveRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const SaveRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -2562,18 +2581,52 @@ export const SaveRunTemplatesResponse = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(saveRunTemplatesResponseTemplatesItemRevisionMin).max(saveRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(saveRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
 /**
- * Removes a batch of run templates by id. Any signed-in user may delete.
- * @summary Delete run templates by id
+ * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
+ * @summary Tombstone run templates by id and revision
  */
-export const DeleteRunTemplatesBody = zod.object({
-  "ids": zod.array(zod.string()).describe('The ids of the run templates to delete')
-})
+export const deleteRunTemplatesBodyOneItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyOneItemsItemRevisionMax = 9007199254740991;
+
+export const deleteRunTemplatesBodyTwoItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyTwoItemsItemRevisionMax = 9007199254740991;
+
+export const deleteRunTemplatesBodyThreeItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
+
+
+
+export const DeleteRunTemplatesBody = zod.union([zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "revision": zod.number().int().min(deleteRunTemplatesBodyOneItemsItemRevisionMin).max(deleteRunTemplatesBodyOneItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+})).describe('Deletion tombstones to apply by id and revision'),
+  "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
+}),zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "revision": zod.number().int().min(deleteRunTemplatesBodyTwoItemsItemRevisionMin).max(deleteRunTemplatesBodyTwoItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+})).optional().describe('Deletion tombstones to apply by id and revision'),
+  "ids": zod.array(zod.string()).describe('Legacy deletion ids. The server atomically assigns a newer revision.')
+})]).and(zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "revision": zod.number().int().min(deleteRunTemplatesBodyThreeItemsItemRevisionMin).max(deleteRunTemplatesBodyThreeItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+})).optional().describe('Deletion tombstones to apply by id and revision'),
+  "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
+})).describe('Revisioned deletion tombstones and\/or legacy template ids. At least one of `items` or `ids` must be supplied.')
+
+export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+
+export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const DeleteRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -2582,7 +2635,9 @@ export const DeleteRunTemplatesResponse = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(deleteRunTemplatesResponseTemplatesItemRevisionMin).max(deleteRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(deleteRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 

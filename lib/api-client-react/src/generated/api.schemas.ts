@@ -3302,21 +3302,74 @@ export interface RunTemplate {
   flavor?: string;
   /** ISO-8601 timestamp the template was created */
   createdAt: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision: number;
+  /** Whether this record is a deletion tombstone */
+  deleted?: boolean;
 }
 
 export interface RunTemplateList {
   templates: RunTemplate[];
 }
 
-export interface SaveRunTemplatesInput {
-  /** The batch of run templates to create or update (by id) */
-  templates: RunTemplate[];
+/**
+ * Run configuration (cross-platform wire shape; opaque to the server)
+ */
+export type RunTemplateInputValues = { [key: string]: unknown };
+
+/**
+ * A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.
+ */
+export interface RunTemplateInput {
+  /** Stable client-generated id */
+  id: string;
+  /** Human-readable template name */
+  name: string;
+  /** Run configuration (cross-platform wire shape; opaque to the server) */
+  values: RunTemplateInputValues;
+  brand?: string;
+  flavor?: string;
+  /** ISO-8601 timestamp the template was created */
+  createdAt: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision?: number;
+  /** Whether this record is a deletion tombstone */
+  deleted?: boolean;
 }
 
-export interface DeleteRunTemplatesInput {
-  /** The ids of the run templates to delete */
-  ids: string[];
+export interface SaveRunTemplatesInput {
+  /** The batch of run templates to create or update (by id) */
+  templates: RunTemplateInput[];
 }
+
+export type DeleteRunTemplatesInputItemsItem = {
+  /** Stable client-generated id */
+  id: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision: number;
+};
+
+/**
+ * Revisioned deletion tombstones and/or legacy template ids. At least one of `items` or `ids` must be supplied.
+ */
+export type DeleteRunTemplatesInput = (unknown & {
+  /** Deletion tombstones to apply by id and revision */
+  items?: DeleteRunTemplatesInputItemsItem[];
+  /** Legacy deletion ids. The server atomically assigns a newer revision. */
+  ids?: string[];
+});
 
 export interface SupervisorPin {
   /** The facility supervisor PIN */

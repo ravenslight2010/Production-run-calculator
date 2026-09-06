@@ -65,6 +65,7 @@ import {
   markProfileEdited,
   markProfileDeleted,
 } from "./profileServerSync";
+import { localRunTemplates, replaceRunTemplates } from "./runTemplatesRepository";
 import {
   type MergeMap,
   mergeList as mergeListNames,
@@ -1490,21 +1491,15 @@ export function profileKeyIsTombstoned(
 }
 
 export function loadTemplates(): RunTemplate[] {
-  try {
-    const raw = localStorage.getItem(TEMPLATES_KEY);
-    if (raw) {
-      const templates = JSON.parse(raw) as RunTemplate[];
-      for (const t of templates) {
-        if (t.values) normalizePepFields(t.values as unknown as Record<string, unknown>);
-      }
-      return templates;
-    }
-  } catch {}
-  return [];
+  const templates = localRunTemplates();
+  for (const t of templates) {
+    if (t.values) normalizePepFields(t.values as unknown as Record<string, unknown>);
+  }
+  return templates;
 }
 
 export function saveTemplates(t: RunTemplate[]): void {
-  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(t)); } catch {}
+  try { replaceRunTemplates(t); } catch {}
 }
 
 export function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
