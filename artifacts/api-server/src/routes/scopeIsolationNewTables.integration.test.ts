@@ -1,5 +1,5 @@
 // Integration tests proving scope isolation for the newly scoped tables:
-// factory_kv, production_runs, and quality_checks.
+// factory_kv, production_runs, quality_checks, and run_templates.
 //
 // Each test DB is created fresh, schema pushed via drizzle-kit push-force, and
 // dropped on teardown — nothing here touches real data.
@@ -38,6 +38,7 @@ let rolesTable: DbModule["rolesTable"];
 let factoryKvTable: DbModule["factoryKvTable"];
 let productionRunsTable: DbModule["productionRunsTable"];
 let qualityChecksTable: DbModule["qualityChecksTable"];
+let runTemplatesTable: DbModule["runTemplatesTable"];
 
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
@@ -51,6 +52,7 @@ let server: Server;
 let baseUrl: string;
 
 const LIVE_MANAGER = "live-mgr-scope-test";
+const LIVE_OPERATOR = "live-op-scope-test";
 let sandboxUserId: string;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -92,6 +94,7 @@ beforeAll(async () => {
   factoryKvTable = dbMod.factoryKvTable;
   productionRunsTable = dbMod.productionRunsTable;
   qualityChecksTable = dbMod.qualityChecksTable;
+  runTemplatesTable = dbMod.runTemplatesTable;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   seedRoles = (await import("../lib/roles")).seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
@@ -117,8 +120,14 @@ beforeAll(async () => {
   if (!sandboxUser) throw new Error("sandbox user was not seeded");
   sandboxUserId = sandboxUser.id;
 
-  await db.insert(usersTable).values({ id: LIVE_MANAGER, username: "live-mgr-scope", passwordHash: "x" });
-  await db.insert(userRolesTable).values({ userId: LIVE_MANAGER, role: "manager" });
+  await db.insert(usersTable).values([
+    { id: LIVE_MANAGER, username: "live-mgr-scope", passwordHash: "x" },
+    { id: LIVE_OPERATOR, username: "live-op-scope", passwordHash: "x" },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: LIVE_MANAGER, role: "manager" },
+    { userId: LIVE_OPERATOR, role: "operator" },
+  ]);
 }, 90_000);
 
 afterAll(async () => {
@@ -140,6 +149,7 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM ${factoryKvTable}`);
   await db.execute(sql`DELETE FROM ${productionRunsTable}`);
   await db.execute(sql`DELETE FROM ${qualityChecksTable}`);
+  await db.execute(sql`DELETE FROM ${runTemplatesTable}`);
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -188,6 +198,32 @@ async function deleteRun(userId: string, id: number): Promise<Response> {
   return fetch(`${baseUrl}/api/runs/${id}`, {
     method: "DELETE",
     headers: authHeader(userId),
+  });
+}
+
+type RunTemplate = { id: string; name: string; values: Record<string, unknown> };
+
+async function saveTemplate(userId: string, template: RunTemplate): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({
+      templates: [{ ...template, createdAt: "2026-09-06T00:00:00.000Z" }],
+    }),
+  });
+}
+
+async function listTemplates(userId: string): Promise<RunTemplate[]> {
+  const res = await fetch(`${baseUrl}/api/run-templates`, { headers: authHeader(userId) });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { templates: RunTemplate[] }).templates;
+}
+
+async function deleteTemplates(userId: string, ids: string[]): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({ ids }),
   });
 }
 
@@ -246,6 +282,22 @@ describe("factory KV — live/sandbox scope isolation", () => {
 // ── production runs scope isolation ──────────────────────────────────────────
 
 describe("production runs — live/sandbox scope isolation", () => {
+  it("rejects anonymous reads and writes, and requires factory-settings capability for mutations", async () => {
+    const anonymousGet = await fetch(`${baseUrl}/api/runs`);
+    const anonymousPost = await fetch(`${baseUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const operatorGet = await fetch(`${baseUrl}/api/runs`, { headers: authHeader(LIVE_OPERATOR) });
+    const operatorPost = await createRun(LIVE_OPERATOR, "operator-run");
+
+    expect(anonymousGet.status).toBe(401);
+    expect(anonymousPost.status).toBe(401);
+    expect(operatorGet.status).toBe(200);
+    expect(operatorPost.status).toBe(403);
+  });
+
   it("a live-scope run is not visible in sandbox list", async () => {
     const r = await createRun(LIVE_MANAGER, "live-run");
     expect(r.status).toBe(201);
@@ -286,5 +338,69 @@ describe("production runs — live/sandbox scope isolation", () => {
 
     expect(liveRuns.map((r) => r.label).sort()).toEqual(["live-a", "live-b"]);
     expect(sandboxRuns.map((r) => r.label)).toEqual(["sandbox-a"]);
+  });
+});
+
+// ── run templates auth and scope isolation ───────────────────────────────────
+
+describe("run templates — authenticated shared convenience with scope isolation", () => {
+  it("rejects anonymous access to every operation", async () => {
+    const [getRes, postRes, deleteRes] = await Promise.all([
+      fetch(`${baseUrl}/api/run-templates`),
+      fetch(`${baseUrl}/api/run-templates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templates: [] }),
+      }),
+      fetch(`${baseUrl}/api/run-templates`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: [] }),
+      }),
+    ]);
+
+    expect(getRes.status).toBe(401);
+    expect(postRes.status).toBe(401);
+    expect(deleteRes.status).toBe(401);
+  });
+
+  it("allows an authenticated operator to read, save, and delete templates", async () => {
+    const saved = await saveTemplate(LIVE_OPERATOR, {
+      id: "operator-template",
+      name: "Operator Template",
+      values: { casesNeeded: 10 },
+    });
+    expect(saved.status).toBe(200);
+    expect((await listTemplates(LIVE_OPERATOR)).map((template) => template.id))
+      .toContain("operator-template");
+
+    const deleted = await deleteTemplates(LIVE_OPERATOR, ["operator-template"]);
+    expect(deleted.status).toBe(200);
+    expect((await listTemplates(LIVE_OPERATOR)).map((template) => template.id))
+      .not.toContain("operator-template");
+  });
+
+  it("keeps same-id templates independent across live and sandbox scopes", async () => {
+    const id = "shared-template-id";
+    expect((await saveTemplate(LIVE_MANAGER, {
+      id,
+      name: "Live Template",
+      values: { source: "live" },
+    })).status).toBe(200);
+    expect((await saveTemplate(sandboxUserId, {
+      id,
+      name: "Sandbox Template",
+      values: { source: "sandbox" },
+    })).status).toBe(200);
+
+    expect((await listTemplates(LIVE_MANAGER)).map((template) => template.name))
+      .toEqual(["Live Template"]);
+    expect((await listTemplates(sandboxUserId)).map((template) => template.name))
+      .toEqual(["Sandbox Template"]);
+
+    expect((await deleteTemplates(sandboxUserId, [id])).status).toBe(200);
+    expect((await listTemplates(sandboxUserId))).toEqual([]);
+    expect((await listTemplates(LIVE_MANAGER)).map((template) => template.name))
+      .toEqual(["Live Template"]);
   });
 });
