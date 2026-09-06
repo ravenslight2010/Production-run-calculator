@@ -54,4 +54,8 @@ Thumbs.db
 
 # Replit
 .cache/
-.local/
+!/.local/
+.local/*
+!.local/custom_skills/
+!.local/custom_skills/**
+.local/custom_skills/**/.fingerprint
