@@ -73,6 +73,7 @@ import type {
   FreezerPullItemList,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
+  GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
   GetSyncTodayParams,
@@ -9362,9 +9363,9 @@ export const getGetProfileDataHealthWorkspaceUrl = () => {
 /**
  * @summary Read the manager data-health workspace
  */
-export const getProfileDataHealthWorkspace = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+export const getProfileDataHealthWorkspace = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetProfileDataHealthWorkspace200> => {
 
-  return customFetch<void>(getGetProfileDataHealthWorkspaceUrl(),
+  return customFetch<GetProfileDataHealthWorkspace200>(getGetProfileDataHealthWorkspaceUrl(),
   {
     ...options,
     method: 'GET'

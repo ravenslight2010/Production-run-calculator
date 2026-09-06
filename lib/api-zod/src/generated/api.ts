@@ -3428,7 +3428,187 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
 /**
  * @summary Read the manager data-health workspace
  */
-export const GetProfileDataHealthWorkspaceResponse = zod.unknown()
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+
+
+
+
+export const GetProfileDataHealthWorkspaceResponse = zod.object({
+  "workspace": zod.object({
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "category": zod.string(),
+  "severity": zod.enum(['info', 'warning', 'error']),
+  "repairability": zod.enum(['safe', 'review']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "recipe": zod.string(),
+  "message": zod.string(),
+  "proposedRepair": zod.string(),
+  "affectedRecord": zod.string(),
+  "protectedValue": zod.boolean(),
+  "source": zod.enum(['profile-health', 'master-data', 'saved-spec', 'cleanup']),
+  "sourceRoute": zod.string(),
+  "reconciliationCategory": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']).nullish(),
+  "preview": zod.record(zod.string(), zod.unknown()).nullish()
+})),
+  "safeRepairs": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "fingerprint": zod.string(),
+  "fields": zod.array(zod.string()),
+  "previousValues": zod.record(zod.string(), zod.unknown()),
+  "nextValues": zod.record(zod.string(), zod.unknown())
+})),
+  "summary": zod.record(zod.string(), zod.number().int()),
+  "cleanupHistory": zod.object({
+
+}).passthrough().nullable(),
+  "repairBatches": zod.array(zod.record(zod.string(), zod.unknown())),
+  "aiRetention": zod.object({
+  "policyVersion": zod.string(),
+  "scope": zod.enum(['live', 'sandbox']),
+  "batchLimit": zod.number().int().min(1),
+  "canApply": zod.boolean(),
+  "alreadyApplied": zod.boolean(),
+  "appliedAt": zod.coerce.date().nullable(),
+  "candidates": zod.object({
+  "conversationTurns": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin),
+  "retiredFacilityFacts": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin),
+  "incidentGeneratedTextToLabel": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin),
+  "qualityThumbnailsToRedact": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin),
+  "closedObservationsToRedact": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin),
+  "total": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin)
+}),
+  "protected": zod.object({
+  "correctionAndAliasRecords": zod.string(),
+  "operationalIncidentRows": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin),
+  "confirmedQualityRows": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin),
+  "openInventoryObservations": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin),
+  "inventoryLedgerEffects": zod.string()
+}),
+  "cutoffs": zod.object({
+  "conversationBefore": zod.coerce.date(),
+  "thumbnailBefore": zod.coerce.date(),
+  "observationBefore": zod.coerce.date()
+})
+}),
+  "sourceReconciliation": zod.object({
+  "report": zod.object({
+  "path": zod.string(),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp),
+  "formatVersion": zod.number().int(),
+  "automaticProposals": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin),
+  "stubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin),
+  "planSha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp),
+  "snapshot": zod.object({
+  "path": zod.string(),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp),
+  "capturedAt": zod.coerce.date()
+}),
+  "manifest": zod.object({
+  "path": zod.string(),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp),
+  "retained": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin),
+  "excludedOlderDuplicates": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin)
+})
+}),
+  "heal": zod.object({
+  "id": zod.string(),
+  "fromDate": zod.coerce.date(),
+  "appliedAt": zod.coerce.date().nullable(),
+  "markerValid": zod.boolean(),
+  "result": zod.object({
+  "replacements": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin),
+  "aliasesInserted": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin),
+  "repointedProfiles": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin),
+  "repointedRuns": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin),
+  "deletedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin)
+})
+}),
+  "checkedAt": zod.coerce.date(),
+  "status": zod.enum(['clean', 'warning', 'error', 'not-verified']),
+  "freshness": zod.enum(['current', 'stale']),
+  "summary": zod.object({
+  "poolMismatches": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin),
+  "aliasGaps": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin),
+  "staleProfileLinks": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin),
+  "stalePendingRunLinks": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin),
+  "protectedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin),
+  "unexpectedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin),
+  "protectedHistoryReferences": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin),
+  "omittedFindings": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin),
+  "findingLimitPerCategory": zod.number().int().min(1)
+}),
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "category": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']),
+  "severity": zod.enum(['info', 'warning', 'error']),
+  "affectedRecord": zod.string(),
+  "currentValue": zod.string(),
+  "proposedOutcome": zod.string(),
+  "protectedValue": zod.boolean(),
+  "sourceRoute": zod.enum(['dough', 'sauce', 'cheeseRecipes', 'mixes', 'import', 'setupProfiles', 'audit'])
+}))
+})
+})
+})
 
 
 /**

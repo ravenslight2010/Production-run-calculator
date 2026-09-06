@@ -707,10 +707,26 @@ describe("profile data health check", () => {
       workspace: {
         findings: Array<{
           id: string;
+          repairability: "safe" | "review";
+          reconciliationCategory?: string;
           preview?: { changes?: Array<{ field: string; before: string; after: string }> };
         }>;
+        sourceReconciliation: {
+          report: { path: string; sha256: string };
+          status: string;
+          findings: Array<Record<string, unknown>>;
+        };
       };
     };
+    expect(workspace.workspace.sourceReconciliation.report.path).toBe(
+      "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
+    );
+    expect(workspace.workspace.sourceReconciliation.report.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(workspace.workspace.sourceReconciliation.status).toBe("not-verified");
+    expect(workspace.workspace.findings.filter((finding) => finding.reconciliationCategory))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ repairability: "review" })]));
+    expect(JSON.stringify(workspace.workspace.sourceReconciliation)).not.toContain('"runValues"');
+    expect(JSON.stringify(workspace.workspace.sourceReconciliation)).not.toContain('"values"');
     const profilePreview = workspace.workspace.findings.find((finding) =>
       finding.id === report.report.safeRepairs[0]?.id)?.preview;
     expect(profilePreview?.changes).toEqual(expect.arrayContaining([

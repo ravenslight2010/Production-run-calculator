@@ -2829,6 +2829,14 @@ paths:
       responses:
         "200":
           description: Findings, safe repairs, cleanup history, and repair batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspace]
+                properties:
+                  workspace:
+                    $ref: "#/components/schemas/ProfileDataHealthWorkspace"
         "403":
           description: Missing manager capability
 
@@ -7483,6 +7491,135 @@ components:
               type: integer
             repairedRuns:
               type: integer
+
+    ProfileDataHealthWorkspace:
+      type: object
+      required: [findings, safeRepairs, summary, cleanupHistory, repairBatches, aiRetention, sourceReconciliation]
+      properties:
+        findings: { type: array, items: { $ref: "#/components/schemas/DataHealthFinding" } }
+        safeRepairs: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthRepair" } }
+        summary: { type: object, additionalProperties: { type: integer } }
+        cleanupHistory: { type: object, nullable: true }
+        repairBatches: { type: array, items: { type: object, additionalProperties: true } }
+        aiRetention:
+          $ref: "#/components/schemas/AiRetentionReport"
+        sourceReconciliation:
+          $ref: "#/components/schemas/SourceLibraryReconciliationStatus"
+
+    DataHealthFinding:
+      type: object
+      required: [id, category, severity, repairability, brand, flavor, recipe, message, proposedRepair, affectedRecord, protectedValue, source, sourceRoute]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        severity: { type: string, enum: [info, warning, error] }
+        repairability: { type: string, enum: [safe, review] }
+        brand: { type: string }
+        flavor: { type: string }
+        recipe: { type: string }
+        message: { type: string }
+        proposedRepair: { type: string }
+        affectedRecord: { type: string }
+        protectedValue: { type: boolean }
+        source: { type: string, enum: [profile-health, master-data, saved-spec, cleanup] }
+        sourceRoute: { type: string }
+        reconciliationCategory:
+          type: string
+          nullable: true
+          enum: [pool-mismatch, alias-gap, stale-profile-link, stale-pending-run-link, protected-stub, unexpected-stub]
+        preview:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    SourceLibraryReconciliationStatus:
+      type: object
+      additionalProperties: false
+      required: [report, heal, checkedAt, status, freshness, summary, findings]
+      properties:
+        report:
+          type: object
+          additionalProperties: false
+          required: [path, sha256, formatVersion, automaticProposals, stubs, planSha256, snapshot, manifest]
+          properties:
+            path: { type: string }
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            formatVersion: { type: integer }
+            automaticProposals: { type: integer, minimum: 0 }
+            stubs: { type: integer, minimum: 0 }
+            planSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            snapshot:
+              type: object
+              additionalProperties: false
+              required: [path, sha256, capturedAt]
+              properties:
+                path: { type: string }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+                capturedAt: { type: string, format: date-time }
+            manifest:
+              type: object
+              additionalProperties: false
+              required: [path, sha256, retained, excludedOlderDuplicates]
+              properties:
+                path: { type: string }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+                retained: { type: integer, minimum: 0 }
+                excludedOlderDuplicates: { type: integer, minimum: 0 }
+        heal:
+          type: object
+          additionalProperties: false
+          required: [id, fromDate, appliedAt, markerValid, result]
+          properties:
+            id: { type: string }
+            fromDate: { type: string, format: date }
+            appliedAt: { type: string, format: date-time, nullable: true }
+            markerValid: { type: boolean }
+            result:
+              type: object
+              additionalProperties: false
+              required: [replacements, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs]
+              properties:
+                replacements: { type: integer, minimum: 0 }
+                aliasesInserted: { type: integer, minimum: 0 }
+                repointedProfiles: { type: integer, minimum: 0 }
+                repointedRuns: { type: integer, minimum: 0 }
+                deletedStubs: { type: integer, minimum: 0 }
+        checkedAt: { type: string, format: date-time }
+        status: { type: string, enum: [clean, warning, error, not-verified] }
+        freshness: { type: string, enum: [current, stale] }
+        summary:
+          type: object
+          additionalProperties: false
+          required: [poolMismatches, aliasGaps, staleProfileLinks, stalePendingRunLinks, protectedStubs, unexpectedStubs, protectedHistoryReferences, omittedFindings, findingLimitPerCategory]
+          properties:
+            poolMismatches: { type: integer, minimum: 0 }
+            aliasGaps: { type: integer, minimum: 0 }
+            staleProfileLinks: { type: integer, minimum: 0 }
+            stalePendingRunLinks: { type: integer, minimum: 0 }
+            protectedStubs: { type: integer, minimum: 0 }
+            unexpectedStubs: { type: integer, minimum: 0 }
+            protectedHistoryReferences: { type: integer, minimum: 0 }
+            omittedFindings: { type: integer, minimum: 0 }
+            findingLimitPerCategory: { type: integer, minimum: 1 }
+        findings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, category, severity, affectedRecord, currentValue, proposedOutcome, protectedValue, sourceRoute]
+            properties:
+              id: { type: string }
+              category:
+                type: string
+                enum: [pool-mismatch, alias-gap, stale-profile-link, stale-pending-run-link, protected-stub, unexpected-stub]
+              severity: { type: string, enum: [info, warning, error] }
+              affectedRecord: { type: string }
+              currentValue: { type: string }
+              proposedOutcome: { type: string }
+              protectedValue: { type: boolean }
+              sourceRoute:
+                type: string
+                enum: [dough, sauce, cheeseRecipes, mixes, import, setupProfiles, audit]
 
     ProfileNameLinkCleanupAudit:
       type: object

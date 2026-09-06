@@ -6057,7 +6057,12 @@ export async function runSourceLibraryReconciliationHeal(): Promise<void> {
       for (const run of runs) {
         if (!run || typeof run !== "object") continue;
         const id = String((run as Record<string, unknown>).id ?? "");
-        if (!id || (run as Record<string, unknown>).startedAt != null || !runValues[id]) continue;
+        if (
+          !id ||
+          (run as Record<string, unknown>).startedAt != null ||
+          (run as Record<string, unknown>).endedAt != null ||
+          !runValues[id]
+        ) continue;
         const values = { ...runValues[id] };
         if (!repoint(values)) continue;
         const stamp = Math.max(Number(stamps[id] ?? values.valuesUpdatedAtMs ?? 0) + 1, Date.now());

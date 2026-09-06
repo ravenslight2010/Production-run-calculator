@@ -517,12 +517,20 @@ test("repairs scoped Data Health findings, preserves started runs, and guards un
   await openDataHealth(page);
   await runDataHealthCheck(page);
   const workspace = page.getByTestId("data-health-workspace");
+  await expect(page.getByTestId("source-reconciliation-status")).toBeVisible();
+  await expect(page.getByTestId("source-reconciliation-status")).toContainText("Authoritative source reconciliation");
+  await expect(page.getByTestId("source-reconciliation-status")).toContainText("Report ");
   await expect(workspace).toContainText(`${fixture.brand} — ${fixture.safeFlavors[0]}`);
   await expect(workspace).toContainText("review only");
   await expect(workspace).toContainText(fixture.protectedFlavor);
   await page.screenshot({ path: testInfo.outputPath("data-health-findings.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("Filter source reconciliation category")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("data-health-mobile.png") });
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   await page.getByLabel("Filter data health category").selectOption("profile-links");
+  await page.getByLabel("Filter source reconciliation category").selectOption("all");
   await page.getByLabel("Filter data health repairability").selectOption("safe");
   await page.getByLabel("Filter data health brand").selectOption(fixture.brand);
   await expect(workspace).toContainText(`${fixture.brand} / ${fixture.safeFlavors[0]} / sauce`);

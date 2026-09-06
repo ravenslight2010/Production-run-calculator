@@ -18,6 +18,7 @@ import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { buildMasterDataHealthReport, type MasterDataHealthReport } from "../lib/masterDataHealth";
 import { applyAiRetentionCleanup, buildAiRetentionReport, type AiRetentionReport } from "../lib/aiRetention";
+import { sourceLibraryReconciliationStatus, type SourceLibraryReconciliationStatus } from "../lib/sourceLibraryReconciliationHeal";
 
 type JsonRecord = Record<string, unknown>;
 type RecipeKind = "dough" | "sauce";
@@ -67,6 +68,7 @@ export type DataHealthFinding = {
   protectedValue: boolean;
   source: "profile-health" | "master-data" | "saved-spec" | "cleanup";
   sourceRoute: "setupProfiles" | "import" | "merge" | "audit" | "dough" | "sauce" | "cheeseRecipes" | "mixes" | "ingredientTypes";
+  reconciliationCategory?: SourceLibraryReconciliationStatus["findings"][number]["category"];
   preview?: {
     before: string;
     after: string;
@@ -105,6 +107,7 @@ export type DataHealthWorkspace = {
     summary: { applied: number; skipped: number; failed: number; repairedRuns: number };
   }>;
   aiRetention: AiRetentionReport;
+  sourceReconciliation: SourceLibraryReconciliationStatus;
 };
 
 const router = Router();
@@ -307,10 +310,11 @@ function previewValue(value: unknown): string {
 
 export async function dataHealthWorkspace(executor: HealthExecutor): Promise<DataHealthWorkspace> {
   const scope = currentScope();
-  const [report, master, aiRetention] = await Promise.all([
+  const [report, master, aiRetention, sourceReconciliation] = await Promise.all([
     profileDataHealthReport(executor),
     buildMasterDataHealthReport(executor, scope),
     buildAiRetentionReport(executor),
+    sourceLibraryReconciliationStatus(executor, scope),
   ]);
   const [marker] = await executor
     .select({
@@ -396,6 +400,29 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
       preview: repairPreview,
     });
   }
+  for (const item of sourceReconciliation.findings) {
+    findings.push({
+      id: item.id,
+      category: item.category === "alias-gap" ? "aliases"
+        : item.category === "stale-profile-link" ? "profiles"
+          : item.category === "stale-pending-run-link" ? "scheduled-runs"
+            : item.sourceRoute === "dough" ? "dough"
+              : item.sourceRoute === "sauce" ? "sauce"
+                : item.sourceRoute === "mixes" ? "mixes" : "cheese",
+      severity: item.severity,
+      repairability: "review",
+      brand: "",
+      flavor: "",
+      recipe: "Authoritative source reconciliation",
+      message: item.currentValue,
+      proposedRepair: item.proposedOutcome,
+      affectedRecord: item.affectedRecord,
+      protectedValue: item.protectedValue,
+      source: "master-data",
+      sourceRoute: item.sourceRoute,
+      reconciliationCategory: item.category,
+    });
+  }
   if (cleanupHistory) {
     for (const [kind, count] of Object.entries(cleanupHistory.summary.removedStubs)) {
       if (count === 0) continue;
@@ -442,6 +469,7 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     summary,
     cleanupHistory,
     aiRetention,
+    sourceReconciliation,
     repairBatches: batches.map((batch) => {
       const value = record(batch.summary);
       return { ...batch, summary: {

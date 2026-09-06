@@ -2348,6 +2348,282 @@ export interface ProfileDataHealthApplyResult {
   summary: ProfileDataHealthApplyResultSummary;
 }
 
+export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
+
+export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown } | null;
+
+export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
+
+export type DataHealthFindingSeverity = typeof DataHealthFindingSeverity[keyof typeof DataHealthFindingSeverity];
+
+
+export const DataHealthFindingSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
+
+export type DataHealthFindingRepairability = typeof DataHealthFindingRepairability[keyof typeof DataHealthFindingRepairability];
+
+
+export const DataHealthFindingRepairability = {
+  safe: 'safe',
+  review: 'review',
+} as const;
+
+export type DataHealthFindingSource = typeof DataHealthFindingSource[keyof typeof DataHealthFindingSource];
+
+
+export const DataHealthFindingSource = {
+  'profile-health': 'profile-health',
+  'master-data': 'master-data',
+  'saved-spec': 'saved-spec',
+  cleanup: 'cleanup',
+} as const;
+
+export type DataHealthFindingReconciliationCategory = typeof DataHealthFindingReconciliationCategory[keyof typeof DataHealthFindingReconciliationCategory] | null;
+
+
+export const DataHealthFindingReconciliationCategory = {
+  'pool-mismatch': 'pool-mismatch',
+  'alias-gap': 'alias-gap',
+  'stale-profile-link': 'stale-profile-link',
+  'stale-pending-run-link': 'stale-pending-run-link',
+  'protected-stub': 'protected-stub',
+  'unexpected-stub': 'unexpected-stub',
+} as const;
+
+export type DataHealthFindingPreview = { [key: string]: unknown } | null;
+
+export interface DataHealthFinding {
+  id: string;
+  category: string;
+  severity: DataHealthFindingSeverity;
+  repairability: DataHealthFindingRepairability;
+  brand: string;
+  flavor: string;
+  recipe: string;
+  message: string;
+  proposedRepair: string;
+  affectedRecord: string;
+  protectedValue: boolean;
+  source: DataHealthFindingSource;
+  sourceRoute: string;
+  reconciliationCategory?: DataHealthFindingReconciliationCategory;
+  preview?: DataHealthFindingPreview;
+}
+
+export type AiRetentionReportScope = typeof AiRetentionReportScope[keyof typeof AiRetentionReportScope];
+
+
+export const AiRetentionReportScope = {
+  live: 'live',
+  sandbox: 'sandbox',
+} as const;
+
+export type AiRetentionReportCandidates = {
+  /** @minimum 0 */
+  conversationTurns: number;
+  /** @minimum 0 */
+  retiredFacilityFacts: number;
+  /** @minimum 0 */
+  incidentGeneratedTextToLabel: number;
+  /** @minimum 0 */
+  qualityThumbnailsToRedact: number;
+  /** @minimum 0 */
+  closedObservationsToRedact: number;
+  /** @minimum 0 */
+  total: number;
+};
+
+export type AiRetentionReportProtected = {
+  correctionAndAliasRecords: string;
+  /** @minimum 0 */
+  operationalIncidentRows: number;
+  /** @minimum 0 */
+  confirmedQualityRows: number;
+  /** @minimum 0 */
+  openInventoryObservations: number;
+  inventoryLedgerEffects: string;
+};
+
+export type AiRetentionReportCutoffs = {
+  conversationBefore: string;
+  thumbnailBefore: string;
+  observationBefore: string;
+};
+
+export interface AiRetentionReport {
+  policyVersion: string;
+  scope: AiRetentionReportScope;
+  /** @minimum 1 */
+  batchLimit: number;
+  canApply: boolean;
+  alreadyApplied: boolean;
+  /** @nullable */
+  appliedAt: string | null;
+  candidates: AiRetentionReportCandidates;
+  protected: AiRetentionReportProtected;
+  cutoffs: AiRetentionReportCutoffs;
+}
+
+export type SourceLibraryReconciliationStatusStatus = typeof SourceLibraryReconciliationStatusStatus[keyof typeof SourceLibraryReconciliationStatusStatus];
+
+
+export const SourceLibraryReconciliationStatusStatus = {
+  clean: 'clean',
+  warning: 'warning',
+  error: 'error',
+  'not-verified': 'not-verified',
+} as const;
+
+export type SourceLibraryReconciliationStatusFreshness = typeof SourceLibraryReconciliationStatusFreshness[keyof typeof SourceLibraryReconciliationStatusFreshness];
+
+
+export const SourceLibraryReconciliationStatusFreshness = {
+  current: 'current',
+  stale: 'stale',
+} as const;
+
+export type SourceLibraryReconciliationStatusFindingsItemCategory = typeof SourceLibraryReconciliationStatusFindingsItemCategory[keyof typeof SourceLibraryReconciliationStatusFindingsItemCategory];
+
+
+export const SourceLibraryReconciliationStatusFindingsItemCategory = {
+  'pool-mismatch': 'pool-mismatch',
+  'alias-gap': 'alias-gap',
+  'stale-profile-link': 'stale-profile-link',
+  'stale-pending-run-link': 'stale-pending-run-link',
+  'protected-stub': 'protected-stub',
+  'unexpected-stub': 'unexpected-stub',
+} as const;
+
+export type SourceLibraryReconciliationStatusFindingsItemSeverity = typeof SourceLibraryReconciliationStatusFindingsItemSeverity[keyof typeof SourceLibraryReconciliationStatusFindingsItemSeverity];
+
+
+export const SourceLibraryReconciliationStatusFindingsItemSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
+
+export type SourceLibraryReconciliationStatusFindingsItemSourceRoute = typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute[keyof typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute];
+
+
+export const SourceLibraryReconciliationStatusFindingsItemSourceRoute = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheeseRecipes: 'cheeseRecipes',
+  mixes: 'mixes',
+  import: 'import',
+  setupProfiles: 'setupProfiles',
+  audit: 'audit',
+} as const;
+
+export type SourceLibraryReconciliationStatusReportSnapshot = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  capturedAt: string;
+};
+
+export type SourceLibraryReconciliationStatusReportManifest = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  /** @minimum 0 */
+  retained: number;
+  /** @minimum 0 */
+  excludedOlderDuplicates: number;
+};
+
+export type SourceLibraryReconciliationStatusReport = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  formatVersion: number;
+  /** @minimum 0 */
+  automaticProposals: number;
+  /** @minimum 0 */
+  stubs: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  planSha256: string;
+  snapshot: SourceLibraryReconciliationStatusReportSnapshot;
+  manifest: SourceLibraryReconciliationStatusReportManifest;
+};
+
+export type SourceLibraryReconciliationStatusHealResult = {
+  /** @minimum 0 */
+  replacements: number;
+  /** @minimum 0 */
+  aliasesInserted: number;
+  /** @minimum 0 */
+  repointedProfiles: number;
+  /** @minimum 0 */
+  repointedRuns: number;
+  /** @minimum 0 */
+  deletedStubs: number;
+};
+
+export type SourceLibraryReconciliationStatusHeal = {
+  id: string;
+  fromDate: string;
+  appliedAt: string | null;
+  markerValid: boolean;
+  result: SourceLibraryReconciliationStatusHealResult;
+};
+
+export type SourceLibraryReconciliationStatusSummary = {
+  /** @minimum 0 */
+  poolMismatches: number;
+  /** @minimum 0 */
+  aliasGaps: number;
+  /** @minimum 0 */
+  staleProfileLinks: number;
+  /** @minimum 0 */
+  stalePendingRunLinks: number;
+  /** @minimum 0 */
+  protectedStubs: number;
+  /** @minimum 0 */
+  unexpectedStubs: number;
+  /** @minimum 0 */
+  protectedHistoryReferences: number;
+  /** @minimum 0 */
+  omittedFindings: number;
+  /** @minimum 1 */
+  findingLimitPerCategory: number;
+};
+
+export type SourceLibraryReconciliationStatusFindingsItem = {
+  id: string;
+  category: SourceLibraryReconciliationStatusFindingsItemCategory;
+  severity: SourceLibraryReconciliationStatusFindingsItemSeverity;
+  affectedRecord: string;
+  currentValue: string;
+  proposedOutcome: string;
+  protectedValue: boolean;
+  sourceRoute: SourceLibraryReconciliationStatusFindingsItemSourceRoute;
+};
+
+export interface SourceLibraryReconciliationStatus {
+  report: SourceLibraryReconciliationStatusReport;
+  heal: SourceLibraryReconciliationStatusHeal;
+  checkedAt: string;
+  status: SourceLibraryReconciliationStatusStatus;
+  freshness: SourceLibraryReconciliationStatusFreshness;
+  summary: SourceLibraryReconciliationStatusSummary;
+  findings: SourceLibraryReconciliationStatusFindingsItem[];
+}
+
+export interface ProfileDataHealthWorkspace {
+  findings: DataHealthFinding[];
+  safeRepairs: ProfileDataHealthRepair[];
+  summary: ProfileDataHealthWorkspaceSummary;
+  cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
+  repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
+  aiRetention: AiRetentionReport;
+  sourceReconciliation: SourceLibraryReconciliationStatus;
+}
+
 export type ProfileNameLinkCleanupSummaryRemovedStubs = {
   dough: number;
   sauce: number;
@@ -3768,60 +4044,6 @@ export interface IncidentDiagnosis {
   aiGenerated: false;
 }
 
-export type AiRetentionReportScope = typeof AiRetentionReportScope[keyof typeof AiRetentionReportScope];
-
-
-export const AiRetentionReportScope = {
-  live: 'live',
-  sandbox: 'sandbox',
-} as const;
-
-export type AiRetentionReportCandidates = {
-  /** @minimum 0 */
-  conversationTurns: number;
-  /** @minimum 0 */
-  retiredFacilityFacts: number;
-  /** @minimum 0 */
-  incidentGeneratedTextToLabel: number;
-  /** @minimum 0 */
-  qualityThumbnailsToRedact: number;
-  /** @minimum 0 */
-  closedObservationsToRedact: number;
-  /** @minimum 0 */
-  total: number;
-};
-
-export type AiRetentionReportProtected = {
-  correctionAndAliasRecords: string;
-  /** @minimum 0 */
-  operationalIncidentRows: number;
-  /** @minimum 0 */
-  confirmedQualityRows: number;
-  /** @minimum 0 */
-  openInventoryObservations: number;
-  inventoryLedgerEffects: string;
-};
-
-export type AiRetentionReportCutoffs = {
-  conversationBefore: string;
-  thumbnailBefore: string;
-  observationBefore: string;
-};
-
-export interface AiRetentionReport {
-  policyVersion: string;
-  scope: AiRetentionReportScope;
-  /** @minimum 1 */
-  batchLimit: number;
-  canApply: boolean;
-  alreadyApplied: boolean;
-  /** @nullable */
-  appliedAt: string | null;
-  candidates: AiRetentionReportCandidates;
-  protected: AiRetentionReportProtected;
-  cutoffs: AiRetentionReportCutoffs;
-}
-
 export type IncidentSource = typeof IncidentSource[keyof typeof IncidentSource];
 
 
@@ -4117,6 +4339,10 @@ export type AuditAiMemoryHealth200 = {
 
 export type AuditProfileDataHealth200 = {
   report: ProfileDataHealthReport;
+};
+
+export type GetProfileDataHealthWorkspace200 = {
+  workspace: ProfileDataHealthWorkspace;
 };
 
 export type GetProfileNameLinkCleanupAudit200 = {
