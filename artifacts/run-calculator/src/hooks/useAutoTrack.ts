@@ -2,6 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { type FormValues } from "../types";
 import { AUTO_TRACK_COORDINATION_EVENT } from "../autoTrackCoordinationClient";
+import {
+  buildAppSlotClaimMutations,
+  buildCaseClaimMutations,
+  buildSauceClaimMutations,
+  clampWebPeriodMs,
+  computeAppSlotInfo,
+  computeAutoTrackSuggestion,
+  computeNetSecondDue,
+  getAutoTrackTiming,
+  suggestedDoughStaging,
+  type SuggestedDoughStagingReturn,
+} from "@workspace/live-calc";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -35,30 +47,10 @@ interface AutoTrackCalc {
   app4Batches?: number;
 }
 
-/**
- * Suggested dough staging for a run — the same numbers the "Suggest" button
- * applies to the Trays on Line / Batches Ready steppers. Derived from the
- * CURRENT deficit (traysNeeded/batchesNeeded), capped to a sane staging
- * quantity (40 trays / 3 batches). This suggestion is not a persisted tray
- * capacity: traysOnLine remains an uncapped aggregate so automatic tracking
- * never discards valid staged dough. Kept at verbatim parity with mobile
- * RunContext's suggestedDoughStaging.
- */
-export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
-
-export function suggestedDoughStaging(
-  traysNeeded: number,
-  batchesNeeded: number,
-): SuggestedDoughStagingReturn {
-  return {
-    trays: traysNeeded > 0
-      ? Math.max(1, Math.round(Math.min(40, traysNeeded)))
-      : null,
-    batches: batchesNeeded > 0
-      ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, batchesNeeded))))
-      : null,
-  };
-}
+// Re-exported from @workspace/live-calc so existing consumers (home.tsx,
+// LiveRunContext.tsx, __mocks__/useAutoTrack.ts) keep importing from here.
+export type { SuggestedDoughStagingReturn } from "@workspace/live-calc";
+export { suggestedDoughStaging } from "@workspace/live-calc";
 
 interface AutoTrackValues {
   casesPerSkid: number;
@@ -266,92 +258,11 @@ interface AutoTrackResult {
 /** Exported return type — shared with __mocks__/useAutoTrack.ts for compile-time drift detection. */
 export type UseAutoTrackReturn = AutoTrackResult;
 
-// Each counter ticks at its own natural production pace, clamped to a sane
-// range: never faster than once per 1s (the app clock resolution) and never
-// slower than once per hour (a stalled/garbage rate must not freeze the
-// counter forever).
-function clampPeriodMs(ms: number): number {
-  if (!Number.isFinite(ms) || ms <= 0) return 60 * 60 * 1000;
-  return Math.min(60 * 60 * 1000, Math.max(1000, ms));
-}
+// Re-exported from @workspace/live-calc so countdown/display consumers
+// (home.tsx, LiveRunContext.tsx) keep importing from here.
+export type { AutoTrackTiming } from "@workspace/live-calc";
+export { getAutoTrackTiming } from "@workspace/live-calc";
 
-export interface AutoTrackTiming {
-  caseMs: number;
-  trayMs: number;
-  trayProductionMs: number;
-  batchConsumptionMs: number;
-  batchProductionMs: number;
-  hopperMs: number;
-}
-
-/**
- * The single cadence contract shared by auto-track scheduling and countdown UI.
- * Consumption remains quarter-batch internally so fractional inventory movement
- * stays visible; the UI labels that event as such rather than calling it a
- * full-batch completion.
- */
-export function getAutoTrackTiming(
-  ppm: number,
-  pizzasPerCase: number,
-  perTray: number,
-  perBatch: number,
-  machine?: { spinSec: number; hopperSec: number },
-): AutoTrackTiming {
-  const caseMs = ppm > 0 && pizzasPerCase > 0
-    ? clampPeriodMs((pizzasPerCase / ppm) * 60000)
-    : 0;
-  const trayMs = ppm > 0 && perTray > 0
-    ? clampPeriodMs((perTray / ppm) * 60000)
-    : 0;
-  const lineBatchMs = ppm > 0 && perBatch > 0
-    ? (perBatch / ppm) * 60000
-    : 0;
-  const hopperMs = machine && Number.isFinite(machine.hopperSec) && machine.hopperSec > 0
-    ? clampPeriodMs(machine.hopperSec * 1000)
-    : 0;
-  const effectiveDrainMs = Math.max(hopperMs, lineBatchMs);
-  const batchConsumptionMs = effectiveDrainMs > 0
-    ? clampPeriodMs(effectiveDrainMs / 4)
-    : 0;
-  const spinMs = machine && Number.isFinite(machine.spinSec) && machine.spinSec > 0
-    ? machine.spinSec * 1000
-    : 0;
-  const batchProductionMs = spinMs > 0
-    ? clampPeriodMs(spinMs)
-    : (lineBatchMs > 0 ? clampPeriodMs(lineBatchMs) : 0);
-  return {
-    caseMs,
-    trayMs,
-    trayProductionMs: trayMs > 0 ? trayMs / 2 : 0,
-    batchConsumptionMs,
-    batchProductionMs,
-    hopperMs,
-  };
-}
-
-/**
- * Tracks expected progress automatically while running. Each counter updates
- * at its own natural production cadence instead of a fixed wall-clock interval:
- *
- *  • cases (and therefore skids): every time-to-run-one-case
- *    (pizzasPerCase / ppm). The skid counter is derived from the same total, so
- *    it rolls the moment the case count completes a skid.
- *  • trays: every time-to-consume-one-tray (perTray / ppm).
- *  • batches: every quarter-batch duration (perBatch / ppm / 4) — the integer
- *    count still drops once per full batch, via the fractional remainder carry.
- *
- * Skids/cases: applied INCREMENTALLY — each tick adds the production since the
- * last tick on top of the current (possibly manually-entered) value. This means
- * a manual correction by the operator becomes the new baseline and auto-track
- * continues forward from it instead of overwriting it with its own absolute
- * estimate. On the first tick after a (re)start/switch the absolute count is
- * seeded only when there is no existing progress, so reloads and run switches
- * never double-count saved progress.
- *
- * Trays/batches: incremental decrement per tick — subtracts consumption for the
- * actual duration since that counter's last tick (capped to 2 periods for
- * tray/batch; cases apply the full catch-up delta on wake).
- */
 export function useAutoTrack({
   runId,
   runGeneration,
@@ -546,39 +457,18 @@ export function useAutoTrack({
     drainMs > 0 &&
     nowTime.getTime() < endedAt + drainMs;
 
-  const autoTrackSuggestion = useMemo(() => {
-    const ok =
-      (runStatus === "running" || runStatus === "paused" || drainActive) &&
-      calc.ppm > 0 &&
-      v.casesPerSkid > 0 &&
-      v.pizzasPerCase > 0;
-    if (!ok) return null;
-
-    const maxSkids = Math.floor(v.casesNeeded / v.casesPerSkid);
-    const elapsedMin = elapsedBatchSec / 60;
-    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
-    // Clamp to the run's total need so skids/cases freeze at their final state
-    // once production is complete instead of cycling past it (modulo wrap).
-    const expectedCasesRaw = packagingDrainActive
-      ? Math.floor((Math.max(0, packagingDrainElapsedSec) * calc.ppm) / (v.pizzasPerCase * 60))
-      : Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
-    const expectedCases = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCasesRaw) : expectedCasesRaw;
-
-    return {
-      skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
-      casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
-      expectedCases,
-      // Unclamped time-based total — drives the INCREMENTAL delta below so that a
-      // downward manual correction (e.g. after the estimate ran ahead and hit the
-      // casesNeeded clamp) can still climb again. The clamp lives only on what is
-      // displayed/written, not on the delta source.
-      expectedCasesRaw,
-      // Tray/batch suggestions are handled incrementally in the write effect;
-      // returning null here means the UI falls back to the calc-based suggestion.
-      trays: null,
-      batches: null,
-    };
-  }, [
+  const autoTrackSuggestion = useMemo(() => computeAutoTrackSuggestion({
+    runStatus,
+    drainActive,
+    packagingDrainActive,
+    packagingDrainElapsedSec,
+    ppm: calc.ppm,
+    casesPerSkid: v.casesPerSkid,
+    pizzasPerCase: v.pizzasPerCase,
+    casesNeeded: v.casesNeeded,
+    freezerTime: v.freezerTime,
+    elapsedBatchSec,
+  }), [
     runStatus,
     drainActive,
     packagingDrainActive,
@@ -1151,18 +1041,22 @@ export function useAutoTrack({
     const cadence = Number(calc.sauceDepletionSec) || 0;
     if (!Number.isFinite(cadence) || cadence <= 0 || !Number.isFinite(elapsedBatchSec)) return;
     const anchor = Math.max(0, Number(v.sauceBarrelAnchorNetSec) || 0);
-    const dueAtNetSec = sauceNextDueNetSecRef.current > 0
-      ? sauceNextDueNetSecRef.current
-      : anchor + cadence;
+    const dueAtNetSec = computeNetSecondDue({
+      currentDue: sauceNextDueNetSecRef.current,
+      anchor,
+      cadence,
+    });
     if (elapsedBatchSec < dueAtNetSec) return;
     const currentCount = Math.max(0, Number(v.sauceBarrelsMade) || 0);
     const correctionGeneration = Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0);
     sauceNextDueNetSecRef.current = dueAtNetSec;
-    commitAutomatic("sauce-barrel", dueAtNetSec, dueAtNetSec + cadence, [
-      { field: "sauceBarrelsMade", from: currentCount, to: currentCount + 1 },
-      { field: "sauceBarrelAnchorNetSec", from: anchor, to: dueAtNetSec },
-      { field: "sauceBarrelCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
-    ]);
+    commitAutomatic("sauce-barrel", dueAtNetSec, dueAtNetSec + cadence, buildSauceClaimMutations({
+      countFrom: currentCount,
+      countTo: currentCount + 1,
+      anchorFrom: anchor,
+      anchorTo: dueAtNetSec,
+      correctionGeneration,
+    }));
   }, [
     autoTrackBlocked,
     autoTrackBlockedRef,
@@ -1189,18 +1083,17 @@ export function useAutoTrack({
   useEffect(() => {
     (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
       const values = v as FormValues;
-      const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
-      const batchLbs = recipeLbs > 0
-        ? recipeLbs
-        : Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0;
-      const ounces = Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0;
-      const cadence = batchLbs > 0 && ounces > 0 && calc.ppm > 0
-        ? (batchLbs * 16 / ounces / calc.ppm) * 60
-        : 0;
+      const info = computeAppSlotInfo({
+        type: String(values[`${slot}Type` as keyof FormValues]),
+        recipe: values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"],
+        batchLbs: Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0,
+        ozPerPizza: Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0,
+        required: Number(calc[`${slot}Batches`]),
+        ppm: calc.ppm,
+      });
       const channel = `${slot}-batch` as AutoTrackChannel;
-      dueRefForChannel(channel).current = cadence > 0
-        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + cadence
+      dueRefForChannel(channel).current = info.cadence > 0
+        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + info.cadence
         : 0;
     });
   }, [calc.ppm, v]);
@@ -1223,10 +1116,14 @@ export function useAutoTrack({
     ) return;
     const formValues = v as FormValues;
     const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
-      const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
-      const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : Number(formValues[`${slot}BatchLbs` as keyof FormValues]);
-      const ouncesPerPizza = Number(formValues[`${slot}OzPerPizza` as keyof FormValues]);
+      const info = computeAppSlotInfo({
+        type: String(formValues[`${slot}Type` as keyof FormValues]),
+        recipe: formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"],
+        batchLbs: Number(formValues[`${slot}BatchLbs` as keyof FormValues]),
+        ozPerPizza: Number(formValues[`${slot}OzPerPizza` as keyof FormValues]),
+        required: Number(calc[`${slot}Batches`]),
+        ppm: calc.ppm,
+      });
       const required = Number(calc[`${slot}Batches`]);
       return {
         slot,
@@ -1234,12 +1131,8 @@ export function useAutoTrack({
         madeField: `${slot}BatchesMade` as keyof FormValues,
         anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
         correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
-        valid: !!String(formValues[`${slot}Type` as keyof FormValues]).trim() &&
-          !String(formValues[`${slot}Type` as keyof FormValues]).trim().toLowerCase().includes("mix") &&
-          effectiveBatchLbs > 0 && ouncesPerPizza > 0 && required > 0 && calc.ppm > 0,
-        cadence: effectiveBatchLbs > 0 && ouncesPerPizza > 0 && calc.ppm > 0
-          ? (effectiveBatchLbs * 16 / ouncesPerPizza / calc.ppm) * 60
-          : 0,
+        valid: info.validForClaim,
+        cadence: info.cadence,
         required,
       };
     });
@@ -1254,11 +1147,14 @@ export function useAutoTrack({
       // the next overdue fractional cadence without losing accumulated time.
       if (elapsedBatchSec < dueAt || made >= Math.ceil(slot.required)) continue;
       dueRefForChannel(slot.channel).current = dueAt;
-      commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
-        { field: slot.madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(slot.required), made + 1) },
-        { field: slot.anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
-        { field: slot.correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
-      ]);
+      commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, buildAppSlotClaimMutations({
+        slot: slot.slot,
+        madeFrom: made,
+        madeTo: Math.min(Math.ceil(slot.required), made + 1),
+        anchorFrom: anchor,
+        anchorTo: dueAt,
+        correctionGeneration,
+      }));
     }
   }, [
     autoSuppressUntilRef,
@@ -1309,7 +1205,7 @@ export function useAutoTrack({
       && v.pizzasPerCase > 0
       && nowMs >= caseNextDueMsRef.current
     ) {
-      const casePeriodMs = clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000);
+      const casePeriodMs = clampWebPeriodMs((v.pizzasPerCase / calc.ppm) * 60000);
       const prevExpected = lastExpectedCasesRef.current;
       // Baseline the incremental delta off the UNCLAMPED total so the count keeps
       // advancing even after the time-based estimate saturates at casesNeeded (e.g.
@@ -1348,10 +1244,12 @@ export function useAutoTrack({
             if (newTotal !== curTotal) {
               const nextSkids = Math.floor(newTotal / cps);
               const nextCases = Math.round(newTotal % cps);
-              commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
-                { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-                { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-              ]);
+              commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
+                skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
+                skidsTo: nextSkids,
+                casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                casesTo: nextCases,
+              }));
             }
           }
         } else if (prevExpected < 0) {
@@ -1364,10 +1262,12 @@ export function useAutoTrack({
             const nextSkids = Math.floor(seedTotal / cps);
             const nextCases = Math.round(seedTotal % cps);
             caseClaimRetryRef.current = false;
-            commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
-              { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-              { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-            ]);
+            commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
+              skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
+              skidsTo: nextSkids,
+              casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
+              casesTo: nextCases,
+            }));
           }
         } else {
           // Add the production since the last tick on top of the current value, so a
@@ -1398,10 +1298,12 @@ export function useAutoTrack({
               if (newTotal !== curTotal) {
                 const nextSkids = Math.floor(newTotal / cps);
                 const nextCases = Math.round(newTotal % cps);
-                commitAutomatic("case", nowMs, caseNextDueMsRef.current, [
-                  { field: "skidsCompleted", from: Number(form.getValues("skidsCompleted")) || 0, to: nextSkids },
-                  { field: "casesOnCurrentSkid", from: Number(form.getValues("casesOnCurrentSkid")) || 0, to: nextCases },
-                ]);
+                commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
+                  skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
+                  skidsTo: nextSkids,
+                  casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                  casesTo: nextCases,
+                }));
               }
             }
           } else {
