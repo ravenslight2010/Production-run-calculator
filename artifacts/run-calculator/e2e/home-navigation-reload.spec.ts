@@ -11,7 +11,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
-import { signUpAndHandleOnboarding } from "./onboarding";
+import {
+  reloadThroughSettlingSession,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -97,8 +100,7 @@ test.describe("Home navigation persistence", () => {
     await expectSelected(page, "dough");
     await expect(page).toHaveURL(/\/$/);
 
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await reloadThroughSettlingSession(page);
     await expectSelected(page, "dough");
   });
 
