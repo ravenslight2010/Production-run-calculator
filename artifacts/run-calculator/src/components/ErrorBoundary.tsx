@@ -45,7 +45,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (!this.state.error) return this.props.children;
     const needsUpdate = isMissingNotificationError(this.state.error);
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-background">
+      <main className="min-h-screen flex items-center justify-center p-6 bg-background">
         <div className="max-w-md w-full text-center space-y-4">
           <div className="mx-auto flex items-center justify-center w-12 h-12 rounded-full bg-red-500/15">
             <AlertTriangle className="w-6 h-6 text-red-400" />
@@ -70,7 +70,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             {needsUpdate ? "Update and reload" : "Reload the app"}
           </Button>
         </div>
-      </div>
+      </main>
     );
   }
 }

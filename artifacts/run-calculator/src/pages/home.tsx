@@ -18082,7 +18082,9 @@ export default function Home() {
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
-        {screenMode ? <ScreenModeView /> : mainContent}
+        <main>
+          {screenMode ? <ScreenModeView /> : mainContent}
+        </main>
         </LiveRunProvider>
         </DepartmentProvider>
         </HomeTabCtx.Provider>
@@ -18221,7 +18223,7 @@ function FloorModeView() {
 
             <div className="floor-drift flex flex-1 flex-col min-h-0">
             {/* Big three numbers */}
-            <main className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
+            <div className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
               <div className="flex flex-col items-center">
                 <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
@@ -18246,7 +18248,7 @@ function FloorModeView() {
                   <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>NEXT BATCH</div>
                 </div>
               )}
-            </main>
+            </div>
 
             {/* Bottom */}
             <div className="px-4 pb-6 space-y-4 shrink-0">

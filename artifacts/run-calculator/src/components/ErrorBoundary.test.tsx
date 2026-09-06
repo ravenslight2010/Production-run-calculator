@@ -40,6 +40,7 @@ describe("ErrorBoundary recovery actions", () => {
     );
 
     expect(screen.getByRole("button", { name: "Update and reload" })).not.toBeNull();
+    expect(screen.getByRole("main")).not.toBeNull();
     expect(updateAndReload).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Update and reload" }));
@@ -57,6 +58,7 @@ describe("ErrorBoundary recovery actions", () => {
     );
 
     expect(screen.getByRole("button", { name: "Reload the app" })).not.toBeNull();
+    expect(screen.getByRole("main")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Update and reload" })).toBeNull();
     expect(
       screen.getByText(/Reloading usually clears it — your saved work isn't affected\./),
