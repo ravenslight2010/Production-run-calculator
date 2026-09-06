@@ -114,10 +114,9 @@ export default defineConfig({
     runtimeErrorOverlay(),
     workbookBoundaryManifest(),
     VitePWA({
-      // New workers activate without claiming an existing page. That makes a
-      // plain, user-chosen reload from an older error screen load the fixed
-      // bundle, while `clientsClaim: false` ensures an active run is never
-      // interrupted. AppUpdatePrompt still offers the explicit reload action.
+      // The authored worker activates promptly but does not claim existing
+      // pages, so an active run is never interrupted. AppUpdatePrompt still
+      // offers the explicit reload action.
       registerType: "prompt",
       base: basePath,
       includeAssets: [
@@ -163,32 +162,14 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        skipWaiting: true,
-        clientsClaim: false,
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "service-worker.ts",
+      injectManifest: {
         // The main bundle crossed workbox's default 2 MiB precache cap
         // (build hard-fails, not just a warning). Allow up to 4 MiB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        navigateFallback: null,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-cache",
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "gstatic-fonts-cache",
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-        ],
       },
       devOptions: {
         enabled: false,

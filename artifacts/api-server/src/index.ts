@@ -7,6 +7,7 @@ import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observabilit
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
 import { startAutoTrackServerTicks } from "./routes/sync";
+import { startWebPushAlertWorker } from "./lib/webPush";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import {
@@ -162,6 +163,7 @@ async function initializeStartup(startedAt: number): Promise<void> {
   // Best-effort, bounded ownership for live automatic production tracking.
   // The runner shares the claim transaction path with connected clients.
   startAutoTrackServerTicks();
+  startWebPushAlertWorker();
 
   // Ensure the seeded sandbox account exists with a known password + manager
   // role on every boot. Best-effort and non-production only.

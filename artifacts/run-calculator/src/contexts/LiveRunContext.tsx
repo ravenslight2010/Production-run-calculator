@@ -324,6 +324,7 @@ export function LiveRunProvider({
     isCrust: doughSubTab === "crusts",
     nextRunLabels: upcomingRunLabels,
     prefs,
+    alertDate: dayState.date,
   });
 
   // ── Stall detection ───────────────────────────────────────────────────────

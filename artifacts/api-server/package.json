@@ -54,7 +54,8 @@
     "http-proxy-middleware": "^4.1.1",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",

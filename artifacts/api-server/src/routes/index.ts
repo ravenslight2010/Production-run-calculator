@@ -52,6 +52,7 @@ import masterDataHealthRouter from "./masterDataHealth";
 import masterDataBootstrapRouter from "./masterDataBootstrap";
 import fieldChecksRouter from "./fieldChecks";
 import { startupGate } from "../lib/startupGate";
+import webPushRouter from "./webPush";
 
 const router: IRouter = Router();
 
@@ -99,6 +100,7 @@ router.use(authRouter);
 // the live-sync SSE streams, and the paid AI photo endpoint behind auth.
 router.use(requireAuth);
 router.use(rolesRouter);
+router.use(webPushRouter);
 router.use(runsRouter);
 router.use(syncRouter);
 router.use(completedHistoryRouter);
