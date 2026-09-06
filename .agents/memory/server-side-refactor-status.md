@@ -1,11 +1,11 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b foundation done; 6b (server due-now verdict drives net-second claims) in PR; 6c not started.
+description: Where the server-side refactor stands — Steps 1-5 + 6a + 6b (incl. foundation + server due-now verdict) done; 6c not started.
 ---
 
 # Server-side refactor — current status (2026-09-06)
 
-## In PR (branch `refactor/autotrack-server-verdict`) — Step 6b: server due-now verdict drives net-second claims
+## Done (merged to main, PR #29) — Step 6b: server due-now verdict drives net-second claims
 
 **Step 6b: client fires sauce/applicator claims on the server's `dueNow` verdict** — the Step 6a schedule already computed `dueNow` server-side; this wires it through the coordination event (`dueNow` on the channel state) into `serverDueNowRef`, and the sauce/applicator effects fire immediately on a fresh verdict (one-shot), keeping the local elapsed check as the offline fallback. Generation mismatch clears the verdict so stale runs never fire. Wall-clock channels stay local-fallback (server only echoes them). Server unchanged.
 
