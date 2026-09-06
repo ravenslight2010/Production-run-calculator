@@ -144,3 +144,4 @@
 - [Tailwind source scanning and Playwright](tailwind-playwright-visible-selectors.md) — Playwright `:visible` locator strings can become invalid production CSS; use locator visibility filters.
 - [Completed history durability](completed-history-durability.md) — immutable run completions use scope-bound caches/outboxes; normal resets and undo must preserve pending uploads.
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
+- [Replit production detection](replit-production-detection.md) — `REPLIT_ENVIRONMENT=production` can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.

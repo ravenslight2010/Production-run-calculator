@@ -106,6 +106,13 @@ pnpm --filter @workspace/api-spec run codegen
 pnpm --filter @workspace/db run push
 ```
 
+For department Playwright checks on a fresh isolated database, run
+`pnpm --filter @workspace/run-calculator run prepare:e2e:department` in place
+of the normal API workflow. The command rejects production and unapproved
+shared databases, applies the canonical Drizzle schema, and only then starts
+the development API. Leave it running and execute `test:e2e:department` from a
+second shell; no separate schema command is required.
+
 Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (gates public sign-up, fails closed), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed).
 
 ## Verification

@@ -54,11 +54,21 @@ export interface AuthorizedFixtureCleanupOptions {
 /**
  * Destructive browser fixtures are only safe against a local database, a
  * database whose name explicitly identifies it as disposable, or an
- * explicitly approved CI/test mode.  REPLIT_DEV_DOMAIN alone is not a safety
+ * explicitly approved CI/test mode. Production markers always win, even when
+ * the URL otherwise looks disposable. REPLIT_DEV_DOMAIN alone is not a safety
  * signal: a development browser can still be pointed at a shared database.
  */
 export function requireIsolatedTestDatabase(operation: string): string {
   const url = process.env.DATABASE_URL ?? "";
+  const productionEnvironment =
+    process.env.REPLIT_DEPLOYMENT === "1"
+    || [process.env.NODE_ENV, process.env.APP_ENV]
+      .some((value) => /^(production|prod)$/i.test(value ?? ""));
+  if (productionEnvironment) {
+    throw new Error(
+      `${operation} refused to run destructive database setup in production.`,
+    );
+  }
   let host = "";
   let database = "";
   try {
