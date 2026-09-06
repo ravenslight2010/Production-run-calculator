@@ -464,3 +464,22 @@ export {
   type AutoTrackScheduleInput,
   type AutoTrackScheduleProgress,
 } from "./autoTrackSchedule";
+
+// ── Pure auto-track decision math (refactor step 6b foundation) ─────────────
+export {
+  buildAppSlotClaimMutations,
+  buildCaseClaimMutations,
+  buildSauceClaimMutations,
+  clampWebPeriodMs,
+  computeAppSlotInfo,
+  computeAutoTrackSuggestion,
+  computeNetSecondDue,
+  getAutoTrackTiming,
+  suggestedDoughStaging,
+  type AppSlotInfo,
+  type AppSlotKey,
+  type AutoTrackSuggestion,
+  type AutoTrackSuggestionInput,
+  type AutoTrackTiming,
+  type SuggestedDoughStagingReturn,
+} from "./autoTrackEngine";

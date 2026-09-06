@@ -272,3 +272,25 @@ Each entry includes:
 4. Schedule generation is `${runId}:${metaUpdatedAt ?? startedAt ?? 0}`, byte-identical to the claim endpoint's `expectedGeneration` in `applyAutoTrackClaim`.
 
 **Context:** First slice of refactor step 6 (server-side auto-track). The schedule is advisory — live-claim validation still lives in `applyAutoTrackClaim` (unchanged); manual corrections are excluded because the server only echoes coordination or derives from stored anchors. Actual server-side tick execution needs the 1,645-line `useAutoTrack.ts` decomposition first (step 6b/6c).
+
+## 2026-09-06 — Extract pure auto-track engine into live-calc (refactor step 6b foundation)
+
+**File(s):**
+- `lib/live-calc/src/autoTrackEngine.ts` (new — pure auto-track decision math)
+- `lib/live-calc/src/autoTrackEngine.test.ts` (new — 27 unit tests)
+- `lib/live-calc/src/index.ts` (re-export engine)
+- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` (delegates to the engine; keeps re-exports for home.tsx / LiveRunContext.tsx / __mocks__)
+- `docs/superpowers/specs/2026-09-06-auto-track-engine-decomposition-design.md`, `docs/superpowers/plans/2026-09-06-auto-track-engine.md` (spec + plan)
+
+**Problem:** `useAutoTrack.ts` is 1,645 lines mixing React refs/timers with the pure math that decides when each counter is due and what it writes. That math can't be unit-tested in isolation and the server (Step 6a) has its own slightly different copy — the documented prerequisite for Steps 6b/6c (client adopts server tick times, then server-owned tick execution).
+
+**Fix:** Extracted the pure parts into `lib/live-calc/src/autoTrackEngine.ts` with the hook delegating (zero behavior change):
+1. `clampWebPeriodMs`, `getAutoTrackTiming`, `suggestedDoughStaging` moved verbatim (kept web semantics: invalid -> 1h, floor 1s; **distinct** from `autoTrackSchedule.clampPeriodMs` server semantics: invalid -> 0, floor 2s).
+2. `computeAutoTrackSuggestion` — the `autoTrackSuggestion` memo, pure (unclamped raw expected cases drives incremental deltas).
+3. `computeAppSlotInfo` — per-applicator-slot effective batch/cadence/claim gate, shared by the anchor-rebase + claim effects (cadence computed regardless of the mix/type gate, matching both).
+4. `computeNetSecondDue` — sauce/applicator due-time (`currentDue > 0 ? currentDue : anchor + cadence`).
+5. `buildCaseClaimMutations`, `buildSauceClaimMutations`, `buildAppSlotClaimMutations` — exact claim mutation arrays (literal field unions, assignable to the hook's `AutoTrackMutation`).
+
+**Context:** Step 6b foundation. Re-exports (`getAutoTrackTiming`, `suggestedDoughStaging`, `AutoTrackTiming`, `SuggestedDoughStagingReturn`) keep existing consumers untouched. Refs, effect declaration order, and coordination/claim plumbing unchanged. Verified: lib 70/70, auto-track suites 85/85, memo/context suites 130/130, adjacent timing/suppression suites 72/72, web + api-server typechecks pass. Per-tick case/tray/batch delta extraction is the follow-up engine PR.
+
+*Last updated: 2026-09-06*

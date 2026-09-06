@@ -1,9 +1,13 @@
 ---
 name: Server-side refactor status
-description: Where the server-side refactor stands — Steps 1-5 + 6a (server-computed auto-track schedule) done, 6b/6c not started.
+description: Where the server-side refactor stands — Steps 1-5 + 6a done; 6b foundation (pure auto-track engine) in PR; 6b/6c not started.
 ---
 
 # Server-side refactor — current status (2026-09-06)
+
+## In PR (branch `refactor/auto-track-engine`) — Step 6b foundation: pure auto-track engine
+
+**Step 6b foundation: pure auto-track engine extracted to `lib/live-calc/src/autoTrackEngine.ts`** — timing/cadence (`getAutoTrackTiming`, `clampWebPeriodMs`), `suggestedDoughStaging`, `computeAutoTrackSuggestion`, `computeAppSlotInfo`, `computeNetSecondDue`, and claim-mutation builders now live in live-calc (unit-tested) and `useAutoTrack` delegates to them. Re-exports keep home.tsx / LiveRunContext.tsx / __mocks__ working. Zero behavior change; refs/effect order untouched. Makes Steps 6b/6c tractable by giving client + server a shared source of truth. Follow-up: per-tick case/tray/batch delta extraction.
 
 ## Done (merged to main, PR #23) — Step 6a: server-computed auto-track schedule
 
