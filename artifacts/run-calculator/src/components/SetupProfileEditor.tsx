@@ -34,8 +34,8 @@ import {
   DoughRecipeCard,
   FrontlineRecipeCard,
   TypeDropdown,
-  NumField,
 } from "../pages/home";
+import { NumField } from "./NumField";
 import { useMixes } from "../hooks/useMixes";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";

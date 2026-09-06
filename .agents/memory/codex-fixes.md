@@ -226,3 +226,28 @@ Each entry includes:
 
 *Last updated: 2026-09-05*
 *Last updated: 2026-09-05*
+
+## 2026-09-05 — Extract Setup + Summary tools panels into memoized components (refactor step 5)
+
+**File(s):**
+- `artifacts/run-calculator/src/pages/home.tsx` (removed inline Setup panel + Summary tools header; wired `SetupTabCtx` provider; replaced `NumField`/`SetupMathConflictBadge` definitions with imports/re-exports)
+- `artifacts/run-calculator/src/contexts/SetupTabCtx.ts` (new — narrow ctx + `useSetupTabCtx()`, mirrors `WarehouseTabCtx`)
+- `artifacts/run-calculator/src/pages/setupTabCtxDeps.ts` (new — `SETUP_TAB_CTX_DEP_FIELDS` registry)
+- `artifacts/run-calculator/src/components/SetupContent.tsx` (new — memo'd Setup panel, verbatim block + `SetupMathConflictBadge`)
+- `artifacts/run-calculator/src/components/SummaryToolsContent.tsx` (new — memo'd manager Operations-desk tools header, consumes `HomeTabCtx` like `LiveSummaryTabContent`)
+- `artifacts/run-calculator/src/components/NumField.tsx` (new — `NumField` moved out of home.tsx to avoid a circular import from SetupContent)
+- `artifacts/run-calculator/src/components/SetupProfileEditor.tsx` (import `NumField` from new shared file)
+- `artifacts/run-calculator/src/contexts/__tests__/LiveTabMemo.snappy.test.tsx` (new Suite 4 freeze-guard tests for Setup)
+
+**What was wrong:** `home.tsx` remained a ~24.6k-line monolith; the Setup panel (~183 lines incl. Packaging Settings) and the manager Summary tools header (~75 lines) rendered inline. Every state change in the giant `homeCtxValue` (incl. manage/merge/import dialogs) re-rendered both blocks.
+
+**What the fix was:** Applied the Step 4a/4b recipe to both blocks:
+1. `SetupContent` (memo'd) reads `SetupTabCtx`, whose value in home.tsx is memoized on `v, circles, shipper, skidStacking, gripSheets, isManager, isSupervisor, currentRun, doughSubTab` only. `form` and the callbacks (`commitMissingField`, `applyRunSuggestion`, `getRunSuggestionAcceptWarning`) ride the ref-capture pattern (NOT in deps — their reactive closes, `v`/`currentRun`/`currentRunId`, ARE in deps).
+2. `SummaryToolsContent` (memo'd) consumes `HomeTabCtx` (same as `LiveSummaryTabContent`) and returns null for non-managers — no new ctx needed since its deps (`isManager`, `history`, `dayState`, `currentRunId`) are already in `HOME_TAB_CTX_DEP_FIELDS`.
+3. `NumField` moved to `components/NumField.tsx` (still shared with Dough/Setup-recipes tab UI); `SetupMathConflictBadge` moved into `SetupContent.tsx` with a re-export from home.tsx so `appSlotMathBadge.render.test.tsx` keeps importing it from `./pages/home`.
+4. AI panel left inline (already lazy behind `LazyDeferredManagementAiSurface`, closures-only) — deferred deliberately.
+5. Added `SETUP_TAB_CTX_DEP_FIELDS` registry + Suite 4 freeze-guard tests (static guard that no `DIALOG_REGISTRY` field enters the Setup deps, plus live render-count guards).
+
+**Why it was needed:** Step 5 of the approved server-side refactor. Setup + Summary were the last large inline blocks besides the AI closure object; extracting them means manage/import/dialog churn no longer re-renders either block, and `home.tsx` shrinks by ~343 lines. Typecheck passes; LiveTabMemo 79/79; badge/dough/summary-adjacent suites 109/109.
+
+*Last updated: 2026-09-05*
