@@ -274,3 +274,249 @@ export function buildAppSlotClaimMutations(input: {
     { field: `${input.slot}BatchCorrectionGeneration`, from: input.correctionGeneration, to: input.correctionGeneration },
   ];
 }
+
+// ── Per-tick write decisions (engine PR #2) ─────────────────────────────────
+// These mirror the useAutoTrack write effect exactly. Each returns the
+// decision/values; the hook owns the ref mutations and commitAutomatic calls.
+// The server reuses the same math for Step 6c (server-owned tick execution).
+
+export type CaseTickWriteDecision =
+  | { action: "seed"; newTotal: number; caseClaimRetryReset: true; formResetSkippedNew: boolean }
+  | { action: "write"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean }
+  | { action: "reset-skip"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: true }
+  | { action: "none"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean };
+
+/** Cases/skids per-tick write decision (drain path, first-tick seed, and the
+ * incremental delta with its stale-delta reset guard). All case bookkeeping
+ * (due, expected baseline, freezer baseline) advances unconditionally in the
+ * caller BEFORE this runs, so the inputs here are the PRE-tick baselines plus
+ * the newly advanced freezer value. */
+export function computeCaseTickWrite(input: {
+  prevExpected: number;
+  expectedRaw: number;
+  expectedCases: number;
+  prevFreezer: number;
+  nextFreezer: number;
+  curTotal: number;
+  casesPerSkid: number;
+  casesNeeded: number;
+  drainActive: boolean;
+  packagingDrainActive: boolean;
+  caseClaimRetry: boolean;
+  formResetSkipped: boolean;
+}): CaseTickWriteDecision {
+  const cps = input.casesPerSkid;
+  if (input.drainActive || input.packagingDrainActive) {
+    // Ended runs use the Freeze tunnel WIP drop. During a paused packaging
+    // drain, tunnel WIP is frozen at pause, so use the pause-relative stage
+    // clock instead. Both paths baseline first, preventing reload/sync
+    // adoption from replaying old output.
+    const exited = input.packagingDrainActive
+      ? (input.prevExpected >= 0 ? Math.max(0, input.expectedRaw - input.prevExpected) : 0)
+      : (input.prevFreezer >= 0 ? Math.max(0, input.prevFreezer - input.nextFreezer) : 0);
+    if (exited > 0) {
+      const target = input.curTotal + exited;
+      const newTotal = input.casesNeeded > 0 ? Math.min(target, Math.max(input.curTotal, input.casesNeeded)) : target;
+      if (newTotal !== input.curTotal) {
+        return { action: "write", newTotal, caseClaimRetryReset: false, formResetSkippedNew: input.formResetSkipped };
+      }
+    }
+    return { action: "none", newTotal: input.curTotal, caseClaimRetryReset: false, formResetSkippedNew: input.formResetSkipped };
+  }
+  if (input.prevExpected < 0) {
+    // First tick after a (re)start/switch: seed the absolute count only when
+    // there is no progress yet. If progress already exists (reload / switching
+    // into a run that's already going / a prior manual entry), just baseline.
+    if ((input.curTotal === 0 || input.caseClaimRetry) && input.expectedCases > input.curTotal) {
+      const seedTotal = input.casesNeeded > 0 ? Math.min(input.casesNeeded, input.expectedCases) : input.expectedCases;
+      return { action: "seed", newTotal: seedTotal, caseClaimRetryReset: true, formResetSkippedNew: input.formResetSkipped };
+    }
+    return { action: "none", newTotal: input.curTotal, caseClaimRetryReset: false, formResetSkippedNew: input.formResetSkipped };
+  }
+  const deltaCases = Math.floor(Math.max(0, input.expectedRaw - input.prevExpected));
+  if (deltaCases > 0) {
+    // Stale-delta catch-up guard: if the form shows 0 cases but prevExpected
+    // is positive, the form was reset while the expected baseline was still
+    // ahead. Skip this one tick so the next tick has a fresh baseline and
+    // writes ~1 case. If the operator corrected to 0, the flag lets the very
+    // next tick proceed.
+    if (!input.formResetSkipped && input.curTotal === 0 && input.prevExpected > cps) {
+      return { action: "reset-skip", newTotal: input.curTotal, caseClaimRetryReset: false, formResetSkippedNew: true };
+    }
+    const target = input.curTotal + deltaCases;
+    // Never pull a value down below what the operator already has on the floor.
+    const newTotal = input.casesNeeded > 0 ? Math.min(target, Math.max(input.curTotal, input.casesNeeded)) : target;
+    return {
+      action: newTotal !== input.curTotal ? "write" : "none",
+      newTotal,
+      caseClaimRetryReset: false,
+      formResetSkippedNew: false,
+    };
+  }
+  return { action: "none", newTotal: input.curTotal, caseClaimRetryReset: false, formResetSkippedNew: false };
+}
+
+export type TrayTickResult = {
+  prodDueMsNew: number;
+  consDueMsNew: number;
+  lastMsNew: number;
+  delta: number;
+  remainderNew: number;
+  seededNew: boolean;
+  /** Non-null only when the one-shot seed write should fire this tick. */
+  seed: { from: number; to: number } | null;
+};
+
+/** Tray per-tick production/consumption decision. Mirrors the tray block of
+ * the hook's write effect: production (+1 half-period out of phase) while the
+ * run still has a tray deficit or ready batches; consumption floors whole
+ * trays with a fractional remainder carry; one-shot suggested-staging seed for
+ * an untouched 0 counter. */
+export function computeTrayTick(input: {
+  nowMs: number;
+  prodDueMs: number;
+  consDueMs: number;
+  lastMs: number;
+  periodMs: number;
+  suppressed: boolean;
+  feedComplete: boolean;
+  deficitOpen: boolean;
+  seeded: boolean;
+  current: number;
+  seed: number | null;
+  ppm: number;
+  perTray: number;
+  remainder: number;
+}): TrayTickResult {
+  let prodDueMsNew = input.prodDueMs;
+  let consDueMsNew = input.consDueMs;
+  let lastMsNew = input.lastMs;
+  let remainderNew = input.remainder;
+  let delta = 0;
+  let seededNew = input.seeded;
+  let seed: { from: number; to: number } | null = null;
+
+  // Production tick: first encounter arms half a period out of phase with
+  // consumption (no write); otherwise +1 per completed period.
+  if (prodDueMsNew === 0) {
+    prodDueMsNew = input.nowMs + input.periodMs / 2;
+  } else if (input.nowMs >= prodDueMsNew) {
+    prodDueMsNew = input.nowMs + input.periodMs;
+    if (!input.suppressed && !input.feedComplete && input.deficitOpen) {
+      delta += 1;
+    }
+  }
+
+  // Consumption tick.
+  if (input.nowMs >= consDueMsNew) {
+    // Consumption for the actual duration since this counter's last tick
+    // (capped to 2 periods to avoid huge jumps); assume one full period on
+    // the first tick.
+    const durationMin = lastMsNew > 0
+      ? Math.min((input.periodMs * 2) / 60000, (input.nowMs - lastMsNew) / 60000)
+      : input.periodMs / 60000;
+    consDueMsNew = input.nowMs + input.periodMs;
+    lastMsNew = input.nowMs;
+    if (!input.suppressed && !input.feedComplete) {
+      // One-shot seed: an untouched 0 counter gets the suggested staging so it
+      // has real stock to track.
+      if (!seededNew) {
+        seededNew = true;
+        if (input.current === 0 && input.seed !== null) {
+          seed = { from: input.current, to: input.seed };
+        }
+      }
+      if (seed === null) {
+        // Fractional tray consumption carried between ticks so sub-unit
+        // depletion accumulates instead of being lost to Math.floor.
+        const traysExact = (durationMin * input.ppm) / input.perTray + remainderNew;
+        const traysConsumed = Math.floor(traysExact);
+        remainderNew = traysExact - traysConsumed;
+        delta -= traysConsumed;
+      }
+    }
+  }
+
+  return { prodDueMsNew, consDueMsNew, lastMsNew, delta, remainderNew, seededNew, seed };
+}
+
+export type BatchTickResult = {
+  prodDueMsNew: number;
+  consDueMsNew: number;
+  lastMsNew: number;
+  delta: number;
+  seededNew: boolean;
+  /** Non-null only when the one-shot seed write should fire this tick. */
+  seed: { from: number; to: number } | null;
+};
+
+/** Batch per-tick production/consumption decision. Mirrors the batch block of
+ * the hook's write effect: production +1 once per full batch-time while a
+ * deficit remains; consumption is fractional at 1 batch per effective-drain
+ * period; the one-shot seed subtracts any tray coverage seeded this same tick
+ * so dough-on-hand is not double-counted. */
+export function computeBatchTick(input: {
+  nowMs: number;
+  prodDueMs: number;
+  consDueMs: number;
+  lastMs: number;
+  periodMs: number;
+  fullBatchMs: number;
+  effDrainMs: number;
+  suppressed: boolean;
+  feedComplete: boolean;
+  deficitOpen: boolean;
+  seeded: boolean;
+  current: number;
+  traysSeededAmount: number;
+  traysNeeded: number;
+  batchesNeeded: number;
+}): BatchTickResult {
+  let prodDueMsNew = input.prodDueMs;
+  let consDueMsNew = input.consDueMs;
+  let lastMsNew = input.lastMs;
+  let delta = 0;
+  let seededNew = input.seeded;
+  let seed: { from: number; to: number } | null = null;
+
+  // Production tick: the first mixed batch lands one full batch-time in.
+  if (prodDueMsNew === 0) {
+    prodDueMsNew = input.nowMs + input.fullBatchMs;
+  } else if (input.nowMs >= prodDueMsNew) {
+    prodDueMsNew = input.nowMs + input.fullBatchMs;
+    if (!input.suppressed && !input.feedComplete && input.deficitOpen) {
+      delta += 1;
+    }
+  }
+
+  // Consumption tick.
+  if (input.nowMs >= consDueMsNew) {
+    const durationMin = lastMsNew > 0
+      ? Math.min((input.periodMs * 2) / 60000, (input.nowMs - lastMsNew) / 60000)
+      : input.periodMs / 60000;
+    consDueMsNew = input.nowMs + input.periodMs;
+    lastMsNew = input.nowMs;
+    if (!input.suppressed && !input.feedComplete) {
+      // Same one-shot seed as trays: an untouched 0 counter gets staged stock
+      // on its first tick (minus any tray coverage already seeded this tick).
+      if (!seededNew) {
+        seededNew = true;
+        const remainingBatchesNeeded = input.traysSeededAmount > 0 && input.traysNeeded > 0
+          ? Math.max(0, input.batchesNeeded * (input.traysNeeded - input.traysSeededAmount) / input.traysNeeded)
+          : input.batchesNeeded;
+        const seedValue = remainingBatchesNeeded > 0
+          ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded))))
+          : null;
+        if (input.current === 0 && seedValue !== null) {
+          seed = { from: input.current, to: seedValue };
+        }
+      }
+      if (seed === null) {
+        // Fractional consumption at 1 batch per effective-drain period.
+        delta -= (durationMin * 60000) / input.effDrainMs;
+      }
+    }
+  }
+
+  return { prodDueMsNew, consDueMsNew, lastMsNew, delta, seededNew, seed };
+}

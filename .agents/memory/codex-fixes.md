@@ -294,3 +294,22 @@ Each entry includes:
 **Context:** Step 6b foundation. Re-exports (`getAutoTrackTiming`, `suggestedDoughStaging`, `AutoTrackTiming`, `SuggestedDoughStagingReturn`) keep existing consumers untouched. Refs, effect declaration order, and coordination/claim plumbing unchanged. Verified: lib 70/70, auto-track suites 85/85, memo/context suites 130/130, adjacent timing/suppression suites 72/72, web + api-server typechecks pass. Per-tick case/tray/batch delta extraction is the follow-up engine PR.
 
 *Last updated: 2026-09-06*
+
+## 2026-09-06 — Per-tick write decisions extracted to live-calc engine (engine PR #2)
+
+**File(s):**
+- `lib/live-calc/src/autoTrackEngine.ts` (+ `computeCaseTickWrite`, `computeTrayTick`, `computeBatchTick` + result types)
+- `lib/live-calc/src/autoTrackEngine.test.ts` (+30 unit tests → 57 total for the engine; lib suite 100/100)
+- `lib/live-calc/src/index.ts` (re-exports)
+- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` (write effect delegates to the engine functions)
+
+**Problem:** The case/tray/batch per-tick write logic (delta, seed, remainder carry, stale-delta reset guard, stepper caps) still lived inline in `useAutoTrack`'s big write effect — the last block of pure decision math trapped in the hook, and the exact math Step 6c (server-owned tick execution) must share.
+
+**Fix:** Extracted the three per-tick decisions as pure functions, with the hook keeping all ref mutations + `commitAutomatic`:
+1. `computeCaseTickWrite` — drain (Freeze WIP drop / packaging stage clock), first-tick seed (with retry flag), incremental delta with the `formResetSkipped` stale-delta guard; returns a tagged action (`seed|write|reset-skip|none`) + new total + flag updates.
+2. `computeTrayTick` — production (+1 half-period out of phase) while tray deficit/open batches remain; consumption floors whole trays with fractional remainder carry; one-shot suggested-staging seed; suppression/`pressDone` gates; 2-period consumption cap.
+3. `computeBatchTick` — production +1 per full batch-time; fractional consumption at 1 batch per effective-drain period; one-shot seed minus same-tick tray coverage (anti double-count).
+
+**Context:** Engine PR #2 of the Step 6b foundation. Behavior preserved exactly (verified by the 83-test auto-track suite, 157-test context/memo/adjacent suites, 100-test lib suite, and all typechecks). Refs, effect order, and claim plumbing untouched. Remaining for Steps 6b/6c: adopt server net-second due-times on the client, then server-owned tick execution reusing this engine.
+
+*Last updated: 2026-09-06*

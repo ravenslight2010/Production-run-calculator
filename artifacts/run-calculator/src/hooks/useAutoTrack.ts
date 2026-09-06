@@ -9,7 +9,10 @@ import {
   clampWebPeriodMs,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
+  computeBatchTick,
+  computeCaseTickWrite,
   computeNetSecondDue,
+  computeTrayTick,
   getAutoTrackTiming,
   suggestedDoughStaging,
   type SuggestedDoughStagingReturn,
@@ -1228,87 +1231,34 @@ export function useAutoTrack({
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
           (Number(form.getValues("casesOnCurrentSkid")) || 0);
-        if (drainActive || packagingDrainActive) {
-          // Ended runs use the Freeze tunnel WIP drop. During a paused packaging
-          // drain, tunnel WIP is intentionally frozen at pause, so use the
-          // pause-relative stage clock instead. Both paths baseline first,
-          // preventing reload/sync adoption from replaying old output.
-          const exited = packagingDrainActive
-            ? (prevExpected >= 0 ? Math.max(0, expectedRaw - prevExpected) : 0)
-            : (prevFreezer >= 0
-              ? Math.max(0, prevFreezer - drainFreezerRef.current)
-              : 0);
-          if (exited > 0) {
-            const target = curTotal + exited;
-            const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-            if (newTotal !== curTotal) {
-              const nextSkids = Math.floor(newTotal / cps);
-              const nextCases = Math.round(newTotal % cps);
-              commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
-                skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
-                skidsTo: nextSkids,
-                casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
-                casesTo: nextCases,
-              }));
-            }
-          }
-        } else if (prevExpected < 0) {
-          // First tick after a (re)start/switch: seed the absolute count only when
-          // there is no progress yet. If progress already exists (reload / switching
-          // into a run that's already going / a prior manual entry), just baseline so
-          // we don't double-count.
-          if ((curTotal === 0 || caseClaimRetryRef.current) && expectedCases > curTotal) {
-            const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
-            const nextSkids = Math.floor(seedTotal / cps);
-            const nextCases = Math.round(seedTotal % cps);
-            caseClaimRetryRef.current = false;
-            commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
-              skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
-              skidsTo: nextSkids,
-              casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
-              casesTo: nextCases,
-            }));
-          }
-        } else {
-          // Add the production since the last tick on top of the current value, so a
-          // manual correction is preserved and tracking continues forward from it.
-          // Floor to a whole number — cases are discrete; a fractional delta
-          // (e.g. 0.1666 when ppm/pizzasPerCase doesn't divide evenly into the
-          // tick interval) would store a float into casesOnCurrentSkid via the
-          // modulo below and corrupt every subsequent curTotal read.
-          const deltaCases = Math.floor(Math.max(0, expectedRaw - prevExpected));
-          if (deltaCases > 0) {
-            // Stale-delta catch-up guard: if the form shows 0 cases but
-            // prevExpected is positive, the form was reset (SSE echo, run
-            // switch, or operator correction to 0) while the expected-cases
-            // baseline was still ahead. Applying the full accumulated delta
-            // on top of 0 would write a wrong low count (e.g. 54 when the
-            // real count is 524). Skip this one tick — lastExpectedCasesRef
-            // was already updated above to expectedRaw, so the NEXT tick has
-            // a fresh baseline and writes ≈ 1 case (normal increment). Set
-            // formResetSkippedRef so the very next tick always proceeds even
-            // if curTotal is still 0 (operator-corrected-to-0 resumes).
-            if (!formResetSkippedRef.current && curTotal === 0 && prevExpected > cps) {
-              formResetSkippedRef.current = true;
-            } else {
-              formResetSkippedRef.current = false;
-              const target = curTotal + deltaCases;
-              // Never pull a value down below what the operator already has on the floor.
-              const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-              if (newTotal !== curTotal) {
-                const nextSkids = Math.floor(newTotal / cps);
-                const nextCases = Math.round(newTotal % cps);
-                commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
-                  skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
-                  skidsTo: nextSkids,
-                  casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
-                  casesTo: nextCases,
-                }));
-              }
-            }
-          } else {
-            formResetSkippedRef.current = false;
-          }
+        const decision = computeCaseTickWrite({
+          prevExpected,
+          expectedRaw,
+          expectedCases,
+          prevFreezer,
+          nextFreezer: drainFreezerRef.current,
+          curTotal,
+          casesPerSkid: cps,
+          casesNeeded: v.casesNeeded,
+          drainActive,
+          packagingDrainActive,
+          caseClaimRetry: caseClaimRetryRef.current,
+          formResetSkipped: formResetSkippedRef.current,
+        });
+        if (decision.caseClaimRetryReset) caseClaimRetryRef.current = false;
+        formResetSkippedRef.current = decision.formResetSkippedNew;
+        // Seed fires exactly when the seed branch is entered (matching the
+        // original), and write fires when the engine computed a new total.
+        const fired = decision.action !== "none" && decision.action !== "reset-skip";
+        if (fired) {
+          const nextSkids = Math.floor(decision.newTotal / cps);
+          const nextCases = Math.round(decision.newTotal % cps);
+          commitAutomatic("case", nowMs, caseNextDueMsRef.current, buildCaseClaimMutations({
+            skidsFrom: Number(form.getValues("skidsCompleted")) || 0,
+            skidsTo: nextSkids,
+            casesFrom: Number(form.getValues("casesOnCurrentSkid")) || 0,
+            casesTo: nextCases,
+          }));
         }
       }
     }
@@ -1374,67 +1324,36 @@ export function useAutoTrack({
 
     if (runStatus === "running" && calc.perTray > 0 && calc.ppm > 0) {
       const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
-      const trayPeriodMs = timing.trayMs;
-      let delta = 0;
-      let traySeededThisTick = false;
-
-      // Production tick.
-      if (trayProdNextDueMsRef.current === 0) {
-        // First encounter: arm the schedule half a period out of phase with
-        // consumption; no write.
-        trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
-      } else if (nowMs >= trayProdNextDueMsRef.current) {
-        trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
-        if (!doughSuppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
-          delta += 1;
-        }
-      }
-
-      // Consumption tick.
-      if (nowMs >= trayNextDueMsRef.current) {
-        const prevMs = trayLastMsRef.current;
-        // Consumption for the actual duration since this counter's last tick
-        // (capped to 2 periods to avoid huge jumps); assume one full period on
-        // the first tick.
-        const durationMin = prevMs > 0
-          ? Math.min((trayPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
-          : trayPeriodMs / 60000;
-        trayNextDueMsRef.current = nowMs + trayPeriodMs;
-        trayLastMsRef.current = nowMs;
-        if (!doughSuppressed && !doughFeedComplete) {
-          // First tray tick of a run where the operator never entered staged
-          // dough (counter still 0): seed the suggested staging (the same number
-          // the "Suggest" button applies) so the counter has real stock to track
-          // — otherwise a crew that never types their dough counts sees trays
-          // sit at 0 the whole run. One-shot per run; a counter with a value
-          // (manual or seeded) just tracks normally below.
-          if (!traySeededRef.current) {
-            traySeededRef.current = true;
-            const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
-            if (v.traysOnLine === 0 && seed !== null) {
-              commitAutomatic("tray-consume", nowMs, trayNextDueMsRef.current, [
-                { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: seed },
-              ]);
-              traySeededThisTick = true;
-              traysSeededAmount = seed;
-            }
-          }
-          if (!traySeededThisTick) {
-            const traysExact = (durationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
-            const traysConsumed = Math.floor(traysExact);
-            traysRemainderRef.current = traysExact - traysConsumed;
-            delta -= traysConsumed;
-          }
-        }
-      }
-
-      if (!traySeededThisTick && delta !== 0) {
-        // traysOnLine is the aggregate across all physical tray sections.
-        // Section capacity is advisory in the UI, so production must not stop
-        // or rewrite this count at an arbitrary display threshold.
-        const next = Math.max(0, v.traysOnLine + delta);
+      const trayTick = computeTrayTick({
+        nowMs,
+        prodDueMs: trayProdNextDueMsRef.current,
+        consDueMs: trayNextDueMsRef.current,
+        lastMs: trayLastMsRef.current,
+        periodMs: timing.trayMs,
+        suppressed: doughSuppressed,
+        feedComplete: doughFeedComplete,
+        deficitOpen: calc.traysNeeded > 0 || v.batchesReady > 0,
+        seeded: traySeededRef.current,
+        current: Number(form.getValues("traysOnLine")) || 0,
+        seed: suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays,
+        ppm: calc.ppm,
+        perTray: calc.perTray,
+        remainder: traysRemainderRef.current,
+      });
+      trayProdNextDueMsRef.current = trayTick.prodDueMsNew;
+      trayNextDueMsRef.current = trayTick.consDueMsNew;
+      trayLastMsRef.current = trayTick.lastMsNew;
+      traysRemainderRef.current = trayTick.remainderNew;
+      traySeededRef.current = trayTick.seededNew;
+      if (trayTick.seed) {
+        traysSeededAmount = trayTick.seed.to;
+        commitAutomatic("tray-consume", nowMs, trayNextDueMsRef.current, [
+          { field: "traysOnLine", from: trayTick.seed.from, to: trayTick.seed.to },
+        ]);
+      } else if (trayTick.delta !== 0) {
+        const next = Math.max(0, v.traysOnLine + trayTick.delta);
         if (next !== v.traysOnLine) {
-          commitAutomatic(delta > 0 ? "tray-produce" : "tray-consume", nowMs, delta > 0
+          commitAutomatic(trayTick.delta > 0 ? "tray-produce" : "tray-consume", nowMs, trayTick.delta > 0
             ? trayProdNextDueMsRef.current
             : trayNextDueMsRef.current, [
             { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: next },
@@ -1443,80 +1362,42 @@ export function useAutoTrack({
       }
     }
 
-    // ── Batches: +1 when the mixer finishes a batch (one per full batch-time,
-    // while the run still has a batch deficit), down once per full batch
-    // consumed (quarter-batch ticks with fractional remainder carry).
-    // Never for an ended run — drain phase is case/skid-only. ──
     if (runStatus === "running" && calc.perBatch > 0 && calc.ppm > 0) {
       const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
-      const batchPeriodMs = timing.batchConsumptionMs;
-      const fullBatchMs = timing.batchProductionMs;
-      const effDrainMs = Math.max(
-        machine && machine.hopperSec > 0 ? machine.hopperSec * 1000 : 0,
-        (calc.perBatch / calc.ppm) * 60000,
-      );
-      let delta = 0;
-      let batchSeededThisTick = false;
-
-      // Production tick: the first mixed batch lands one full batch-time in.
-      if (batchProdNextDueMsRef.current === 0) {
-        batchProdNextDueMsRef.current = nowMs + fullBatchMs;
-      } else if (nowMs >= batchProdNextDueMsRef.current) {
-        batchProdNextDueMsRef.current = nowMs + fullBatchMs;
-        if (!doughSuppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
-          delta += 1;
-        }
-      }
-
-      // Consumption tick.
-      if (nowMs >= batchNextDueMsRef.current) {
-        const prevMs = batchLastMsRef.current;
-        const durationMin = prevMs > 0
-          ? Math.min((batchPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
-          : batchPeriodMs / 60000;
-        batchNextDueMsRef.current = nowMs + batchPeriodMs;
-        batchLastMsRef.current = nowMs;
-        if (!doughSuppressed && !doughFeedComplete) {
-          // Same one-shot seed as trays: an untouched 0 counter gets the
-          // suggested staging on its first tick so it has stock to track.
-          if (!batchSeededRef.current) {
-            batchSeededRef.current = true;
-            // If trays were auto-seeded this same tick, only seed the remaining
-            // deficit not already covered by those trays — seeding both at the
-            // full deficit would double-count dough-on-hand.
-            const remainingBatchesNeeded = traysSeededAmount > 0 && calc.traysNeeded > 0
-              ? Math.max(0, calc.batchesNeeded * (calc.traysNeeded - traysSeededAmount) / calc.traysNeeded)
-              : calc.batchesNeeded;
-            const seed = remainingBatchesNeeded > 0
-              ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded))))
-              : null;
-            if (v.batchesReady === 0 && seed !== null) {
-              commitAutomatic("batch-consume", nowMs, batchNextDueMsRef.current, [
-                { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: seed },
-              ]);
-              batchSeededThisTick = true;
-            }
-          }
-          if (!batchSeededThisTick) {
-            // Fractional consumption, written directly (2 decimals) so the
-            // operator SEES the counter fluctuate every quarter-batch tick
-            // instead of thinking it's frozen until a whole batch drops.
-            // Rate = 1 batch per effective-drain period (line demand, slowed
-            // by the hopper when a hopper time has been measured).
-            delta -= (durationMin * 60000) / effDrainMs;
-          }
-        }
-      }
-
-      if (!batchSeededThisTick && delta !== 0) {
-        // Production never pushes past the stepper max (3) — but must never
-        // clamp an already-higher value DOWN either. Rounded to 2 decimals so
-        // the fractional drain shows cleanly (e.g. 1.75, 1.5).
-        let next = v.batchesReady + delta;
-        if (delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
+      const batchTick = computeBatchTick({
+        nowMs,
+        prodDueMs: batchProdNextDueMsRef.current,
+        consDueMs: batchNextDueMsRef.current,
+        lastMs: batchLastMsRef.current,
+        periodMs: timing.batchConsumptionMs,
+        fullBatchMs: timing.batchProductionMs,
+        effDrainMs: Math.max(
+          machine && machine.hopperSec > 0 ? machine.hopperSec * 1000 : 0,
+          (calc.perBatch / calc.ppm) * 60000,
+        ),
+        suppressed: doughSuppressed,
+        feedComplete: doughFeedComplete,
+        deficitOpen: calc.batchesNeeded > 0,
+        seeded: batchSeededRef.current,
+        current: Number(form.getValues("batchesReady")) || 0,
+        traysSeededAmount,
+        traysNeeded: calc.traysNeeded,
+        batchesNeeded: calc.batchesNeeded,
+      });
+      batchProdNextDueMsRef.current = batchTick.prodDueMsNew;
+      batchNextDueMsRef.current = batchTick.consDueMsNew;
+      batchLastMsRef.current = batchTick.lastMsNew;
+      batchSeededRef.current = batchTick.seededNew;
+      if (batchTick.seed) {
+        commitAutomatic("batch-consume", nowMs, batchNextDueMsRef.current, [
+          { field: "batchesReady", from: batchTick.seed.from, to: batchTick.seed.to },
+        ]);
+      } else if (batchTick.delta !== 0) {
+        let next = v.batchesReady + batchTick.delta;
+        if (batchTick.delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
         next = Math.max(0, Math.round(next * 100) / 100);
         if (next !== v.batchesReady) {
-          commitAutomatic(delta > 0 ? "batch-produce" : "batch-consume", nowMs, delta > 0
+          commitAutomatic(batchTick.delta > 0 ? "batch-produce" : "batch-consume", nowMs, batchTick.delta > 0
             ? batchProdNextDueMsRef.current
             : batchNextDueMsRef.current, [
             { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: next },
@@ -1524,6 +1405,7 @@ export function useAutoTrack({
         }
       }
     }
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTrackBlocked, autoTrackBlockedRef, coordinationDelayed, nowTime]);
 
