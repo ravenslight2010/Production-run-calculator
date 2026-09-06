@@ -390,3 +390,20 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Tests:** 5 new cases (sauce: fresh not-due suppresses even far past local due; stale latch restores local fallback at 46s. apps: fresh due-now verdict fires before local elapsed; fresh not-due suppresses; stale latch restores). Note for future test authors: with no `runGeneration` prop and `endedAt` defaulted to `null`, the client identity is `"{runId}:running:0"` — schedules must publish that generation to be adopted.
 
 **Context:** Refactor Task 1 (battery/CPU win while fully connected). The server tick (7a) + heartbeat (6c) are what make suppression safe: the server executes the claim within 15s regardless of what any client does; offline/stale clients degrade back to local execution automatically. Verified: web tsc clean; sauceBarrel 15/15, applicators 12/12, coordinationClient + trays/batches + pauseResume + screenWake + suppression 58/58, sync regression 23/23.
+## 2026-09-06 — Pure wall-clock auto-track engine + compute-only schedule verdicts (refactor Task 2)
+
+**File(s):**
+- `lib/live-calc/src/wallClockEngine.ts` (+ `wallClockEngine.test.ts`, 18 cases) — NEW pure engine
+- `lib/live-calc/src/autoTrackSchedule.ts` (+ schedule tests) — compute-only wall-clock replay entries
+- `lib/live-calc/src/index.ts` — exports the engine
+
+**Problem:** Task 1 (above) made the server hold net-second execution, but the WALL-CLOCK channels (case/tray/batch/hopper) were still 100% client-owned: the server only echoed canonical coordination records (which exist only after a claim), so a fresh run's schedule had no wall-clock due refs and no path toward server ownership of those counters.
+
+**Fix:**
+1. Ported the client's arm-state machines into `wallClockEngine.ts` — `WallClockBookkeeping` (all the refs: due refs, lastMs, lastExpectedCases, drainFreezer, remainders, seed flags, reset guards, dough-pause refs), `createWallClockBookkeeping`, `rearmWallClockTimers` (mirror of rearmCaseTimer + rearmDoughTimers), and `tickWallClock` (full per-instant port of the client's write effect, delegating to the SAME shared `computeCaseTickWrite`/`computeTrayTick`/`computeBatchTick` and reusing `suggestedDoughStaging`/`getAutoTrackTiming`). Includes: expected-baseline advance on every tick (even suppressed), stale-delta reset guard, freezer drain paths, clamp-to-casesNeeded, fractional tray remainder carry, one-shot tray/batch seeds (batch seed subtracts tray coverage), pressDone dough gate, manual-edit suppression (writes skipped, refs advance), dough-timer pause + timed resume re-arm, hopper display cycle.
+2. `computeWallClockDueRefs` — deterministic stateless replay of each run's running segments (split only by pause stoppages; non-pause downtime keeps ticking; open pauses freeze; `endedAt` caps the horizon) producing each channel's next-due: `segmentStart + (floor(dur/period) + 1) * period` (the +1 is the immediate baseline tick at run start / resume re-arm).
+3. `computeAutoTrackSchedule` now emits compute-only entries for wall-clock channels with NO canonical record (Task 2 verdicts), gated to live runs within 6h of start, with canonical echo still authoritative. `machine` (spinSec = mixerLowSec+mixerHighSec, hopperSec) is plumbed from raw run values. No server-side writes yet — the client still executes through the validated claim endpoint; canonical nextDueAt takes over after the first claim.
+
+**Context:** This is the battle-tested engine foundation for full server ownership of the wall-clock channels (the remaining execution step stays gated on this port's parity). Verified: lib 120/120 (18 new engine + schedule tests), api-server tsc + build + coordination/server-tick units 28/28, web tsc + auto-track suites 81/81. PR #36.
+
+*Last updated: 2026-09-06*

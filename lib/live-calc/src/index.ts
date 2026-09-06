@@ -490,3 +490,20 @@ export {
   type SuggestedDoughStagingReturn,
   type TrayTickResult,
 } from "./autoTrackEngine";
+
+// ── Pure wall-clock auto-track engine (refactor Task 2) ────────────────────
+export {
+  buildRunningSegments,
+  computeWallClockDueRefs,
+  createWallClockBookkeeping,
+  rearmWallClockTimers,
+  tickWallClock,
+  type WallClockBookkeeping,
+  type WallClockChannel,
+  type WallClockDueRefs,
+  type WallClockMutation,
+  type WallClockRunStatus,
+  type WallClockStoppage,
+  type WallClockTickEvent,
+  type WallClockTickInput,
+} from "./wallClockEngine";

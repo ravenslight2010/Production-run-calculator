@@ -241,8 +241,47 @@ describe("computeAutoTrackSchedule — wall-clock channels", () => {
     expect(caseEntry!.sequence).toBe(4);
   });
 
-  it("omits wall-clock channels without a coordination record (client owns arming)", () => {
-    const schedule = computeAutoTrackSchedule(makeInput({}));
+  it("derives a compute-only replay for wall-clock channels without a coordination record (Task 2)", () => {
+    const schedule = computeAutoTrackSchedule(makeInput({
+      startedAt: 100_000,
+      nowMs: 100_000 + 10 * 60 * 1000, // 10 minutes into the run
+      calc: makeCalc({ ppm: 60, perTray: 60, perBatch: 600 }),
+      machine: { spinSec: 0, hopperSec: 30 },
+    }));
+    const caseEntry = entry(schedule, "case");
+    expect(caseEntry).toBeDefined();
+    expect(caseEntry!.canonical).toBe(false);
+    // caseMs = 12s; immediate start tick + 50 full periods → due at +51*12s.
+    expect(caseEntry!.dueAt).toBe(100_000 + (Math.floor(600_000 / 12_000) + 1) * 12_000);
+    expect(caseEntry!.dueNow).toBe(false);
+    expect(entry(schedule, "tray-consume")).toBeDefined();
+    expect(entry(schedule, "tray-produce")).toBeDefined();
+    expect(entry(schedule, "batch-consume")).toBeDefined();
+    expect(entry(schedule, "batch-produce")).toBeDefined();
+    expect(entry(schedule, "hopper")).toBeDefined();
+  });
+
+  it("keeps the canonical coordination echo authoritative over the replay", () => {
+    const schedule = computeAutoTrackSchedule(makeInput({
+      startedAt: 100_000,
+      nowMs: 100_000 + 10 * 60 * 1000,
+      calc: makeCalc({ ppm: 60, perTray: 60, perBatch: 600 }),
+      coordination: {
+        case: { generation: "run-1:2", sequence: 4, nextDueAt: 123_456 },
+      },
+    }));
+    expect(entry(schedule, "case")).toMatchObject({ canonical: true, dueAt: 123_456, sequence: 4 });
+    // The channel without canonical state still gets the engine replay.
+    expect(entry(schedule, "tray-consume")).toBeDefined();
+  });
+
+  it("gates the replay off for paused runs (client keeps arming locally)", () => {
+    const schedule = computeAutoTrackSchedule(makeInput({
+      startedAt: 100_000,
+      pausedAt: 200_000,
+      nowMs: 300_000,
+      calc: makeCalc({ ppm: 60, perTray: 60, perBatch: 600 }),
+    }));
     expect(entry(schedule, "case")).toBeUndefined();
     expect(entry(schedule, "tray-consume")).toBeUndefined();
     expect(entry(schedule, "hopper")).toBeUndefined();
