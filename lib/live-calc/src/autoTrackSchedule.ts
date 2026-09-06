@@ -18,7 +18,7 @@
 //   - pressDone stops sauce + applicator claims.
 //   - Paused/ended runs emit no sauce/applicator claims; case drain window is
 //     the only post-End exception and it only echoes canonical coordination.
-import type { Calc, CalcFormValues, CalcStoppage } from "./index";
+import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
 
 export const AUTO_TRACK_SCHEDULE_CHANNELS = [
   "case",
@@ -233,4 +233,40 @@ export function computeAutoTrackSchedule(
   });
 
   return { runId, generation, atMs: nowMs, entries };
+}
+
+// ── Server-side schedule builder (refactor steps 6a/7) ──────────────────────
+// Extracts the schedule inputs from a SyncPayload-shaped object and builds the
+// auto-track schedule. Shared by the API SSE/claim paths and the server tick
+// loop so every consumer derives due times/verdicts through the same code.
+export function buildAutoTrackScheduleFromPayload(
+  payload: unknown,
+  calcResult: ServerCalcResult | null,
+  nowMs = Date.now(),
+): AutoTrackSchedule | null {
+  const p = (payload ?? {}) as {
+    dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
+    runValues?: Record<string, Record<string, unknown>>;
+    autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
+  };
+  if (!p.dayState?.runs || p.dayState.runs.length === 0 || !calcResult) return null;
+  const run = p.dayState.runs[p.dayState.currentIndex ?? 0];
+  if (!run?.id || typeof run.id !== "string") return null;
+  const runId = run.id;
+  const rawValues = p.runValues?.[runId];
+  if (!rawValues || typeof rawValues !== "object") return null;
+  const coordinationForRun = p.autoTrackCoordination?.runs?.[runId];
+  return computeAutoTrackSchedule({
+    runId,
+    metaUpdatedAt: typeof run.metaUpdatedAt === "number" ? run.metaUpdatedAt : undefined,
+    startedAt: typeof run.startedAt === "number" ? run.startedAt : undefined,
+    pausedAt: typeof run.pausedAt === "number" ? run.pausedAt : undefined,
+    endedAt: typeof run.endedAt === "number" ? run.endedAt : undefined,
+    stoppages: Array.isArray(run.stoppages) ? run.stoppages : undefined,
+    v: rawValues as unknown as AutoTrackScheduleInput["v"],
+    calc: calcResult.calc,
+    progress: rawValues,
+    coordination: coordinationForRun as AutoTrackScheduleInput["coordination"],
+    nowMs,
+  });
 }

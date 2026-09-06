@@ -232,8 +232,6 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
       || !Number.isSafeInteger(made.from)
       || !Number.isSafeInteger(made.to)
       || made.to !== made.from + 1
-      || (body.channel === "sauce-barrel" && !Number.isSafeInteger(anchor.from))
-      || (body.channel === "sauce-barrel" && !Number.isSafeInteger(anchor.to))
       || anchor.to < anchor.from
       || !Number.isSafeInteger(correction.from)
       || !Number.isSafeInteger(correction.to)
