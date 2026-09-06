@@ -2056,7 +2056,7 @@ const FULL_RUN_VALUES = {
     app3CheeseRecipe: [],
     app4CheeseRecipeName: "",
     app4CheeseRecipe: [],
-    frontlineRecipeName: "",
+    frontlineRecipeName: "Classic Sauce",
     frontlineRecipe: [],
 
 };
@@ -2196,8 +2196,8 @@ describe("runNetSecondServerTicks — server-owned net-second execution (step 7a
     }).returning();
     await db.insert(inventoryLotsTable).values({
       itemId: item.id,
-      qtyReceived: 100,
-      qtyRemaining: 100,
+      qtyReceived: 200,
+      qtyRemaining: 200,
     });
     await seedRun({ startedAtMs: nowMs - 120_000 });
 
@@ -2218,9 +2218,9 @@ describe("runNetSecondServerTicks — server-owned net-second execution (step 7a
     expect(coordination["sauce-barrel"].sequence).toBe(2);
     expect(coordination["app1-batch"].sequence).toBe(1);
     expect(totalAccepted).toBe(3);
-    // Both barrels consumed exactly one lot's worth of sauce inventory.
+    // Both barrels consumed 50 lbs each from the sauce inventory lot.
     const [lot] = await db.select().from(inventoryLotsTable);
-    expect(lot.qtyRemaining).toBe(0);
+    expect(lot.qtyRemaining).toBe(100);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(2);
     // A beat later nothing is due (anchors advanced past netSec).
@@ -2265,8 +2265,8 @@ describe("runNetSecondServerTicks — server-owned net-second execution (step 7a
     }).returning();
     await db.insert(inventoryLotsTable).values({
       itemId: item.id,
-      qtyReceived: 100,
-      qtyRemaining: 100,
+      qtyReceived: 200,
+      qtyRemaining: 200,
     });
     await seedRun({ startedAtMs: nowMs - 120_000 });
 
@@ -2283,6 +2283,9 @@ describe("runNetSecondServerTicks — server-owned net-second execution (step 7a
     values = data.runValues[RUN] as Record<string, unknown>;
     expect(values.sauceBarrelsMade).toBe(2);
     expect(values.app1BatchesMade).toBe(1);
+    const [lot] = await db.select().from(inventoryLotsTable);
+    expect(lot.qtyRemaining).toBe(100);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
   });
 });
 
