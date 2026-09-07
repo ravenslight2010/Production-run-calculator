@@ -5,6 +5,7 @@ import {
   mergeProfileIntoOpenForm,
   saveProfile,
 } from "./storage";
+import { runSharedRecipeRefresh } from "./profileRecipeRefresh";
 import { DEFAULT_VALUES, PROFILE_KEY, CRUST_PROFILE_KEY } from "./types";
 import type { FormValues } from "./types";
 
@@ -151,6 +152,34 @@ describe("shared recipe snapshot boundary", () => {
       expect(frozen.app2CheeseRecipeName).toBe("Mix V1");
     }
   });
+
+  it.each(["cheese", "mix", "dough", "sauce"] as const)(
+    "%s shared edits refresh only the pending open run",
+    (family) => {
+      const lifecycle = {
+        pending: {},
+        running: { startedAt: 1 },
+        paused: { startedAt: 1, pausedAt: 2 },
+        finished: { startedAt: 1, endedAt: 3 },
+      } as const;
+
+      for (const [status, run] of Object.entries(lifecycle)) {
+        let refreshes = 0;
+        const result = runSharedRecipeRefresh(run, () => {
+          refreshes += 1;
+          return `${family}:${status}`;
+        });
+
+        if (status === "pending") {
+          expect(refreshes).toBe(1);
+          expect(result).toBe(`${family}:${status}`);
+        } else {
+          expect(refreshes).toBe(0);
+          expect(result).toBeUndefined();
+        }
+      }
+    },
+  );
 
   it("does not copy production progress or run-specific targets from a profile", () => {
     const current = form({

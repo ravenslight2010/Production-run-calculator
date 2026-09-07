@@ -132,7 +132,12 @@ import {
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
-import { refreshNamedRecipeProfilesAndPropagate } from "../profileRecipeRefresh";
+import {
+  isSharedRecipeRefreshEligible,
+  orchestrateSharedRecipeRefresh,
+  refreshNamedRecipeProfilesAndPropagate,
+  runSharedRecipeRefresh,
+} from "../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
@@ -162,7 +167,6 @@ import {
   backfillFromProfile,
   saveProfile,
   mergeProfileIntoOpenForm,
-  isRunRecipeRefreshEligible,
   markProfileRemotelyDeleted,
   recipeRowsEqual,
   normalizeRecipeRowsForCompare,
@@ -4756,65 +4760,66 @@ export default function Home() {
         { nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe" },
       ] as const;
 
-      let updatedCount = 0;
-      const propagations: Promise<void>[] = [];
+      const updatedCount = await orchestrateSharedRecipeRefresh({
+        getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+        refreshProfiles: async () => {
+          let count = 0;
+          const propagations: Promise<void>[] = [];
 
-      for (const suffix of profileSuffixes) {
-        const dunderIdx = suffix.indexOf("__");
-        if (dunderIdx < 0) continue;
-        const brand  = suffix.slice(0, dunderIdx);
-        const flavor = suffix.slice(dunderIdx + 2);
+          for (const suffix of profileSuffixes) {
+            const dunderIdx = suffix.indexOf("__");
+            if (dunderIdx < 0) continue;
+            const brand  = suffix.slice(0, dunderIdx);
+            const flavor = suffix.slice(dunderIdx + 2);
 
-        const profile = loadProfile(brand, flavor);
-        if (!profile) continue;
+            const profile = loadProfile(brand, flavor);
+            if (!profile) continue;
 
-        const profileRec = profile as unknown as Record<string, unknown>;
-        const updates: Record<string, unknown> = {};
+            const profileRec = profile as unknown as Record<string, unknown>;
+            const updates: Record<string, unknown> = {};
 
-        for (const { nameField, rowsField } of cheeseSlots) {
-          const recipeName = ((profileRec[nameField] as string) ?? "").trim();
-          if (!recipeName) continue;
-          const freshRows = recipeByName.get(recipeName.toLowerCase());
-          if (!freshRows) continue;
-          // Skip if every ingredient and its lbs is already identical (full row comparison,
-          // not just sum — catches ingredient renames, additions, or removals that preserve total).
-          const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
-          const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => {
-            const cr = currentRows[i];
-            return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001;
-          });
-          if (!rowsChanged) continue;
-          updates[rowsField] = freshRows;
-        }
+            for (const { nameField, rowsField } of cheeseSlots) {
+              const recipeName = ((profileRec[nameField] as string) ?? "").trim();
+              if (!recipeName) continue;
+              const freshRows = recipeByName.get(recipeName.toLowerCase());
+              if (!freshRows) continue;
+              // Skip if every ingredient and its lbs is already identical (full row comparison,
+              // not just sum — catches ingredient renames, additions, or removals that preserve total).
+              const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+              const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => {
+                const cr = currentRows[i];
+                return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001;
+              });
+              if (!rowsChanged) continue;
+              updates[rowsField] = freshRows;
+            }
 
-        if (Object.keys(updates).length === 0) continue;
+            if (Object.keys(updates).length === 0) continue;
 
-        const updated = { ...profile, ...updates } as FormValues;
-        // Profile writes are manager-only; non-managers still get the
-        // in-memory heal (open-form update below) but never persist it.
-        const saved = canManageProfiles && saveProfile(brand, flavor, updated);
-        if (saved) {
-          updatedCount++;
-          propagations.push(propagateProfileToPendingRuns(brand, flavor));
-        }
-      }
+            const updated = { ...profile, ...updates } as FormValues;
+            // Profile writes are manager-only; non-managers still get the
+            // in-memory heal (open-form update below) but never persist it.
+            const saved = canManageProfiles && saveProfile(brand, flavor, updated);
+            if (saved) {
+              count++;
+              propagations.push(propagateProfileToPendingRuns(brand, flavor));
+            }
+          }
 
-      await Promise.allSettled(propagations);
-
-      // Start is the immutable recipe snapshot boundary. Profiles and future
-      // work still receive the shared edit, but an active/finished open form
-      // must retain the rows it started with.
-      const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
-      if (isRunRecipeRefreshEligible(liveRun)) {
-        const cv = form.getValues() as unknown as Record<string, unknown>;
-        for (const { nameField, rowsField } of cheeseSlots) {
-          const recipeName = ((cv[nameField] as string) ?? "").trim();
-          if (!recipeName) continue;
-          const freshRows = recipeByName.get(recipeName.toLowerCase());
-          if (!freshRows) continue;
-          form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
-        }
-      }
+          await Promise.allSettled(propagations);
+          return count;
+        },
+        refreshOpenForm: () => {
+          const cv = form.getValues() as unknown as Record<string, unknown>;
+          for (const { nameField, rowsField } of cheeseSlots) {
+            const recipeName = ((cv[nameField] as string) ?? "").trim();
+            if (!recipeName) continue;
+            const freshRows = recipeByName.get(recipeName.toLowerCase());
+            if (!freshRows) continue;
+            form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
+          }
+        },
+      });
 
       if (updatedCount > 0) {
         toast({
@@ -9878,29 +9883,30 @@ export default function Home() {
     }
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
-    if (!isRunRecipeRefreshEligible(liveRun)) return;
-    const profile = loadProfile(liveRun.brand, liveRun.flavor);
-    if (!profile) return;
-    // Same guard as the spec-import reload: a mix recipe name must never land
-    // in the sauce fields (mixes live on the applicator cards).
-    if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
-      profile.frontlineRecipeName = "";
-      profile.frontlineRecipe = [];
-    }
-    const current = form.getValues();
-    const merged = mergeProfileIntoOpenForm(current, profile);
-    if (merged === current) return;
-    const now = Date.now();
-    saveRunValues(liveRun.id, merged);
-    markRunValuesUpdated(liveRun.id, now);
-    lastLocalEditRef.current = now;
-    lastFormRunIdRef.current = liveRun.id;
-    form.reset(merged);
-    resetFieldArrays(merged);
-    schedulePush(dayStateRef.current, 0);
-    toast({
-      title: "Run form updated",
-      description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
+    runSharedRecipeRefresh(liveRun, () => {
+      const profile = loadProfile(liveRun.brand, liveRun.flavor);
+      if (!profile) return;
+      // Same guard as the spec-import reload: a mix recipe name must never land
+      // in the sauce fields (mixes live on the applicator cards).
+      if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+        profile.frontlineRecipeName = "";
+        profile.frontlineRecipe = [];
+      }
+      const current = form.getValues();
+      const merged = mergeProfileIntoOpenForm(current, profile);
+      if (merged === current) return;
+      const now = Date.now();
+      saveRunValues(liveRun.id, merged);
+      markRunValuesUpdated(liveRun.id, now);
+      lastLocalEditRef.current = now;
+      lastFormRunIdRef.current = liveRun.id;
+      form.reset(merged);
+      resetFieldArrays(merged);
+      schedulePush(dayStateRef.current, 0);
+      toast({
+        title: "Run form updated",
+        description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
+      });
     });
   }
 
@@ -9974,7 +9980,7 @@ export default function Home() {
     const now = Date.now();
     let todayChanged = false;
     for (const r of ds.runs) {
-      if (r.id === openId || !isRunRecipeRefreshEligible(r)) continue;
+      if (r.id === openId || !isSharedRecipeRefreshEligible(r)) continue;
       if (!matches(r)) continue;
       const stored = loadRunValues(r.id);
       const merged = mergeProfileIntoOpenForm(stored, profile);
@@ -10008,7 +10014,7 @@ export default function Home() {
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
         for (const run of payload.dayState.runs) {
-          if (!matches(run) || !isRunRecipeRefreshEligible(run)) continue;
+          if (!matches(run) || !isSharedRecipeRefreshEligible(run)) continue;
           const stored = rv[run.id];
           const merged = mergeProfileIntoOpenForm(stored ?? { ...DEFAULT_VALUES }, profile);
           if (stored && merged === stored) continue;
@@ -10044,7 +10050,7 @@ export default function Home() {
   // stamps it. The first snapshot of each pool only primes the ref — a page
   // load must not look like "everything changed".
   const namedPoolSnapRef = useRef<{ dough: Map<string, string> | null; sauce: Map<string, string> | null }>({ dough: null, sauce: null });
-  function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
+  async function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
     const snap = new Map<string, string>();
     const byKey = new Map<string, NamedRecipePoolPatch>();
     for (const r of list) {
@@ -10110,45 +10116,50 @@ export default function Home() {
       if (prev.get(key) !== undefined && prev.get(key) !== sig) changed.push(byKey.get(key)!);
     }
     if (changed.length === 0) return;
-    const touched = refreshNamedRecipeProfilesAndPropagate(
-      kind,
-      changed,
-      undefined,
-      handleSetupProfileSaved,
-    );
-    const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
-    const linked = String(linkedRaw ?? "").trim().toLowerCase();
-    const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
-    const hit = isRunRecipeRefreshEligible(liveRun) && linked
-      ? changed.find((c) => c.name.trim().toLowerCase() === linked)
-      : undefined;
     let formUpdated = false;
-    if (hit) {
-      const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
-      if (!recipeRowsEqual(curRows, hit.rows)) {
-        const copy = hit.rows.map((row) => ({ ...row }));
-        if (kind === "dough") {
-          form.setValue("doughRecipe", copy, { shouldDirty: true });
-          replaceDough(copy);
-        } else {
-          form.setValue("frontlineRecipe", copy, { shouldDirty: true });
-          replaceFrontline(copy);
+    const touched = await orchestrateSharedRecipeRefresh({
+      getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+      refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
+        kind,
+        changed,
+        undefined,
+        handleSetupProfileSaved,
+      ),
+      refreshOpenForm: () => {
+        const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
+        const linked = String(linkedRaw ?? "").trim().toLowerCase();
+        const hit = linked
+          ? changed.find((c) => c.name.trim().toLowerCase() === linked)
+          : undefined;
+        if (hit) {
+          const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
+          if (!recipeRowsEqual(curRows, hit.rows)) {
+            const copy = hit.rows.map((row) => ({ ...row }));
+            if (kind === "dough") {
+              form.setValue("doughRecipe", copy, { shouldDirty: true });
+              replaceDough(copy);
+            } else {
+              form.setValue("frontlineRecipe", copy, { shouldDirty: true });
+              replaceFrontline(copy);
+            }
+            formUpdated = true;
+          }
         }
-        formUpdated = true;
-      }
-      // Weight/per-tray are per-flavor — pool values only fill a blank form,
-      // never overwrite a value the profile/operator already set.
-      const wantW = hit.doughballWeightOz ?? 0;
-      if (kind === "dough" && wantW > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) {
-        form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
-        formUpdated = true;
-      }
-      const wantTray = hit.doughballsPerTray ?? 0;
-      if (kind === "dough" && wantTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) {
-        form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
-        formUpdated = true;
-      }
-    }
+        if (!hit) return;
+        // Weight/per-tray are per-flavor — pool values only fill a blank form,
+        // never overwrite a value the profile/operator already set.
+        const wantW = hit.doughballWeightOz ?? 0;
+        if (kind === "dough" && wantW > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) {
+          form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
+          formUpdated = true;
+        }
+        const wantTray = hit.doughballsPerTray ?? 0;
+        if (kind === "dough" && wantTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) {
+          form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
+          formUpdated = true;
+        }
+      },
+    });
     if (!formUpdated && touched.length === 0) return;
     const label = kind === "dough" ? "dough" : "sauce";
     toast({
@@ -10159,11 +10170,11 @@ export default function Home() {
     });
   }
   useEffect(() => {
-    applyNamedPoolChange("dough", doughRecipesList);
+    void applyNamedPoolChange("dough", doughRecipesList);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doughRecipesList]);
   useEffect(() => {
-    applyNamedPoolChange("sauce", sauceRecipesList);
+    void applyNamedPoolChange("sauce", sauceRecipesList);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList]);
 
@@ -10250,8 +10261,8 @@ export default function Home() {
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
     const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
-    if (!isRunRecipeRefreshEligible(liveRun)) return;
-    if (serverMixRowsByName.size === 0) return;
+    runSharedRecipeRefresh(liveRun, () => {
+      if (serverMixRowsByName.size === 0) return;
     const mixFormSlots = [
       { typeField: "app1Type", nameField: "app1CheeseRecipeName", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza", replace: replaceCheese1 },
       { typeField: "app2Type", nameField: "app2CheeseRecipeName", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza", replace: replaceCheese2 },
@@ -10276,7 +10287,8 @@ export default function Home() {
       replace(rows);
       const rowSum = serverRows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
       if (rowSum > 0) form.setValue(ozField as "app1OzPerPizza", rowSum, { shouldDirty: true });
-    }
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverMixRowsByName]);
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
