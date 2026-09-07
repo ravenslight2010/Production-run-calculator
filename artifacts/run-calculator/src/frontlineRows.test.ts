@@ -57,4 +57,12 @@ describe("deriveFrontlineNeedRows", () => {
     expect(rows.map((row) => row.label)).toEqual(["Pep 1 & 2 — Pep A"]);
     expect(rows.some((row) => row.station === "pep2")).toBe(false);
   });
+
+  it("shows no plausible rows when shared case-based quantities are unavailable", () => {
+    const rows = deriveFrontlineNeedRows(
+      { ...DEFAULT_VALUES, casesNeeded: 240, pizzasPerCase: 0, app1Type: "Cheese", app1OzPerPizza: 2.9 },
+      { ...quantities, productionNeedsAvailable: false } as FrontlineQuantitySource,
+    );
+    expect(rows).toEqual([]);
+  });
 });

@@ -16,6 +16,7 @@ import {
   type AutoTrackTiming,
   type SuggestedDoughStagingReturn,
 } from "@workspace/live-calc";
+import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -331,6 +332,7 @@ export function useAutoTrack({
   claimAutoTrackEvent,
   nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
+  const productionNeedsAvailable = caseBasedProductionNeedsAvailable(v);
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
   // When set, tray/batch production and consumption ticks are suppressed
@@ -1190,6 +1192,7 @@ useEffect(() => {
       autoTrackBlocked ||
       autoTrackBlockedRef?.current ||
       !autoTrackProgress ||
+      !productionNeedsAvailable ||
       runStatus !== "running" ||
       calc.pressDone ||
       nextRunPrepActive
@@ -1214,6 +1217,7 @@ useEffect(() => {
     autoTrackBlocked,
     autoTrackBlockedRef,
     autoTrackProgress,
+    productionNeedsAvailable,
     calc.pressDone,
     calc.sauceDepletionSec,
     commitAutomatic,
@@ -1234,6 +1238,13 @@ useEffect(() => {
   // slot's due time to the new anchor prevents that stale event from writing
   // the old anchor back after the suppression fence expires.
   useEffect(() => {
+    if (!productionNeedsAvailable) {
+      appNextDueNetSecRefs.app1.current = 0;
+      appNextDueNetSecRefs.app2.current = 0;
+      appNextDueNetSecRefs.app3.current = 0;
+      appNextDueNetSecRefs.app4.current = 0;
+      return;
+    }
     (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
       const values = v as FormValues;
       const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
@@ -1250,7 +1261,7 @@ useEffect(() => {
         ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + cadence
         : 0;
     });
-  }, [calc.ppm, v]);
+  }, [calc.ppm, productionNeedsAvailable, v]);
 
   // Applicator batches use the same provider-owned, net-production clock as
   // Sauce. Each slot has its own effective batch and therefore its own cadence;
@@ -1263,6 +1274,7 @@ useEffect(() => {
       autoTrackBlocked ||
       autoTrackBlockedRef?.current ||
       !autoTrackProgress ||
+      !productionNeedsAvailable ||
       runStatus !== "running" ||
       calc.pressDone ||
       Date.now() < autoSuppressUntilRef.current ||
@@ -1316,6 +1328,7 @@ useEffect(() => {
     autoTrackBlocked,
     autoTrackBlockedRef,
     autoTrackProgress,
+    productionNeedsAvailable,
     autoTrackWakeAcknowledgement,
     calc,
     claimAutoTrackEvent,

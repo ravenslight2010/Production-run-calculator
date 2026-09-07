@@ -143,6 +143,70 @@ describe("computeSummaryStats — zero batch weights never produce NaN/Infinity"
   });
 });
 
+describe("computeSummaryStats — case-based production input validity", () => {
+  it("computes the concrete Aldo's Meat Lover cheese requirement from 12 pizzas per case", () => {
+    const stats = computeSummaryStats(
+      baseVals({
+        casesNeeded: 240,
+        pizzasPerCase: 12,
+        casesPerLayer: 0,
+        app1Type: "Cheese",
+        app1OzPerPizza: 2.9,
+        app1CheeseRecipe: [{ ingredient: "Aldo's Standard Cheese Mix", lbs: 55.6 }],
+      }) as never,
+      PEP,
+    );
+    expect(stats.productionNeedsAvailable).toBe(true);
+    expect(stats.productionNeedsMissingInput).toBeNull();
+    expect(stats.app1Batches).toBeCloseTo(9.7482, 4);
+  });
+
+  it("adds the configured extra-layer allowance to the valid total", () => {
+    const base = baseVals({
+      casesNeeded: 240,
+      pizzasPerCase: 12,
+      casesPerLayer: 0,
+      app1Type: "Cheese",
+      app1OzPerPizza: 2.9,
+      app1CheeseRecipe: [{ ingredient: "A", lbs: 55.6 }],
+    });
+    const withoutLayer = computeSummaryStats(base as never, PEP);
+    const withLayer = computeSummaryStats({ ...base, casesPerLayer: 10 } as never, PEP);
+    expect(withLayer.app1Batches).toBeGreaterThan(withoutLayer.app1Batches);
+    expect(withLayer.app1Lbs - withoutLayer.app1Lbs).toBeCloseTo(21.75, 5);
+  });
+
+  it.each([0, undefined])(
+    "fails closed instead of returning buffer-only totals when pizzasPerCase is %s",
+    (pizzasPerCase) => {
+      const vals = baseVals({
+        casesNeeded: 240,
+        pizzasPerCase,
+        sauceOzPerPizza: 3,
+        sauceBarrelLbs: 55,
+        app1Type: "Cheese",
+        app1OzPerPizza: 2.9,
+        app1CheeseRecipe: [{ ingredient: "A", lbs: 55.6 }],
+        pep1Type: "Pepperoni",
+        pep1OzPerPizza: 1,
+        pep1Sticks: 10,
+      });
+      const stats = computeSummaryStats(vals as never, PEP);
+      expect(stats.productionNeedsAvailable).toBe(false);
+      expect(stats.productionNeedsMissingInput).toBe("pizzasPerCase");
+      expect(stats).toMatchObject({
+        sauceLbs: 0,
+        sauceBatches: 0,
+        app1Lbs: 0,
+        app1Batches: 0,
+        pep1Lbs: 0,
+        pep1Batches: 0,
+      });
+      expect(computeRunConsumptionLines(vals as never, PEP)).toEqual([]);
+    },
+  );
+});
+
 describe("applySubstitutions on type fields", () => {
   it("swaps an applicator type so the consumption key changes", () => {
     const vals = {

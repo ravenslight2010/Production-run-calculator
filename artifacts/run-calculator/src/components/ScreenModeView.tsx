@@ -295,7 +295,17 @@ export default function ScreenModeView() {
         )}
 
         {/* Ingredient grid */}
-        {items.length > 0 ? (
+        {!s.productionNeedsAvailable ? (
+          <div className="flex-1 flex items-center justify-center rounded-2xl border border-amber-500/40 bg-amber-500/10 p-8">
+            <div className="max-w-2xl text-center">
+              <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-amber-500" />
+              <p className="text-3xl font-black text-amber-600 dark:text-amber-400">Pizzas Per Case is missing</p>
+              <p className="mt-3 text-xl text-muted-foreground">
+                Frontline quantities and tracking are unavailable. Ask a supervisor to open Setup Profiles for this product, enter Pizzas Per Case, and save the setup.
+              </p>
+            </div>
+          </div>
+        ) : items.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 flex-1">
             {items.map((item: any, i: any) => (
               <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
@@ -476,6 +486,7 @@ export default function ScreenModeView() {
   }
 
   if (screenMode === "sauce") {
+    const summary = computeSummaryStats(v);
     const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
@@ -500,7 +511,17 @@ export default function ScreenModeView() {
         </div>
 
         {/* Big sauce display */}
-        {calc.sauceBatches > 0 ? (
+        {!summary.productionNeedsAvailable ? (
+          <div className="flex-1 flex items-center justify-center rounded-3xl border border-amber-500/40 bg-amber-500/10 p-8">
+            <div className="max-w-2xl text-center">
+              <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-amber-500" />
+              <p className="text-3xl font-black text-amber-600 dark:text-amber-400">Pizzas Per Case is missing</p>
+              <p className="mt-3 text-xl text-muted-foreground">
+                Sauce quantities and tracking are unavailable. Ask a supervisor to open Setup Profiles for this product, enter Pizzas Per Case, and save the setup.
+              </p>
+            </div>
+          </div>
+        ) : calc.sauceBatches > 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border border-border bg-card p-12">
             <p className="text-lg font-bold uppercase tracking-widest text-muted-foreground">Sauce Needed</p>
             <p className="text-[10rem] font-black tabular-nums leading-none text-primary">{fmtNum(calc.sauceBatches, 2)}</p>

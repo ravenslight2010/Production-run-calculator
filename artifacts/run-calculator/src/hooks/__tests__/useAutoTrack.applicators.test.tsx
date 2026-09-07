@@ -284,4 +284,23 @@ describe("useAutoTrack applicator batches", () => {
     await Promise.resolve();
     expect(claim).not.toHaveBeenCalled();
   });
+
+  it("does not arm Sauce or applicator claims when requested cases have no pizzas per case", async () => {
+    const { form: fakeForm } = form();
+    const claim = vi.fn();
+    renderHook(() => useAutoTrack({
+      runId: "missing-case-pack",
+      runStatus: "running",
+      nowTime: new Date(),
+      elapsedBatchSec: 120,
+      calc: { ...calc, sauceDepletionSec: 30 },
+      v: values({ casesNeeded: 240, pizzasPerCase: 0 }),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    }));
+    await Promise.resolve();
+    expect(claim.mock.calls.some(([event]) =>
+      event.channel === "sauce-barrel" || event.channel.startsWith("app"),
+    )).toBe(false);
+  });
 });

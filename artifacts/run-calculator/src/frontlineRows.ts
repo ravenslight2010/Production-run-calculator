@@ -1,6 +1,7 @@
 import type { FormValues } from "./types";
 
 export type FrontlineQuantitySource = {
+  productionNeedsAvailable?: boolean;
   sauceLbs: number;
   sauceBatches: number;
   app1Lbs: number; app1Batches: number;
@@ -34,6 +35,7 @@ export function deriveFrontlineNeedRows(
   v: FormValues,
   q: FrontlineQuantitySource,
 ): FrontlineNeedRow[] {
+  if (q.productionNeedsAvailable === false) return [];
   const rows: FrontlineNeedRow[] = [];
   if (v.sauceOzPerPizza > 0 && q.sauceLbs > 0) {
     rows.push({

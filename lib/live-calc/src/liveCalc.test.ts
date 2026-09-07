@@ -29,6 +29,38 @@ describe("shared live calculation boundary", () => {
     expect(getAutoTrackTiming(1000, 1, 1, 100).caseMs).toBe(1000);
   });
 
+  it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {
+    const result = computeServerCalc({
+      dayState: { runs: [{ id: "invalid", brand: "A", flavor: "B" }], currentIndex: 0 },
+      runValues: {
+        invalid: {
+          casesNeeded: 240,
+          pizzasPerCase: 0,
+          casesPerLayer: 10,
+          crustsPerCycle: 1,
+          cycleSpeed: 100,
+          speedAdjustment: 1,
+          sauceOzPerPizza: 3,
+          sauceBarrelLbs: 55,
+          app1Type: "Cheese",
+          app1OzPerPizza: 2.9,
+          app1CheeseRecipe: [{ ingredient: "A", lbs: 55.6 }],
+          pep1Type: "Pepperoni",
+          pep1OzPerPizza: 1,
+          pep1Sticks: 10,
+        },
+      },
+    }, ["Pepperoni"], 1000);
+    expect(result?.calc).toMatchObject({
+      sauceBatches: 0,
+      sauceDepletionSec: 0,
+      app1Lbs: 0,
+      app1Batches: 0,
+      pep1Lbs: 0,
+      pep1Batches: 0,
+    });
+  });
+
   it("clamps displayed cases to run need while retaining raw delta progress", () => {
     expect(computeAutoTrackSuggestion({
       runStatus: "running",

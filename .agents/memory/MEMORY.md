@@ -137,3 +137,4 @@
 - [Recipe row unit provenance](recipe-row-unit-provenance.md) — unit labels describe raw values only and must follow the selected row set through merges.
 - [Shared master-data refresh](shared-master-data-refresh.md) — facility-wide recipe edits use date-independent SSE nudges; receivers invalidate the canonical bootstrap, not payloads.
 - [Capability-gated controlled dialogs](capability-gated-controlled-dialogs.md) — revoke access with an immediate effective close plus one controlled-state close request; never unmount an open portal abruptly.
+- [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.

@@ -1,4 +1,8 @@
-import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
+import {
+  caseBasedProductionNeedsAvailable,
+  computeCasesInFreezer,
+  computeCasesOnLine,
+} from "@workspace/inventory-math";
 
 export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
 export interface CalcStoppage {
@@ -202,15 +206,16 @@ export function computeCalc({ v, ve, currentRun, nowTimeMs, doughSubTab, default
   const rackTimes = [10, 12, 16, 18, 20, 22].map((trays) => ({
     trays, sec: ppm > 0 ? trays * perTray * 60 / ppm : 0,
   }));
+  const productionNeedsAvailable = caseBasedProductionNeedsAvailable(v);
   const totalPizzasForSauce = casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase;
   const sauceEffBarrel = recipeLbs(v.frontlineRecipe) || v.sauceBarrelLbs;
-  const sauceLbs = totalPizzasForSauce * v.sauceOzPerPizza / 16 + 30;
+  const sauceLbs = productionNeedsAvailable ? totalPizzasForSauce * v.sauceOzPerPizza / 16 + 30 : 0;
   const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
-  const sauceDepletionSec = ppm > 0 && sauceEffBarrel > 0 && v.sauceOzPerPizza > 0
+  const sauceDepletionSec = productionNeedsAvailable && ppm > 0 && sauceEffBarrel > 0 && v.sauceOzPerPizza > 0
     ? sauceEffBarrel * 16 / v.sauceOzPerPizza / ppm * 60 : 0;
   const app = ([1, 2, 3, 4] as const).map((slot) => {
     const prefix = `app${slot}` as const;
-    const lbs = totalPizzasForSauce * v[`${prefix}OzPerPizza`] / 16 + 20;
+    const lbs = productionNeedsAvailable ? totalPizzasForSauce * v[`${prefix}OzPerPizza`] / 16 + 20 : 0;
     const effectiveBatch = recipeLbs(v[`${prefix}CheeseRecipe`]) || v[`${prefix}BatchLbs`];
     const batches = !v[`${prefix}Type`].trim().toLowerCase().includes("mix") && effectiveBatch > 0
       ? lbs / effectiveBatch : 0;
@@ -218,19 +223,23 @@ export function computeCalc({ v, ve, currentRun, nowTimeMs, doughSubTab, default
   });
   const pepCombined = v.pep1Combined === true;
   const pepStickMult = pepCombined ? 2 : 1;
-  const pep1Lbs = totalPizzasForSauce * v.pep1OzPerPizza / 16 + v.pep1Sticks * pepStickMult;
+  const pep1Lbs = productionNeedsAvailable
+    ? totalPizzasForSauce * v.pep1OzPerPizza / 16 + v.pep1Sticks * pepStickMult
+    : 0;
   const pep1Batches = !defaultPepTypes.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
     ? pep1Lbs / v.pep1BatchLbs : 0;
   const pep1TypeB = (v.pep1TypeB ?? "").trim();
-  const pep1LbsB = pep1TypeB
+  const pep1LbsB = productionNeedsAvailable && pep1TypeB
     ? totalPizzasForSauce * (v.pep1OzPerPizzaB ?? 0) / 16 + (v.pep1SticksB ?? 0) * pepStickMult : 0;
   const pep1BatchesB = pep1TypeB && !defaultPepTypes.includes(pep1TypeB) && (v.pep1BatchLbsB ?? 0) > 0
     ? pep1LbsB / (v.pep1BatchLbsB || 1) : 0;
-  const pep2Lbs = pepCombined ? 0 : totalPizzasForSauce * v.pep2OzPerPizza / 16 + v.pep2Sticks;
+  const pep2Lbs = !productionNeedsAvailable || pepCombined
+    ? 0
+    : totalPizzasForSauce * v.pep2OzPerPizza / 16 + v.pep2Sticks;
   const pep2Batches = !pepCombined && !defaultPepTypes.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
     ? pep2Lbs / v.pep2BatchLbs : 0;
   const pep2TypeB = (v.pep2TypeB ?? "").trim();
-  const pep2LbsB = !pepCombined && pep2TypeB
+  const pep2LbsB = productionNeedsAvailable && !pepCombined && pep2TypeB
     ? totalPizzasForSauce * (v.pep2OzPerPizzaB ?? 0) / 16 + (v.pep2SticksB ?? 0) : 0;
   const pep2BatchesB = !pepCombined && pep2TypeB && !defaultPepTypes.includes(pep2TypeB) &&
     (v.pep2BatchLbsB ?? 0) > 0 ? pep2LbsB / (v.pep2BatchLbsB || 1) : 0;

@@ -19785,10 +19785,15 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   if (!(Number(v.pizzasPerCase) > 0)) missing.push("Pizzas Per Case");
                   const freezerMissing = !(Number(ve.freezerTime) > 0);
                   if (missing.length === 0 && !freezerMissing) return null;
-                  const headline = missing.length > 0
+                  const frontlineNeedsBlocked = !computeSummaryStats(v).productionNeedsAvailable;
+                  const headline = frontlineNeedsBlocked
+                    ? "Frontline quantities can't be calculated — Pizzas Per Case is not set"
+                    : missing.length > 0
                     ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Total line time"] : [])].join(", ")} not set`
                     : "Line phase status can't show yet — Total line time not set";
-                  const detail = missing.length > 0
+                  const detail = frontlineNeedsBlocked
+                    ? "Open Setup Profiles for this product, enter Pizzas Per Case, and save the setup. Sauce, Frontline, warehouse pulls, and tracking stay unavailable until it is corrected."
+                    : missing.length > 0
                     ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
                     : "If this run uses a Freeze tunnel, scroll down and enter Freeze tunnel time (min) under the line settings to see the 3-stage filling/emptying status.";
                   return (

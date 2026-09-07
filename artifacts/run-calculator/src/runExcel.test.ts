@@ -6,10 +6,31 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  computeExportBatches,
   mergeImportRuns,
   collectImportAliases,
   type ImportCommitRun,
 } from "@/utils/runExcel";
+
+describe("computeExportBatches", () => {
+  it("does not export a buffer-only Sauce total when pizzas per case is missing", () => {
+    expect(computeExportBatches({
+      casesNeeded: 240,
+      pizzasPerCase: 0,
+      casesPerLayer: 10,
+      doughballOz: 0,
+      doughBatchYield: 0,
+      doughRecipeLbs: 0,
+      sauceOzPerPizza: 3,
+      sauceBarrelLbs: 55,
+      frontlineRecipeLbs: 55,
+    })).toEqual({
+      doughBatches: 0,
+      sauceBatches: 0,
+      productionNeedsAvailable: false,
+    });
+  });
+});
 
 const run = (
   brand: string,
