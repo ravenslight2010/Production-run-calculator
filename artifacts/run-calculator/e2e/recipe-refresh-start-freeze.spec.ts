@@ -224,6 +224,42 @@ async function expectIngredientDetailStable(
   await expect(detail).toBeHidden();
 }
 
+async function expectReloadedRecipeSnapshotsStable(
+  page: Page,
+  pendingRunId: string,
+  pendingSnapshot: string,
+  startedRunId: string,
+  startedSnapshot: string,
+): Promise<void> {
+  await expectIngredientDetailStable(page, pendingRunId, pendingSnapshot);
+  await expectIngredientDetailStable(page, startedRunId, startedSnapshot);
+}
+
+async function readServerRunValue(page: Page, runId: string): Promise<string> {
+  const response = await page.request.get(`/api/sync/today?today=${TODAY}`, {
+    headers: { "Cache-Control": "no-cache" },
+  });
+  if (!response.ok()) {
+    throw new Error(`Read canonical run value failed (${response.status()})`);
+  }
+  const payload = await response.json() as {
+    runValues?: Record<string, unknown>;
+  };
+  return JSON.stringify(payload.runValues?.[runId] ?? null);
+}
+
+async function expectServerRunValueChanged(
+  page: Page,
+  runId: string,
+  previous: string,
+): Promise<string> {
+  await expect.poll(
+    () => readServerRunValue(page, runId),
+    { timeout: 25_000 },
+  ).not.toBe(previous);
+  return readServerRunValue(page, runId);
+}
+
 async function readScheduledRunValues(
   page: Page,
   date: string,
@@ -366,6 +402,7 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
+  const serverBeforeSecondEdit = await readServerRunValue(page, upcomingRunId);
   await setRecipeBatchLbs(page, recipeName, "40");
   await openSummary(page);
   await expect(upcoming).toContainText("3.00 batches");
@@ -376,9 +413,7 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
     },
     { timeout: 20_000 },
   ).toEqual([{ ingredient: "Cheese", lbs: 40 }]);
-  // The future-day propagation writes immediately, while today's pending
-  // snapshot follows the normal debounced live-day save.
-  await page.waitForTimeout(1_000);
+  await expectServerRunValueChanged(page, upcomingRunId, serverBeforeSecondEdit);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
@@ -507,7 +542,7 @@ test("a delayed shared recipe refresh stays with its original run after a rapid 
 
 type SharedRecipeFreezeScenario = {
   label: string;
-  kind: "dough" | "sauce" | "mixes";
+  kind: "dough" | "sauce" | "mixes" | "cheese";
   firstLbs: string;
   secondLbs: string;
   seed: (
@@ -612,11 +647,48 @@ const sharedRecipeFreezeScenarios: SharedRecipeFreezeScenario[] = [
     }),
     edit: setMixPerPizza,
   },
+  {
+    label: "cheese",
+    kind: "cheese" as const,
+    firstLbs: "20",
+    secondLbs: "40",
+    seed: (
+      fixtures: AuthorizedBrowserFixtures,
+      account: { token: string },
+      recipeName: string,
+      recipeId: string,
+      brand: string,
+    ) => fixtures.seedCheeseRecipe(account, {
+      id: recipeId,
+      name: recipeName,
+      brand,
+      components: [{ ingredient: "Cheese", lbs: 10 }],
+    }),
+    values: (recipeName: string) => ({
+      casesNeeded: 100,
+      pizzasPerCase: 1,
+      casesPerSkid: 10,
+      casesPerLayer: 0,
+      crustsPerCycle: 1,
+      cycleSpeed: 1,
+      speedAdjustment: 1,
+      freezerTime: 0,
+      app1Type: "Cheese",
+      app1OzPerPizza: 16,
+      app1BatchLbs: 0,
+      app1CheeseRecipeName: recipeName,
+      app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+    }),
+    edit: setRecipeBatchLbs,
+  },
 ] as const;
 
 for (const scenario of sharedRecipeFreezeScenarios) {
-  test(`${scenario.label} recipe edits refresh pending runs but freeze after Start`, async ({ page }) => {
-    test.setTimeout(90_000);
+  test(`${scenario.label} recipe edits refresh pending runs across browsers but freeze after Start`, async ({
+    browser,
+    page,
+  }) => {
+    test.setTimeout(150_000);
     await page.setViewportSize({ width: 390, height: 844 });
 
     const username = uniqueTestId(`e2e_${scenario.label}_freeze`);
@@ -671,32 +743,112 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     });
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
-    await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    const peerContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await peerContext.addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    const peer = await peerContext.newPage();
 
-    const pendingBefore = await readIngredientDetail(page, upcomingRunId);
-    await scenario.edit(page, recipeName, scenario.firstLbs);
-    const pendingAfterFirstEdit = await expectIngredientDetailChanged(
-      page,
-      upcomingRunId,
-      pendingBefore,
-    );
+    try {
+      await Promise.all([
+        page.goto("/", { waitUntil: "domcontentloaded" }),
+        peer.goto("/", { waitUntil: "domcontentloaded" }),
+      ]);
+      await Promise.all([
+        page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+        peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+      ]);
 
-    await page.getByTestId("tab-run").click();
-    await page.getByTestId("button-start-run").click();
-    await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
-    const startedSnapshot = await readIngredientDetail(page, currentRunId);
+      const [pendingBefore, peerPendingBefore] = await Promise.all([
+        readIngredientDetail(page, upcomingRunId),
+        readIngredientDetail(peer, upcomingRunId),
+      ]);
+      expect(peerPendingBefore).toBe(pendingBefore);
 
-    await scenario.edit(page, recipeName, scenario.secondLbs);
-    await expectIngredientDetailChanged(page, upcomingRunId, pendingAfterFirstEdit);
-    await expectIngredientDetailStable(page, currentRunId, startedSnapshot);
-    // Profile propagation is local-first and the debounced day-state save
-    // follows it. Give that save a turn to reach the server before checking
-    // the reload boundary.
-    await page.waitForTimeout(1_000);
+      const serverBeforeFirstEdit = await readServerRunValue(page, upcomingRunId);
+      await scenario.edit(page, recipeName, scenario.firstLbs);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      const serverAfterFirstEdit = await expectServerRunValueChanged(
+        page,
+        upcomingRunId,
+        serverBeforeFirstEdit,
+      );
+      await peer.reload({ waitUntil: "domcontentloaded" });
+      await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      const [pendingAfterFirstEdit, peerPendingAfterFirstEdit] = await Promise.all([
+        expectIngredientDetailChanged(page, upcomingRunId, pendingBefore),
+        expectIngredientDetailChanged(peer, upcomingRunId, peerPendingBefore),
+      ]);
+      expect(peerPendingAfterFirstEdit).toBe(pendingAfterFirstEdit);
 
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-    await expectIngredientDetailStable(page, currentRunId, startedSnapshot);
+      await page.getByTestId("tab-run").click();
+      await page.getByTestId("button-start-run").click();
+      await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
+      await peer.getByTestId("tab-run").click();
+      await expect(peer.getByRole("button", { name: /pause.?run/i })).toBeVisible({
+        timeout: 20_000,
+      });
+      const [startedSnapshot, peerStartedSnapshot] = await Promise.all([
+        readIngredientDetail(page, currentRunId),
+        readIngredientDetail(peer, currentRunId),
+      ]);
+      expect(peerStartedSnapshot).toBe(startedSnapshot);
+
+      await scenario.edit(peer, recipeName, scenario.secondLbs);
+      await peer.reload({ waitUntil: "domcontentloaded" });
+      await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await expectServerRunValueChanged(
+        peer,
+        upcomingRunId,
+        serverAfterFirstEdit,
+      );
+      await Promise.all([
+        page.reload({ waitUntil: "domcontentloaded" }),
+        peer.reload({ waitUntil: "domcontentloaded" }),
+      ]);
+      await Promise.all([
+        page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+        peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+      ]);
+      const [pendingAfterSecondEdit, peerPendingAfterSecondEdit] = await Promise.all([
+        expectIngredientDetailChanged(page, upcomingRunId, pendingAfterFirstEdit),
+        expectIngredientDetailChanged(peer, upcomingRunId, peerPendingAfterFirstEdit),
+      ]);
+      expect(peerPendingAfterSecondEdit).toBe(pendingAfterSecondEdit);
+      await Promise.all([
+        expectIngredientDetailStable(page, currentRunId, startedSnapshot),
+        expectIngredientDetailStable(peer, currentRunId, peerStartedSnapshot),
+      ]);
+
+      // Reload both contexts once more so neither browser can reintroduce its
+      // older pending snapshot after the peer's acknowledged sync write.
+      await Promise.all([
+        page.reload({ waitUntil: "domcontentloaded" }),
+        peer.reload({ waitUntil: "domcontentloaded" }),
+      ]);
+      await Promise.all([
+        page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+        peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+      ]);
+      await Promise.all([
+        expectReloadedRecipeSnapshotsStable(
+          page,
+          upcomingRunId,
+          pendingAfterSecondEdit,
+          currentRunId,
+          startedSnapshot,
+        ),
+        expectReloadedRecipeSnapshotsStable(
+          peer,
+          upcomingRunId,
+          peerPendingAfterSecondEdit,
+          currentRunId,
+          peerStartedSnapshot,
+        ),
+      ]);
+    } finally {
+      await peerContext.close();
+    }
   });
 }
