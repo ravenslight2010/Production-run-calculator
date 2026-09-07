@@ -2,6 +2,12 @@ import type { Request, Response, NextFunction } from "express";
 import { getOrCreateUserRole, getRole, type Capability } from "../lib/roles";
 import { currentScope } from "../lib/requestScope";
 
+type CapabilityMiddleware = ReturnType<typeof requireCapabilities>;
+const requiredCapabilitiesByMiddleware = new WeakMap<CapabilityMiddleware, readonly Capability[]>();
+const capabilityMatchByMiddleware = new WeakMap<CapabilityMiddleware, "all" | "any">();
+const liveScopeMiddlewares = new WeakSet<Function>();
+const managerRoleMiddlewares = new WeakSet<Function>();
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -31,6 +37,7 @@ export function requireLiveScope(req: Request, res: Response, next: NextFunction
   }
   next();
 }
+liveScopeMiddlewares.add(requireLiveScope);
 
 function requireCapabilities(capabilitiesRequired: readonly Capability[], match: "all" | "any") {
   return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -73,7 +80,58 @@ function requireCapabilities(capabilitiesRequired: readonly Capability[], match:
 }
 
 export function requireCapability(capability: Capability) {
-  return requireCapabilities([capability], "all");
+  const middleware = requireCapabilities([capability], "all");
+  requiredCapabilitiesByMiddleware.set(middleware, [capability]);
+  capabilityMatchByMiddleware.set(middleware, "all");
+  return middleware;
+}
+
+/**
+ * Gate a route only when its request selects a protected variant.  This keeps
+ * current-shift collaboration auth-only while making an alternate target (for
+ * example a scheduled day) capability-controlled before its handler runs.
+ * The middleware is still tagged for route-inventory inspection.
+ */
+export function requireCapabilityWhen(
+  capability: Capability,
+  required: (req: Request) => boolean,
+) {
+  const capabilityMiddleware = requireCapabilities([capability], "all");
+  const middleware = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!required(req)) {
+      next();
+      return;
+    }
+    await capabilityMiddleware(req, res, next);
+  };
+  requiredCapabilitiesByMiddleware.set(middleware, [capability]);
+  capabilityMatchByMiddleware.set(middleware, "all");
+  return middleware;
+}
+
+/**
+ * Test-only route ownership hook. Express keeps middleware functions on each
+ * route layer, so authorization inventory checks can discover capability gates
+ * without duplicating route declarations or invoking the middleware.
+ */
+export function getRequiredCapabilities(
+  middleware: unknown,
+): readonly Capability[] | undefined {
+  return typeof middleware === "function"
+    ? requiredCapabilitiesByMiddleware.get(middleware as CapabilityMiddleware)
+    : undefined;
+}
+
+export function getCapabilityMatch(
+  middleware: unknown,
+): "all" | "any" | undefined {
+  return typeof middleware === "function"
+    ? capabilityMatchByMiddleware.get(middleware as CapabilityMiddleware)
+    : undefined;
+}
+
+export function isRequireLiveScope(middleware: unknown): boolean {
+  return typeof middleware === "function" && liveScopeMiddlewares.has(middleware);
 }
 
 /**
@@ -87,8 +145,16 @@ export function requireManagerRole(req: Request, res: Response, next: NextFuncti
   }
   next();
 }
+managerRoleMiddlewares.add(requireManagerRole);
+
+export function isRequireManagerRole(middleware: unknown): boolean {
+  return typeof middleware === "function" && managerRoleMiddlewares.has(middleware);
+}
 
 /** Gate a shared operational read surface that is valid for either role. */
 export function requireAnyCapability(capabilities: readonly Capability[]) {
-  return requireCapabilities(capabilities, "any");
+  const middleware = requireCapabilities(capabilities, "any");
+  requiredCapabilitiesByMiddleware.set(middleware, capabilities);
+  capabilityMatchByMiddleware.set(middleware, "any");
+  return middleware;
 }

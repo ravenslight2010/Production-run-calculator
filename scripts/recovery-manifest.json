@@ -3,6 +3,73 @@
   "description": "Focused evidence inventory for selective recovery from a checkpoint.",
   "entries": [
     {
+      "id": "home-deferred-import-dialog-boundary",
+      "feature": "Deferred import dialogs retain lazy chunks and deterministic close priority",
+      "files": [
+        "artifacts/run-calculator/src/pages/home.tsx",
+        "artifacts/run-calculator/src/hooks/useHomeImportDialogs.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "closeTopmostImportDialog"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "load={loadSpecImportDialog}"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/hooks/useHomeImportDialogs.test.ts",
+          "contains": "closeTopmostImportDialog"
+        }
+      ],
+      "intentionalDifference": "Home still owns DeferredSurface render conditions and loader functions; the hook moves only dialog state containers and close commands."
+    },
+    {
+      "id": "home-form-lifecycle-boundary",
+      "feature": "Home form identity fences keep current-run healing and autosave isolated",
+      "files": [
+        "artifacts/run-calculator/src/pages/home.tsx",
+        "artifacts/run-calculator/src/hooks/useHomeFormLifecycle.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "useHomeFormLifecycle"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/hooks/useHomeFormLifecycle.test.ts",
+          "contains": "shouldAutosaveHomeForm"
+        }
+      ],
+      "intentionalDifference": "Home remains the sole owner of canonical day state, the react-hook-form instance, provider composition, persistence commands, and sync scheduling."
+    },
+    {
+      "id": "home-sync-coordination-boundary",
+      "feature": "Home keeps sync, wake, reset, and push-generation coordination together",
+      "files": [
+        "artifacts/run-calculator/src/pages/home.tsx",
+        "artifacts/run-calculator/src/hooks/useHomeSyncCoordination.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "useHomeSyncCoordination"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/foregroundSyncWakeGuard.test.ts",
+          "contains": "foreground wake sync barrier"
+        }
+      ],
+      "intentionalDifference": "The hook owns only coordination containers; Home remains the single protocol executor and canonical day/form owner."
+    },
+    {
       "id": "import-history",
       "feature": "Saved import history can be reopened",
       "files": [
@@ -11,7 +78,7 @@
       ],
       "wiring": [
         {
-          "file": "artifacts/api-server/src/routes/index.ts",
+          "file": "artifacts/api-server/src/routes/capabilities/masterDataImports.ts",
           "contains": "router.use(importHistoryRouter)"
         },
         {
@@ -45,7 +112,7 @@
       ],
       "wiring": [
         {
-          "file": "artifacts/api-server/src/routes/index.ts",
+          "file": "artifacts/api-server/src/routes/capabilities/administration.ts",
           "contains": "router.use(profileDataHealthRouter)"
         },
         {
@@ -75,7 +142,7 @@
       ],
       "wiring": [
         {
-          "file": "artifacts/api-server/src/routes/index.ts",
+          "file": "artifacts/api-server/src/routes/capabilities/inventoryOperations.ts",
           "contains": "router.use(operationalReportsRouter)"
         },
         {
@@ -96,6 +163,78 @@
         }
       ],
       "intentionalDifference": "The current handoff keeps source-unavailable notes and a broader scoped digest instead of matching the checkpoint implementation byte-for-byte."
+    },
+    {
+      "id": "shared-live-calculations",
+      "feature": "Web and API share live production calculations and advisory auto-track schedules",
+      "files": [
+        "lib/live-calc/src/index.ts",
+        "lib/live-calc/src/autoTrackEngine.ts",
+        "lib/live-calc/src/autoTrackSchedule.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/contexts/LiveRunContext.tsx",
+          "contains": "computeCalc("
+        },
+        {
+          "file": "artifacts/run-calculator/src/hooks/useAutoTrack.ts",
+          "contains": "computeAutoTrackSuggestion("
+        },
+        {
+          "file": "artifacts/api-server/src/routes/sync.ts",
+          "contains": "computeServerLiveState("
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "autoTrackScheduleRef"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "artifacts/api-server/src/routes/sync.ts",
+          "contains": "...liveState"
+        }
+      ],
+      "tests": [
+        {
+          "file": "lib/live-calc/src/liveCalc.test.ts",
+          "contains": "describe("
+        }
+      ],
+      "intentionalDifference": "The current recovery preserves the 1-second client cadence floor while server ownership is bounded to fresh live rows and clients retain an expiring schedule-lease fallback."
+    },
+    {
+      "id": "server-auto-track-ownership",
+      "feature": "Fresh live runs receive bounded server-owned net-second and wall-clock automatic claims",
+      "files": [
+        "artifacts/api-server/src/lib/autoTrackServerTicks.ts",
+        "artifacts/api-server/src/routes/sync.ts",
+        "artifacts/run-calculator/src/hooks/useAutoTrack.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/api-server/src/index.ts",
+          "contains": "startAutoTrackServerTicks()"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "publishAutoTrackSchedule"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "artifacts/api-server/src/lib/autoTrackCoordination.ts",
+          "contains": "applyAutoTrackClaim"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/api-server/src/lib/autoTrackCoordination.test.ts",
+          "contains": "describe("
+        }
+      ],
+      "intentionalDifference": "Server bookkeeping remains an internal sync-blob detail: no schema or public API contract is changed. It is preserved only by ordinary same-date additive merges and intentionally discarded by reset/replacement flows."
     },
     {
       "id": "recovery-contract-freshness",
@@ -127,6 +266,52 @@
           "contains": "diff -ru"
         }
       ]
+    },
+    {
+      "id": "calculator-ui-memo-boundaries",
+      "feature": "Calculator station screens and warehouse tools render behind focused memoized boundaries",
+      "files": [
+        "artifacts/run-calculator/src/components/ScreenModeView.tsx",
+        "artifacts/run-calculator/src/components/SetupContent.tsx",
+        "artifacts/run-calculator/src/components/SummaryToolsContent.tsx",
+        "artifacts/run-calculator/src/components/WarehouseTabContent.tsx",
+        "artifacts/run-calculator/src/components/InventoryTabContent.tsx",
+        "artifacts/run-calculator/src/components/MixesTabContent.tsx",
+        "artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "WarehouseTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "SetupTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "InventoryTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "MixesTabCtx.Provider"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "SummaryToolsContent"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "screenMode ? <ScreenModeView />"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/contexts/__tests__/LiveTabMemo.snappy.test.tsx",
+          "contains": "describe("
+        }
+      ],
+      "intentionalDifference": "Home remains the owner of form state, persistence, synchronization, live-run coordination, permissions, imports, and dialogs. The focused views consume only memoized presentation contexts; no formula, API, database, or workflow ownership was moved."
     }
   ]
 }

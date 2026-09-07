@@ -355,7 +355,7 @@ describe("multi-client sync convergence soak", () => {
     (future.dayState as Record<string, unknown>).runs = [{ id: "future-run", brand: "Acme", flavor: "Cheese" }];
     const futureRes = await fetch(`${baseUrl}/api/sync/${TOMORROW}?today=${TODAY}`, {
       method: "PUT",
-      headers: { ...headers(), "content-type": "application/json" },
+      headers: { ...headers(MANAGER), "content-type": "application/json" },
       body: JSON.stringify({ senderId: client.id, payload: future }),
     });
     expect(futureRes.status).toBe(200);

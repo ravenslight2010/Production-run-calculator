@@ -109,8 +109,8 @@ export default memo(function MixesTabContent() {
                     // date=today so the make-day plan works when today is selected.
                     const todayDateStr = todayStr();
                     const liveRunsForMixes = ctx.dayState.runs
-                      .filter((r: any) => r.brand && !r.endedAt)
-                      .map((r: any) => {
+                      .filter((r) => r.brand && !r.endedAt)
+                      .map((r) => {
                         const runVals = ctx.effectiveValuesForRun(
                           r,
                           r.id === ctx.currentRunId ? ctx.form.getValues() : loadRunValues(r.id),
@@ -119,10 +119,10 @@ export default memo(function MixesTabContent() {
                       });
                     const runs = [
                       ...liveRunsForMixes,
-                      ...ctx.scheduledDays.flatMap((day: any) =>
+                      ...ctx.scheduledDays.flatMap((day) =>
                         (day.runs ?? [])
-                          .filter((r: any) => r.brand)
-                          .map((r: any) => {
+                          .filter((r) => r.brand)
+                          .map((r) => {
                             const profile = loadProfile(r.brand, r.flavor);
                             const vals: FormValues = {
                               ...(profile ?? DEFAULT_VALUES),
@@ -135,7 +135,7 @@ export default memo(function MixesTabContent() {
                               r.flavor,
                               ctx.effectiveValuesForRun(
                                 {
-                                  id: (r as typeof r & { id?: string }).id ?? `${day.date}:${r.brand}:${r.flavor}`,
+                                  id: r.id || `${day.date}:${r.brand}:${r.flavor}`,
                                   brand: r.brand,
                                   flavor: r.flavor,
                                 },
@@ -216,7 +216,7 @@ export default memo(function MixesTabContent() {
                                         </div>
                                         {/* Already made — controlled component so state stays stable during saves */}
                                         {(() => {
-                                          const liveMix = ctx.mixPlanItems.find((mx: any) => mx.id === m.mixId);
+                                          const liveMix = ctx.mixPlanItems.find((mx) => mx.id === m.mixId);
                                           return liveMix ? (
                                             <MixAlreadyMadeInput
                                               mix={liveMix}
@@ -332,7 +332,7 @@ export default memo(function MixesTabContent() {
                                         </div>
                                       )}
                                       {(() => {
-                                        const liveMix = ctx.mixPlanItems.find((mx: any) => mx.id === m.mixId);
+                                         const liveMix = ctx.mixPlanItems.find((mx) => mx.id === m.mixId);
                                         return liveMix ? (
                                           <MixAlreadyMadeInput
                                             mix={liveMix}

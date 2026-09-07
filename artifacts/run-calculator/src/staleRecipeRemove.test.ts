@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 //
 // One-click removal for stale ("old reference") recipe names. Unlike a merge
-// there is no target: removeStaleRecipeReference clears the name from EVERY
-// surface that still references it — legacy local name lists, recipe-preset
-// maps, per-run values, brand/crust profiles, templates and history — and
+// there is no target: removeStaleRecipeReference clears the name from mutable
+// surfaces that still reference it — legacy local name lists, recipe-preset
+// maps, pending current-day run values, brand/crust profiles and templates — and
 // writes a deletion tombstone so the additive live-sync union can't resurrect
-// it from a stale peer. This test drives the REAL storage helper plus the same
-// extracted receive-side guards the merge sync test uses.
+// it from a stale peer. Started/ended/unknown runs and history remain immutable.
+// This test drives the REAL storage helper plus the same extracted receive-side
+// guards the merge sync test uses.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -24,6 +25,7 @@ import {
   dropDeleted,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
+  saveDayState,
   saveTemplates,
   loadTemplates,
   loadList,
@@ -46,10 +48,22 @@ beforeEach(() => {
 });
 
 describe("removeStaleRecipeReference clears every surface", () => {
-  it("blanks run/profile/template/history selections, drops the list entry + preset, tombstones", () => {
+  it("blanks mutable selections while preserving started/ended/unknown/history snapshots", () => {
     // Runs
     saveRunValues("a", run("Old Dough"));
     saveRunValues("b", run("Keep Dough"));
+    saveRunValues("started", run("Old Dough"));
+    saveRunValues("ended", run("Old Dough"));
+    saveRunValues("unknown", run("Old Dough"));
+    saveDayState({
+      runs: [
+        { id: "a", brand: "Brand", flavor: "A" },
+        { id: "b", brand: "Brand", flavor: "B" },
+        { id: "started", brand: "Brand", flavor: "Started", startedAt: 1 },
+        { id: "ended", brand: "Brand", flavor: "Ended", startedAt: 1, endedAt: 2 },
+      ],
+      currentIndex: 0,
+    });
     // Profile
     localStorage.setItem(
       PROFILE_KEY("BrandX", "Cheese"),
@@ -79,14 +93,17 @@ describe("removeStaleRecipeReference clears every surface", () => {
     // Run selection blanked; other run untouched.
     expect(loadRunValues("a").doughRecipeName).toBe("");
     expect(loadRunValues("b").doughRecipeName).toBe("Keep Dough");
+    expect(loadRunValues("started").doughRecipeName).toBe("Old Dough");
+    expect(loadRunValues("ended").doughRecipeName).toBe("Old Dough");
+    expect(loadRunValues("unknown").doughRecipeName).toBe("Old Dough");
     // Profile blanked.
     const prof = JSON.parse(localStorage.getItem(PROFILE_KEY("BrandX", "Cheese"))!);
     expect(prof.doughRecipeName).toBe("");
     // Template blanked.
     expect((loadTemplates()[0].values as FormValues).doughRecipeName).toBe("");
-    // History blanked.
+    // Historical recipe snapshots are immutable.
     const hist = JSON.parse(localStorage.getItem(HISTORY_KEY)!);
-    expect(hist[0].runValues.h1.doughRecipeName).toBe("");
+    expect(hist[0].runValues.h1.doughRecipeName).toBe("Old Dough");
     // Legacy list entry removed (case-insensitive), keeper stays.
     expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).toEqual(["Keep Dough"]);
     // Preset entry dropped, keeper stays.
@@ -101,6 +118,10 @@ describe("removeStaleRecipeReference clears every surface", () => {
       app1CheeseRecipeName: "Ghost Mix",
       app3CheeseRecipeName: "ghost mix",
       app4CheeseRecipeName: "Real Mix",
+    });
+    saveDayState({
+      runs: [{ id: "r", brand: "Brand", flavor: "Run" }],
+      currentIndex: 0,
     });
     localStorage.setItem(CHEESE_RECIPE_NAMES_KEY, JSON.stringify(["Ghost Mix"]));
     saveCheeseRecipePresets({ "Ghost Mix": [{ ingredient: "Mozz", lbs: 5 }] } as never);
@@ -128,6 +149,10 @@ describe("removeStaleRecipeReference clears every surface", () => {
 describe("removal survives a stale incoming sync (receive path)", () => {
   it("does not resurrect the removed name from a stale peer's payload", () => {
     saveRunValues("a", run("Old Dough"));
+    saveDayState({
+      runs: [{ id: "a", brand: "Brand", flavor: "A" }],
+      currentIndex: 0,
+    });
     localStorage.setItem(DOUGH_RECIPE_NAMES_KEY, JSON.stringify(["Old Dough"]));
     saveDoughRecipePresets({ "Old Dough": { rows: [{ ingredient: "Flour", lbs: 1 }] } });
 

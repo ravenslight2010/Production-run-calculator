@@ -32,6 +32,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
+// Receipt ownership is covered separately. Keep these hook tests isolated from
+// persistent IndexedDB/localStorage claims created by other notification cases.
+vi.mock("../../alertReceipts", () => ({
+  claimAlertReceipt: vi.fn().mockResolvedValue(true),
+}));
+
 // ── Sanity: confirm jsdom really omits Notification ──────────────────────────
 // If this fails the whole test file's premise is wrong.
 if (typeof window !== "undefined" && "Notification" in window) {
@@ -301,9 +307,7 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
     act(() => {
       rerender(makeParams(DRAIN_DONE_AT + 1_000, { currentRun: run }));
     });
-    await act(async () => { await Promise.resolve(); });
-
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     expect(notifCtor.mock.calls[0][0]).toBe("❄️ Freeze tunnel empty");
     const opts = notifCtor.mock.calls[0][1] as NotificationOptions;
     expect(opts.body).toMatch(/Freeze tunnel is clear/i);
@@ -345,9 +349,8 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
     act(() => {
       rerender(makeParams(DRAIN_DONE_AT + 1_000, { currentRun: run1 }));
     });
-    await act(async () => { await Promise.resolve(); });
     expect(vibrateMock).toHaveBeenCalledOnce();
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     vibrateMock.mockClear();
     notifCtor.mockClear();
 
@@ -362,9 +365,8 @@ describe("useNotifications — freezer-drain effect (no Notification API)", () =
     act(() => {
       rerender(makeParams(run2DrainAt + 1_000, { currentRun: run2 }));
     });
-    await act(async () => { await Promise.resolve(); });
     expect(vibrateMock).toHaveBeenCalledOnce();
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     expect(notifCtor.mock.calls[0][1] as NotificationOptions).toMatchObject({
       tag: `freezer-done-${run2.id}`,
     });

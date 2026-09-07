@@ -12,15 +12,12 @@
 // logic here keeps both apps thin and identical (replit.md parity), and lets the
 // mix round-trip be unit-tested straight through @workspace/premix-import.
 //
-// Two distinct output workbooks (the two importers have different formats):
-//   * buildSpecExportGrids(...)  → profiles + dough/sauce/cheese recipe tabs,
-//     meant for the AI-based "Import Spec Sheet". Uses labelled tabular layouts
-//     and "Brand: flavor" header rows the parse prompt already understands.
-//   * buildMixExportGrids(...)   → one tab per mix in the DETERMINISTIC premix
-//     format ("Per Pizza"/"Per Batch" columns, a "Total" row, an optional
-//     "Pull N Days Early" note) so "Import Premix Sheet" re-reads it exactly.
-// They are kept in SEPARATE workbooks on purpose: feeding mix tabs to the AI
-// spec importer (or spec/recipe tabs to the premix scanner) would cross-parse.
+// Five distinct output workbooks:
+//   * Specs — one product profile table per brand.
+//   * Dough / Sauce — one recipe per worksheet.
+//   * Cheese — recipe blocks grouped by the brands that use them.
+//   * Mixes — deterministic premix blocks grouped by brand.
+// Mixes remain separate from the AI spec importer format on purpose.
 
 import { PROMPT_MAX_CELL_CHARS, type SheetGrid } from "@workspace/spec-import";
 import type { Mix } from "@workspace/mixes";
@@ -53,9 +50,9 @@ export type ExportProfile = {
   pepperonis: ExportPepperoni[];
   /** doughRecipeName reference (ties this profile to a dough recipe). */
   doughRecipeName?: string;
-  /** Dough target doughball weight in oz (exported alongside the dough recipe). */
+  /** Product-specific dough target weight in oz. */
   targetDoughballWeight?: number;
-  /** Doughballs per tray (exported alongside the dough recipe). */
+  /** Product-specific doughballs per tray. */
   doughballsPerTray?: number;
   /** frontlineRecipeName reference (ties this profile to a sauce recipe). */
   sauceRecipeName?: string;
@@ -70,12 +67,19 @@ export type SpecExportInput = {
   cheeseRecipes: ExportRecipe[];
 };
 
-/** Which kinds the user chose to include in the spec/recipe workbook. */
+/** Compatibility selection used by buildSpecExportGrids. */
 export type SpecExportSelection = {
   profiles: boolean;
   dough: boolean;
   sauce: boolean;
   cheese: boolean;
+};
+
+export type SpecRecipeWorkbookKind = "specs" | "dough" | "sauce" | "cheese";
+export type ExportWorkbookKind = SpecRecipeWorkbookKind | "mixes";
+export type ExportWorkbook = {
+  kind: ExportWorkbookKind;
+  grids: SheetGrid[];
 };
 
 // ── Cell helpers ─────────────────────────────────────────────────────────────
@@ -126,17 +130,25 @@ function dedupeSheetNames(grids: SheetGrid[]): SheetGrid[] {
   });
 }
 
+function recipeSheetName(name: string, kind: "Dough" | "Sauce"): string {
+  // Keep the kind first so Excel's 31-character clamp cannot remove the
+  // importer context from long recipe names.
+  return `${kind} — ${name}`;
+}
+
 // ── Recipe → targets derivation ──────────────────────────────────────────────
 
 type RecipeTie = {
   /** brand → set of flavors (preserves each flavor exactly once). */
   targetsByBrand: Map<string, string[]>;
-  /** Dough only: first non-zero target doughball weight found. */
-  doughballOz?: number;
-  /** Dough only: first non-zero doughballs-per-tray count found. */
-  doughballsPerTray?: number;
-  /** Cheese only: applicator slot (1-4) the recipe first ties to. */
-  appSlot?: number;
+  /** Dough metadata is emitted only when every tied profile agrees. */
+  doughballOzs: number[];
+  doughballsPerTrayValues: number[];
+  targetCount: number;
+  doughballOzPresentCount: number;
+  doughballsPerTrayPresentCount: number;
+  /** Cheese slots by brand; ambiguous multi-slot use is intentionally omitted. */
+  appSlotsByBrand: Map<string, number[]>;
 };
 
 function addTarget(tie: RecipeTie, brand: string, flavor: string): void {
@@ -168,7 +180,15 @@ function tieRecipes(
     const key = name.trim().toLowerCase();
     let tie = byName.get(key);
     if (!tie) {
-      tie = { targetsByBrand: new Map() };
+      tie = {
+        targetsByBrand: new Map(),
+        doughballOzs: [],
+        doughballsPerTrayValues: [],
+        targetCount: 0,
+        doughballOzPresentCount: 0,
+        doughballsPerTrayPresentCount: 0,
+        appSlotsByBrand: new Map(),
+      };
       byName.set(key, tie);
     }
     return tie;
@@ -179,11 +199,26 @@ function tieRecipes(
       if (nm) {
         const tie = get(nm);
         addTarget(tie, p.brand, p.flavor);
-        if (tie.doughballOz == null && p.targetDoughballWeight && p.targetDoughballWeight > 0) {
-          tie.doughballOz = p.targetDoughballWeight;
+        tie.targetCount += 1;
+        if (
+          p.targetDoughballWeight &&
+          p.targetDoughballWeight > 0 &&
+          !tie.doughballOzs.includes(p.targetDoughballWeight)
+        ) {
+          tie.doughballOzs.push(p.targetDoughballWeight);
         }
-        if (tie.doughballsPerTray == null && p.doughballsPerTray && p.doughballsPerTray > 0) {
-          tie.doughballsPerTray = p.doughballsPerTray;
+        if (p.targetDoughballWeight && p.targetDoughballWeight > 0) {
+          tie.doughballOzPresentCount += 1;
+        }
+        if (
+          p.doughballsPerTray &&
+          p.doughballsPerTray > 0 &&
+          !tie.doughballsPerTrayValues.includes(p.doughballsPerTray)
+        ) {
+          tie.doughballsPerTrayValues.push(p.doughballsPerTray);
+        }
+        if (p.doughballsPerTray && p.doughballsPerTray > 0) {
+          tie.doughballsPerTrayPresentCount += 1;
         }
       }
     } else if (kind === "sauce") {
@@ -196,7 +231,12 @@ function tieRecipes(
         if (!nm) continue;
         const tie = get(nm);
         addTarget(tie, p.brand, p.flavor);
-        if (tie.appSlot == null) tie.appSlot = slot;
+        const brand = text(p.brand);
+        if (brand) {
+          const slots = tie.appSlotsByBrand.get(brand) ?? [];
+          if (!slots.includes(slot)) slots.push(slot);
+          tie.appSlotsByBrand.set(brand, slots);
+        }
       }
     }
   }
@@ -212,7 +252,7 @@ function tieRecipes(
  * Abbreviations are spelled out ("Applicator", "Pepperoni") so the sheet
  * is readable without knowing the import format.
  */
-function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
+function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "Profiles"): SheetGrid {
   const sorted = [...profiles].sort(
     (a, b) =>
       a.brand.localeCompare(b.brand) || a.flavor.localeCompare(b.flavor),
@@ -232,6 +272,8 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
   }
   const appSlots = maxAppSlot + 1; // 0 when no applicators used
   const pepSlots = maxPepSlot + 1; // 0 when no peps used
+  const hasDoughballWeight = sorted.some((p) => (p.targetDoughballWeight ?? 0) > 0);
+  const hasDoughballsPerTray = sorted.some((p) => (p.doughballsPerTray ?? 0) > 0);
 
   // Build the header row for only the slots in use.
   const header: string[] = [
@@ -240,10 +282,16 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
     "Die Type",
     "Sauce oz/pizza",
     "Dough Recipe",
-    "Sauce Recipe",
   ];
+  if (hasDoughballWeight) header.push("Target Doughball Weight (oz)");
+  if (hasDoughballsPerTray) header.push("Doughballs Per Tray");
+  header.push("Sauce Recipe");
   for (let i = 0; i < appSlots; i++) {
-    header.push(`Applicator ${i + 1} Type`, `Applicator ${i + 1} oz/pizza`);
+    header.push(
+      `Applicator ${i + 1} Type`,
+      `Applicator ${i + 1} oz/pizza`,
+      `Applicator ${i + 1} Recipe`,
+    );
   }
   for (let i = 0; i < pepSlots; i++) {
     header.push(`Pepperoni ${i + 1} Type`, `Pepperoni ${i + 1} Sticks`, `Pepperoni ${i + 1} oz/pizza`);
@@ -266,12 +314,18 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
       // a factory export round-trips each product's dough/sauce assignment even
       // when the recipe itself lives on another tab (or doesn't exist yet).
       text(p.doughRecipeName),
-      text(p.sauceRecipeName),
     ];
+    if (hasDoughballWeight) row.push(num(p.targetDoughballWeight));
+    if (hasDoughballsPerTray) row.push(num(p.doughballsPerTray));
+    row.push(text(p.sauceRecipeName));
     for (let i = 0; i < appSlots; i++) {
       const a = apps[i];
       const type = text(a?.type);
-      row.push(type, type ? num(a?.ozPerPizza) : "");
+      row.push(
+        type,
+        type ? num(a?.ozPerPizza) : "",
+        type ? text(p.cheeseRecipeNames?.[i]) : "",
+      );
     }
     for (let i = 0; i < pepSlots; i++) {
       const pp = peps[i];
@@ -280,7 +334,19 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
     }
     rows.push(row);
   }
-  return { name: "Profiles", rows, boldRows: [0] };
+  return {
+    name: sheetName,
+    rows,
+    boldRows: [0],
+    accentRows: [0],
+    headerRows: [0],
+    columnWidths: header.map((label, index) =>
+      index < 2 ? Math.max(18, Math.min(30, label.length + 4)) : Math.max(14, Math.min(24, label.length + 2)),
+    ),
+    wrapText: true,
+    freezeRows: 1,
+    autoFilter: { startRow: 0, endRow: Math.max(0, rows.length - 1) },
+  };
 }
 
 // ── Recipe sheets ────────────────────────────────────────────────────────────
@@ -304,6 +370,7 @@ function buildRecipeGrid(
   kind: "dough" | "sauce" | "cheese",
   recipes: ReadonlyArray<ExportRecipe>,
   ties: Map<string, RecipeTie>,
+  targetBrand?: string,
 ): SheetGrid {
   const rows: string[][] = [];
   const boldRows: number[] = [];
@@ -317,6 +384,7 @@ function buildRecipeGrid(
     const tie = ties.get(name.toLowerCase());
     if (tie) {
       for (const [brand, flavors] of tie.targetsByBrand) {
+        if (targetBrand && brand.toLowerCase() !== targetBrand.toLowerCase()) continue;
         // The AI prompt path clamps each CELL to PROMPT_MAX_CELL_CHARS when the
         // workbook is flattened for parsing. A brand with many flavors renders
         // one long single-cell line — if it exceeds the clamp, the trailing
@@ -336,14 +404,25 @@ function buildRecipeGrid(
         }
         flush();
       }
-      if (kind === "dough" && tie.doughballOz != null) {
-        rows.push(["Target Doughball Weight (oz)", num(tie.doughballOz)]);
+      if (
+        kind === "dough" &&
+        tie.doughballOzs.length === 1 &&
+        tie.doughballOzPresentCount === tie.targetCount
+      ) {
+        rows.push(["Target Doughball Weight (oz)", num(tie.doughballOzs[0])]);
       }
-      if (kind === "dough" && tie.doughballsPerTray != null) {
-        rows.push(["Doughballs Per Tray", num(tie.doughballsPerTray)]);
+      if (
+        kind === "dough" &&
+        tie.doughballsPerTrayValues.length === 1 &&
+        tie.doughballsPerTrayPresentCount === tie.targetCount
+      ) {
+        rows.push(["Doughballs Per Tray", num(tie.doughballsPerTrayValues[0])]);
       }
-      if (kind === "cheese" && tie.appSlot != null) {
-        rows.push(["Applicator Slot", num(tie.appSlot)]);
+      if (kind === "cheese") {
+        const slots = targetBrand
+          ? tie.appSlotsByBrand.get(targetBrand) ?? []
+          : [...new Set([...tie.appSlotsByBrand.values()].flat())];
+        if (slots.length === 1) rows.push(["Applicator Slot", num(slots[0])]);
       }
     }
     rows.push(["Ingredient", "Lbs"]);
@@ -352,7 +431,113 @@ function buildRecipeGrid(
     }
     rows.push([]); // spacer between blocks
   }
-  return { name: sheetName, rows, boldRows };
+  const headerRows = rows.flatMap((row, index) => row[0] === "Ingredient" ? [index] : []);
+  return {
+    name: sheetName,
+    rows,
+    boldRows: [...boldRows, ...headerRows],
+    accentRows: boldRows,
+    headerRows,
+    columnWidths: [42, 16],
+    wrapText: true,
+    freezeRows: 1,
+    numberFormats: [{ columns: [1], format: "0.###" }],
+  };
+}
+
+function validProfiles(profiles: ReadonlyArray<ExportProfile>): ExportProfile[] {
+  return profiles.filter((profile) => text(profile.brand) && text(profile.flavor));
+}
+
+/** Specs workbook: one worksheet per brand, preserving the Brand column. */
+export function buildSpecsExportGrids(input: SpecExportInput): SheetGrid[] {
+  const byBrand = new Map<string, ExportProfile[]>();
+  for (const profile of validProfiles(input.profiles ?? [])) {
+    const brand = text(profile.brand);
+    const list = byBrand.get(brand) ?? [];
+    list.push(profile);
+    byBrand.set(brand, list);
+  }
+  return dedupeSheetNames(
+    [...byBrand.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([brand, profiles]) => buildProfilesGrid(profiles, brand)),
+  );
+}
+
+/** Dough workbook: every library recipe gets its own importer-safe worksheet. */
+export function buildDoughExportGrids(input: SpecExportInput): SheetGrid[] {
+  const ties = tieRecipes(input.profiles ?? [], "dough");
+  return dedupeSheetNames(
+    [...(input.doughRecipes ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((recipe) =>
+        buildRecipeGrid(
+          recipeSheetName(text(recipe.name) || "Dough Recipe", "Dough"),
+          "dough",
+          [recipe],
+          ties,
+        ),
+      )
+      .filter((grid) => grid.rows.length > 0),
+  );
+}
+
+/** Sauce workbook: every library recipe gets its own importer-safe worksheet. */
+export function buildSauceExportGrids(input: SpecExportInput): SheetGrid[] {
+  const ties = tieRecipes(input.profiles ?? [], "sauce");
+  return dedupeSheetNames(
+    [...(input.sauceRecipes ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((recipe) =>
+        buildRecipeGrid(
+          recipeSheetName(text(recipe.name) || "Sauce Recipe", "Sauce"),
+          "sauce",
+          [recipe],
+          ties,
+        ),
+      )
+      .filter((grid) => grid.rows.length > 0),
+  );
+}
+
+/**
+ * Cheese workbook: one worksheet per using brand. Shared recipes are repeated
+ * on every applicable brand sheet; recipes with no profile references live on
+ * Unassigned.
+ */
+export function buildCheeseExportGrids(input: SpecExportInput): SheetGrid[] {
+  const recipes = (input.cheeseRecipes ?? []).filter(
+    (recipe) => text(recipe.name) && (recipe.rows ?? []).some((row) => text(row.ingredient)),
+  );
+  const ties = tieRecipes(input.profiles ?? [], "cheese");
+  const brands = new Set<string>();
+  for (const recipe of recipes) {
+    const tie = ties.get(text(recipe.name).toLowerCase());
+    for (const brand of tie?.targetsByBrand.keys() ?? []) brands.add(brand);
+  }
+  const grids: SheetGrid[] = [...brands]
+    .sort((a, b) => a.localeCompare(b))
+    .map((brand) => {
+      const used = recipes.filter((recipe) =>
+        ties.get(text(recipe.name).toLowerCase())?.targetsByBrand.has(brand),
+      );
+      return buildRecipeGrid(brand, "cheese", used, ties, brand);
+    });
+  const unassigned = recipes.filter(
+    (recipe) => (ties.get(text(recipe.name).toLowerCase())?.targetsByBrand.size ?? 0) === 0,
+  );
+  if (unassigned.length) grids.push(buildRecipeGrid("Unassigned", "cheese", unassigned, ties));
+  return dedupeSheetNames(grids);
+}
+
+export function buildSpecRecipeExportWorkbooks(input: SpecExportInput): ExportWorkbook[] {
+  return [
+    { kind: "specs", grids: buildSpecsExportGrids(input) },
+    { kind: "dough", grids: buildDoughExportGrids(input) },
+    { kind: "sauce", grids: buildSauceExportGrids(input) },
+    { kind: "cheese", grids: buildCheeseExportGrids(input) },
+  ];
 }
 
 /**
@@ -364,64 +549,81 @@ export function buildSpecExportGrids(
   input: SpecExportInput,
   selection: SpecExportSelection,
 ): SheetGrid[] {
-  const grids: SheetGrid[] = [];
-  const profiles = input.profiles ?? [];
-  if (selection.profiles && profiles.some((p) => text(p.brand) && text(p.flavor))) {
-    grids.push(buildProfilesGrid(profiles));
-  }
-  if (selection.dough && (input.doughRecipes ?? []).length) {
-    grids.push(
-      buildRecipeGrid("Dough Recipes", "dough", input.doughRecipes, tieRecipes(profiles, "dough")),
-    );
-  }
-  if (selection.sauce && (input.sauceRecipes ?? []).length) {
-    grids.push(
-      buildRecipeGrid("Sauce Recipes", "sauce", input.sauceRecipes, tieRecipes(profiles, "sauce")),
-    );
-  }
-  if (selection.cheese && (input.cheeseRecipes ?? []).length) {
-    grids.push(
-      buildRecipeGrid("Cheese Recipes", "cheese", input.cheeseRecipes, tieRecipes(profiles, "cheese")),
-    );
-  }
-  return dedupeSheetNames(grids);
+  return dedupeSheetNames([
+    ...(selection.profiles ? buildSpecsExportGrids(input) : []),
+    ...(selection.dough ? buildDoughExportGrids(input) : []),
+    ...(selection.sauce ? buildSauceExportGrids(input) : []),
+    ...(selection.cheese ? buildCheeseExportGrids(input) : []),
+  ]);
 }
 
 // ── Mixes workbook (premix format) ───────────────────────────────────────────
 
 /**
- * Build the mixes export workbook — one tab per mix in the DETERMINISTIC premix
+ * Build the mixes export workbook — one tab per brand in the DETERMINISTIC premix
  * layout so "Import Premix Sheet" re-reads it exactly:
- *   A1: <mix name>                       (name, ≤4 rows above the header)
- *   A2: Pull N Days Early                (only when daysEarly > 0)
- *   A3: Ingredient | B3: Per Pizza | C3: Per Batch   (the "Per Pizza" anchor)
- *   A4…: <ingredient> | <perPizza> |     (Per Batch left blank; import uses perPizza)
- *   A_n: Total | (blank) | <batchSize>   (the block Total → batchSize)
- * The tab name is the product ("Brand Flavor") so the importer's deterministic
- * name→brand/flavor grounding recovers the same product, and the block name is
- * the mix's own name so the deterministic id (and thus update-not-duplicate)
- * stays stable on re-import. Pure. Disabled/empty mixes are still exported.
+ *   Product Brand | <brand>
+ *   Product Flavor | <flavor>
+ *   <mix name>
+ *   Pull N Days Early                    (only when daysEarly > 0)
+ *   Ingredient | Per Pizza | Per Batch   (the "Per Pizza" anchor)
+ *   <ingredient> | <perPizza> |
+ *   Total | (blank) | <batchSize>
+ * Explicit markers preserve each product association when several vertical
+ * blocks share one brand tab. The original mix name keeps deterministic IDs
+ * stable on re-import. Pure. Disabled/empty mixes are still exported.
  */
 export function buildMixExportGrids(mixes: ReadonlyArray<Mix>): SheetGrid[] {
+  const byBrand = new Map<string, Mix[]>();
+  for (const mix of mixes) {
+    const brand = text(mix.brand) || "Unassigned";
+    const list = byBrand.get(brand) ?? [];
+    list.push(mix);
+    byBrand.set(brand, list);
+  }
   const grids: SheetGrid[] = [];
-  for (const m of mixes) {
-    const name = text(m.name);
-    const components = (m.components ?? []).filter((c) => text(c.ingredient));
-    if (!name && components.length === 0) continue;
+  const entries = [...byBrand.entries()].sort(([a], [b]) => {
+    if (a === "Unassigned") return 1;
+    if (b === "Unassigned") return -1;
+    return a.localeCompare(b);
+  });
+  for (const [brand, brandMixes] of entries) {
     const rows: string[][] = [];
-    rows.push([name || `${text(m.brand)} ${text(m.flavor)}`.trim()]);
-    if (m.daysEarly && m.daysEarly > 0) {
-      rows.push([`Pull ${m.daysEarly} Days Early`]);
+    const accentRows: number[] = [];
+    const headerRows: number[] = [];
+    for (const m of [...brandMixes].sort((a, b) =>
+      text(a.flavor).localeCompare(text(b.flavor)) || text(a.name).localeCompare(text(b.name)),
+    )) {
+      const name = text(m.name);
+      const components = (m.components ?? []).filter((c) => text(c.ingredient));
+      if (!name && components.length === 0) continue;
+      if (rows.length) rows.push([]);
+      accentRows.push(rows.length);
+      rows.push(["Product Brand", text(m.brand)]);
+      rows.push(["Product Flavor", text(m.flavor)]);
+      rows.push([name || `${text(m.brand)} ${text(m.flavor)}`.trim()]);
+      if (m.daysEarly && m.daysEarly > 0) {
+        rows.push([`Pull ${m.daysEarly} Days Early`]);
+      }
+      headerRows.push(rows.length);
+      rows.push(["Ingredient", "Per Pizza", "Per Batch"]);
+      for (const c of components) {
+        rows.push([text(c.ingredient), num(c.perPizza), ""]);
+      }
+      rows.push(["Total", "", num(m.batchSize)]);
     }
-    rows.push(["Ingredient", "Per Pizza", "Per Batch"]);
-    for (const c of components) {
-      rows.push([text(c.ingredient), num(c.perPizza), ""]);
-    }
-    rows.push(["Total", "", num(m.batchSize)]);
-    // Tab name = the product so the importer grounds brand/flavor back; fall
-    // back to the mix name when the product is blank.
-    const tab = `${text(m.brand)} ${text(m.flavor)}`.trim() || name || "Mix";
-    grids.push({ name: tab, rows });
+    if (!rows.length) continue;
+    grids.push({
+      name: brand,
+      rows,
+      boldRows: [...accentRows, ...headerRows],
+      accentRows,
+      headerRows,
+      columnWidths: [42, 18, 18],
+      wrapText: true,
+      freezeRows: 1,
+      numberFormats: [{ columns: [1, 2], format: "0.###" }],
+    });
   }
   return dedupeSheetNames(grids);
 }

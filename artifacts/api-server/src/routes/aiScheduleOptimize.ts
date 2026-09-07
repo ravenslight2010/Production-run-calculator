@@ -1,4 +1,4 @@
-import { AiScheduleOptimizeBody } from "@workspace/api-zod";
+import { OperationsScheduleOrderingBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   optimizeSchedule,
@@ -8,17 +8,12 @@ import {
 } from "@workspace/schedule-optimize";
 import type { ProductionRule } from "@workspace/production-rules";
 
-// AI schedule-order narration. Given the runs planned for one day, the server
-// DETERMINISTICALLY proposes an ordering (allergen runs end-of-day, same
-// brand/die grouped to minimize changeovers, factory sequence rules honored —
-// shared @workspace/schedule-optimize lib). The model is only asked to NARRATE
-// the suggested order into a short plain-language explanation, and only when a
-// strictly better order exists (no improvement → no AI call), mirroring the
-// anomaly/waste-insight posture. Read-only and advisory; never writes the
-// schedule. Fail-safe: if the AI is unavailable or returns nothing usable, the
-// deterministic suggested order is still returned with an empty narration.
+// Operations Insights schedule ordering. Given the runs planned for one day,
+// the server deterministically proposes an ordering (allergen runs end-of-day,
+// same brand/die grouped to minimize changeovers, and factory sequence rules
+// honored). Read-only and advisory; never writes the schedule.
 
-export type ScheduleOptimizeInput = z.infer<typeof AiScheduleOptimizeBody>;
+export type ScheduleOptimizeInput = z.infer<typeof OperationsScheduleOrderingBody>;
 
 // Bound how many runs one request can carry so a single call can't blow up cost
 // or latency. Mirrors the other AI endpoint guards.
@@ -31,7 +26,7 @@ export type ScheduleValidationResult =
   | { ok: false; status: number; error: string };
 
 export function validateScheduleBody(body: unknown): ScheduleValidationResult {
-  const parsed = AiScheduleOptimizeBody.safeParse(body);
+  const parsed = OperationsScheduleOrderingBody.safeParse(body);
   if (!parsed.success) {
     return { ok: false, status: 400, error: "Invalid schedule input" };
   }

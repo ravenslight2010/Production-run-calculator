@@ -26,7 +26,7 @@ import {
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
-import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
+import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../adapters/browserRunPersistence";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
 import { recordPerformance } from "../performanceDiagnostics";
@@ -48,12 +48,16 @@ import {
   type PackagingSpeedNudgeFeedbackStatus,
 } from "../packagingSpeedNudge";
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
+import {
+  classifyOperationalDisplay,
+  type OperationalDisplayState,
+  type OperationalSnapshotReceipt,
+} from "../operationalState";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
 
-// ── Calc output type ─────────────────────────────────────────────────────────
-// Calc type is re-exported from @workspace/live-calc (imported above).
+export type { Calc } from "@workspace/live-calc";
 
 // ── Context value ────────────────────────────────────────────────────────────
 export interface LiveRunContextValue {
@@ -101,6 +105,9 @@ export interface LiveRunContextValue {
   /** Human-readable pace alert message (rate / shortfall / time remaining). */
   paceAlertMsg: string;
   packagingDrainActive: boolean;
+  /** Local ticking values remain projections until this run has a server receipt. */
+  operationalDisplayState: OperationalDisplayState;
+  operationalSnapshotReceipt: OperationalSnapshotReceipt | null;
 }
 
 // Module-level calcRef is kept as a compatibility export for existing callers.
@@ -132,7 +139,12 @@ export interface LiveRunProviderProps {
   autoTrackBlocked?: boolean;
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
   autoTrackRebaseAfterBlock?: boolean;
+  autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
+  operationalServerCalc?: Calc | null;
+  operationalOnline?: boolean;
+  operationalSyncConnected?: boolean;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -165,9 +177,14 @@ export function LiveRunProvider({
   autoTrackBlocked = false,
   autoTrackBlockedRef,
   autoTrackRebaseAfterBlock = false,
+  autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  operationalSnapshotReceipt = null,
+  operationalServerCalc = null,
+  operationalOnline = true,
+  operationalSyncConnected = false,
 }: LiveRunProviderProps) {
-  const nowTime = useClock(runStatus);
+  const nowTime = useClock(runStatus, autoTrackWakeAcknowledgement);
   // A selected pending run must never inherit Packaging, Sauce, or Frontline
   // applicator completion from the previously viewed/active run while
   // react-hook-form settles a run switch. Staged Dough values remain intact
@@ -185,10 +202,6 @@ export function LiveRunProvider({
   })();
 
   // ── Core production calc ─────────────────────────────────────────────────
-  // ── Core production calc ─────────────────────────────────────────────────
-  // Computed by the shared pure engine in @workspace/live-calc so the SAME
-  // formulas run on the server (Step 3 of the server-side refactor) and the
-  // client can't drift. Telemetry for the local computation stays here.
   const calc = useMemo((): Calc => {
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
     const result = computeCalc({
@@ -203,7 +216,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, currentRun, nowTime, doughSubTab]);
+  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
@@ -258,6 +271,16 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const operationalDisplayState = classifyOperationalDisplay({
+    online: operationalOnline,
+    syncConnected: operationalSyncConnected,
+    selectedRunId: currentRunId,
+    receipt: operationalSnapshotReceipt,
+  });
+  const operationalCalc =
+    operationalDisplayState === "confirmed" && operationalServerCalc
+      ? operationalServerCalc
+      : calc;
   const packagingAutoTrackActive =
     runStatus !== "running" || linePhases.stage3.state === "active";
   const packagingDrainElapsedSec = computePackagingDrainElapsedSec({
@@ -327,6 +350,7 @@ export function LiveRunProvider({
     isCrust: doughSubTab === "crusts",
     nextRunLabels: upcomingRunLabels,
     prefs,
+    alertDate: dayState.date,
   });
 
   // ── Stall detection ───────────────────────────────────────────────────────
@@ -392,6 +416,7 @@ export function LiveRunProvider({
       autoTrackBlocked,
       autoTrackBlockedRef,
       autoTrackRebaseAfterBlock,
+      autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
       nextRunPrepActive,
     });
@@ -522,7 +547,7 @@ export function LiveRunProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -536,10 +561,12 @@ export function LiveRunProvider({
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
       packagingDrainActive,
+      operationalDisplayState,
+      operationalSnapshotReceipt,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -552,6 +579,8 @@ export function LiveRunProvider({
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
       packagingDrainActive,
+      operationalDisplayState,
+      operationalSnapshotReceipt,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     ],
   );

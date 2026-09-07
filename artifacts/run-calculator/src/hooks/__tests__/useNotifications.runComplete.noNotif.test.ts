@@ -28,6 +28,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
+// Receipt ownership is covered separately. Keep these hook tests isolated from
+// persistent IndexedDB/localStorage claims created by other notification cases.
+vi.mock("../../alertReceipts", () => ({
+  claimAlertReceipt: vi.fn().mockResolvedValue(true),
+}));
+
 // ── Sanity: confirm jsdom really omits Notification ──────────────────────────
 // If this fails the whole test file's premise is wrong.
 if (typeof window !== "undefined" && "Notification" in window) {
@@ -297,11 +303,8 @@ describe("useNotifications — run-complete effect (no Notification API)", () =>
       rerender(makeParams({ currentRun: run, calc: { ...makeParams().calc, adjustedTimeSec: 0, ppm: 100 } }));
     });
 
-    // Flush the async IIFE inside showAppNotification.
-    await act(async () => { await Promise.resolve(); });
-
     expect(vibrateMock).toHaveBeenCalledWith([300, 100, 300, 100, 300]);
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     expect(notifCtor.mock.calls[0][0]).toBe("✅ Run time complete");
   });
 });

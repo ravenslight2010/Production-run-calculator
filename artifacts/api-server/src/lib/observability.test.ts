@@ -5,8 +5,12 @@ import {
   CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
   clearCacheMaintenanceDiagnosticsForTests,
   getCacheMaintenanceDiagnostics,
+  isHealthProbePath,
   operationType,
+  observabilityMiddleware,
   recordCacheMaintenance,
+  recordCostLimitEvent,
+  recordStartupSlowWarning,
   safeErrorCode,
   safeQueueAgeMs,
 } from "./observability";
@@ -17,11 +21,40 @@ afterEach(async () => {
 });
 
 describe("observability", () => {
+  it("always replaces client-provided correlation headers with a server UUID", () => {
+    const headers = new Map<string, unknown>();
+    const req = {
+      header: (name: string) => name.toLowerCase() === "x-correlation-id" ? "secret-token-value" : undefined,
+      id: "client-controlled-id",
+      path: "/api/incidents",
+    };
+    const res = {
+      setHeader: (name: string, value: unknown) => headers.set(name, value),
+      once: vi.fn(),
+    };
+    const next = vi.fn();
+    observabilityMiddleware(req as never, res as never, next);
+    const correlationId = String(headers.get("X-Correlation-ID"));
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(correlationId).not.toContain("secret");
+    expect((req as typeof req & { correlationId?: string }).correlationId).toBe(correlationId);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
   it("classifies operational routes without including identifiers", () => {
     expect(operationType("/api/sync/2026-08-22")).toBe("sync");
     expect(operationType("/api/inventory/items/123")).toBe("inventory");
     expect(operationType("/api/ai/ask")).toBe("ai");
+    expect(operationType("/api/ai/fill-missing")).toBe("ai");
     expect(operationType("/api/unknown")).toBe("request");
+  });
+
+  it("classifies platform probes separately from application operations", () => {
+    expect(operationType("/api/readyz")).toBe("health");
+    expect(operationType("/api/healthz")).toBe("health");
+    expect(operationType("/api")).toBe("health");
+    expect(isHealthProbePath("/api/livez")).toBe(true);
+    expect(isHealthProbePath("/api/sync/today")).toBe(false);
   });
 
   it("only emits bounded machine-readable error codes", () => {
@@ -34,6 +67,79 @@ describe("observability", () => {
     expect(safeQueueAgeMs(9_500, 10_000)).toBe(500);
     expect(safeQueueAgeMs(10_001, 10_000)).toBeUndefined();
     expect(safeQueueAgeMs(0, 8 * 24 * 60 * 60 * 1000)).toBeUndefined();
+  });
+
+  it("records bounded cost-limit signals without request payloads", () => {
+    const info = vi.fn();
+    const warn = vi.fn();
+
+    recordCostLimitEvent(
+      {
+        scope: "inventory_photo_analysis",
+        outcome: "near_limit",
+        actorHash: "actor-hash",
+        requestedCost: 20.4,
+        usedCost: 999_999_999_999,
+        limitCost: 300,
+        remainingCost: 4,
+      },
+      { info, warn },
+    );
+    recordCostLimitEvent(
+      {
+        scope: "inventory_photo_analysis",
+        outcome: "rejected",
+        actorHash: "actor-hash",
+        requestedCost: 20,
+        usedCost: 300,
+        limitCost: 300,
+        remainingCost: 0,
+      },
+      { info, warn },
+    );
+
+    expect(info).toHaveBeenCalledWith(
+      {
+        event: "cost_limit",
+        scope: "inventory_photo_analysis",
+        outcome: "near_limit",
+        actorHash: "actor-hash",
+        requestedCost: 20,
+        usedCost: 1_000_000_000,
+        limitCost: 300,
+        remainingCost: 4,
+        safeCounts: { nearLimitResponses: 1, rejections: 0 },
+      },
+      "cost limit nearing budget",
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "cost_limit",
+        scope: "inventory_photo_analysis",
+        outcome: "rejected",
+        safeCounts: { nearLimitResponses: 0, rejections: 1 },
+      }),
+      "cost limit rejected request",
+    );
+    const loggedFields = [...info.mock.calls, ...warn.mock.calls].map(([fields]) => fields);
+    expect(JSON.stringify(loggedFields)).not.toMatch(/prompt|image|candidate/i);
+  });
+
+  it("does not let cost-limit telemetry failures escape", () => {
+    expect(() =>
+      recordCostLimitEvent(
+        {
+          scope: "inventory_photo_analysis",
+          outcome: "rejected",
+          actorHash: "actor-hash",
+          requestedCost: 20,
+          usedCost: 300,
+          limitCost: 300,
+          remainingCost: 0,
+        },
+        { warn: () => { throw new Error("logger unavailable"); } },
+      ),
+    ).not.toThrow();
   });
 
   it("records only bounded, scope-aware cache maintenance fields", async () => {
@@ -67,6 +173,51 @@ describe("observability", () => {
         { info: () => { throw new Error("logger unavailable"); } },
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it("emits one safe startup warning payload with the current stage", () => {
+    const warn = vi.fn();
+
+    recordStartupSlowWarning(
+      {
+        phase: "starting",
+        stage: "data_heals",
+        durationMs: 30_001.7,
+      },
+      { warn },
+    );
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        event: "startup_slow",
+        stage: "data_heals",
+        durationMs: 30_002,
+        outcome: "degraded",
+        errorCode: "initialization_in_progress",
+      },
+      "Startup initialization is taking longer than expected",
+    );
+    expect(JSON.stringify(warn.mock.calls[0])).not.toMatch(/password|secret|message|stack/i);
+  });
+
+  it("uses the existing safe startup failure category when available", () => {
+    const warn = vi.fn();
+
+    recordStartupSlowWarning(
+      {
+        phase: "starting",
+        stage: "seed_roles",
+        durationMs: 45_000,
+        failure: { stage: "seed_roles", errorCode: "seed_roles_failed" },
+      },
+      { warn },
+    );
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "seed_roles", errorCode: "seed_roles_failed" }),
+      "Startup initialization is taking longer than expected",
+    );
   });
 
   it("surfaces recurring cache maintenance failures once per rolling-window episode", async () => {

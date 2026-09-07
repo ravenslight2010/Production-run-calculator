@@ -11,11 +11,15 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
+import { signToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let specImportAliasesTable: DbModule["specImportAliasesTable"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let seedRoles: () => Promise<void>;
 let server: Server;
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -47,11 +51,15 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
-  const requestScopeMod = await import("../lib/requestScope");
   const routerMod = await import("./specImportAliases");
   db = dbMod.db;
   pool = dbMod.pool;
   specImportAliasesTable = dbMod.specImportAliasesTable;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
+  const { requireAuth } = await import("../middlewares/requireAuth");
+  const { requireCapability } = await import("../middlewares/requireCapability");
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -59,11 +67,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  app.use((req, _res, next) => {
-    const scope = req.header("x-test-scope") === "sandbox" ? "sandbox" : "live";
-    requestScopeMod.runWithScope(scope, () => next());
-  });
-  app.use("/api", routerMod.default);
+  app.use("/api", requireAuth, requireCapability("manage-profiles"), routerMod.default);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -83,7 +87,16 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${specImportAliasesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${specImportAliasesTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await seedRoles();
+  await db.insert(usersTable).values([
+    { id: "profile-live", username: "profile-live", passwordHash: "x" },
+    { id: "profile-sandbox", username: "profile-sandbox", passwordHash: "x", sandbox: true },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: "profile-live", role: "manager" },
+    { userId: "profile-sandbox", role: "manager" },
+  ]);
 });
 
 type Scope = "live" | "sandbox";
@@ -95,7 +108,10 @@ type Alias = {
 };
 
 function headers(scope: Scope): Record<string, string> {
-  return { "content-type": "application/json", "x-test-scope": scope };
+  return {
+    "content-type": "application/json",
+    authorization: `Bearer ${signToken(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
+  };
 }
 
 async function deleteAliases(aliases: Alias[], scope: Scope = "live"): Promise<Response> {

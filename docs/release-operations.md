@@ -14,7 +14,7 @@ pnpm --filter @workspace/scripts run check:release-evidence
 The standard run includes typechecks, security audit, recovery and operational
 evidence checks, clean-start startup health, API test shards, the explicitly
 listed bounded package-test gates (including `@workspace/spec-import`), and
-browser smoke/accessibility checks. Full mode is an opt-in command that adds
+browser smoke, accessibility, and the bounded WebKit smoke. Full mode is an opt-in command that adds
 the complete browser suite. Independent prerequisite, consumer-typecheck,
 API/package-test, and browser stages have explicit dependency barriers. The
 API/package-test stage runs at most four children by default, with no more than
@@ -32,7 +32,10 @@ To run the full mode locally:
 pnpm run release:check:full
 ```
 
-The full browser config retains `browser-full/FINAL-REPORT.md` automatically.
+The WebKit config retains `browser-smoke/webkit-result.json`; the full browser
+config retains `browser-full/FINAL-REPORT.md` automatically. These are separate
+evidence paths: the bounded smoke and accessibility gates cannot overwrite the
+full-suite report.
 It records the run revision, total/complete/pass/skip/fail/not-run counts,
 wall-clock duration, and a sorted per-file duration table. The report is generated from
 Playwright's completed test results; a `GO` report requires all 117 cases to be
@@ -258,7 +261,7 @@ forwarding still fails.
 ## Evidence and escalation boundary
 
 Evidence is allowlisted and revision-linked. Standard mode requires all
-clean-start artifacts; full mode additionally requires
+clean-start artifacts and the WebKit smoke JSON; full mode additionally requires
 `browser-full/FINAL-REPORT.md`, including its revision-bound duration summary.
 Do not manually mark a report GO or delete missing artifacts. Escalate only
 after the documented retry/diagnostic path:

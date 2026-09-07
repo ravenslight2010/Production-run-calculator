@@ -25,11 +25,15 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
+import { signToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let deniedMergesTable: DbModule["deniedMergesTable"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let seedRoles: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -67,6 +71,11 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   deniedMergesTable = dbMod.deniedMergesTable;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
+  const { requireAuth } = await import("../middlewares/requireAuth");
+  const { requireCapability } = await import("../middlewares/requireCapability");
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -75,7 +84,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  app.use("/api", routerMod.default);
+  app.use("/api", requireAuth, requireCapability("manage-profiles"), routerMod.default);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -100,7 +109,10 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${deniedMergesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${deniedMergesTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await seedRoles();
+  await db.insert(usersTable).values({ id: "profile-user", username: "profile-user", passwordHash: "x" });
+  await db.insert(userRolesTable).values({ userId: "profile-user", role: "manager" });
 });
 
 type Pair = { nameA: string; nameB: string };
@@ -110,7 +122,7 @@ async function list(category?: string, brand?: string): Promise<Pair[]> {
   if (category) qs.set("category", category);
   if (brand) qs.set("brand", brand);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  const res = await fetch(`${baseUrl}/api/denied-merges${suffix}`);
+  const res = await fetch(`${baseUrl}/api/denied-merges${suffix}`, { headers: authHeaders() });
   expect(res.status).toBe(200);
   return ((await res.json()) as { denied: Pair[] }).denied;
 }
@@ -118,7 +130,7 @@ async function list(category?: string, brand?: string): Promise<Pair[]> {
 async function add(pairs: Pair[], category?: string, brand?: string): Promise<Response> {
   return fetch(`${baseUrl}/api/denied-merges`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ pairs, ...(category ? { category } : {}), ...(brand ? { brand } : {}) }),
   });
 }
@@ -126,9 +138,13 @@ async function add(pairs: Pair[], category?: string, brand?: string): Promise<Re
 async function remove(pairs: Pair[], category?: string, brand?: string): Promise<Response> {
   return fetch(`${baseUrl}/api/denied-merges`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ pairs, ...(category ? { category } : {}), ...(brand ? { brand } : {}) }),
   });
+}
+
+function authHeaders(): Record<string, string> {
+  return { authorization: `Bearer ${signToken("profile-user")}` };
 }
 
 describe("denied-merges routes", () => {
@@ -173,7 +189,7 @@ describe("denied-merges routes", () => {
   it("rejects a malformed body with 400", async () => {
     const res = await fetch(`${baseUrl}/api/denied-merges`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ nope: true }),
     });
     expect(res.status).toBe(400);
@@ -214,7 +230,9 @@ describe("denied-merges routes — category/brand scoping", () => {
   });
 
   it("GET rejects an unrecognized category query param with 400 instead of silently defaulting", async () => {
-    const res = await fetch(`${baseUrl}/api/denied-merges?category=not-a-real-category`);
+    const res = await fetch(`${baseUrl}/api/denied-merges?category=not-a-real-category`, {
+      headers: authHeaders(),
+    });
     expect(res.status).toBe(400);
   });
 });

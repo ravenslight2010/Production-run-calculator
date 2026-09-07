@@ -100,33 +100,55 @@ export interface RunLinesInput extends SummaryStatsInput {
 
 export type SummaryStats = ReturnType<typeof computeSummaryStats>;
 
+/**
+ * Case-based Sauce and Frontline quantities are unavailable when a run requests
+ * cases but has no positive package count. Fixed buffers must never appear by
+ * themselves as plausible production totals.
+ */
+export function caseBasedProductionNeedsAvailable(
+  vals: Pick<SummaryStatsInput, "casesNeeded" | "pizzasPerCase">,
+): boolean {
+  return !(Number(vals.casesNeeded) > 0 && !(Number(vals.pizzasPerCase) > 0));
+}
+
 export function computeSummaryStats(
   vals: SummaryStatsInput,
   defaultPepTypes: readonly string[],
 ) {
+  const productionNeedsAvailable = caseBasedProductionNeedsAvailable(vals);
   const totalPizzas = vals.casesNeeded * vals.pizzasPerCase;
   const totalPizzasForSauce = totalPizzas + vals.casesPerLayer * vals.pizzasPerCase;
   const frontlineRecipeLbs = (vals.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : vals.sauceBarrelLbs;
-  const sauceLbs = (totalPizzasForSauce * vals.sauceOzPerPizza) / 16 + 30;
+  const sauceLbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * vals.sauceOzPerPizza) / 16 + 30
+    : 0;
   const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
   const app1RecipeLbs = (vals.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app1Lbs = (totalPizzasForSauce * vals.app1OzPerPizza) / 16 + 20;
+  const app1Lbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * vals.app1OzPerPizza) / 16 + 20
+    : 0;
   const app1IsMix = vals.app1Type.trim().toLowerCase().includes("mix");
   const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : vals.app1BatchLbs;
   const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
   const app2RecipeLbs = (vals.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app2Lbs = (totalPizzasForSauce * vals.app2OzPerPizza) / 16 + 20;
+  const app2Lbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * vals.app2OzPerPizza) / 16 + 20
+    : 0;
   const app2IsMix = vals.app2Type.trim().toLowerCase().includes("mix");
   const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : vals.app2BatchLbs;
   const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
   const app3RecipeLbs = (vals.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app3Lbs = (totalPizzasForSauce * vals.app3OzPerPizza) / 16 + 20;
+  const app3Lbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * vals.app3OzPerPizza) / 16 + 20
+    : 0;
   const app3IsMix = vals.app3Type.trim().toLowerCase().includes("mix");
   const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : vals.app3BatchLbs;
   const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
   const app4RecipeLbs = (vals.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app4Lbs = (totalPizzasForSauce * vals.app4OzPerPizza) / 16 + 20;
+  const app4Lbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * vals.app4OzPerPizza) / 16 + 20
+    : 0;
   const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
   const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : vals.app4BatchLbs;
   const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
@@ -135,7 +157,9 @@ export function computeSummaryStats(
   // suppressed. STRICT === true so mobile (never sets the flag) is unaffected.
   const pepCombined = vals.pep1Combined === true;
   const pepStickMult = pepCombined ? 2 : 1;
-  const pep1Lbs = (totalPizzasForSauce * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks * pepStickMult;
+  const pep1Lbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks * pepStickMult
+    : 0;
   const pep1Batches =
     !defaultPepTypes.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
       ? pep1Lbs / vals.pep1BatchLbs
@@ -143,7 +167,7 @@ export function computeSummaryStats(
   // Additional pep type on applicator 1 (only when its type is set). Its stick
   // buffer also doubles when combined (both physical applicators run it too).
   const pep1TypeBTrim = (vals.pep1TypeB ?? "").trim();
-  const pep1LbsB = pep1TypeBTrim
+  const pep1LbsB = productionNeedsAvailable && pep1TypeBTrim
     ? (totalPizzasForSauce * (vals.pep1OzPerPizzaB ?? 0)) / 16 + (vals.pep1SticksB ?? 0) * pepStickMult
     : 0;
   const pep1BatchesB =
@@ -151,14 +175,16 @@ export function computeSummaryStats(
       ? pep1LbsB / (vals.pep1BatchLbsB ?? 1)
       : 0;
   // Applicator 2 (and its additional type) are suppressed entirely when combined.
-  const pep2Lbs = pepCombined ? 0 : (totalPizzasForSauce * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
+  const pep2Lbs = !productionNeedsAvailable || pepCombined
+    ? 0
+    : (totalPizzasForSauce * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
   const pep2Batches =
     !pepCombined && !defaultPepTypes.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
       ? pep2Lbs / vals.pep2BatchLbs
       : 0;
   const pep2TypeBTrim = (vals.pep2TypeB ?? "").trim();
   const pep2LbsB =
-    !pepCombined && pep2TypeBTrim
+    productionNeedsAvailable && !pepCombined && pep2TypeBTrim
       ? (totalPizzasForSauce * (vals.pep2OzPerPizzaB ?? 0)) / 16 + (vals.pep2SticksB ?? 0)
       : 0;
   const pep2BatchesB =
@@ -168,6 +194,8 @@ export function computeSummaryStats(
   const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
   const estimatedTimeSec = ppm > 0 ? (totalPizzas * 60) / ppm : 0;
   return {
+    productionNeedsAvailable,
+    productionNeedsMissingInput: productionNeedsAvailable ? null : "pizzasPerCase" as const,
     totalCases: vals.casesNeeded,
     totalPizzas,
     totalPizzasForSauce,

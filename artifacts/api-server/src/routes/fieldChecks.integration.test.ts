@@ -233,6 +233,56 @@ describe("field-check evidence from two authenticated clients", () => {
 });
 
 describe("manager-only hardware confirmations", () => {
+  it("records an iPhone confirmation and reports the expanded catalog", async () => {
+    const response = await request(
+      MANAGER,
+      "POST",
+      "/api/field-checks/hardware-confirmations",
+      {
+        checkName: "safe-area-clearance",
+        checkVersion: "2026-09",
+        outcome: "success",
+        observedAt: new Date().toISOString(),
+        deviceCategory: "iphone",
+      },
+    );
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ accepted: 1, duplicate: 0 });
+
+    const reportResponse = await request(MANAGER, "GET", "/api/field-checks");
+    expect(reportResponse.status).toBe(200);
+    const report = await reportResponse.json() as {
+      scope: string;
+      checks: Array<{ name: string; observedBy: string; status: string; recentFailures: unknown[] }>;
+    };
+    expect(report.scope).toBe("current facility");
+    expect(report.checks.find((check) => check.name === "safe-area-clearance")).toMatchObject({
+      observedBy: "hardware",
+      status: "healthy",
+      recentFailures: [],
+    });
+    expect(report.checks.find((check) => check.name === "offline-queue-replay")).toMatchObject({
+      observedBy: "browser",
+      status: "collecting",
+    });
+  });
+
+  it("rejects browser categories for guided confirmations", async () => {
+    const response = await request(
+      MANAGER,
+      "POST",
+      "/api/field-checks/hardware-confirmations",
+      {
+        checkName: "orientation-layout",
+        checkVersion: "2026-09",
+        outcome: "success",
+        observedAt: new Date().toISOString(),
+        deviceCategory: "mobile-safari",
+      },
+    );
+    expect(response.status).toBe(400);
+  });
+
   it("rejects the seeded supervisor without recording an observation", async () => {
     const response = await request(
       SUPERVISOR,

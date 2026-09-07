@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { dateRange, validateOperationalReportBody } from "./operationalReports";
+import {
+  adaptCanonicalOperationalSnapshot,
+  dateRange,
+  validateOperationalReportBody,
+} from "./operationalReports";
 
 const run = {
   brand: "Acme",
@@ -17,6 +21,10 @@ describe("operational report input contract", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("accepts scope/date without client production facts", () => {
+    expect(validateOperationalReportBody({ scope: "day", date: "2026-09-04" }).ok).toBe(true);
+  });
+
   it("accepts a week and derives the six-day lookback", () => {
     const result = validateOperationalReportBody({ scope: "week", date: "2026-09-04", runs: [] });
     expect(result.ok).toBe(true);
@@ -31,5 +39,13 @@ describe("operational report input contract", () => {
   it("rejects more than 600 supplied runs", () => {
     const tooMany = Array.from({ length: 601 }, () => run);
     expect(validateOperationalReportBody({ scope: "day", date: "2026-09-04", runs: tooMany }).ok).toBe(false);
+  });
+
+  it("adapts canonical stored data to complete v1 without mutating it", () => {
+    const stored = { dayState: { runs: [] }, runValues: {} };
+    const snapshot = adaptCanonicalOperationalSnapshot(stored);
+    expect(snapshot).toMatchObject({ syncVersion: 1, completeness: "complete" });
+    expect(stored).not.toHaveProperty("syncVersion");
+    expect(stored).not.toHaveProperty("completeness");
   });
 });

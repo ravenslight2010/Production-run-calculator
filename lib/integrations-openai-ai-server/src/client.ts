@@ -149,21 +149,38 @@ function buildConfig(
   return config;
 }
 
-async function create(params: CreateParamsStream): Promise<AsyncIterable<ChatChunk>>;
-async function create(params: CreateParamsSync): Promise<ChatResponse>;
+type CreateRequestOptions = { signal?: AbortSignal; timeoutMs?: number };
+
+function abortable<T>(promise: Promise<T>, options?: CreateRequestOptions): Promise<T> {
+  if (!options?.signal && !options?.timeoutMs) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const timer = options.timeoutMs ? setTimeout(() => reject(new Error("AI provider request timed out")), options.timeoutMs) : undefined;
+    const abort = () => reject(new Error("AI provider request was cancelled"));
+    if (options.signal?.aborted) { abort(); return; }
+    options.signal?.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+    });
+  });
+}
+
+async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
+async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
 async function create(
   params: CreateParamsBase & { stream?: boolean },
+  options?: CreateRequestOptions,
 ): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
   const { systemInstruction, contents } = toGemini(params.messages);
   const config = buildConfig(params, systemInstruction);
   const ai = client();
 
   if (params.stream) {
-    const stream = await ai.models.generateContentStream({
+    const stream = await abortable(ai.models.generateContentStream({
       model: params.model,
       contents,
       config,
-    });
+    }), options);
     return (async function* () {
       for await (const chunk of stream) {
         yield { choices: [{ delta: { content: chunk.text ?? null } }] };
@@ -171,11 +188,11 @@ async function create(
     })();
   }
 
-  const response = await ai.models.generateContent({
+  const response = await abortable(ai.models.generateContent({
     model: params.model,
     contents,
     config,
-  });
+  }), options);
   return { choices: [{ message: { content: response.text ?? null } }] };
 }
 

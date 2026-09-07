@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import type { SheetGrid } from "@workspace/spec-import";
-import { buildSpecExportGrids, type SpecExportInput } from "./index";
+import { buildSpecRecipeExportWorkbooks, type SpecExportInput } from "./index";
 
 // ── Representative dataset (verbatim from the real-AI harness) ───────────────
 // Deliberately stresses the parse rules: qualifier brands ("Basha's Original"
@@ -38,6 +38,7 @@ const input: SpecExportInput = {
       pepperonis: [],
       doughRecipeName: "Standard Dough",
       targetDoughballWeight: 19.5,
+      doughballsPerTray: 24,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", "Cheese Blend B", undefined, undefined],
     },
@@ -50,6 +51,7 @@ const input: SpecExportInput = {
       pepperonis: [{ type: "Cup Char Pepperoni", sticks: 2, ozPerPizza: 1.2 }],
       doughRecipeName: "Standard Dough",
       targetDoughballWeight: 19.5,
+      doughballsPerTray: 24,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", undefined, undefined, undefined],
     },
@@ -62,6 +64,7 @@ const input: SpecExportInput = {
       pepperonis: [],
       doughRecipeName: "Thin Crust Dough",
       targetDoughballWeight: 11,
+      doughballsPerTray: 30,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", undefined, undefined, undefined],
     },
@@ -76,7 +79,8 @@ const input: SpecExportInput = {
       ],
       pepperonis: [{ type: "Standard Pepperoni", sticks: 1, ozPerPizza: 0.6 }],
       doughRecipeName: "Standard Dough",
-      targetDoughballWeight: 19.5,
+      targetDoughballWeight: 10.25,
+      doughballsPerTray: 20,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: [undefined, "Cheese Blend B", undefined, undefined],
     },
@@ -190,35 +194,34 @@ function canonical(grids: ReadonlyArray<SheetGrid>): SheetGrid[] {
 // ── The guard ────────────────────────────────────────────────────────────────
 
 describe("spec export survives a real .xlsx write→read round-trip with zero loss", () => {
-  const exported = buildSpecExportGrids(input, {
-    profiles: true,
-    dough: true,
-    sauce: true,
-    cheese: true,
-  });
-  const recovered = readWorkbook(writeWorkbook(exported));
+  const workbooks = buildSpecRecipeExportWorkbooks(input);
+  const recovered = workbooks.map((workbook) => ({
+    kind: workbook.kind,
+    grids: readWorkbook(writeWorkbook(workbook.grids)),
+  }));
 
-  it("exports all four sheets in order", () => {
-    expect(exported.map((g) => g.name)).toEqual([
-      "Profiles",
-      "Dough Recipes",
-      "Sauce Recipes",
-      "Cheese Recipes",
+  it("exports four independent spec/recipe workbooks with grouped sheets", () => {
+    expect(workbooks.map((workbook) => workbook.kind)).toEqual(["specs", "dough", "sauce", "cheese"]);
+    expect(workbooks.find((workbook) => workbook.kind === "specs")?.grids.map((g) => g.name)).toEqual([
+      "Basha's Original",
+      "Basha's Ultra Thin Crust",
+      "Lowes 7in",
     ]);
-    expect(recovered.map((g) => g.name)).toEqual(exported.map((g) => g.name));
+    expect(workbooks.find((workbook) => workbook.kind === "dough")?.grids).toHaveLength(2);
+    expect(workbooks.find((workbook) => workbook.kind === "sauce")?.grids).toHaveLength(1);
+    expect(workbooks.find((workbook) => workbook.kind === "cheese")?.grids).toHaveLength(3);
   });
 
-  it("recovers every sheet's rows and cells exactly (names, rows, cells)", () => {
-    // The whole invariant in one strict assertion: after canonicalization the
-    // recovered workbook IS the exported one. Any sheet-name mangling, dropped
-    // row, reordered block, or reformatted cell (e.g. "3.5" → "3.50", 19.5 →
-    // 19.499999) fails here with a readable diff.
-    expect(canonical(recovered)).toEqual(canonical(exported));
+  it("recovers every workbook's rows and cells exactly", () => {
+    for (const workbook of workbooks) {
+      const roundTripped = recovered.find((item) => item.kind === workbook.kind)?.grids ?? [];
+      expect(canonical(roundTripped)).toEqual(canonical(workbook.grids));
+    }
   });
 
   it("keeps the tricky parse-rule shapes intact at the grid level", () => {
-    // Compare on canonical rows (trailing defval:"" padding stripped).
-    const canon = canonical(recovered);
+    const allRecovered = recovered.flatMap((workbook) => workbook.grids);
+    const canon = canonical(allRecovered);
     const flat = canon.flatMap((g) => g.rows.map((r) => r.join("\t")));
     // Qualifier brands stay distinct (no prefix collapse in any cell).
     expect(
@@ -229,19 +232,26 @@ describe("spec export survives a real .xlsx write→read round-trip with zero lo
     ).toBe(1);
     // Size-in-brand survives verbatim (no "7in" number coercion).
     expect(flat.some((l) => l.startsWith("Lowes 7in\tSupreme\t"))).toBe(true);
+    const lowesProfile = flat.find((l) => l.startsWith("Lowes 7in\tSupreme\t"))!;
+    expect(lowesProfile).toContain("\t10.25\t20\t");
+    expect(lowesProfile).toContain("\tCheese Blend B");
     // Shared recipes keep ALL their brand targets.
-    const dough = canon.find((g) => g.name === "Dough Recipes");
-    const doughLines = (dough?.rows ?? []).map((r) => r.join("\t"));
+    const doughLines = canon
+      .filter((g) => g.name.includes("Dough"))
+      .flatMap((g) => g.rows.map((r) => r.join("\t")));
     expect(doughLines).toContain("Basha's Original: Cheese, Pepperoni");
     expect(doughLines).toContain("Lowes 7in: Supreme");
-    const sauce = canon.find((g) => g.name === "Sauce Recipes");
-    const sauceLines = (sauce?.rows ?? []).map((r) => r.join("\t"));
+    const sauceLines = canon
+      .filter((g) => g.name.includes("Sauce"))
+      .flatMap((g) => g.rows.map((r) => r.join("\t")));
     expect(sauceLines).toContain("Basha's Ultra Thin Crust: Cheese");
-    // Doughball weight + applicator-slot metadata rows survive.
-    expect(doughLines).toContain("Target Doughball Weight (oz)\t19.5");
+    // A shared dough with conflicting profile values emits no recipe-wide
+    // default; the unambiguous thin-crust recipe can still carry its default.
+    expect(doughLines).not.toContain("Target Doughball Weight (oz)\t19.5");
     expect(doughLines).toContain("Target Doughball Weight (oz)\t11");
-    const cheese = canon.find((g) => g.name === "Cheese Recipes");
-    const cheeseLines = (cheese?.rows ?? []).map((r) => r.join("\t"));
+    const cheeseLines = recovered
+      .find((workbook) => workbook.kind === "cheese")!
+      .grids.flatMap((g) => g.rows.map((r) => r.join("\t")));
     expect(cheeseLines).toContain("Applicator Slot\t1");
     expect(cheeseLines).toContain("Applicator Slot\t2");
     // Decimal ingredient weights come back as the same shortest-exact strings.
@@ -251,18 +261,11 @@ describe("spec export survives a real .xlsx write→read round-trip with zero lo
   });
 
   it("negative control: the strict compare DOES catch a lost cell", () => {
-    // Prove the guard detects the failure mode it exists for: drop one
-    // ingredient row from a "recovered" copy and the canonical compare fails.
-    const tampered = recovered.map((g) =>
-      g.name === "Sauce Recipes"
-        ? { name: g.name, rows: g.rows.filter((r) => r[0] !== "Spice Blend") }
-        : g,
+    const sauce = workbooks.find((workbook) => workbook.kind === "sauce")!;
+    const recoveredSauce = recovered.find((workbook) => workbook.kind === "sauce")!.grids;
+    const tampered = recoveredSauce.map((g) =>
+      ({ ...g, rows: g.rows.filter((r) => r[0] !== "Spice Blend") }),
     );
-    expect(canonical(tampered)).not.toEqual(canonical(exported));
-    // And a sheet-name mangle is caught too.
-    const renamed = recovered.map((g, i) =>
-      i === 0 ? { ...g, name: "Profiles (1)" } : g,
-    );
-    expect(canonical(renamed)).not.toEqual(canonical(exported));
+    expect(canonical(tampered)).not.toEqual(canonical(sauce.grids));
   });
 });

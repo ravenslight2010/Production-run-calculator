@@ -38,6 +38,8 @@ let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
+let rolesTable: DbModule["rolesTable"];
+let seedRoles: () => Promise<void>;
 
 let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
@@ -49,6 +51,7 @@ let server: Server;
 let baseUrl: string;
 
 const USER = "user-1";
+const SCHEDULER = "scheduler-1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -103,6 +106,8 @@ beforeAll(async () => {
   dailySyncTable = dbMod.dailySyncTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
+  rolesTable = dbMod.rolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -139,10 +144,20 @@ beforeEach(async () => {
   clearUserValidityCache();
   clearSessionBoundaryCache();
   await db.execute(
-    sql`TRUNCATE ${dailySyncTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
-  await db.insert(usersTable).values({ id: USER, username: "user", passwordHash: "x" });
-  await db.insert(userRolesTable).values({ userId: USER, role: "operator" });
+  // Capability resolution reads the role catalog; seed it after every truncate
+  // so scheduled-date writes use a real manager capability, not an implicit
+  // missing-role fallback.
+  await seedRoles();
+  await db.insert(usersTable).values([
+    { id: USER, username: "user", passwordHash: "x" },
+    { id: SCHEDULER, username: "scheduler", passwordHash: "x" },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: USER, role: "operator" },
+    { userId: SCHEDULER, role: "manager" },
+  ]);
 });
 
 // Write a daily_sync row for `date` carrying a reset boundary. The fence reads
@@ -322,11 +337,12 @@ describe("daily-reset rollover write", () => {
     // today's date key only; it must not bleed into that future row.
     const token = signToken(USER);
     const futureResetAt = 111_111;
-    await putSync(
+    const futureSetup = await putSync(
       tomorrowStr(),
       { dayState: { runs: [{ id: "r1", brand: "B", flavor: "F" }], resetAt: futureResetAt } },
-      token,
+      signToken(SCHEDULER),
     );
+    expect(futureSetup.status).toBe(200);
 
     const rolloverResetAt = Date.now();
     const res = await putSync("today", { dayState: { runs: [], resetAt: rolloverResetAt } }, token);
@@ -400,14 +416,14 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
     const serverToday = todayStr();
     const operatorToday = yesterdayStr();
 
-    // The operator, in their evening, pushes their scheduled tomorrow (= server
+    // An authorized scheduler, in their evening, pushes their scheduled tomorrow (= server
     // UTC today) with the future-day resetAt=now override, keyed to their own
     // local date.
     const res1 = await putSyncWithToday(
       serverToday,
       { dayState: { runs: [{ id: "r1", brand: "B", flavor: "F" }], resetAt: Date.now() } },
       operatorToday,
-      token,
+      signToken(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     clearSessionBoundaryCache();
@@ -428,7 +444,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: Date.now() + 1000 } },
       serverToday,
-      token,
+      signToken(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     clearSessionBoundaryCache();
@@ -448,7 +464,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: Date.now(), resetBoundaryAt: Date.now() + 1_000_000 } },
       operatorToday,
-      token,
+      signToken(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     clearSessionBoundaryCache();
@@ -471,7 +487,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: genuineReset } },
       serverToday,
-      token,
+      signToken(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     expect(await readBoundaryAt(serverToday)).toBe(genuineReset);
@@ -482,7 +498,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: genuineReset } },
       tomorrow,
-      token,
+      signToken(SCHEDULER),
     );
     expect(res2.status).toBe(200);
     expect(await readBoundaryAt(serverToday)).toBe(genuineReset);

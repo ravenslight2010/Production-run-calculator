@@ -202,6 +202,27 @@
 }
 
 @media print {
+  body:has(.report-print-root) * {
+    visibility: hidden !important;
+  }
+
+  body:has(.report-print-root) .report-print-root,
+  body:has(.report-print-root) .report-print-root * {
+    visibility: visible !important;
+  }
+
+  body:has(.report-print-root) .report-print-root {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 0.4in;
+    background: white !important;
+    color: black !important;
+  }
+
+  body:has(.report-print-root) .report-print-root details {
+    display: block;
+  }
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -311,4 +332,11 @@
 .floor-drift {
   animation: floor-drift 90s ease-in-out infinite;
   will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-drift {
+    animation: none;
+    will-change: auto;
+  }
 }

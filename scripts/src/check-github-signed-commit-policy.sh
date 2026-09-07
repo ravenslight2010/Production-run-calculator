@@ -128,8 +128,8 @@ expected_checks=(
   $'Build (web + API)\t15368'
   $'Desktop and phone department journey\t15368'
   $'Docker image\t15368'
+  $'Informational security audit (high severity; registry best-effort)\t15368'
   $'Release gates and retained standard evidence\t15368'
-  $'Security audit (prod deps)\t15368'
   $'Typecheck\t15368'
   $'Unit tests (web + libs)\t15368'
 )

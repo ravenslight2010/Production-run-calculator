@@ -36,6 +36,7 @@ export type DataHealthFinding = {
   protectedValue: boolean;
   source: "profile-health" | "master-data" | "saved-spec" | "cleanup";
   sourceRoute: "setupProfiles" | "import" | "merge" | "audit" | "dough" | "sauce" | "cheeseRecipes" | "mixes" | "ingredientTypes";
+  reconciliationCategory?: "pool-mismatch" | "alias-gap" | "stale-profile-link" | "stale-pending-run-link" | "protected-stub" | "unexpected-stub";
   preview?: {
     before: string;
     after: string;
@@ -78,7 +79,77 @@ export type DataHealthWorkspace = {
     id: string; actor: string; appliedAt: string; undoneAt: string | null; status: string;
     summary: { applied: number; skipped: number; failed: number; repairedRuns: number; undoable?: boolean };
   }>;
+  aiRetention: {
+    policyVersion: string;
+    scope: string;
+    batchLimit: number;
+    canApply: boolean;
+    alreadyApplied: boolean;
+    appliedAt: string | null;
+    candidates: {
+      conversationTurns: number;
+      retiredFacilityFacts: number;
+      incidentGeneratedTextToLabel: number;
+      qualityThumbnailsToRedact: number;
+      closedObservationsToRedact: number;
+      total: number;
+    };
+    protected: {
+      correctionAndAliasRecords: string;
+      operationalIncidentRows: number;
+      confirmedQualityRows: number;
+      openInventoryObservations: number;
+      inventoryLedgerEffects: string;
+    };
+    cutoffs: { conversationBefore: string; thumbnailBefore: string; observationBefore: string };
+  };
+  sourceReconciliation: {
+    report: {
+      path: string;
+      sha256: string;
+      formatVersion: number;
+      automaticProposals: number;
+      stubs: number;
+      planSha256: string;
+      snapshot: { path: string; sha256: string; capturedAt: string };
+      manifest: { path: string; sha256: string; retained: number; excludedOlderDuplicates: number };
+    };
+    heal: { id: string; fromDate: string; appliedAt: string | null; markerValid: boolean; result: Record<string, number> };
+    checkedAt: string;
+    status: "clean" | "warning" | "error" | "not-verified";
+    freshness: "current" | "stale";
+    summary: {
+      poolMismatches: number;
+      aliasGaps: number;
+      staleProfileLinks: number;
+      stalePendingRunLinks: number;
+      protectedStubs: number;
+      unexpectedStubs: number;
+      protectedHistoryReferences: number;
+      omittedFindings: number;
+      findingLimitPerCategory: number;
+    };
+    findings: Array<{
+      id: string;
+      category: "pool-mismatch" | "alias-gap" | "stale-profile-link" | "stale-pending-run-link" | "protected-stub" | "unexpected-stub";
+      severity: "info" | "warning" | "error";
+      affectedRecord: string;
+      currentValue: string;
+      proposedOutcome: string;
+      protectedValue: boolean;
+      sourceRoute: DataHealthFinding["sourceRoute"];
+    }>;
+  };
 };
+
+export async function applyAiRetentionCleanup(): Promise<DataHealthWorkspace["aiRetention"]> {
+  const res = await fetch("/api/profile-data/ai-retention/apply", {
+    method: "POST",
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`Failed to apply AI retention cleanup: ${res.status}`);
+  return ((await res.json()) as { report: DataHealthWorkspace["aiRetention"] }).report;
+}
 
 export type ProfileDataHealthReport = {
   findings: ProfileDataHealthFinding[];

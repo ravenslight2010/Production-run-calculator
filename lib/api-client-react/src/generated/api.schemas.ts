@@ -5,6 +5,26 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type CompletedRunFinalizationSnapshot = { [key: string]: unknown };
+
+export interface CompletedRunFinalization {
+  /** @maxLength 300 */
+  operationId: string;
+  /** @maxLength 500 */
+  runId: string;
+  date: string;
+  completedAt: string;
+  snapshot: CompletedRunFinalizationSnapshot;
+}
+
+export type CompletedHistoryRecord = CompletedRunFinalization & {
+  snapshotHash: string;
+};
+
+export interface CompletedHistoryList {
+  history: CompletedHistoryRecord[];
+}
+
 /**
  * Whether the response is deterministic-only, AI-enriched, or missing AI narration
  */
@@ -16,6 +36,31 @@ export const AiStatus = {
   enriched: 'enriched',
   unavailable: 'unavailable',
 } as const;
+
+/**
+ * Optional provider outcome detail for an advisory response
+ */
+export type AiModelStatus = typeof AiModelStatus[keyof typeof AiModelStatus];
+
+
+export const AiModelStatus = {
+  completed: 'completed',
+  'provider-unavailable': 'provider-unavailable',
+  'rate-limited': 'rate-limited',
+  malformed: 'malformed',
+} as const;
+
+export type SuggestionMetadataDecision = typeof SuggestionMetadataDecision[keyof typeof SuggestionMetadataDecision];
+
+
+export const SuggestionMetadataDecision = {
+  suggestion: 'suggestion',
+} as const;
+
+export interface SuggestionMetadata {
+  decision: SuggestionMetadataDecision;
+  modelStatus?: AiModelStatus;
+}
 
 export type AutoTrackMutationField = typeof AutoTrackMutationField[keyof typeof AutoTrackMutationField];
 
@@ -405,18 +450,6 @@ export interface UpdateInventorySettingsInput {
   expirySoonDays: number;
 }
 
-export interface ProactiveAlertSettings {
-  enabled: boolean;
-  pollSeconds: number;
-  cooldownSeconds: number;
-}
-
-export interface UpdateProactiveAlertSettingsInput {
-  enabled: boolean;
-  pollSeconds: number;
-  cooldownSeconds: number;
-}
-
 /**
  * Known inventory/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can't inflate the model prompt for cost/DoS purposes.
  */
@@ -454,11 +487,22 @@ export interface ParseSpecImagesInput {
   images: ParseSpecImagesInputImagesItem[];
 }
 
+export type ParseSpecImagesResultDecision = typeof ParseSpecImagesResultDecision[keyof typeof ParseSpecImagesResultDecision];
+
+
+export const ParseSpecImagesResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface ParseSpecImagesResult {
   /** Bounded workbook-style transcription suitable for the existing spec parser */
   workbookText: string;
   generatedAt: number;
   note?: string;
+  decision: ParseSpecImagesResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }
 
 export type PhotoGuessCategory = typeof PhotoGuessCategory[keyof typeof PhotoGuessCategory];
@@ -982,314 +1026,6 @@ export interface ApprovePasswordResetResult {
   expiresAt: string;
 }
 
-export interface OptimizeStoppage {
-  reason: string;
-  durationSec: number;
-  /** True if the stoppage is still in progress (no end time) */
-  open: boolean;
-}
-
-export type OptimizeRunStatus = typeof OptimizeRunStatus[keyof typeof OptimizeRunStatus];
-
-
-export const OptimizeRunStatus = {
-  running: 'running',
-  upcoming: 'upcoming',
-  finished: 'finished',
-} as const;
-
-export interface OptimizeRun {
-  id: string;
-  label: string;
-  brand: string;
-  flavor: string;
-  dieType: string;
-  status: OptimizeRunStatus;
-  casesNeeded: number;
-  /** Recorded/cased output only; excludes work still in the freezer or on the line */
-  casesMade: number;
-  /** Lifecycle-aware cases pressed but not yet cased (freezer/on-line work in progress); optional for older clients */
-  casesOnLine?: number;
-  casesLeft: number;
-  /** Planned pizzas-per-minute from line config */
-  plannedPpm: number;
-  /**
-     * Observed pizzas-per-minute, or null if not yet measurable
-     * @nullable
-     */
-  actualPpm: number | null;
-  /** @nullable */
-  minutesRemaining: number | null;
-  netElapsedSec: number;
-  downtimeSec: number;
-  stoppages: OptimizeStoppage[];
-  /** How many pizzas make one case (unit-conversion denominator for PPM→cases) */
-  pizzasPerCase?: number;
-  /** How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid) */
-  casesPerSkid?: number;
-}
-
-export interface OptimizeScheduledRun {
-  date: string;
-  brand: string;
-  flavor: string;
-  dieType: string;
-  casesNeeded: number;
-}
-
-/**
- * Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted.
- */
-export type OptimizeInputReorderDemandByKey = {[key: string]: number};
-
-export interface OptimizeInput {
-  date: string;
-  /** Client clock (ms epoch) so the model can reason about timing */
-  nowMs: number;
-  /** Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts */
-  tzOffsetMinutes?: number;
-  /** Target completion time of day (HH:MM), or empty if unset */
-  runToTime?: string;
-  /** Today's aggregate pizzas-per-minute so far */
-  todayPpm?: number;
-  /**
-     * Historical average pizzas-per-minute, or null if no history
-     * @nullable
-     */
-  benchmarkPpm?: number | null;
-  /** Today's runs (running, upcoming, and finished) */
-  runs: OptimizeRun[];
-  /** Future planned runs */
-  scheduledRuns?: OptimizeScheduledRun[];
-  /** Recent finished runs from prior days */
-  historyRuns?: OptimizeRun[];
-  /** Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted. */
-  reorderDemandByKey?: OptimizeInputReorderDemandByKey;
-}
-
-export type OptimizeActionKind = typeof OptimizeActionKind[keyof typeof OptimizeActionKind];
-
-
-export const OptimizeActionKind = {
-  set_target_time: 'set_target_time',
-  set_run_target: 'set_run_target',
-  reorder_run: 'reorder_run',
-} as const;
-
-/**
- * Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today's run ids.
- */
-export interface OptimizeAction {
-  kind: OptimizeActionKind;
-  /** Short imperative button caption */
-  label: string;
-  /** Target finish time HH:MM (set_target_time) */
-  time?: string;
-  /** Target run id (set_run_target, reorder_run) */
-  runId?: string;
-  /** New case target (set_run_target) */
-  casesNeeded?: number;
-  /**
-     * reorder_run: move runId immediately before this run id, or null to move it last
-     * @nullable
-     */
-  beforeRunId?: string | null;
-}
-
-export type OptimizeRecommendationCategory = typeof OptimizeRecommendationCategory[keyof typeof OptimizeRecommendationCategory];
-
-
-export const OptimizeRecommendationCategory = {
-  run: 'run',
-  break: 'break',
-  efficiency: 'efficiency',
-} as const;
-
-export type OptimizeRecommendationImpact = typeof OptimizeRecommendationImpact[keyof typeof OptimizeRecommendationImpact];
-
-
-export const OptimizeRecommendationImpact = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-/**
- * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
- */
-export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
-
-
-export const ReviewVerdictStatus = {
-  ok: 'ok',
-  warn: 'warn',
-  reject: 'reject',
-} as const;
-
-/**
- * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
- */
-export interface ReviewVerdict {
-  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
-  status: ReviewVerdictStatus;
-  /** Short reason for a warn/reject verdict */
-  reason?: string;
-}
-
-export interface OptimizeRecommendation {
-  category: OptimizeRecommendationCategory;
-  title: string;
-  detail: string;
-  impact: OptimizeRecommendationImpact;
-  /**
-     * Run label or scope this applies to, or null for shift-wide
-     * @nullable
-     */
-  appliesTo: string | null;
-  /** Optional one-tap action, or null when nothing is safely applicable */
-  action?: OptimizeAction | null;
-  review?: ReviewVerdict;
-}
-
-export interface OptimizeResult {
-  recommendations: OptimizeRecommendation[];
-  generatedAt: number;
-  /** Optional message when data is insufficient for analysis */
-  note?: string;
-}
-
-/**
- * A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.
- */
-export interface AskInput {
-  /** The user's plain-language question about the day */
-  question: string;
-  dayState: OptimizeInput;
-}
-
-/**
- * Who produced this turn
- */
-export type ConversationTurnRole = typeof ConversationTurnRole[keyof typeof ConversationTurnRole];
-
-
-export const ConversationTurnRole = {
-  user: 'user',
-  assistant: 'assistant',
-} as const;
-
-/**
- * One turn in a user's AI conversation memory — a single message either from the user or the assistant.
- */
-export interface ConversationTurn {
-  /** Who produced this turn */
-  role: ConversationTurnRole;
-  /** The message text */
-  text: string;
-}
-
-export interface AskResult {
-  /** The grounded plain-language answer */
-  answer: string;
-  /** The asking user's recent conversation window (oldest first) after this exchange was recorded, so the client can render the thread from server truth. */
-  turns: ConversationTurn[];
-  generatedAt: number;
-  /** Optional message when the question could not be answered from data */
-  note?: string;
-}
-
-/**
- * A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data /ai/ask uses), letting the server resolve fuzzy run references to concrete run ids.
- */
-export interface CommandInput {
-  /** The user's spoken phrase (a question or an action command) */
-  utterance: string;
-  dayState: OptimizeInput;
-}
-
-/**
- * One ingredient line of a recipe (ingredient name + pounds).
- */
-export interface RecipeAssistRow {
-  ingredient: string;
-  /** Pounds of this ingredient in the recipe/batch */
-  lbs: number;
-}
-
-/**
- * One of the current run's recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).
- */
-export interface RecipeAssistRecipe {
-  /** Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an "apply" suggestion target this exact recipe deterministically. */
-  id?: string;
-  /** What the recipe is for (dough, sauce, cheese, other) */
-  kind: string;
-  /** The recipe's name (may be empty if unnamed) */
-  name: string;
-  rows: RecipeAssistRow[];
-}
-
-/**
- * Optional run numbers the model may use to ground scaling math so its answer is consistent with what the app computes.
- */
-export interface RecipeAssistContext {
-  brand?: string;
-  flavor?: string;
-  casesNeeded?: number;
-  pizzasPerCase?: number;
-  /** Target weight of one doughball in ounces */
-  doughballWeightOz?: number;
-}
-
-/**
- * A plain-language recipe/ingredient question plus the real recipe rows, the known ingredient pool, and optional run context the answer must be grounded in. Both clients send identically-shaped data.
- */
-export interface RecipeAssistInput {
-  /** The user's plain-language recipe/ingredient question */
-  question: string;
-  /** The current run's recipes (dough/sauce/cheese), may be empty */
-  recipes: RecipeAssistRecipe[];
-  /** Known ingredient names, so substitutions stay within the app's pool */
-  ingredientNames?: string[];
-  context?: RecipeAssistContext;
-}
-
-/**
- * Whether this resizes a recipe (scale) or swaps an ingredient (substitute)
- */
-export type RecipeAssistSuggestionKind = typeof RecipeAssistSuggestionKind[keyof typeof RecipeAssistSuggestionKind];
-
-
-export const RecipeAssistSuggestionKind = {
-  scale: 'scale',
-  substitute: 'substitute',
-} as const;
-
-/**
- * An optional structured, confirm-first edit the worker can apply in one tap — the exact resulting ingredient rows of a scaled or substituted recipe. Present only for SCALE/SUBSTITUTE questions where the model could produce exact rows; absent for EXPLAIN questions or when it is unsure. Advisory: nothing is applied until the worker confirms.
- */
-export interface RecipeAssistSuggestion {
-  /** Whether this resizes a recipe (scale) or swaps an ingredient (substitute) */
-  kind: RecipeAssistSuggestionKind;
-  /** The id of the recipe to apply this to, copied from the matching RecipeAssistRecipe.id sent in the request. */
-  recipeId: string;
-  /** The target recipe's display name (for the confirmation UI) */
-  recipeName?: string;
-  /** A short button/label describing the change (e.g. "Apply scaled dough 1.5x") */
-  summary?: string;
-  /** The COMPLETE new set of ingredient rows for that recipe after the change */
-  rows: RecipeAssistRow[];
-}
-
-export interface RecipeAssistResult {
-  /** The grounded plain-language answer */
-  answer: string;
-  generatedAt: number;
-  /** Optional message when the question could not be answered from data */
-  note?: string;
-  suggestion?: RecipeAssistSuggestion;
-}
-
 export interface SpecReconcileRow {
   ingredient: string;
   lbs: number;
@@ -1471,12 +1207,7 @@ export interface ReconcileDiscrepancy {
 export interface SpecReconcileResult {
   specSheetId: number;
   discrepancies: ReconcileDiscrepancy[];
-  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
-  summary?: string;
   generatedAt: number;
-  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 export interface MixComponentSpec {
@@ -1614,164 +1345,9 @@ export interface MixReconcileInput {
 }
 
 export interface MixReconcileResult {
-  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
-  summary?: string;
+  /** The validated deterministic discrepancies supplied by the client */
+  discrepancies: MixDiscrepancyWire[];
   generatedAt: number;
-  /** True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
-}
-
-export interface MixAssistMix {
-  name: string;
-  brand: string;
-  flavor: string;
-  batchSize?: number;
-  daysEarly?: number;
-  amountAlreadyMade?: number;
-  enabled?: boolean;
-  components: MixComponentSpec[];
-}
-
-export interface MixAssistInput {
-  question: string;
-  mixes: MixAssistMix[];
-}
-
-export interface MixAssistResult {
-  answer: string;
-  generatedAt: number;
-  note?: string;
-}
-
-export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
-
-
-export const ProactiveAlertCategory = {
-  run: 'run',
-  break: 'break',
-  efficiency: 'efficiency',
-} as const;
-
-export type ProactiveAlertImpact = typeof ProactiveAlertImpact[keyof typeof ProactiveAlertImpact];
-
-
-export const ProactiveAlertImpact = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-/**
- * A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. "behind-plan", "break-window") so repeats of the same situation can be de-duped/cooled down client-side; it is never run-instance or timestamp specific.
- */
-export interface ProactiveAlert {
-  /** Stable de-dup slug for the kind of nudge */
-  key: string;
-  category: ProactiveAlertCategory;
-  /** Short glanceable headline */
-  title: string;
-  /** One or two plain-language sentences a manager can act on */
-  detail: string;
-  impact: ProactiveAlertImpact;
-}
-
-export interface ProactiveAlertResult {
-  /** The single nudge to surface now, or null when nothing applies */
-  alert: ProactiveAlert | null;
-  generatedAt: number;
-  aiStatus: AiStatus;
-  /** Optional message when no alert could be produced */
-  note?: string;
-}
-
-/**
- * A finished run from a past day, used to learn demand patterns.
- */
-export interface ForecastHistoryRun {
-  brand: string;
-  flavor: string;
-  /** May be empty when unknown */
-  dieType: string;
-  /** Cases actually produced for this run */
-  cases: number;
-  /** Net run minutes (excludes downtime); a throughput signal */
-  netRunMin: number;
-}
-
-/**
- * One past production day with its finished runs.
- */
-export interface ForecastHistoryDay {
-  /** ISO date (YYYY-MM-DD) of the production day */
-  date: string;
-  runs: ForecastHistoryRun[];
-}
-
-export interface ForecastInput {
-  /** ISO date (YYYY-MM-DD) of the first upcoming day to forecast */
-  targetDate: string;
-  /**
-     * How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday's history.
-     * @minimum 1
-     * @maximum 7
-     */
-  horizonDays?: number;
-  /** Client clock in epoch ms (for relative reasoning) */
-  nowMs: number;
-  /** Recent finished production days, most useful when several weeks deep */
-  history: ForecastHistoryDay[];
-  /** Runs already planned for future days (incl. any existing plan for the target day) */
-  scheduledRuns?: OptimizeScheduledRun[];
-}
-
-/**
- * One suggested run in the predicted plan (advisory; not committed).
- */
-export interface ForecastRun {
-  brand: string;
-  flavor: string;
-  /** May be empty when the model is unsure */
-  dieType: string;
-  /** Rough suggested case target */
-  casesNeeded: number;
-  /** Short reason this run is suggested (grounded in history) */
-  rationale: string;
-}
-
-/**
- * Honest confidence given how much history supports the prediction
- */
-export type ForecastPlanConfidence = typeof ForecastPlanConfidence[keyof typeof ForecastPlanConfidence];
-
-
-export const ForecastPlanConfidence = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-export interface ForecastPlan {
-  targetDate: string;
-  /** Honest confidence given how much history supports the prediction */
-  confidence: ForecastPlanConfidence;
-  /** Plain-language rationale for the whole plan, incl. caveats */
-  summary: string;
-  /** Suggested runs in a sensible production sequence */
-  runs: ForecastRun[];
-}
-
-export interface ForecastResult {
-  /** The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present. */
-  forecast: ForecastPlan | null;
-  /** One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon. */
-  forecasts?: ForecastPlan[];
-  generatedAt: number;
-  /** True when the AI produced a forecast; false when no forecast was produced */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
-  /** Explanation when no forecast could responsibly be produced */
-  note?: string;
 }
 
 /**
@@ -1856,13 +1432,10 @@ export interface SummaryStats {
 }
 
 export interface SummaryResult {
-  /** Plain-language recap (AI narration, or deterministic fallback) */
+  /** Deterministic plain-language recap */
   summary: string;
   stats: SummaryStats;
   generatedAt: number;
-  /** True when the AI narrated; false when the deterministic fallback was used */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 export type OperationalReportInputScope = typeof OperationalReportInputScope[keyof typeof OperationalReportInputScope];
@@ -1877,9 +1450,91 @@ export interface OperationalReportInput {
   scope: OperationalReportInputScope;
   /** ISO date, or week-ending date for a weekly report */
   date: string;
-  /** @maxItems 600 */
-  runs: SummaryRunInput[];
+  /**
+     * Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.
+     * @maxItems 600
+     */
+  runs?: SummaryRunInput[];
 }
+
+export type FinalizedOperationalReportSummaryReportScope = typeof FinalizedOperationalReportSummaryReportScope[keyof typeof FinalizedOperationalReportSummaryReportScope];
+
+
+export const FinalizedOperationalReportSummaryReportScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+/**
+ * Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.
+ */
+export type FinalizedOperationalReportSummaryHashContract = typeof FinalizedOperationalReportSummaryHashContract[keyof typeof FinalizedOperationalReportSummaryHashContract];
+
+
+export const FinalizedOperationalReportSummaryHashContract = {
+  'json-v1': 'json-v1',
+  'canonical-json-v2': 'canonical-json-v2',
+  unrecognized: 'unrecognized',
+} as const;
+
+/**
+ * Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+ * @nullable
+ */
+export type FinalizedOperationalReportSummaryProofContract = typeof FinalizedOperationalReportSummaryProofContract[keyof typeof FinalizedOperationalReportSummaryProofContract] | null;
+
+
+export const FinalizedOperationalReportSummaryProofContract = {
+  'hmac-sha256-v1': 'hmac-sha256-v1',
+} as const;
+
+/**
+ * Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.
+ */
+export type FinalizedOperationalReportSummaryProofStatus = typeof FinalizedOperationalReportSummaryProofStatus[keyof typeof FinalizedOperationalReportSummaryProofStatus];
+
+
+export const FinalizedOperationalReportSummaryProofStatus = {
+  verified: 'verified',
+  'unsigned-legacy': 'unsigned-legacy',
+  invalid: 'invalid',
+  'key-unavailable': 'key-unavailable',
+  'not-checked': 'not-checked',
+} as const;
+
+export interface FinalizedOperationalReportSummary {
+  id: string;
+  reportScope: FinalizedOperationalReportSummaryReportScope;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  generatedBy: string;
+  finalizedAt: string;
+  finalizedBy: string;
+  contentHash: string;
+  /** Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker. */
+  hashContract: FinalizedOperationalReportSummaryHashContract;
+  /**
+     * Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+     * @nullable
+     */
+  proofContract: FinalizedOperationalReportSummaryProofContract;
+  /**
+     * Identifier used to select a retained verification key during safe rotation. This is not secret key material.
+     * @nullable
+     */
+  proofKeyId: string | null;
+  /** Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative. */
+  proofStatus: FinalizedOperationalReportSummaryProofStatus;
+}
+
+export type FinalizedOperationalReportScope = typeof FinalizedOperationalReportScope[keyof typeof FinalizedOperationalReportScope];
+
+
+export const FinalizedOperationalReportScope = {
+  live: 'live',
+  sandbox: 'sandbox',
+} as const;
 
 export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
 
@@ -1897,6 +1552,22 @@ export const OperationalReportQualityAvailability = {
   unavailable: 'unavailable',
 } as const;
 
+export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
+
+
+export const OperationalReportIncidentsAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
+
+
+export const OperationalReportInventoryAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
 export type OperationalReportQualityValue = {
   checks?: number;
   issues?: number;
@@ -1910,14 +1581,6 @@ export type OperationalReportQuality = {
   note?: string;
 };
 
-export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
-
-
-export const OperationalReportIncidentsAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
 export type OperationalReportIncidentsValue = {
   total?: number;
   unresolved?: number;
@@ -1928,14 +1591,6 @@ export type OperationalReportIncidents = {
   value: OperationalReportIncidentsValue;
   note?: string;
 };
-
-export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
-
-
-export const OperationalReportInventoryAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
 
 export type OperationalReportInventoryValue = {
   flaggedItems?: number;
@@ -1957,6 +1612,228 @@ export interface OperationalReport {
   quality: OperationalReportQuality;
   incidents: OperationalReportIncidents;
   inventory: OperationalReportInventory;
+}
+
+export type FinalizedOperationalReport = FinalizedOperationalReportSummary & {
+  scope: FinalizedOperationalReportScope;
+  idempotent?: boolean;
+  report: OperationalReport;
+};
+
+export type OperationalRunViewVersion = typeof OperationalRunViewVersion[keyof typeof OperationalRunViewVersion];
+
+
+export const OperationalRunViewVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewObservedStatus = typeof OperationalRunViewObservedStatus[keyof typeof OperationalRunViewObservedStatus];
+
+
+export const OperationalRunViewObservedStatus = {
+  'not-started': 'not-started',
+  running: 'running',
+  paused: 'paused',
+  ended: 'ended',
+} as const;
+
+export type OperationalRunViewObservedPackagingProgress = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+} | null;
+
+export type OperationalRunViewObservedTemporaryOverrides = {
+  freezerTime: boolean;
+  crustsPerCycle: boolean;
+  cycleSpeed: boolean;
+};
+
+export type OperationalRunViewObservedStoppages = {
+  count: number;
+  downtimeSeconds: number;
+};
+
+export type OperationalRunViewObserved = {
+  brand: string;
+  flavor: string;
+  status: OperationalRunViewObservedStatus;
+  startedAt?: number;
+  pausedAt?: number;
+  endedAt?: number;
+  elapsedBatchSec: number;
+  substitutionsApplied: number;
+  packagingProgress: OperationalRunViewObservedPackagingProgress;
+  temporaryOverrides: OperationalRunViewObservedTemporaryOverrides;
+  stoppages: OperationalRunViewObservedStoppages;
+};
+
+export type OperationalRunViewRecap = {
+  casesNeeded: number;
+  casesCompleted: number;
+  casesLeftToRun: number;
+  pressDone: boolean;
+  extraCases: number;
+};
+
+export type OperationalLinePhaseState = typeof OperationalLinePhaseState[keyof typeof OperationalLinePhaseState];
+
+
+export const OperationalLinePhaseState = {
+  filling: 'filling',
+  active: 'active',
+  paused: 'paused',
+  draining: 'draining',
+  resuming: 'resuming',
+  empty: 'empty',
+} as const;
+
+export interface OperationalLinePhase {
+  label: string;
+  state: OperationalLinePhaseState;
+  remainMs: number;
+}
+
+export type OperationalRunViewElapsedPhase = {
+  stage1: OperationalLinePhase;
+  stage2: OperationalLinePhase;
+  stage3: OperationalLinePhase;
+};
+
+export type OperationalRunViewElapsed = {
+  batchSec: number;
+  phase: OperationalRunViewElapsedPhase;
+};
+
+export type OperationalRunViewPacePaceStatus = typeof OperationalRunViewPacePaceStatus[keyof typeof OperationalRunViewPacePaceStatus] | null;
+
+
+export const OperationalRunViewPacePaceStatus = {
+  'on-pace': 'on-pace',
+  ahead: 'ahead',
+  behind: 'behind',
+} as const;
+
+export type OperationalRunViewPace = {
+  ppm: number;
+  paceStatus: OperationalRunViewPacePaceStatus;
+  paceDelta: number;
+  catchUpPpm: number | null;
+};
+
+export type OperationalRunViewAdvisoryFreezer = {
+  cases: number;
+  configuredMinutes: number;
+};
+
+export type OperationalRunViewAdvisoryLine = {
+  cases: number;
+};
+
+/**
+ * Read-only projections; never authoritative counter or inventory writes.
+ */
+export type OperationalRunViewAdvisory = {
+  freezer: OperationalRunViewAdvisoryFreezer;
+  line: OperationalRunViewAdvisoryLine;
+};
+
+export type OperationalRunViewFreshnessStatus = typeof OperationalRunViewFreshnessStatus[keyof typeof OperationalRunViewFreshnessStatus];
+
+
+export const OperationalRunViewFreshnessStatus = {
+  fresh: 'fresh',
+  stale: 'stale',
+} as const;
+
+export type OperationalRunViewFreshness = {
+  status: OperationalRunViewFreshnessStatus;
+  snapshotId: string;
+  capturedAt: number;
+  ageMs: number;
+  maxAgeMs: number;
+};
+
+export type OperationalRunViewFormulaProvenancePolicy = typeof OperationalRunViewFormulaProvenancePolicy[keyof typeof OperationalRunViewFormulaProvenancePolicy];
+
+
+export const OperationalRunViewFormulaProvenancePolicy = {
+  'operational-run-view': 'operational-run-view',
+} as const;
+
+export type OperationalRunViewFormulaProvenancePolicyVersion = typeof OperationalRunViewFormulaProvenancePolicyVersion[keyof typeof OperationalRunViewFormulaProvenancePolicyVersion];
+
+
+export const OperationalRunViewFormulaProvenancePolicyVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewFormulaProvenanceCalculator = typeof OperationalRunViewFormulaProvenanceCalculator[keyof typeof OperationalRunViewFormulaProvenanceCalculator];
+
+
+export const OperationalRunViewFormulaProvenanceCalculator = {
+  computeServerCalc: 'computeServerCalc',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceCalculatorVersion = typeof OperationalRunViewFormulaProvenanceCalculatorVersion[keyof typeof OperationalRunViewFormulaProvenanceCalculatorVersion];
+
+
+export const OperationalRunViewFormulaProvenanceCalculatorVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewFormulaProvenanceTemporaryOverrides = typeof OperationalRunViewFormulaProvenanceTemporaryOverrides[keyof typeof OperationalRunViewFormulaProvenanceTemporaryOverrides];
+
+
+export const OperationalRunViewFormulaProvenanceTemporaryOverrides = {
+  applyTemporaryOverrides: 'applyTemporaryOverrides',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceInventoryItem = typeof OperationalRunViewFormulaProvenanceInventoryItem[keyof typeof OperationalRunViewFormulaProvenanceInventoryItem];
+
+
+export const OperationalRunViewFormulaProvenanceInventoryItem = {
+  computeCasesOnLine: 'computeCasesOnLine',
+  computeCasesInFreezer: 'computeCasesInFreezer',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceLinePhases = typeof OperationalRunViewFormulaProvenanceLinePhases[keyof typeof OperationalRunViewFormulaProvenanceLinePhases];
+
+
+export const OperationalRunViewFormulaProvenanceLinePhases = {
+  computeLinePhases: 'computeLinePhases',
+} as const;
+
+export type OperationalRunViewFormulaProvenanceLinePhasesVersion = typeof OperationalRunViewFormulaProvenanceLinePhasesVersion[keyof typeof OperationalRunViewFormulaProvenanceLinePhasesVersion];
+
+
+export const OperationalRunViewFormulaProvenanceLinePhasesVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalRunViewFormulaProvenance = {
+  policy: OperationalRunViewFormulaProvenancePolicy;
+  policyVersion: OperationalRunViewFormulaProvenancePolicyVersion;
+  calculator: OperationalRunViewFormulaProvenanceCalculator;
+  calculatorVersion: OperationalRunViewFormulaProvenanceCalculatorVersion;
+  temporaryOverrides: OperationalRunViewFormulaProvenanceTemporaryOverrides;
+  inventory: OperationalRunViewFormulaProvenanceInventoryItem[];
+  linePhases: OperationalRunViewFormulaProvenanceLinePhases;
+  linePhasesVersion: OperationalRunViewFormulaProvenanceLinePhasesVersion;
+};
+
+export interface OperationalRunView {
+  version: OperationalRunViewVersion;
+  date: string;
+  runId: string;
+  observed: OperationalRunViewObserved;
+  recap: OperationalRunViewRecap;
+  elapsed: OperationalRunViewElapsed;
+  pace: OperationalRunViewPace;
+  /** Read-only projections; never authoritative counter or inventory writes. */
+  advisory: OperationalRunViewAdvisory;
+  calculatedAt: number;
+  freshness: OperationalRunViewFreshness;
+  formulaProvenance: OperationalRunViewFormulaProvenance;
 }
 
 export type ShiftHandoffItemSource = typeof ShiftHandoffItemSource[keyof typeof ShiftHandoffItemSource];
@@ -2074,8 +1951,6 @@ export interface IncidentClustersResult {
   /** Optional explanation (e.g. too few incidents to cluster) */
   note?: string;
   generatedAt: number;
-  /** True when the AI proposed the grouping; false for the deterministic fallback */
-  aiGenerated: boolean;
 }
 
 /**
@@ -2131,14 +2006,11 @@ export interface AnomalyResult {
   anomalies: Anomaly[];
   checkedRuns: number;
   baselineRuns: number;
-  /** Plain-language narration (AI), or empty when nothing was flagged / AI unavailable */
+  /** Deterministic summary, or empty when nothing was flagged */
   summary: string;
   /** Optional explanation (e.g. not enough history to judge) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }
 
 /**
@@ -2209,116 +2081,11 @@ export interface ScheduleOptimizeResponse {
   improved: boolean;
   before: ScheduleMetrics;
   after: ScheduleMetrics;
-  /** Plain-language narration (AI), or empty when no improvement / AI unavailable */
+  /** Deterministic summary, or empty when no improvement is available */
   summary: string;
   /** Optional explanation (e.g. already optimally ordered) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
-}
-
-/**
- * Actual finished production history to grade past forecasts against.
- */
-export interface ForecastAccuracyInput {
-  /** Client clock in epoch ms (for relative reasoning) */
-  nowMs: number;
-  /** Recent finished production days (the actual results to compare forecasts to) */
-  history: ForecastHistoryDay[];
-}
-
-/**
- * hit = predicted ≈ actual; over/under = predicted more/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted
- */
-export type ForecastAccuracyProductStatus = typeof ForecastAccuracyProductStatus[keyof typeof ForecastAccuracyProductStatus];
-
-
-export const ForecastAccuracyProductStatus = {
-  hit: 'hit',
-  over: 'over',
-  under: 'under',
-  missed: 'missed',
-  unexpected: 'unexpected',
-} as const;
-
-/**
- * One product's predicted vs. actual cases for a reviewed day.
- */
-export interface ForecastAccuracyProduct {
-  /** Product label (brand + flavor) as recorded/run */
-  label: string;
-  /** Cases the forecast predicted (0 if it was not predicted) */
-  predictedCases: number;
-  /** Cases actually produced (0 if it did not run) */
-  actualCases: number;
-  /** hit = predicted ≈ actual; over/under = predicted more/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted */
-  status: ForecastAccuracyProductStatus;
-}
-
-/**
- * Confidence the forecast was issued with
- */
-export type ForecastAccuracyReviewConfidence = typeof ForecastAccuracyReviewConfidence[keyof typeof ForecastAccuracyReviewConfidence];
-
-
-export const ForecastAccuracyReviewConfidence = {
-  high: 'high',
-  medium: 'medium',
-  low: 'low',
-} as const;
-
-/**
- * One past forecast graded against the day's actual finished runs.
- */
-export interface ForecastAccuracyReview {
-  /** ISO date (YYYY-MM-DD) the forecast was for */
-  date: string;
-  /** Confidence the forecast was issued with */
-  confidence: ForecastAccuracyReviewConfidence;
-  predictedTotalCases: number;
-  actualTotalCases: number;
-  /** 0–100 closeness of predicted total cases to actual total cases */
-  caseAccuracyPct: number;
-  products: ForecastAccuracyProduct[];
-}
-
-/**
- * A product the forecast consistently mis-predicts across reviewed days.
- */
-export interface ForecastAccuracyTrendProduct {
-  /** Product label (brand + flavor) */
-  label: string;
-  /** Reviewed days this product was over-predicted */
-  daysOver: number;
-  /** Reviewed days this product was under-predicted */
-  daysUnder: number;
-  /** Reviewed days this product appeared in at all */
-  daysScored: number;
-}
-
-/**
- * Cross-day calibration summary rolled up from the per-day reviews.
- */
-export interface ForecastAccuracyTrend {
-  /** Number of reviewed (forecast + finished) days included */
-  daysScored: number;
-  /** Mean case-accuracy across the reviewed days (0–100) */
-  averageCaseAccuracyPct: number;
-  /** Products repeatedly over-predicted, most frequent first */
-  chronicOver: ForecastAccuracyTrendProduct[];
-  /** Products repeatedly under-predicted, most frequent first */
-  chronicUnder: ForecastAccuracyTrendProduct[];
-}
-
-export interface ForecastAccuracyResult {
-  /** Per-date reviews, most recent first */
-  reviews: ForecastAccuracyReview[];
-  trend: ForecastAccuracyTrend;
-  generatedAt: number;
-  /** Explanation when there is nothing to review yet */
-  note?: string;
 }
 
 export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
@@ -2377,6 +2144,28 @@ export interface FillMissingInput {
   fields: FillMissingField[];
 }
 
+/**
+ * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
+ */
+export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
+
+
+export const ReviewVerdictStatus = {
+  ok: 'ok',
+  warn: 'warn',
+  reject: 'reject',
+} as const;
+
+/**
+ * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
+ */
+export interface ReviewVerdict {
+  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
+  status: ReviewVerdictStatus;
+  /** Short reason for a warn/reject verdict */
+  reason?: string;
+}
+
 export interface FillMissingSuggestion {
   /** The field key this suggestion is for (echoes a requested key) */
   key: string;
@@ -2387,11 +2176,22 @@ export interface FillMissingSuggestion {
   review?: ReviewVerdict;
 }
 
+export type FillMissingResultDecision = typeof FillMissingResultDecision[keyof typeof FillMissingResultDecision];
+
+
+export const FillMissingResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface FillMissingResult {
   suggestions: FillMissingSuggestion[];
   generatedAt: number;
   /** Optional message when no suggestions could be made */
   note?: string;
+  decision: FillMissingResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -2859,12 +2659,274 @@ export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown 
 
 export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
 
+export type DataHealthFindingSeverity = typeof DataHealthFindingSeverity[keyof typeof DataHealthFindingSeverity];
+
+
+export const DataHealthFindingSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
+
+export type DataHealthFindingRepairability = typeof DataHealthFindingRepairability[keyof typeof DataHealthFindingRepairability];
+
+
+export const DataHealthFindingRepairability = {
+  safe: 'safe',
+  review: 'review',
+} as const;
+
+export type DataHealthFindingSource = typeof DataHealthFindingSource[keyof typeof DataHealthFindingSource];
+
+
+export const DataHealthFindingSource = {
+  'profile-health': 'profile-health',
+  'master-data': 'master-data',
+  'saved-spec': 'saved-spec',
+  cleanup: 'cleanup',
+} as const;
+
+export type DataHealthFindingReconciliationCategory = typeof DataHealthFindingReconciliationCategory[keyof typeof DataHealthFindingReconciliationCategory] | null;
+
+
+export const DataHealthFindingReconciliationCategory = {
+  'pool-mismatch': 'pool-mismatch',
+  'alias-gap': 'alias-gap',
+  'stale-profile-link': 'stale-profile-link',
+  'stale-pending-run-link': 'stale-pending-run-link',
+  'protected-stub': 'protected-stub',
+  'unexpected-stub': 'unexpected-stub',
+} as const;
+
+export type DataHealthFindingPreview = { [key: string]: unknown } | null;
+
+export interface DataHealthFinding {
+  id: string;
+  category: string;
+  severity: DataHealthFindingSeverity;
+  repairability: DataHealthFindingRepairability;
+  brand: string;
+  flavor: string;
+  recipe: string;
+  message: string;
+  proposedRepair: string;
+  affectedRecord: string;
+  protectedValue: boolean;
+  source: DataHealthFindingSource;
+  sourceRoute: string;
+  reconciliationCategory?: DataHealthFindingReconciliationCategory;
+  preview?: DataHealthFindingPreview;
+}
+
+export type AiRetentionReportScope = typeof AiRetentionReportScope[keyof typeof AiRetentionReportScope];
+
+
+export const AiRetentionReportScope = {
+  live: 'live',
+  sandbox: 'sandbox',
+} as const;
+
+export type AiRetentionReportCandidates = {
+  /** @minimum 0 */
+  conversationTurns: number;
+  /** @minimum 0 */
+  retiredFacilityFacts: number;
+  /** @minimum 0 */
+  incidentGeneratedTextToLabel: number;
+  /** @minimum 0 */
+  qualityThumbnailsToRedact: number;
+  /** @minimum 0 */
+  closedObservationsToRedact: number;
+  /** @minimum 0 */
+  total: number;
+};
+
+export type AiRetentionReportProtected = {
+  correctionAndAliasRecords: string;
+  /** @minimum 0 */
+  operationalIncidentRows: number;
+  /** @minimum 0 */
+  confirmedQualityRows: number;
+  /** @minimum 0 */
+  openInventoryObservations: number;
+  inventoryLedgerEffects: string;
+};
+
+export type AiRetentionReportCutoffs = {
+  conversationBefore: string;
+  thumbnailBefore: string;
+  observationBefore: string;
+};
+
+export interface AiRetentionReport {
+  policyVersion: string;
+  scope: AiRetentionReportScope;
+  /** @minimum 1 */
+  batchLimit: number;
+  canApply: boolean;
+  alreadyApplied: boolean;
+  /** @nullable */
+  appliedAt: string | null;
+  candidates: AiRetentionReportCandidates;
+  protected: AiRetentionReportProtected;
+  cutoffs: AiRetentionReportCutoffs;
+}
+
+export type SourceLibraryReconciliationStatusStatus = typeof SourceLibraryReconciliationStatusStatus[keyof typeof SourceLibraryReconciliationStatusStatus];
+
+
+export const SourceLibraryReconciliationStatusStatus = {
+  clean: 'clean',
+  warning: 'warning',
+  error: 'error',
+  'not-verified': 'not-verified',
+} as const;
+
+export type SourceLibraryReconciliationStatusFreshness = typeof SourceLibraryReconciliationStatusFreshness[keyof typeof SourceLibraryReconciliationStatusFreshness];
+
+
+export const SourceLibraryReconciliationStatusFreshness = {
+  current: 'current',
+  stale: 'stale',
+} as const;
+
+export type SourceLibraryReconciliationStatusFindingsItemCategory = typeof SourceLibraryReconciliationStatusFindingsItemCategory[keyof typeof SourceLibraryReconciliationStatusFindingsItemCategory];
+
+
+export const SourceLibraryReconciliationStatusFindingsItemCategory = {
+  'pool-mismatch': 'pool-mismatch',
+  'alias-gap': 'alias-gap',
+  'stale-profile-link': 'stale-profile-link',
+  'stale-pending-run-link': 'stale-pending-run-link',
+  'protected-stub': 'protected-stub',
+  'unexpected-stub': 'unexpected-stub',
+} as const;
+
+export type SourceLibraryReconciliationStatusFindingsItemSeverity = typeof SourceLibraryReconciliationStatusFindingsItemSeverity[keyof typeof SourceLibraryReconciliationStatusFindingsItemSeverity];
+
+
+export const SourceLibraryReconciliationStatusFindingsItemSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
+
+export type SourceLibraryReconciliationStatusFindingsItemSourceRoute = typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute[keyof typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute];
+
+
+export const SourceLibraryReconciliationStatusFindingsItemSourceRoute = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheeseRecipes: 'cheeseRecipes',
+  mixes: 'mixes',
+  import: 'import',
+  setupProfiles: 'setupProfiles',
+  audit: 'audit',
+} as const;
+
+export type SourceLibraryReconciliationStatusReportSnapshot = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  capturedAt: string;
+};
+
+export type SourceLibraryReconciliationStatusReportManifest = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  /** @minimum 0 */
+  retained: number;
+  /** @minimum 0 */
+  excludedOlderDuplicates: number;
+};
+
+export type SourceLibraryReconciliationStatusReport = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  formatVersion: number;
+  /** @minimum 0 */
+  automaticProposals: number;
+  /** @minimum 0 */
+  stubs: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  planSha256: string;
+  snapshot: SourceLibraryReconciliationStatusReportSnapshot;
+  manifest: SourceLibraryReconciliationStatusReportManifest;
+};
+
+export type SourceLibraryReconciliationStatusHealResult = {
+  /** @minimum 0 */
+  replacements: number;
+  /** @minimum 0 */
+  aliasesInserted: number;
+  /** @minimum 0 */
+  repointedProfiles: number;
+  /** @minimum 0 */
+  repointedRuns: number;
+  /** @minimum 0 */
+  deletedStubs: number;
+};
+
+export type SourceLibraryReconciliationStatusHeal = {
+  id: string;
+  fromDate: string;
+  appliedAt: string | null;
+  markerValid: boolean;
+  result: SourceLibraryReconciliationStatusHealResult;
+};
+
+export type SourceLibraryReconciliationStatusSummary = {
+  /** @minimum 0 */
+  poolMismatches: number;
+  /** @minimum 0 */
+  aliasGaps: number;
+  /** @minimum 0 */
+  staleProfileLinks: number;
+  /** @minimum 0 */
+  stalePendingRunLinks: number;
+  /** @minimum 0 */
+  protectedStubs: number;
+  /** @minimum 0 */
+  unexpectedStubs: number;
+  /** @minimum 0 */
+  protectedHistoryReferences: number;
+  /** @minimum 0 */
+  omittedFindings: number;
+  /** @minimum 1 */
+  findingLimitPerCategory: number;
+};
+
+export type SourceLibraryReconciliationStatusFindingsItem = {
+  id: string;
+  category: SourceLibraryReconciliationStatusFindingsItemCategory;
+  severity: SourceLibraryReconciliationStatusFindingsItemSeverity;
+  affectedRecord: string;
+  currentValue: string;
+  proposedOutcome: string;
+  protectedValue: boolean;
+  sourceRoute: SourceLibraryReconciliationStatusFindingsItemSourceRoute;
+};
+
+export interface SourceLibraryReconciliationStatus {
+  report: SourceLibraryReconciliationStatusReport;
+  heal: SourceLibraryReconciliationStatusHeal;
+  checkedAt: string;
+  status: SourceLibraryReconciliationStatusStatus;
+  freshness: SourceLibraryReconciliationStatusFreshness;
+  summary: SourceLibraryReconciliationStatusSummary;
+  findings: SourceLibraryReconciliationStatusFindingsItem[];
+}
+
 export interface ProfileDataHealthWorkspace {
-  findings: ProfileDataHealthFinding[];
+  findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
   cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
   repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
+  aiRetention: AiRetentionReport;
+  sourceReconciliation: SourceLibraryReconciliationStatus;
 }
 
 export type ProfileNameLinkCleanupSummaryRemovedStubs = {
@@ -2894,16 +2956,6 @@ export interface FacilityKnowledgeList {
 export interface SaveFacilityKnowledgeInput {
   /** The batch of facility-knowledge facts to upsert into the shared pool */
   knowledge: FacilityKnowledge[];
-}
-
-export interface ConversationHistory {
-  /** The user's recent conversation turns, oldest first */
-  turns: ConversationTurn[];
-}
-
-export interface AppendConversationInput {
-  /** One or more turns to append to the current user's conversation memory */
-  turns: ConversationTurn[];
 }
 
 /**
@@ -2956,6 +3008,59 @@ export interface DeniedMerge {
 
 export interface DeniedMergeList {
   denied: DeniedMerge[];
+}
+
+export type DuplicateReviewGroupStatus = typeof DuplicateReviewGroupStatus[keyof typeof DuplicateReviewGroupStatus];
+
+
+export const DuplicateReviewGroupStatus = {
+  pending: 'pending',
+  resolved: 'resolved',
+  ignored: 'ignored',
+} as const;
+
+export interface DuplicateReviewGroup {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  groupKey: string;
+  category: MergeSuggestCategory;
+  /** @nullable */
+  brand?: string | null;
+  /** @minLength 1 */
+  target: string;
+  /** @minItems 1 */
+  sources: string[];
+  status: DuplicateReviewGroupStatus;
+}
+
+export interface DuplicateReviewList {
+  groups: DuplicateReviewGroup[];
+  /** @minimum 0 */
+  count: number;
+}
+
+export interface SaveDuplicateReviewsInput {
+  /** @maxItems 1000 */
+  groups: DuplicateReviewGroup[];
+}
+
+export type ResolveDuplicateReviewInputOutcome = typeof ResolveDuplicateReviewInputOutcome[keyof typeof ResolveDuplicateReviewInputOutcome];
+
+
+export const ResolveDuplicateReviewInputOutcome = {
+  resolved: 'resolved',
+  ignored: 'ignored',
+} as const;
+
+export interface ResolveDuplicateReviewInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  groupKey: string;
+  outcome: ResolveDuplicateReviewInputOutcome;
 }
 
 export interface SaveDeniedMergesInput {
@@ -3302,21 +3407,74 @@ export interface RunTemplate {
   flavor?: string;
   /** ISO-8601 timestamp the template was created */
   createdAt: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision: number;
+  /** Whether this record is a deletion tombstone */
+  deleted?: boolean;
 }
 
 export interface RunTemplateList {
   templates: RunTemplate[];
 }
 
-export interface SaveRunTemplatesInput {
-  /** The batch of run templates to create or update (by id) */
-  templates: RunTemplate[];
+/**
+ * Run configuration (cross-platform wire shape; opaque to the server)
+ */
+export type RunTemplateInputValues = { [key: string]: unknown };
+
+/**
+ * A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.
+ */
+export interface RunTemplateInput {
+  /** Stable client-generated id */
+  id: string;
+  /** Human-readable template name */
+  name: string;
+  /** Run configuration (cross-platform wire shape; opaque to the server) */
+  values: RunTemplateInputValues;
+  brand?: string;
+  flavor?: string;
+  /** ISO-8601 timestamp the template was created */
+  createdAt: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision?: number;
+  /** Whether this record is a deletion tombstone */
+  deleted?: boolean;
 }
 
-export interface DeleteRunTemplatesInput {
-  /** The ids of the run templates to delete */
-  ids: string[];
+export interface SaveRunTemplatesInput {
+  /** The batch of run templates to create or update (by id) */
+  templates: RunTemplateInput[];
 }
+
+export type DeleteRunTemplatesInputItemsItem = {
+  /** Stable client-generated id */
+  id: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision: number;
+};
+
+/**
+ * Revisioned deletion tombstones and/or legacy template ids. At least one of `items` or `ids` must be supplied.
+ */
+export type DeleteRunTemplatesInput = (unknown & {
+  /** Deletion tombstones to apply by id and revision */
+  items?: DeleteRunTemplatesInputItemsItem[];
+  /** Legacy deletion ids. The server atomically assigns a newer revision. */
+  ids?: string[];
+});
 
 export interface SupervisorPin {
   /** The facility supervisor PIN */
@@ -3649,6 +3807,13 @@ export interface MergeSuggestion {
   review?: ReviewVerdict;
 }
 
+export type SuggestMergesResultDecision = typeof SuggestMergesResultDecision[keyof typeof SuggestMergesResultDecision];
+
+
+export const SuggestMergesResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface SuggestMergesResult {
   suggestions: MergeSuggestion[];
   /** Epoch ms when the suggestions were generated */
@@ -3658,6 +3823,8 @@ export interface SuggestMergesResult {
   aiStatus: AiStatus;
   /** Optional brief overall comment from the model */
   note?: string;
+  decision: SuggestMergesResultDecision;
+  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -3746,6 +3913,14 @@ export interface SpecImportApplicator {
   ozPerPizza: number;
   /** Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese/topping recipe for this slot derives the batch size from its row sum instead. Optional. */
   batchLbs?: number;
+  /**
+     * Physical applicator slot when the workbook identifies it.
+     * @minimum 1
+     * @maximum 4
+     */
+  slot?: number;
+  /** Exact cheese or mix recipe linked to this applicator slot. */
+  recipeName?: string;
 }
 
 export interface SpecImportPepperoni {
@@ -3763,6 +3938,18 @@ export interface SpecImportProfile {
   sauceOzPerPizza?: number;
   /** Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name. */
   sauceName?: string;
+  /** Exact dough or crust recipe name assigned to this product profile. */
+  doughName?: string;
+  /**
+     * Product-specific target doughball weight in ounces.
+     * @exclusiveMinimum 0
+     */
+  targetDoughballWeight?: number;
+  /**
+     * Product-specific number of doughballs per tray.
+     * @minimum 1
+     */
+  doughballsPerTray?: number;
   /** Case pack: how many pizzas go in one case, when the sheet states it. Optional. */
   pizzasPerCase?: number;
   /** Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional. */
@@ -3808,6 +3995,13 @@ export interface SpecImportRecipe {
   review?: ReviewVerdict;
 }
 
+export type ParseSpecSheetResultDecision = typeof ParseSpecSheetResultDecision[keyof typeof ParseSpecSheetResultDecision];
+
+
+export const ParseSpecSheetResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface SpecImportWarning {
   /** Brand of the profile the warning concerns */
   brand: string;
@@ -3824,6 +4018,10 @@ export interface ParseSpecSheetResult {
   /** Flavor-grounding corrections/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row. */
   warnings?: SpecImportWarning[];
   generatedAt: number;
+  decision: ParseSpecSheetResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }
 
 export interface MatchImportNameMatch {
@@ -3856,6 +4054,13 @@ export interface MatchImportIngredientMatch {
   review?: ReviewVerdict;
 }
 
+export type MatchImportResultDecision = typeof MatchImportResultDecision[keyof typeof MatchImportResultDecision];
+
+
+export const MatchImportResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];
@@ -3871,6 +4076,8 @@ export interface MatchImportResult {
   aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+  decision: MatchImportResultDecision;
+  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -3897,6 +4104,13 @@ export interface MatchPremixMatch {
   review?: ReviewVerdict;
 }
 
+export type MatchPremixResultDecision = typeof MatchPremixResultDecision[keyof typeof MatchPremixResultDecision];
+
+
+export const MatchPremixResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
 export interface MatchPremixResult {
   matches: MatchPremixMatch[];
   generatedAt: number;
@@ -3905,6 +4119,8 @@ export interface MatchPremixResult {
   aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+  decision: MatchPremixResultDecision;
+  modelStatus?: AiModelStatus;
 }
 
 export type FieldCheckObservationInputCheckName = typeof FieldCheckObservationInputCheckName[keyof typeof FieldCheckObservationInputCheckName];
@@ -4126,8 +4342,16 @@ export interface IncidentContext {
   errorMessage?: string;
   /** The uncaught error's stack/component trace (crashes) */
   errorStack?: string;
-  /** Client user-agent / device string, when available */
-  userAgent?: string;
+  browserFamily?: string;
+  deviceClass?: string;
+  correlationId?: string;
+  relatedCorrelationId?: string;
+  action?: string;
+  outcome?: string;
+  retryCount?: number;
+  connectivity?: string;
+  syncState?: string;
+  signalKind?: string;
 }
 
 export type ReportIncidentInputSource = typeof ReportIncidentInputSource[keyof typeof ReportIncidentInputSource];
@@ -4145,6 +4369,65 @@ export const ReportIncidentInputAppPlatform = {
   web: 'web',
   mobile: 'mobile',
 } as const;
+
+export type ReportIncidentInputDiagnosticsOutcome = typeof ReportIncidentInputDiagnosticsOutcome[keyof typeof ReportIncidentInputDiagnosticsOutcome];
+
+
+export const ReportIncidentInputDiagnosticsOutcome = {
+  error: 'error',
+  rejected: 'rejected',
+  degraded: 'degraded',
+} as const;
+
+export type ReportIncidentInputDiagnosticsConnectivity = typeof ReportIncidentInputDiagnosticsConnectivity[keyof typeof ReportIncidentInputDiagnosticsConnectivity];
+
+
+export const ReportIncidentInputDiagnosticsConnectivity = {
+  online: 'online',
+  offline: 'offline',
+  unstable: 'unstable',
+  unknown: 'unknown',
+} as const;
+
+export type ReportIncidentInputDiagnosticsSyncState = typeof ReportIncidentInputDiagnosticsSyncState[keyof typeof ReportIncidentInputDiagnosticsSyncState];
+
+
+export const ReportIncidentInputDiagnosticsSyncState = {
+  idle: 'idle',
+  pending: 'pending',
+  retrying: 'retrying',
+  blocked: 'blocked',
+  unknown: 'unknown',
+} as const;
+
+export type ReportIncidentInputDiagnosticsSignalKind = typeof ReportIncidentInputDiagnosticsSignalKind[keyof typeof ReportIncidentInputDiagnosticsSignalKind];
+
+
+export const ReportIncidentInputDiagnosticsSignalKind = {
+  user_report: 'user_report',
+  crash: 'crash',
+  rejected_promise: 'rejected_promise',
+  api_failure: 'api_failure',
+  startup: 'startup',
+  update: 'update',
+  sync: 'sync',
+} as const;
+
+export type ReportIncidentInputDiagnostics = {
+  /** @maxLength 80 */
+  action?: string;
+  outcome?: ReportIncidentInputDiagnosticsOutcome;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  retryCount?: number;
+  connectivity?: ReportIncidentInputDiagnosticsConnectivity;
+  syncState?: ReportIncidentInputDiagnosticsSyncState;
+  signalKind?: ReportIncidentInputDiagnosticsSignalKind;
+  /** @maxLength 128 */
+  correlationId?: string;
+};
 
 export interface ReportIncidentInput {
   source: ReportIncidentInputSource;
@@ -4173,6 +4456,7 @@ export interface ReportIncidentInput {
   errorStack?: string;
   /** @maxLength 500 */
   userAgent?: string;
+  diagnostics?: ReportIncidentInputDiagnostics;
 }
 
 /**
@@ -4190,12 +4474,21 @@ export interface IncidentRecurrence {
 
 export interface IncidentDiagnosis {
   incidentId: string;
-  /** Plain-language explanation of what likely went wrong */
-  diagnosis: string;
-  /** Suggested next step / workaround for the user */
-  workaround: string;
+  correlationId: string;
+  /**
+     * Retained compatibility field; null for new reports
+     * @nullable
+     */
+  diagnosis: string | null;
+  /**
+     * Retained compatibility field; null for new reports
+     * @nullable
+     */
+  workaround: string | null;
   /** Recurrence signal, or null when this problem has no precedent */
   recurrence: IncidentRecurrence | null;
+  /** New reports do not use automated diagnosis */
+  aiGenerated: false;
 }
 
 export type IncidentSource = typeof IncidentSource[keyof typeof IncidentSource];
@@ -4317,6 +4610,66 @@ export interface IncidentWorkflowUpdate {
 
 export interface UnreviewedIncidentCount {
   count: number;
+}
+
+export interface CreateServerJobInput {
+  /** @pattern ^[a-z][a-z0-9-]{1,63}$ */
+  type: string;
+  /**
+     * @minLength 8
+     * @maxLength 128
+     */
+  idempotencyKey: string;
+  input?: unknown;
+  /** @maxLength 200 */
+  snapshotId?: string;
+}
+
+export type ServerJobStatus = typeof ServerJobStatus[keyof typeof ServerJobStatus];
+
+
+export const ServerJobStatus = {
+  queued: 'queued',
+  running: 'running',
+  succeeded: 'succeeded',
+  failed: 'failed',
+  cancelled: 'cancelled',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ServerJobError = {
+  code?: string;
+  /** @nullable */
+  message?: string | null;
+} | null;
+
+export interface ServerJob {
+  id: string;
+  type: string;
+  status: ServerJobStatus;
+  /** @nullable */
+  snapshotId?: string | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  progress: number;
+  /** @nullable */
+  progressMessage?: string | null;
+  attempt: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  result?: unknown;
+  /** @nullable */
+  error?: ServerJobError;
+  createdAt: string;
+  /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
+  finishedAt?: string | null;
+  expiresAt: string;
 }
 
 export type ManagerActionItemCategory = typeof ManagerActionItemCategory[keyof typeof ManagerActionItemCategory];
@@ -4451,6 +4804,60 @@ export const ListQualityChecksStatus = {
   fail: 'fail',
 } as const;
 
+export type ListFinalizedOperationalReportsParams = {
+scope: ListFinalizedOperationalReportsScope;
+date: string;
+};
+
+export type ListFinalizedOperationalReportsScope = typeof ListFinalizedOperationalReportsScope[keyof typeof ListFinalizedOperationalReportsScope];
+
+
+export const ListFinalizedOperationalReportsScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export type SearchFinalizedOperationalReportsParams = {
+startDate: string;
+endDate: string;
+scope?: SearchFinalizedOperationalReportsScope;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
+
+export type SearchFinalizedOperationalReportsScope = typeof SearchFinalizedOperationalReportsScope[keyof typeof SearchFinalizedOperationalReportsScope];
+
+
+export const SearchFinalizedOperationalReportsScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export type DownloadCanonicalOperationalReportParams = {
+format: DownloadCanonicalOperationalReportFormat;
+/**
+ * Completed export-package job whose pre-generated retained artifact should be served.
+ */
+jobId?: string;
+};
+
+export type DownloadCanonicalOperationalReportFormat = typeof DownloadCanonicalOperationalReportFormat[keyof typeof DownloadCanonicalOperationalReportFormat];
+
+
+export const DownloadCanonicalOperationalReportFormat = {
+  csv: 'csv',
+  xlsx: 'xlsx',
+  print: 'print',
+} as const;
+
+export type GetOperationalRunViewParams = {
+date: string;
+runId: string;
+};
+
 export type GetShiftHandoffDigestParams = {
 date: string;
 };
@@ -4495,6 +4902,10 @@ export type AuditProfileDataHealth200 = {
   report: ProfileDataHealthReport;
 };
 
+export type GetProfileDataHealthWorkspace200 = {
+  workspace: ProfileDataHealthWorkspace;
+};
+
 export type GetProfileNameLinkCleanupAudit200 = {
   heal: ProfileNameLinkCleanupAudit | null;
 };
@@ -4531,6 +4942,10 @@ export const ListImportHistoryStatus = {
   partial: 'partial',
   failed: 'failed',
 } as const;
+
+export type ApplyAiRetentionCleanup200 = {
+  report: AiRetentionReport;
+};
 
 export type ListIncidentAssignees200Item = {
   userId: string;
@@ -4575,6 +4990,11 @@ export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
 };
 
+export type ListCompletedHistoryParams = {
+from?: string;
+to?: string;
+};
+
 export type GetSyncTodayParams = {
 today?: ClientTodayParameter;
 /**
@@ -4608,4 +5028,3 @@ today?: ClientTodayParameter;
  */
 epoch?: number;
 };
-

@@ -46,19 +46,90 @@ export interface TodaySyncFixture {
   date?: string;
 }
 
+export interface ScheduledSyncFixture {
+  token: string;
+  date: string;
+  today: string;
+  payload: JsonRecord;
+}
+
 export interface AuthorizedFixtureCleanupOptions {
   profileKeys?: Iterable<string>;
   syncDates?: Iterable<string>;
+  cheeseRecipeIds?: Iterable<string>;
+  doughRecipeIds?: Iterable<string>;
+  sauceRecipeIds?: Iterable<string>;
+  mixIds?: Iterable<string>;
+}
+
+export interface CheeseRecipeFixture {
+  id: string;
+  name: string;
+  brand?: string;
+  flavors?: string[];
+  shredderSetting?: string;
+  cellulose?: string;
+  notes?: string;
+  components?: Array<{
+    ingredient: string;
+    lbs: number;
+    ozPerPizza?: number;
+    sharePct?: number;
+  }>;
+  enabled?: boolean;
+}
+
+export interface NamedRecipeFixture {
+  id: string;
+  name: string;
+  notes?: string;
+  components?: Array<{
+    ingredient: string;
+    lbs: number;
+  }>;
+  enabled?: boolean;
+  brand?: string;
+  flavors?: string[];
+  doughballWeightOz?: number;
+  doughballsPerTray?: number;
+}
+
+export interface MixFixture {
+  id: string;
+  name: string;
+  brand?: string;
+  flavor?: string;
+  batchSize?: number;
+  daysEarly?: number;
+  notes?: string;
+  amountAlreadyMade?: number;
+  components?: Array<{
+    ingredient: string;
+    perPizza: number;
+    perBatchLbs?: number;
+  }>;
+  enabled?: boolean;
+  isPrep?: boolean;
 }
 
 /**
  * Destructive browser fixtures are only safe against a local database, a
  * database whose name explicitly identifies it as disposable, or an
- * explicitly approved CI/test mode.  REPLIT_DEV_DOMAIN alone is not a safety
+ * explicitly approved CI/test mode. Production markers always win, even when
+ * the URL otherwise looks disposable. REPLIT_DEV_DOMAIN alone is not a safety
  * signal: a development browser can still be pointed at a shared database.
  */
 export function requireIsolatedTestDatabase(operation: string): string {
   const url = process.env.DATABASE_URL ?? "";
+  const productionEnvironment =
+    process.env.REPLIT_DEPLOYMENT === "1"
+    || [process.env.NODE_ENV, process.env.APP_ENV]
+      .some((value) => /^(production|prod)$/i.test(value ?? ""));
+  if (productionEnvironment) {
+    throw new Error(
+      `${operation} refused to run destructive database setup in production.`,
+    );
+  }
   let host = "";
   let database = "";
   try {
@@ -85,6 +156,31 @@ export function requireIsolatedTestDatabase(operation: string): string {
         "E2E_APPROVED_DESTRUCTIVE_MODE=1 in an approved test environment. " +
         "REPLIT_DEV_DOMAIN alone is not sufficient; this protects shared and " +
         "production databases from live-day deletion.",
+    );
+  }
+  return url;
+}
+
+/**
+ * The recipe-refresh suite changes shared recipe master data in addition to
+ * clearing disposable live-day rows. Require the connection itself to name a
+ * disposable database; approved-mode flags alone are intentionally not enough.
+ */
+export function requireDedicatedTestDatabase(operation: string): string {
+  const url = requireIsolatedTestDatabase(operation);
+  let database = "";
+  try {
+    const parsed = new URL(url);
+    database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+  } catch {
+    // requireIsolatedTestDatabase already emitted the actionable URL error.
+  }
+
+  if (!/(?:^|[-_])(e2e|test|tests|tmp|temporary)(?:[-_]|$)/i.test(database)) {
+    throw new Error(
+      `${operation} requires a dedicated disposable database. ` +
+        "Use a database name containing an explicit e2e, test, tmp, or " +
+        "temporary marker; approved test-mode flags alone are not sufficient.",
     );
   }
   return url;
@@ -123,6 +219,10 @@ export class AuthorizedBrowserFixtures {
   private readonly roleNames = new Set<string>();
   private readonly profileKeys = new Set<string>();
   private readonly syncDates = new Set<string>();
+  private readonly cheeseRecipeIds = new Set<string>();
+  private readonly doughRecipeIds = new Set<string>();
+  private readonly sauceRecipeIds = new Set<string>();
+  private readonly mixIds = new Set<string>();
   private lockClient: Client | undefined;
   private startPromise: Promise<void> | undefined;
 
@@ -308,6 +408,120 @@ export class AuthorizedBrowserFixtures {
     return date;
   }
 
+  async seedScheduledSync(fixture: ScheduledSyncFixture): Promise<string> {
+    await this.start();
+    const headers = { Cookie: `rc_auth=${fixture.token}` };
+    const epochResponse = await this.request.get(
+      `${this.apiBase}/api/sync/reset-epoch`,
+      { headers },
+    );
+    if (!epochResponse.ok()) {
+      throw new Error(`Fixture reset epoch failed: ${await responseFailure(epochResponse)}`);
+    }
+    const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
+    const response = await this.request.put(
+      `${this.apiBase}/api/sync/${fixture.date}?today=${fixture.today}&epoch=${epoch}`,
+      {
+        headers,
+        data: { payload: fixture.payload },
+      },
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Fixture scheduled sync seed failed: ${await responseFailure(response)}`,
+      );
+    }
+    this.syncDates.add(fixture.date);
+    return fixture.date;
+  }
+
+  async seedCheeseRecipe(
+    account: Pick<AuthorizedTestAccount, "token">,
+    recipe: CheeseRecipeFixture,
+  ): Promise<string> {
+    await this.start();
+    const response = await this.request.post(`${this.apiBase}/api/cheese-recipes`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      data: {
+        items: [{
+          brand: "",
+          flavors: [],
+          shredderSetting: "",
+          cellulose: "",
+          notes: "",
+          components: [],
+          enabled: true,
+          ...recipe,
+        }],
+      },
+    });
+    if (!response.ok()) {
+      throw new Error(`Fixture cheese recipe seed failed: ${await responseFailure(response)}`);
+    }
+    this.cheeseRecipeIds.add(recipe.id);
+    return recipe.id;
+  }
+
+  async seedNamedRecipe(
+    kind: "dough" | "sauce",
+    account: Pick<AuthorizedTestAccount, "token">,
+    recipe: NamedRecipeFixture,
+  ): Promise<string> {
+    await this.start();
+    const response = await this.request.post(
+      `${this.apiBase}/api/${kind}-recipes`,
+      {
+        headers: { Cookie: `rc_auth=${account.token}` },
+        data: {
+          items: [{
+            notes: "",
+            components: [],
+            enabled: true,
+            brand: "",
+            flavors: [],
+            ...recipe,
+          }],
+        },
+      },
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Fixture ${kind} recipe seed failed: ${await responseFailure(response)}`,
+      );
+    }
+    (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).add(recipe.id);
+    return recipe.id;
+  }
+
+  async seedMix(
+    account: Pick<AuthorizedTestAccount, "token">,
+    mix: MixFixture,
+  ): Promise<string> {
+    await this.start();
+    const response = await this.request.post(`${this.apiBase}/api/mixes`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      data: {
+        items: [{
+          brand: "",
+          flavor: "",
+          batchSize: 0,
+          daysEarly: 0,
+          notes: "",
+          amountAlreadyMade: 0,
+          components: [],
+          enabled: true,
+          isPrep: false,
+          ...mix,
+        }],
+      },
+    });
+    if (!response.ok()) {
+      throw new Error(`Fixture mix seed failed: ${await responseFailure(response)}`);
+    }
+    this.mixIds.add(mix.id);
+    return mix.id;
+  }
+
   async removeBrandProfiles(
     keys: Iterable<string> = this.profileKeys,
     scope = "live",
@@ -338,12 +552,75 @@ export class AuthorizedBrowserFixtures {
     selected.forEach((date) => this.syncDates.delete(date));
   }
 
+  async removeCheeseRecipes(ids: Iterable<string> = this.cheeseRecipeIds): Promise<void> {
+    const selected = [...ids];
+    if (selected.length === 0) return;
+    await this.withDatabase("remove browser fixture cheese recipes", async (db) => {
+      await db.query(
+        "DELETE FROM cheese_recipes WHERE id = ANY($1::text[])",
+        [selected],
+      );
+    });
+    selected.forEach((id) => this.cheeseRecipeIds.delete(id));
+  }
+
+  async removeNamedRecipes(
+    kind: "dough" | "sauce",
+    ids: Iterable<string>,
+  ): Promise<void> {
+    const selected = [...ids];
+    if (selected.length === 0) return;
+    await this.withDatabase(`remove browser fixture ${kind} recipes`, async (db) => {
+      await db.query(
+        `DELETE FROM ${kind}_recipes WHERE id = ANY($1::text[]) AND scope = $2`,
+        [selected, "live"],
+      );
+    });
+    (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).forEach((id) => {
+      if (selected.includes(id)) {
+        (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).delete(id);
+      }
+    });
+  }
+
+  async removeDoughRecipes(
+    ids: Iterable<string> = this.doughRecipeIds,
+  ): Promise<void> {
+    await this.removeNamedRecipes("dough", ids);
+  }
+
+  async removeSauceRecipes(
+    ids: Iterable<string> = this.sauceRecipeIds,
+  ): Promise<void> {
+    await this.removeNamedRecipes("sauce", ids);
+  }
+
+  async removeMixes(ids: Iterable<string> = this.mixIds): Promise<void> {
+    const selected = [...ids];
+    if (selected.length === 0) return;
+    await this.withDatabase("remove browser fixture mixes", async (db) => {
+      await db.query(
+        "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
+        [selected, "live"],
+      );
+    });
+    selected.forEach((id) => this.mixIds.delete(id));
+  }
+
   async cleanup(options: AuthorizedFixtureCleanupOptions = {}): Promise<void> {
     for (const key of options.profileKeys ?? []) this.profileKeys.add(key);
     for (const date of options.syncDates ?? []) this.syncDates.add(date);
+    for (const id of options.cheeseRecipeIds ?? []) this.cheeseRecipeIds.add(id);
+    for (const id of options.doughRecipeIds ?? []) this.doughRecipeIds.add(id);
+    for (const id of options.sauceRecipeIds ?? []) this.sauceRecipeIds.add(id);
+    for (const id of options.mixIds ?? []) this.mixIds.add(id);
     const errors: unknown[] = [];
     await this.removeBrandProfiles().catch((error) => errors.push(error));
     await this.removeTodaySync().catch((error) => errors.push(error));
+    await this.removeCheeseRecipes().catch((error) => errors.push(error));
+    await this.removeDoughRecipes().catch((error) => errors.push(error));
+    await this.removeSauceRecipes().catch((error) => errors.push(error));
+    await this.removeMixes().catch((error) => errors.push(error));
     await this.withDatabase("cleanup authorized browser fixtures", async (db) => {
       await cleanupTestUsers(db, this.usernames);
       if (this.roleNames.size > 0) {

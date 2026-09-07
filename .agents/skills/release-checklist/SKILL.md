@@ -168,9 +168,11 @@ For UI or interaction changes, run the axe-based accessibility suite:
 pnpm --filter @workspace/run-calculator run test:e2e:a11y
 ```
 
-Expected evidence is passing desktop and phone-sized scans with no new
-critical/serious violations. Investigate any violation rather than accepting a
-changed baseline silently.
+`test:e2e:a11y` is the owning accessibility release command. It enforces the
+axe document-structure checks, including viewport metadata and page headings,
+alongside the interaction checks. Expected evidence is passing desktop and
+phone-sized scans with no new critical/serious violations. Investigate any
+violation rather than accepting a changed baseline silently.
 
 ### Responsive, visual, and PWA/mobile coverage
 

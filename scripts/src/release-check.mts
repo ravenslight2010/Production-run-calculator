@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -14,6 +15,8 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  parseSourceLibraryEvidenceEnvironment,
+  type SourceLibraryEvidenceEnvironment,
 } from "./verify-source-library-reconciliation.mts";
 
 export type ReleaseStep = {
@@ -33,6 +36,40 @@ export type ReleaseStep = {
   /** Optional per-stage limit, used to keep stateful browser work serial. */
   concurrencyLimit?: number;
 };
+
+export function assertUniqueReleaseSteps(
+  releaseSteps: readonly ReleaseStep[],
+): void {
+  const labels = new Set<string>();
+  const invocations = new Set<string>();
+  const duplicateLabels = new Set<string>();
+  const duplicateInvocations = new Set<string>();
+
+  for (const step of releaseSteps) {
+    if (labels.has(step.label)) duplicateLabels.add(step.label);
+    labels.add(step.label);
+
+    const invocation = JSON.stringify([step.command ?? "pnpm", step.args]);
+    if (invocations.has(invocation)) {
+      duplicateInvocations.add(`${step.command ?? "pnpm"} ${step.args.join(" ")}`);
+    }
+    invocations.add(invocation);
+  }
+
+  if (duplicateLabels.size > 0 || duplicateInvocations.size > 0) {
+    throw new Error(
+      [
+        "Release gates must be unique.",
+        ...(duplicateLabels.size > 0
+          ? [`Duplicate labels: ${[...duplicateLabels].join(", ")}`]
+          : []),
+        ...(duplicateInvocations.size > 0
+          ? [`Duplicate command invocations: ${[...duplicateInvocations].join(", ")}`]
+          : []),
+      ].join("\n"),
+    );
+  }
+}
 
 export type StepStatus =
   | "PASS"
@@ -62,6 +99,7 @@ export type ReleaseEvidenceOptions = {
   expectedMode?: "standard" | "full";
   expectedLabels?: readonly string[];
   allowIncompleteCheckpoint?: boolean;
+  expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
 };
 
 export type BrowserDurationRegression = {
@@ -173,11 +211,19 @@ const fullBrowserReportPath = resolve(
   releaseEvidenceDir,
   "browser-full/FINAL-REPORT.md",
 );
+const webkitBrowserEvidencePath = resolve(
+  rootDir,
+  releaseEvidenceDir,
+  "browser-smoke/webkit-result.json",
+);
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
+const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE =
+  `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
+  "report-key-rotation-preflight.json",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
   "clean-start/preview-home.png",
@@ -185,6 +231,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
@@ -390,8 +437,8 @@ export const PRODUCTION_AUDIT_TIMEOUT_MS = 5 * 60_000;
 export const PRODUCTION_AUDIT_WARNING_MS = 4 * 60_000;
 
 export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
-  label: "production dependency audit",
-  args: ["run", "audit:prod"],
+  label: "blocking release security audit (high severity; registry required)",
+  args: ["run", "audit:prod:release"],
   timeoutMs: PRODUCTION_AUDIT_TIMEOUT_MS,
   warningMs: PRODUCTION_AUDIT_WARNING_MS,
   stage: "prerequisites",
@@ -415,6 +462,11 @@ const sourceLibraryFromDate =
   process.env.SOURCE_LIBRARY_RECONCILIATION_FROM_DATE ??
   sourceLibraryHealDate ??
   DEFAULT_FROM_DATE;
+const sourceLibraryEnvironment = parseSourceLibraryEvidenceEnvironment(
+  cliOptionValue("--source-library-environment") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT ??
+    (process.env.CI ? "release" : "development"),
+);
 export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   label: "source-library reconciliation verification",
   args: [
@@ -429,15 +481,67 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     sourceLibraryHealId,
     "--from-date",
     sourceLibraryFromDate,
+    "--environment",
+    sourceLibraryEnvironment,
     "--output",
-    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
   ],
   stage: "prerequisites",
 };
 
+/**
+ * The reconciliation verifier proves a specific production repair, including
+ * its historical rows. A newly-created CI database intentionally has none of
+ * that history, so it cannot produce that proof. CI may omit this production
+ * prerequisite only after running the verifier's focused test suite; the
+ * escape hatch is deliberately unavailable outside the disposable CI contract.
+ */
+export function sourceLibraryReconciliationRequired(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (environment.RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION !== "1") {
+    return true;
+  }
+  if (
+    environment.CI !== "true" ||
+    environment.NODE_ENV !== "test" ||
+    environment.E2E_TEST_DB !== "1"
+  ) {
+    throw new Error(
+      "RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION is restricted to a disposable CI test database; production reconciliation evidence remains required.",
+    );
+  }
+  return false;
+}
+
+const requiresProductionSourceLibraryReconciliation =
+  sourceLibraryReconciliationRequired();
+
 const steps: ReleaseStep[] = [
+  {
+    label: "operational report signing-key rotation preflight",
+    args: [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      "audit:report-key-rotation",
+    ],
+    env: {
+      REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT:
+        process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
+        ?? (process.env.CI ? "disposable-ci" : "development"),
+      REPORT_KEY_ROTATION_PREFLIGHT_OUTPUT: resolve(
+        rootDir,
+        releaseEvidenceDir,
+        "report-key-rotation-preflight.json",
+      ),
+    },
+    stage: "prerequisites",
+  },
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
-  SOURCE_LIBRARY_RECONCILIATION_STEP,
+  ...(requiresProductionSourceLibraryReconciliation
+    ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
+    : []),
   {
     label: "shell lint inventory",
     args: ["run", "check:shell-inventory"],
@@ -525,10 +629,6 @@ const steps: ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "spec import tests",
-    args: ["--filter", "@workspace/spec-import", "run", "test"],
-  },
-  {
     label: "scheduled recipe check tests",
     args: ["--filter", "@workspace/scheduled-recipe-check", "run", "test"],
     stage: "release-tests",
@@ -574,7 +674,6 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
-      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
     stage: "browser-smoke",
     concurrencyLimit: 1,
@@ -585,9 +684,22 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
-      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
     stage: "browser-accessibility",
+    concurrencyLimit: 1,
+  },
+  {
+    label: "browser WebKit smoke",
+    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
+    env: {
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
+      RELEASE_BROWSER_ENVIRONMENT: process.env.CI
+        ? "ci"
+        : "development",
+    },
+    stage: "browser-webkit",
     concurrencyLimit: 1,
   },
 ];
@@ -659,6 +771,8 @@ if (fixtureSteps !== undefined) {
   }
 }
 
+assertUniqueReleaseSteps(steps);
+
 export function releaseStepStage(step: ReleaseStep, index: number): string {
   return step.stage ?? `serial-${index}`;
 }
@@ -710,6 +824,9 @@ function printHelp(): void {
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence  Verify retained evidence files",
+  );
+  console.log(
+    "  Add --source-library-environment development|release when verifying a selected database.",
   );
   console.log("");
   console.log(
@@ -842,6 +959,7 @@ export async function verifyReleaseEvidence(
     ...(evidenceMode === "full"
       ? ["browser-full/FINAL-REPORT.md" as const]
       : []),
+    "browser-smoke/webkit-result.json" as const,
   ];
   const missingEvidence = requiredEvidence.filter((file) => !files.includes(file));
   if (missingEvidence.length > 0) {
@@ -865,17 +983,29 @@ export async function verifyReleaseEvidence(
   }
   const revision =
     options.currentRevision ?? (await currentRevision());
+  const expectedSourceLibraryEnvironment =
+    options.expectedSourceLibraryEnvironment ?? sourceLibraryEnvironment;
   validateReleaseReport(report, {
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
+    expectedSourceLibraryEnvironment,
   });
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
     );
-    validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence);
+    validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence, {
+      expectedEnvironment: expectedSourceLibraryEnvironment,
+    });
   }
+  const webkitEvidence = await readFile(
+    resolve(evidenceRoot, "browser-smoke/webkit-result.json"),
+  );
+  validateWebKitBrowserEvidence(webkitEvidence, {
+    currentRevision: revision,
+    requirePass: /^Decision:\s*GO\s*$/m.test(report),
+  });
   if (evidenceMode === "full") {
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
@@ -894,8 +1024,95 @@ export async function verifyReleaseEvidence(
   );
 }
 
+export function validateWebKitBrowserEvidence(
+  evidenceBytes: Uint8Array,
+  options: { currentRevision: string; requirePass?: boolean },
+): void {
+  const MAX_EVIDENCE_BYTES = 64 * 1024;
+  if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
+    throw new Error(
+      `WebKit browser evidence exceeds the ${MAX_EVIDENCE_BYTES}-byte bound.`,
+    );
+  }
+
+  let evidence: unknown;
+  try {
+    evidence = JSON.parse(Buffer.from(evidenceBytes).toString("utf8"));
+  } catch {
+    throw new Error("WebKit browser evidence is not valid JSON.");
+  }
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error("WebKit browser evidence must be a JSON object.");
+  }
+  const record = evidence as Record<string, unknown>;
+  if (record.schemaVersion !== 1 || record.browser !== "webkit") {
+    throw new Error("WebKit browser evidence has an unsupported schema or browser.");
+  }
+  if (
+    typeof record.revision !== "string" ||
+    record.revision !== options.currentRevision
+  ) {
+    throw new Error(
+      `WebKit browser evidence revision is stale or missing (expected ${options.currentRevision}).`,
+    );
+  }
+  if (typeof record.environment !== "string" || !record.environment.trim()) {
+    throw new Error("WebKit browser evidence environment is missing.");
+  }
+  if (
+    record.result !== "passed" &&
+    record.result !== "failed" &&
+    record.result !== "timedout" &&
+    record.result !== "interrupted"
+  ) {
+    throw new Error("WebKit browser evidence has an invalid result.");
+  }
+  if (options.requirePass && record.result !== "passed") {
+    throw new Error("WebKit browser evidence cannot support GO unless it passed.");
+  }
+  if (!Array.isArray(record.cases) || record.cases.length === 0) {
+    throw new Error("WebKit browser evidence must enumerate at least one test case.");
+  }
+  const validStatuses = new Set([
+    "passed",
+    "failed",
+    "timedout",
+    "skipped",
+    "interrupted",
+    "not-run",
+  ]);
+  const validClassifications = new Set([
+    "product",
+    "test-setup",
+    "infrastructure",
+    "optional-environment-gap",
+  ]);
+  for (const testCase of record.cases) {
+    if (!testCase || typeof testCase !== "object" || Array.isArray(testCase)) {
+      throw new Error("WebKit browser evidence contains an invalid test case.");
+    }
+    const item = testCase as Record<string, unknown>;
+    if (
+      typeof item.file !== "string" ||
+      typeof item.title !== "string" ||
+      typeof item.status !== "string" ||
+      !validStatuses.has(item.status)
+    ) {
+      throw new Error("WebKit browser evidence contains an incomplete test case.");
+    }
+    if (
+      item.failureClassification !== undefined &&
+      (typeof item.failureClassification !== "string" ||
+        !validClassifications.has(item.failureClassification))
+    ) {
+      throw new Error("WebKit browser evidence contains an invalid failure classification.");
+    }
+  }
+}
+
 export function validateSourceLibraryReconciliationEvidence(
   evidenceBytes: Uint8Array,
+  options: { expectedEnvironment?: SourceLibraryEvidenceEnvironment } = {},
 ): void {
   const MAX_EVIDENCE_BYTES = 64 * 1024;
   if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
@@ -920,6 +1137,23 @@ export function validateSourceLibraryReconciliationEvidence(
   if (output.verifier !== "source-library-reconciliation") {
     throw new Error(
       "Source-library reconciliation evidence has the wrong verifier identity.",
+    );
+  }
+  const evidenceEnvironment = output.environment;
+  if (
+    evidenceEnvironment !== "development" &&
+    evidenceEnvironment !== "release"
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence is missing a valid development/release environment.",
+    );
+  }
+  if (
+    options.expectedEnvironment !== undefined &&
+    evidenceEnvironment !== options.expectedEnvironment
+  ) {
+    throw new Error(
+      `Source-library reconciliation evidence targets ${String(evidenceEnvironment)}, but ${options.expectedEnvironment} evidence was requested; use the matching database and evidence directory.`,
     );
   }
   if (output.ok !== true) {
@@ -1114,6 +1348,7 @@ export function validateReleaseReport(
     currentRevision: string;
     expectedMode?: "standard" | "full";
     expectedLabels?: readonly string[];
+    expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
@@ -1180,10 +1415,23 @@ export function validateReleaseReport(
   if (
     !/^Environment:\s*.+$/m.test(report) ||
     !/^Commands:\s*.+$/m.test(report) ||
-    !/^Evidence paths:\s*.+$/m.test(report)
+    !/^Evidence paths:\s*.+$/m.test(report) ||
+    (options.expectedSourceLibraryEnvironment !== undefined &&
+      !/^Source-library evidence environment:\s*(development|release)\s*$/m.test(report))
   ) {
     throw new Error(
       "Release report is malformed: environment, commands, and evidence paths are required.",
+    );
+  }
+  const sourceLibraryReportEnvironment = report.match(
+    /^Source-library evidence environment:\s*(development|release)\s*$/m,
+  )?.[1];
+  if (
+    options.expectedSourceLibraryEnvironment !== undefined &&
+    sourceLibraryReportEnvironment !== options.expectedSourceLibraryEnvironment
+  ) {
+    throw new Error(
+      `Release report source-library evidence targets ${sourceLibraryReportEnvironment ?? "unknown"}, but ${options.expectedSourceLibraryEnvironment} evidence was requested.`,
     );
   }
   const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
@@ -1355,6 +1603,7 @@ export function formatReleaseReport(
   metadata: {
     revision?: string;
     environment?: string;
+    sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
@@ -1440,6 +1689,7 @@ export function formatReleaseReport(
         ]
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
+    `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     "",
@@ -1473,6 +1723,7 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-api.log", "API startup log"),
     evidenceLink("clean-start/startup-web.log", "Web startup log"),
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
+    evidenceLink("browser-smoke/webkit-result.json", "WebKit browser smoke evidence"),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     evidenceLink(
       SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
@@ -1603,6 +1854,14 @@ async function writeReleaseReport(
     // Full browser evidence validation below reports a missing file when the
     // full release decision requires it.
   }
+  try {
+    await access(
+      resolve(rootDir, releaseEvidenceDir, "browser-smoke/webkit-result.json"),
+    );
+    availableEvidenceFiles.add("browser-smoke/webkit-result.json");
+  } catch {
+    // The evidence verifier reports the missing WebKit artifact when required.
+  }
   let browserDurationRegressions: BrowserDurationRegression[] | undefined;
   if (fullRun) {
     try {
@@ -1629,7 +1888,12 @@ async function writeReleaseReport(
       availableEvidenceFiles,
       {
         ...metadata,
-        environment: process.env.CI ? "CI release validation" : "local release validation",
+        environment: process.env.CI
+          ? requiresProductionSourceLibraryReconciliation
+            ? "CI release validation"
+            : "disposable CI gate test (not production reconciliation evidence)"
+          : "local release validation",
+        sourceLibraryEnvironment,
         browserDurationRegressions,
         timing: metadata.timing,
       },
@@ -1744,6 +2008,20 @@ async function currentRevision(): Promise<string> {
   });
 }
 
+async function promoteSourceLibraryEvidence(): Promise<void> {
+  const pendingPath = resolve(
+    rootDir,
+    releaseEvidenceDir,
+    SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+  );
+  const retainedPath = resolve(
+    rootDir,
+    releaseEvidenceDir,
+    SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  );
+  await rename(pendingPath, retainedPath);
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
@@ -1824,6 +2102,10 @@ async function main(): Promise<void> {
     );
   } else {
     await rm(checkpointReportPath, { force: true });
+    await rm(
+      resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+      { force: true },
+    );
     await writeFile(
       logPath,
       `Release check ${new Date().toISOString()} revision ${revision} mode ${
@@ -2057,10 +2339,14 @@ async function main(): Promise<void> {
     results.length === steps.length &&
     results.every((result) => result.passed)
   ) {
+    const releaseDecision = requiresProductionSourceLibraryReconciliation
+      ? "GO"
+      : "NO-GO";
     try {
+      await promoteSourceLibraryEvidence();
       const reportPath = await writeReleaseReport(results, {
         revision,
-        decision: "GO",
+        decision: releaseDecision,
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
         timing: {
           totalElapsedMs: stageTimings.reduce(
@@ -2086,10 +2372,18 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
-    console.log("\nRelease check passed. Ready for final publish review.");
+    console.log(
+      requiresProductionSourceLibraryReconciliation
+        ? "\nRelease check passed. Ready for final publish review."
+        : "\nDisposable CI gate test passed. Report remains NO-GO until production source-library reconciliation evidence is supplied.",
+    );
     process.exit(0);
   }
 
+  await rm(
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+    { force: true },
+  );
   try {
     const checkpointReportPath = await writeReleaseReport(results, {
         revision,

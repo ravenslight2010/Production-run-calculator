@@ -29,6 +29,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
+const FORM_LIFECYCLE_FILE = path.join(__dirname, "hooks", "useHomeFormLifecycle.ts");
 
 type CallSite = {
   line: number;
@@ -181,10 +182,15 @@ function analyzeSource(source: string, fileName = "home.tsx"): CallSite[] {
 
 const homeSrc = fs.readFileSync(HOME_FILE, "utf8");
 const homeSites = analyzeSource(homeSrc);
+const formLifecycleSites = analyzeSource(
+  fs.readFileSync(FORM_LIFECYCLE_FILE, "utf8"),
+  "useHomeFormLifecycle.ts",
+);
 
 describe("source guard: run-value writes in home.tsx must stamp before they sync", () => {
   it("every saveRunValues call site stamps (markRunValuesUpdated / saveRunValuesUpdated) or is a pure form flush", () => {
-    const violations = homeSites.filter((s) => s.verdict === "VIOLATION");
+    const violations = [...homeSites, ...formLifecycleSites]
+      .filter((s) => s.verdict === "VIOLATION");
     const report = violations
       .map((s) => `  home.tsx:${s.line} in ${s.enclosingName}() — ${s.detail}`)
       .join("\n");
@@ -202,8 +208,6 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     // not silently skipped. These are the historical bypass writes.
     const byName = (n: string) => homeSites.filter((s) => s.enclosingName === n);
     expect(byName("applyCaseUpdateChoices").length, "re-import case-update accept").toBeGreaterThan(0);
-    expect(byName("writeCases").length, "voice/optimize set_run_target").toBeGreaterThan(0);
-    expect(byName("writeProgress").length, "voice setRunProgress").toBeGreaterThan(0);
     expect(byName("renameDoughIngredient").length, "master-data rename write").toBeGreaterThan(0);
     expect(byName("updateDrainingRunValues").length, "draining-run write").toBeGreaterThan(0);
     // Rollover pull-up + sync receive adopt REMOTE stamps rather than local ones.
@@ -212,9 +216,9 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     expect(homeSites.length).toBeGreaterThanOrEqual(20);
   });
 
-  it("saveRunValues is only written from home.tsx (no unguarded write surface elsewhere)", () => {
-    // The guard is scoped to home.tsx; if another app module starts importing
-    // the writer, it must be added to this guard first.
+  it("saveRunValues is only exposed through guarded orchestration and its persistence adapter", () => {
+    // The guard is scoped to the orchestration call sites. The browser adapter
+    // owns the localStorage write itself but must not add orchestration policy.
     const srcDir = __dirname;
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -227,12 +231,15 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
         if (/\.test\.(ts|tsx)$/.test(entry.name)) continue;
         const rel = path.relative(srcDir, full);
-        // contexts/LiveRunContext.tsx: pre-seeds next-run dough counters when the
-        // press finishes; the write is immediately followed by markRunValuesUpdated.
+        // The form lifecycle controller owns Home's extracted autosave write and
+        // is analyzed above by the same stamp guard. LiveRunContext pre-seeds
+        // next-run dough counters and stamps immediately afterward.
         if (
           rel === path.join("pages", "home.tsx") ||
           rel === "storage.ts" ||
-          rel === path.join("contexts", "LiveRunContext.tsx")
+          rel === path.join("adapters", "browserRunPersistence.ts") ||
+          rel === path.join("contexts", "LiveRunContext.tsx") ||
+          rel === path.join("hooks", "useHomeFormLifecycle.ts")
         ) continue;
         const text = fs.readFileSync(full, "utf8");
         if (/\bsaveRunValues\b/.test(text)) offenders.push(rel);
@@ -241,7 +248,7 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     walk(srcDir);
     expect(
       offenders,
-      "saveRunValues used outside home.tsx/storage.ts — extend runValueStampGuard.test.ts to cover it",
+      "saveRunValues used outside guarded orchestration/persistence boundaries — extend this source guard first",
     ).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, photoAliasesTable, type PhotoAlias } from "@workspace/db";
 import { SavePhotoAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -47,7 +48,7 @@ router.get("/photo-aliases", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/photo-aliases", async (req: Request, res: Response) => {
+router.post("/photo-aliases", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const parsed = SavePhotoAliasesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

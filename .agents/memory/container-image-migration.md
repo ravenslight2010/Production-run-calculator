@@ -21,3 +21,14 @@ service pointed at the slim runtime target, never the full migration target.
 For portable rehearsals, probe with one-shot sibling containers rather than
 `docker exec` or container health commands, and normalize only dump wrapper
 tokens before comparing schema fingerprints.
+
+Long-lived runtime images must not contain even an opt-in schema-push path.
+
+**Why:** A runtime replacement can inherit an environment flag and apply an
+older image's schema, silently turning an application rollback into a schema
+rollback.
+
+**How to apply:** Put schema mutation only in the dedicated migration image or
+pre-deploy phase. Rehearsals should fingerprint the schema after migration,
+after the current runtime, and after the parent runtime, retaining an actual
+schema diff when either runtime changes it.

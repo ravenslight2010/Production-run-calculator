@@ -15,6 +15,7 @@ let cheeseRecipesTable: DbModule["cheeseRecipesTable"]; let mixesTable: DbModule
 let brandProfilesTable: DbModule["brandProfilesTable"]; let dailySyncTable: DbModule["dailySyncTable"];
 let specImportAliasesTable: DbModule["specImportAliasesTable"]; let dataHealsTable: DbModule["dataHealsTable"];
 let runSourceLibraryReconciliationHeal: () => Promise<void>;
+let sourceLibraryReconciliationStatus: typeof import("./sourceLibraryReconciliationHeal")["sourceLibraryReconciliationStatus"];
 let runProfileNameLinkStubPurge: () => Promise<void>;
 let runWorkbookImportStubPurge: () => Promise<void>;
 let admin: pg.Pool; let databaseName: string; let originalUrl: string | undefined;
@@ -45,6 +46,7 @@ beforeAll(async () => {
     runProfileNameLinkStubPurge,
     runWorkbookImportStubPurge,
   } = await import("./dataHeals"));
+  ({ sourceLibraryReconciliationStatus } = await import("./sourceLibraryReconciliationHeal"));
 
   // One audited automatic replacement in every pool. All begin with nonblank,
   // conflicting data so the assertions prove this is an overwrite, not fill.
@@ -80,11 +82,12 @@ beforeAll(async () => {
   ]);
   await db.insert(dailySyncTable).values([
     { date: "2026-08-26", scope: "live", data: { dayState: { runs: [
-      { id: "pending" }, { id: "stub-pending" }, { id: "started", startedAt: 1 },
+      { id: "pending" }, { id: "stub-pending" }, { id: "started", startedAt: 1 }, { id: "ended-only", endedAt: 2 },
     ] }, runValues: {
       pending: { app1CheeseRecipeName: "Corner BBQ Chicken Cheese Mix" },
       "stub-pending": { app1CheeseRecipeName: STUBS[0][1] },
       started: { app1CheeseRecipeName: STUBS[1][1] },
+      "ended-only": { app1CheeseRecipeName: "Corner BBQ Chicken Cheese Mix" },
     }, runValuesUpdatedAt: { pending: 10, "stub-pending": 10, started: 10 } } },
     { date: "2026-08-25", scope: "live", data: { dayState: { runs: [{ id: "history" }] },
       runValues: { history: { app1CheeseRecipeName: STUBS[1][1] } },
@@ -100,6 +103,29 @@ afterAll(async () => {
 
 describe("runSourceLibraryReconciliationHeal", () => {
   it("overwrites audited pools, repoints only pending live links, and protects guarded rows", async () => {
+    const beforeStatus = await sourceLibraryReconciliationStatus(db, "live");
+    expect(beforeStatus.status).toBe("not-verified");
+    expect(beforeStatus.heal.markerValid).toBe(false);
+    expect(beforeStatus.report.path).toBe("attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json");
+    expect(beforeStatus.findings.map((finding) => finding.category)).toEqual(expect.arrayContaining([
+      "pool-mismatch",
+      "alias-gap",
+      "stale-profile-link",
+      "stale-pending-run-link",
+      "protected-stub",
+      "unexpected-stub",
+    ]));
+    expect(beforeStatus.findings).toContainEqual(expect.objectContaining({
+      id: `source:stub-protected:${STUBS[1][0]}`,
+      category: "protected-stub",
+      protectedValue: true,
+    }));
+    expect(beforeStatus.findings.filter((finding) => finding.category === "pool-mismatch").length).toBeLessThanOrEqual(50);
+    expect(beforeStatus.summary.omittedFindings).toBeGreaterThan(0);
+    expect(beforeStatus.summary.findingLimitPerCategory).toBe(50);
+    expect(JSON.stringify(beforeStatus)).not.toContain('"runValues"');
+    expect(JSON.stringify(beforeStatus)).not.toContain('"values"');
+
     // Exercise the two generic stub purges that run earlier during production
     // boot. A historical-only reference must keep its recipe alive until the
     // reconciliation heal performs its own preservation check.
@@ -137,6 +163,7 @@ describe("runSourceLibraryReconciliationHeal", () => {
     expect(future.runValuesUpdatedAt["stub-pending"]).toBeGreaterThan(10);
     expect(future.runValuesUpdatedAt.pending).toBeGreaterThan(10);
     expect(future.runValues.started.app1CheeseRecipeName).toBe(STUBS[1][1]);
+    expect(future.runValues["ended-only"].app1CheeseRecipeName).toBe("Corner BBQ Chicken Cheese Mix");
     expect(history.runValues.history.app1CheeseRecipeName).toBe(STUBS[1][1]);
 
     expect(await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, STUBS[0][0]))).toHaveLength(0);
@@ -154,5 +181,17 @@ describe("runSourceLibraryReconciliationHeal", () => {
     expect((profile.values as any).app1CheeseRecipeName).toBe("Manual override");
     const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, HEAL));
     expect(marker.result).toEqual({ replacements: 4, aliasesInserted: 2, repointedProfiles: 2, repointedRuns: 2, deletedStubs: 1 });
+    const sandboxStatus = await sourceLibraryReconciliationStatus(db, "sandbox");
+    expect(sandboxStatus.status).toBe("not-verified");
+    expect(sandboxStatus.freshness).toBe("stale");
+    expect(sandboxStatus.heal.markerValid).toBe(false);
+    expect(sandboxStatus.heal.appliedAt).toBeNull();
+    expect(sandboxStatus.heal.result).toEqual({
+      replacements: 0,
+      aliasesInserted: 0,
+      repointedProfiles: 0,
+      repointedRuns: 0,
+      deletedStubs: 0,
+    });
   });
 });

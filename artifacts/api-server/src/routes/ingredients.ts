@@ -18,6 +18,7 @@ import {
   ingredientMergePath,
   resolveIngredientMergeTarget,
 } from "../lib/ingredientMerge";
+import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 
 // Factory-wide ingredient catalog. Reading is open to any signed-in
 // user (both apps resolve recipe rows and build category pickers from this),
@@ -161,6 +162,7 @@ router.post(
           });
         }
       });
+      invalidateMasterDataBootstrapCache();
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -199,6 +201,7 @@ router.delete(
             ),
           );
       }
+      invalidateMasterDataBootstrapCache();
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -301,6 +304,7 @@ router.post(
         return;
       }
 
+      invalidateMasterDataBootstrapCache();
       const items = await listAll();
       res.json({ items });
     } catch (err) {

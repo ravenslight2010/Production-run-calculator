@@ -25,6 +25,7 @@ import {
   loadRunValuesUpdated,
   saveRunValuesUpdated,
   saveDoughRecipePresets,
+  saveDayState,
   loadDoughRecipePresets,
   loadDeletedItems,
   unionDeletedItems,
@@ -100,6 +101,14 @@ describe("recipe-name merge survives a stale incoming sync (receive path)", () =
     saveRunValues("a", run("Old Dough"));
     saveRunValues("b", run("Old Dough"));
     saveRunValues("c", run("Keep Dough"));
+    saveDayState({
+      runs: [
+        { id: "a", brand: "Brand", flavor: "A" },
+        { id: "b", brand: "Brand", flavor: "B" },
+        { id: "c", brand: "Brand", flavor: "C" },
+      ],
+      currentIndex: 0,
+    });
     localStorage.setItem(
       DOUGH_RECIPE_NAMES_KEY,
       JSON.stringify(["Keep Dough", "Old Dough"]),

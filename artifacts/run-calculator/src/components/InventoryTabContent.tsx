@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { ClipboardList } from "lucide-react";
 import InventoryTab from "./InventoryTab";
 import { useInventoryTabCtx } from "../contexts/InventoryTabCtx";
 
@@ -20,16 +21,27 @@ export default memo(function InventoryTabContent() {
     onClearSubstitutions,
   } = useInventoryTabCtx();
   return (
-    <InventoryTab
-      candidates={candidates}
-      runValsList={runValsList}
-      coverageRunVals={coverageRunVals}
-      substitutions={substitutions}
-      substitutionLog={substitutionLog}
-      substitutionOptions={substitutionOptions}
-      onAddSubstitution={onAddSubstitution}
-      onRemoveSubstitution={onRemoveSubstitution}
-      onClearSubstitutions={onClearSubstitutions}
-    />
+    <>
+      <div className="mb-4" data-testid="inventory-page-heading">
+        <h2 className="flex items-center gap-2 text-lg font-bold">
+          <ClipboardList className="h-5 w-5 text-primary" />
+          Inventory
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review stock, lots, alerts, transfers, and substitutions.
+        </p>
+      </div>
+      <InventoryTab
+        candidates={candidates}
+        runValsList={runValsList}
+        coverageRunVals={coverageRunVals}
+        substitutions={substitutions}
+        substitutionLog={substitutionLog}
+        substitutionOptions={substitutionOptions}
+        onAddSubstitution={onAddSubstitution}
+        onRemoveSubstitution={onRemoveSubstitution}
+        onClearSubstitutions={onClearSubstitutions}
+      />
+    </>
   );
 });

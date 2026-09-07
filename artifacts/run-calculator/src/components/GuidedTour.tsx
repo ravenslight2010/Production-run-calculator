@@ -77,8 +77,8 @@ function buildSteps(isManager: boolean): TourStep[] {
       icon: MoreHorizontal,
       title: "More in the menu",
       body: isManager
-        ? "Open the top-right menu for Stoppages & Summary, Stock, the AI Assistant, Schedule, Setup & Settings, Reported issues, and Report an issue."
-        : "Open the top-right menu for Stoppages & Summary, Stock, the AI Assistant, Schedule, Setup & Settings, and Report an issue.",
+        ? "Open the top-right menu for Stoppages & Summary, Inventory, Operations Insights, Schedule, Setup & Settings, Reported issues, and Report an issue."
+        : "Open the top-right menu for Stoppages & Summary, Inventory, Operations Insights, Schedule, Setup & Settings, and Report an issue.",
     },
   ];
   return steps;
@@ -124,7 +124,7 @@ export default function GuidedTour({
   const isLast = index === steps.length - 1;
   const Icon = step.icon;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-4 sm:items-center">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/30 p-4 sm:items-center">
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="guided-tour-dialog-title" className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-2xl">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">

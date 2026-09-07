@@ -84,6 +84,19 @@ import type {
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import type { AiStatus } from "./aiStatus";
+import { submitAndWaitForServerJob } from "./serverJobs";
+
+/** Large flattened workbook chunks run durably; small chunks retain the established direct request. */
+export const JOB_BACKED_PARSE_CHARS = 30_000;
+
+export type AiModelStatus = "completed" | "provider-unavailable" | "rate-limited" | "malformed";
+export type SuggestionResponseMetadata = {
+  decision: "suggestion";
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
+};
 
 export type SpecSheetKnown = {
   brands?: string[];
@@ -114,7 +127,7 @@ export type ParseSpecImagesInput = {
   images: Array<{ imageBase64: string; mimeType?: string }>;
 };
 
-export type ParseSpecImagesResult = {
+export type ParseSpecImagesResult = SuggestionResponseMetadata & {
   workbookText: string;
   generatedAt: number;
   note?: string;
@@ -123,7 +136,7 @@ export type ParseSpecImagesResult = {
 export type ReviewedProfile = ParsedProfile & { review?: ReviewVerdict };
 export type ReviewedRecipe = ParsedRecipe & { review?: ReviewVerdict };
 
-export type ParseSpecSheetResult = Omit<ParsedSpecImport, "profiles" | "recipes"> & {
+export type ParseSpecSheetResult = SuggestionResponseMetadata & Omit<ParsedSpecImport, "profiles" | "recipes"> & {
   profiles: ReviewedProfile[];
   recipes: ReviewedRecipe[];
   generatedAt: number;
@@ -133,6 +146,16 @@ export async function requestParseSpecSheet(
   input: ParseSpecSheetInput,
   signal?: AbortSignal,
 ): Promise<ParseSpecSheetResult> {
+  if (input.workbookText.length >= JOB_BACKED_PARSE_CHARS) {
+    try {
+      return await submitAndWaitForServerJob<ParseSpecSheetResult>({
+        type: "workbook-parse", input, signal,
+      });
+    } catch {
+      // Rollout/offline compatibility: direct parsing remains the established
+      // synchronous path and never changes import review/confirmation behavior.
+    }
+  }
   // Generous bound — the AI parse legitimately runs 30-60s — but finite, so a
   // request that hangs at the platform edge (cold-starting deployment) surfaces
   // a clear retryable error instead of freezing the loading dialog forever.

@@ -3,6 +3,7 @@ import {
   FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD,
   deriveFieldCheckStatus,
   HARDWARE_CHECK_VERSION,
+  FIELD_CHECK_CATALOG,
   hardwareConfirmationObservation,
   validateFieldCheckBatch,
   validateHardwareConfirmation,
@@ -103,11 +104,25 @@ describe("field-check contract", () => {
     expect(valid.ok).toBe(true);
     expect(validateHardwareConfirmation({ ...confirmation, notes: "free form" }).ok).toBe(false);
     expect(validateHardwareConfirmation({ ...confirmation, deviceCategory: "desktop-chrome" }).ok).toBe(false);
+    expect(validateHardwareConfirmation({ ...confirmation, deviceCategory: "iphone" }).ok).toBe(true);
     if (valid.ok) {
       expect(hardwareConfirmationObservation(valid.data)).toMatchObject({
         ...confirmation,
         appBuild: "hardware-protocol",
         metrics: {},
+      });
+    }
+  });
+
+  it("classifies expanded checks by honest observation owner", () => {
+    expect(FIELD_CHECK_CATALOG.find((check) => check.name === "offline-queue-replay")).toMatchObject({
+      observedBy: "browser",
+      expiresHours: 168,
+    });
+    for (const name of ["orientation-layout", "safe-area-clearance", "camera-file-selection", "update-handoff"]) {
+      expect(FIELD_CHECK_CATALOG.find((check) => check.name === name)).toMatchObject({
+        observedBy: "hardware",
+        expiresHours: 720,
       });
     }
   });

@@ -1,28 +1,18 @@
-// Pure production-run calculation engine.
-//
-// Extracted from LiveRunContext.tsx (Step 2 of server-side refactor).
-// This file has ZERO React dependencies — both client and server can import it.
-// Pattern follows @workspace/inventory-math: narrow input interfaces, no
-// app-level types imported.
-
 import {
+  caseBasedProductionNeedsAvailable,
   computeCasesInFreezer,
   computeCasesOnLine,
 } from "@workspace/inventory-math";
 
-// ── Shared types ─────────────────────────────────────────────────────────────
-
 export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
-
-/** Stoppage record as used by the calc — subset of RunMeta.stoppages. */
 export interface CalcStoppage {
   id?: string;
   type?: string;
   startedAt: number;
   endedAt?: number;
+  /** Missing legacy values use the safe stop-tunnel policy. */
+  stopTunnel?: boolean;
 }
-
-/** Minimal RunMeta shape needed by the calc. */
 export interface CalcRunMeta {
   id?: string;
   startedAt?: number;
@@ -30,14 +20,10 @@ export interface CalcRunMeta {
   pausedAt?: number;
   stoppages?: CalcStoppage[];
 }
-
-/**
- * Narrow subset of FormValues that the production calc actually reads.
- * Both `v` (liveValues) and `ve` (virtual/effective) are typed as this —
- * they share the same shape but carry different data (e.g. ve may overlay
- * temp overrides for freezerTime, crustsPerCycle, cycleSpeed).
- */
 export interface CalcFormValues {
+  tempFreezerTime?: number;
+  tempCrustsPerCycle?: number;
+  tempCycleSpeed?: number;
   approxLineSpeed: number;
   speedAdjustment: number;
   freezerTime: number | string;
@@ -70,25 +56,26 @@ export interface CalcFormValues {
   pep1TypeB: string; pep1OzPerPizzaB: number; pep1SticksB: number; pep1BatchLbsB: number;
   pep2TypeB: string; pep2OzPerPizzaB: number; pep2SticksB: number; pep2BatchLbsB: number;
 }
-
-/** Input for the pure calc function. */
+export function applyTemporaryOverrides<T extends Partial<Record<string, unknown>>>(v: T): T {
+  const freezerTime = Number(v.tempFreezerTime) || 0;
+  const crustsPerCycle = Number(v.tempCrustsPerCycle) || 0;
+  const cycleSpeed = Number(v.tempCycleSpeed) || 0;
+  if (freezerTime <= 0 && crustsPerCycle <= 0 && cycleSpeed <= 0) return v;
+  return {
+    ...v,
+    ...(freezerTime > 0 ? { freezerTime } : {}),
+    ...(crustsPerCycle > 0 ? { crustsPerCycle } : {}),
+    ...(cycleSpeed > 0 ? { cycleSpeed } : {}),
+  };
+}
 export interface CalcInput {
-  /** Live / isolated form values (after isolatePendingRunPackagingProgress). */
   v: CalcFormValues;
-  /** Virtual / effective form values (with temp overrides applied). */
   ve: CalcFormValues;
-  /** Current run metadata (or undefined if no active run). */
   currentRun?: CalcRunMeta;
-  /** Current wall-clock time in milliseconds. */
   nowTimeMs: number;
-  /** "dough" or "crusts". */
   doughSubTab: string;
-  /** Pepperoni types that are considered "default" (no batch needed). */
   defaultPepTypes: string[];
 }
-
-// ── Calc output type ─────────────────────────────────────────────────────────
-
 export type Calc = {
   ppm: number;
   traysPerSkid: number;
@@ -137,10 +124,7 @@ export type Calc = {
   sauceEffBarrel: number;
 };
 
-// ── Line speed ────────────────────────────────────────────────────────────────
-
 export type LineSpeedMode = "dough" | "crusts";
-
 export type EffectiveLineSpeedInput = {
   mode: LineSpeedMode;
   crustsPerCycle?: number | null;
@@ -148,39 +132,26 @@ export type EffectiveLineSpeedInput = {
   speedAdjustment?: number | null;
   approxLineSpeed?: number | null;
 };
-
 function finiteOrZero(value: number | null | undefined): number {
   return Number.isFinite(value) ? Number(value) : 0;
 }
-
-/**
- * Returns the single line-speed basis used by live production calculations.
- *
- * Dough runs use the cycle-derived speed adjusted by the configured multiplier.
- * Crust runs use their approximate speed directly; they do not inherit the
- * dough multiplier. Invalid or non-positive speeds are disabled rather than
- * producing NaN, Infinity, or false timers.
- */
 export function computeEffectiveLineSpeed(input: EffectiveLineSpeedInput): number {
   if (input.mode === "crusts") {
-    const approxPpm = finiteOrZero(input.approxLineSpeed);
-    return approxPpm > 0 ? Math.round(approxPpm * 100) / 100 : 0;
+    const ppm = finiteOrZero(input.approxLineSpeed);
+    return ppm > 0 ? Math.round(ppm * 100) / 100 : 0;
   }
-
-  const crustsPerCycle = finiteOrZero(input.crustsPerCycle);
-  const cycleSpeed = finiteOrZero(input.cycleSpeed);
-  const speedAdjustment = input.speedAdjustment == null || !Number.isFinite(input.speedAdjustment)
+  const adjustment = input.speedAdjustment == null || !Number.isFinite(input.speedAdjustment)
     ? 1
     : Number(input.speedAdjustment);
-  const adjustedPpm = crustsPerCycle * cycleSpeed * speedAdjustment;
-  return adjustedPpm > 0 ? Math.round(adjustedPpm * 100) / 100 : 0;
+  const ppm = finiteOrZero(input.crustsPerCycle) * finiteOrZero(input.cycleSpeed) * adjustment;
+  return ppm > 0 ? Math.round(ppm * 100) / 100 : 0;
 }
 
-// ── Pure calculation ─────────────────────────────────────────────────────────
+function recipeLbs(rows: RecipeRow[] | undefined): number {
+  return (rows ?? []).reduce((sum, row) => sum + Number(row.lbs ?? 0), 0);
+}
 
-export function computeCalc(input: CalcInput): Calc {
-  const { v, ve, currentRun, nowTimeMs, doughSubTab, defaultPepTypes } = input;
-
+export function computeCalc({ v, ve, currentRun, nowTimeMs, doughSubTab, defaultPepTypes }: CalcInput): Calc {
   const ppm = computeEffectiveLineSpeed({
     mode: doughSubTab === "crusts" ? "crusts" : "dough",
     approxLineSpeed: v.approxLineSpeed,
@@ -188,21 +159,16 @@ export function computeCalc(input: CalcInput): Calc {
     cycleSpeed: ve.cycleSpeed,
     speedAdjustment: v.speedAdjustment,
   });
-
   const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
-
-  const doughRecipeLbs = (v.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const effectiveDoughBatchYield =
-    doughRecipeLbs > 0 && v.targetDoughballWeight > 0
-      ? (doughRecipeLbs * 16) / v.targetDoughballWeight
-      : v.doughBatchYield;
-
-  const traysPerSkid = (v.casesPerSkid * v.pizzasPerCase) / perTray;
+  const doughLbs = recipeLbs(v.doughRecipe);
+  const effectiveDoughBatchYield = doughLbs > 0 && v.targetDoughballWeight > 0
+    ? doughLbs * 16 / v.targetDoughballWeight
+    : v.doughBatchYield;
+  const traysPerSkid = v.casesPerSkid * v.pizzasPerCase / perTray;
   const perBatch = doughSubTab === "crusts" ? v.crustsPerCase : effectiveDoughBatchYield;
   const traysPerBatch = effectiveDoughBatchYield / perTray;
   const batchesPerSkid = traysPerSkid / traysPerBatch;
-
-  const casesOnLine = computeCasesOnLine({
+  const occupancy = {
     startedAt: currentRun?.startedAt,
     endedAt: currentRun?.endedAt,
     pausedAt: currentRun?.pausedAt,
@@ -211,24 +177,12 @@ export function computeCalc(input: CalcInput): Calc {
     ppm,
     pizzasPerCase: v.pizzasPerCase,
     freezerTimeMin: Number(ve.freezerTime),
-  });
-
-  const casesInFreezer = computeCasesInFreezer({
-    startedAt: currentRun?.startedAt,
-    endedAt: currentRun?.endedAt,
-    pausedAt: currentRun?.pausedAt,
-    stoppages: currentRun?.stoppages,
-    now: nowTimeMs,
-    ppm,
-    pizzasPerCase: v.pizzasPerCase,
-    freezerTimeMin: Number(ve.freezerTime),
-  });
-
-  const casesLeftToRun =
-    v.casesNeeded - v.skidsCompleted * v.casesPerSkid - v.casesOnCurrentSkid - casesOnLine + v.casesPerLayer;
-  const casesForTiming =
-    v.casesNeeded - v.skidsCompleted * v.casesPerSkid - v.casesOnCurrentSkid - casesOnLine;
-
+  };
+  const casesOnLine = computeCasesOnLine(occupancy);
+  const casesInFreezer = computeCasesInFreezer(occupancy);
+  const casesLeftToRun = v.casesNeeded - v.skidsCompleted * v.casesPerSkid -
+    v.casesOnCurrentSkid - casesOnLine + v.casesPerLayer;
+  const casesForTiming = casesLeftToRun - v.casesPerLayer;
   const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
   const doughOnHand = v.traysOnLine * perTray + v.batchesReady * effectiveDoughBatchYield;
   const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
@@ -239,148 +193,86 @@ export function computeCalc(input: CalcInput): Calc {
   const stacksNeededTotal = perTray > 0 ? Math.ceil(pizzasNetOfStaged / perTray) : 0;
   const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
   const doughShortCases = doughDeficit / v.pizzasPerCase;
-  const doughDepletionSec = ppm > 0 ? (doughOnHand / ppm) * 60 : 0;
-
+  const doughDepletionSec = ppm > 0 ? doughOnHand / ppm * 60 : 0;
   const casesOnLastSkid = Math.ceil(Math.max(0, v.casesPerSkid - casesOnLine));
-
-  const timePressHzSec =
-    doughSubTab !== "crusts" && ppm > 0 && ve.crustsPerCycle > 0
-      ? (ve.crustsPerCycle / ppm) * 60
-      : 0;
-  const timePerTraySec = ppm > 0 ? (perTray / ppm) * 60 : 0;
-  const timePerBatchSec = ppm > 0 ? (perBatch / ppm) * 60 : 0;
-  const timePerSkidSec = ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
-  const timePerCaseSec = ppm > 0 ? (v.pizzasPerCase / ppm) * 60 : 0;
-  const totalTimeSec = ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : 0;
-  const doughMadeTimeSec =
-    ppm > 0
-      ? ((v.traysOnLine * perTray + v.batchesReady * effectiveDoughBatchYield) / ppm) * 60
-      : 0;
-
-  const rackTimes = [10, 12, 16, 18, 20, 22].map((n) => ({
-    trays: n,
-    sec: ppm > 0 ? (n * perTray * 60) / ppm : 0,
+  const timePressHzSec = doughSubTab !== "crusts" && ppm > 0 && ve.crustsPerCycle > 0
+    ? ve.crustsPerCycle / ppm * 60 : 0;
+  const timePerTraySec = ppm > 0 ? perTray / ppm * 60 : 0;
+  const timePerBatchSec = ppm > 0 ? perBatch / ppm * 60 : 0;
+  const timePerSkidSec = ppm > 0 ? v.casesPerSkid * v.pizzasPerCase / ppm * 60 : 0;
+  const timePerCaseSec = ppm > 0 ? v.pizzasPerCase / ppm * 60 : 0;
+  const totalTimeSec = ppm > 0 ? casesForTiming * v.pizzasPerCase * 60 / ppm : 0;
+  const doughMadeTimeSec = ppm > 0 ? doughOnHand / ppm * 60 : 0;
+  const rackTimes = [10, 12, 16, 18, 20, 22].map((trays) => ({
+    trays, sec: ppm > 0 ? trays * perTray * 60 / ppm : 0,
   }));
-
-  // Frontline
-  const totalPizzasRun = casesLeftToRun * v.pizzasPerCase;
-  const totalPizzasForSauce = totalPizzasRun + v.casesPerLayer * v.pizzasPerCase;
-  const frontlineRecipeLbs = (v.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : v.sauceBarrelLbs;
-  const sauceLbs = (totalPizzasForSauce * v.sauceOzPerPizza) / 16 + 30;
+  const productionNeedsAvailable = caseBasedProductionNeedsAvailable(v);
+  const totalPizzasForSauce = casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase;
+  const sauceEffBarrel = recipeLbs(v.frontlineRecipe) || v.sauceBarrelLbs;
+  const sauceLbs = productionNeedsAvailable ? totalPizzasForSauce * v.sauceOzPerPizza / 16 + 30 : 0;
   const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
-  const sauceDepletionSec =
-    ppm > 0 && sauceEffBarrel > 0 && v.sauceOzPerPizza > 0
-      ? (sauceEffBarrel * 16 / v.sauceOzPerPizza / ppm) * 60
-      : 0;
-
-  // Applicators
-  const app1RecipeLbs = (v.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app1Lbs = (totalPizzasForSauce * v.app1OzPerPizza) / 16 + 20;
-  const app1IsMix = v.app1Type.trim().toLowerCase().includes("mix");
-  const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : v.app1BatchLbs;
-  const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
-
-  const app2RecipeLbs = (v.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app2Lbs = (totalPizzasForSauce * v.app2OzPerPizza) / 16 + 20;
-  const app2IsMix = v.app2Type.trim().toLowerCase().includes("mix");
-  const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : v.app2BatchLbs;
-  const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
-
-  const app3RecipeLbs = (v.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app3Lbs = (totalPizzasForSauce * v.app3OzPerPizza) / 16 + 20;
-  const app3IsMix = v.app3Type.trim().toLowerCase().includes("mix");
-  const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : v.app3BatchLbs;
-  const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
-
-  const app4RecipeLbs = (v.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app4Lbs = (totalPizzasForSauce * v.app4OzPerPizza) / 16 + 20;
-  const app4IsMix = v.app4Type.trim().toLowerCase().includes("mix");
-  const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : v.app4BatchLbs;
-  const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
-
-  // Pepperoni
+  const sauceDepletionSec = productionNeedsAvailable && ppm > 0 && sauceEffBarrel > 0 && v.sauceOzPerPizza > 0
+    ? sauceEffBarrel * 16 / v.sauceOzPerPizza / ppm * 60 : 0;
+  const app = ([1, 2, 3, 4] as const).map((slot) => {
+    const prefix = `app${slot}` as const;
+    const lbs = productionNeedsAvailable ? totalPizzasForSauce * v[`${prefix}OzPerPizza`] / 16 + 20 : 0;
+    const effectiveBatch = recipeLbs(v[`${prefix}CheeseRecipe`]) || v[`${prefix}BatchLbs`];
+    const batches = !v[`${prefix}Type`].trim().toLowerCase().includes("mix") && effectiveBatch > 0
+      ? lbs / effectiveBatch : 0;
+    return { lbs, batches };
+  });
   const pepCombined = v.pep1Combined === true;
   const pepStickMult = pepCombined ? 2 : 1;
-  const pep1Lbs = (totalPizzasForSauce * v.pep1OzPerPizza) / 16 + v.pep1Sticks * pepStickMult;
-  const pep1Batches =
-    !defaultPepTypes.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
-      ? pep1Lbs / v.pep1BatchLbs
-      : 0;
-  const pep1TypeBTrim = (v.pep1TypeB ?? "").trim();
-  const pep1LbsB = pep1TypeBTrim
-    ? (totalPizzasForSauce * (v.pep1OzPerPizzaB ?? 0)) / 16 + (v.pep1SticksB ?? 0) * pepStickMult
+  const pep1Lbs = productionNeedsAvailable
+    ? totalPizzasForSauce * v.pep1OzPerPizza / 16 + v.pep1Sticks * pepStickMult
     : 0;
-  const pep1BatchesB =
-    pep1TypeBTrim && !defaultPepTypes.includes(pep1TypeBTrim) && (v.pep1BatchLbsB ?? 0) > 0
-      ? pep1LbsB / (v.pep1BatchLbsB ?? 1)
-      : 0;
-  const pep2Lbs = pepCombined ? 0 : (totalPizzasForSauce * v.pep2OzPerPizza) / 16 + v.pep2Sticks;
-  const pep2Batches =
-    !pepCombined && !defaultPepTypes.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
-      ? pep2Lbs / v.pep2BatchLbs
-      : 0;
-  const pep2TypeBTrim = (v.pep2TypeB ?? "").trim();
-  const pep2LbsB =
-    !pepCombined && pep2TypeBTrim
-      ? (totalPizzasForSauce * (v.pep2OzPerPizzaB ?? 0)) / 16 + (v.pep2SticksB ?? 0)
-      : 0;
-  const pep2BatchesB =
-    !pepCombined && pep2TypeBTrim && !defaultPepTypes.includes(pep2TypeBTrim) && (v.pep2BatchLbsB ?? 0) > 0
-      ? pep2LbsB / (v.pep2BatchLbsB ?? 1)
-      : 0;
-
-  // Pace
+  const pep1Batches = !defaultPepTypes.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
+    ? pep1Lbs / v.pep1BatchLbs : 0;
+  const pep1TypeB = (v.pep1TypeB ?? "").trim();
+  const pep1LbsB = productionNeedsAvailable && pep1TypeB
+    ? totalPizzasForSauce * (v.pep1OzPerPizzaB ?? 0) / 16 + (v.pep1SticksB ?? 0) * pepStickMult : 0;
+  const pep1BatchesB = pep1TypeB && !defaultPepTypes.includes(pep1TypeB) && (v.pep1BatchLbsB ?? 0) > 0
+    ? pep1LbsB / (v.pep1BatchLbsB || 1) : 0;
+  const pep2Lbs = !productionNeedsAvailable || pepCombined
+    ? 0
+    : totalPizzasForSauce * v.pep2OzPerPizza / 16 + v.pep2Sticks;
+  const pep2Batches = !pepCombined && !defaultPepTypes.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
+    ? pep2Lbs / v.pep2BatchLbs : 0;
+  const pep2TypeB = (v.pep2TypeB ?? "").trim();
+  const pep2LbsB = productionNeedsAvailable && !pepCombined && pep2TypeB
+    ? totalPizzasForSauce * (v.pep2OzPerPizzaB ?? 0) / 16 + (v.pep2SticksB ?? 0) : 0;
+  const pep2BatchesB = !pepCombined && pep2TypeB && !defaultPepTypes.includes(pep2TypeB) &&
+    (v.pep2BatchLbsB ?? 0) > 0 ? pep2LbsB / (v.pep2BatchLbsB || 1) : 0;
   const casesCompleted = v.skidsCompleted * v.casesPerSkid + v.casesOnCurrentSkid;
   const extraCases = Math.max(0, casesCompleted - v.casesNeeded);
-  const pressCasesLeft = v.casesNeeded > 0 ? Math.max(0, v.casesNeeded - casesCompleted - casesInFreezer) : 0;
+  const pressCasesLeft = v.casesNeeded > 0
+    ? Math.max(0, v.casesNeeded - casesCompleted - casesInFreezer) : 0;
   const pressDone = v.casesNeeded > 0 && casesCompleted + casesInFreezer >= v.casesNeeded;
   const isLiveRun = !!currentRun?.startedAt && !currentRun?.endedAt;
-  const adjustedTimeSec =
-    ppm > 0
-      ? isLiveRun && v.casesNeeded > 0
-        ? (pressCasesLeft * v.pizzasPerCase * 60) / ppm
-        : (casesForTiming * v.pizzasPerCase * 60) / ppm
-      : totalTimeSec;
-
-  let paceStatus: "on-pace" | "ahead" | "behind" | null = null;
+  const adjustedTimeSec = ppm > 0
+    ? (isLiveRun && v.casesNeeded > 0 ? pressCasesLeft : casesForTiming) * v.pizzasPerCase * 60 / ppm
+    : totalTimeSec;
+  let paceStatus: Calc["paceStatus"] = null;
   let paceDelta = 0;
-  if (currentRun?.startedAt && !currentRun?.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
-    const refTime = currentRun.pausedAt ?? Date.now();
-    const downtimeMs = (currentRun.stoppages ?? [])
-      .filter(s => s.endedAt && s.type !== "pause")
-      .reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
-    const elapsedMin = Math.max(0, refTime - currentRun.startedAt - downtimeMs) / 60000;
-    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(ve.freezerTime));
-    const expectedCases = Math.floor((ppm * elapsedMinAfterTunnel) / v.pizzasPerCase);
+  let elapsedSec = 0;
+  if (currentRun?.startedAt && !currentRun.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
+    const refTime = currentRun.pausedAt ?? nowTimeMs;
+    const downtimeMs = (currentRun.stoppages ?? []).filter((s) => s.endedAt && s.type !== "pause")
+      .reduce((sum, s) => sum + (s.endedAt! - s.startedAt), 0);
+    elapsedSec = Math.max(0, refTime - currentRun.startedAt - downtimeMs) / 1000;
+    const elapsedMin = elapsedSec / 60;
+    const expectedCases = Math.floor(ppm * Math.max(0, elapsedMin - Number(ve.freezerTime)) / v.pizzasPerCase);
     paceDelta = casesCompleted - expectedCases;
     if (elapsedMin >= Number(ve.freezerTime)) {
       paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
     }
   }
-
   let catchUpPpm: number | null = null;
-  if (
-    paceStatus === "behind" &&
-    currentRun?.startedAt &&
-    !currentRun?.endedAt &&
-    ppm > 0 &&
-    v.pizzasPerCase > 0 &&
-    v.casesNeeded > 0
-  ) {
-    const refTime = currentRun.pausedAt ?? Date.now();
-    const downtimeMs = (currentRun.stoppages ?? [])
-      .filter(s => s.endedAt && s.type !== "pause")
-      .reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
-    const elapsedSec = Math.max(0, refTime - currentRun.startedAt - downtimeMs) / 1000;
+  if (paceStatus === "behind" && ppm > 0 && v.casesNeeded > 0) {
     const remainingCases = v.casesNeeded - casesCompleted;
-    const originalTotalSec = ppm > 0 ? (v.casesNeeded * v.pizzasPerCase * 60) / ppm : 0;
-    const remainingSec = Math.max(60, originalTotalSec - elapsedSec);
-    if (remainingSec > 0 && remainingCases > 0) {
-      catchUpPpm = Math.round((remainingCases * v.pizzasPerCase * 60) / remainingSec);
-    }
+    const remainingSec = Math.max(60, v.casesNeeded * v.pizzasPerCase * 60 / ppm - elapsedSec);
+    if (remainingCases > 0) catchUpPpm = Math.round(remainingCases * v.pizzasPerCase * 60 / remainingSec);
   }
-
   return {
     ppm, traysPerSkid, traysPerBatch, batchesPerSkid, casesOnLine, casesInFreezer,
     casesLeftToRun, casesLeftToOpen, stacksNeededTotal, casesForTiming, batchesNeeded,
@@ -388,122 +280,64 @@ export function computeCalc(input: CalcInput): Calc {
     timePressHzSec, timePerTraySec, timePerBatchSec, timePerSkidSec, timePerCaseSec,
     totalTimeSec, adjustedTimeSec, pressCasesLeft, pressDone, extraCases, doughMadeTimeSec,
     rackTimes, sauceBatches, sauceDepletionSec,
-    app1Lbs, app1Batches, app2Lbs, app2Batches, app3Lbs, app3Batches, app4Lbs, app4Batches,
-    pep1Lbs, pep1Batches, pep2Lbs, pep2Batches,
-    pep1LbsB, pep1BatchesB, pep2LbsB, pep2BatchesB,
-    casesCompleted, paceStatus, paceDelta, catchUpPpm,
-    perTray, perBatch, sauceEffBarrel,
+    app1Lbs: app[0].lbs, app1Batches: app[0].batches,
+    app2Lbs: app[1].lbs, app2Batches: app[1].batches,
+    app3Lbs: app[2].lbs, app3Batches: app[2].batches,
+    app4Lbs: app[3].lbs, app4Batches: app[3].batches,
+    pep1Lbs, pep1Batches, pep2Lbs, pep2Batches, pep1LbsB, pep1BatchesB, pep2LbsB, pep2BatchesB,
+    casesCompleted, paceStatus, paceDelta, catchUpPpm, perTray, perBatch, sauceEffBarrel,
   };
 }
 
-// ── Server-side computation ──────────────────────────────────────────────────
-// Computes calc for the current run from a SyncPayload-shaped object.
-// The server calls this after every sync merge and attaches the result to
-// SSE broadcasts so clients can display server-computed values.
-
-/** Minimal SyncPayload shape needed for server-side calc (untyped on server). */
 export interface ServerCalcSyncPayload {
-  dayState: {
-    runs: CalcRunMeta[];
-    currentIndex?: number;
-  };
+  dayState: { runs: CalcRunMeta[]; currentIndex?: number };
   runValues?: Record<string, Record<string, unknown>>;
   packagingProgress?: Record<string, { skidsCompleted: number; casesOnCurrentSkid: number }>;
 }
-
-export interface ServerCalcResult {
-  runId: string;
-  calc: Calc;
-}
-
-/**
- * Compute calc for the currently-active run from a SyncPayload.
- * Returns null if there is no valid current run or its FormValues are missing.
- */
+export interface ServerCalcResult { runId: string; calc: Calc }
 export function computeServerCalc(
   payload: ServerCalcSyncPayload,
   defaultPepTypes: string[],
+  nowTimeMs = Date.now(),
 ): ServerCalcResult | null {
-  const { runs, currentIndex = 0 } = payload.dayState;
-  const run = runs?.[currentIndex];
+  const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
   if (!run?.id) return null;
-  const rawValues = payload.runValues?.[run.id];
-  if (!rawValues || typeof rawValues !== "object") return null;
-
-  // The server stores raw FormValues; cast the needed fields.
-  const v = rawValues as unknown as CalcFormValues;
-  const packagingProgress = payload.packagingProgress?.[run.id];
-  const vEffective: CalcFormValues = {
-    ...v,
-    skidsCompleted: packagingProgress?.skidsCompleted ?? v.skidsCompleted,
-    casesOnCurrentSkid: packagingProgress?.casesOnCurrentSkid ?? v.casesOnCurrentSkid,
+  const raw = payload.runValues?.[run.id];
+  if (!raw || typeof raw !== "object") return null;
+  const base = {
+    approxLineSpeed: 0, speedAdjustment: 1, freezerTime: 0,
+    crustsPerCycle: 0, cycleSpeed: 0, pizzasPerCase: 0, casesPerSkid: 0,
+    casesPerLayer: 0, doughballsPerTray: 0, crustsPerStack: 0,
+    doughBatchYield: 0, crustsPerCase: 0, casesNeeded: 0,
+    skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0,
+    targetDoughballWeight: 0, doughRecipe: [], sauceBarrelLbs: 0,
+    sauceOzPerPizza: 0, frontlineRecipe: [],
+    app1OzPerPizza: 0, app1BatchLbs: 0, app1Type: "", app1CheeseRecipe: [],
+    app2OzPerPizza: 0, app2BatchLbs: 0, app2Type: "", app2CheeseRecipe: [],
+    app3OzPerPizza: 0, app3BatchLbs: 0, app3Type: "", app3CheeseRecipe: [],
+    app4OzPerPizza: 0, app4BatchLbs: 0, app4Type: "", app4CheeseRecipe: [],
+    pep1OzPerPizza: 0, pep1Sticks: 0, pep1BatchLbs: 0, pep1Type: "",
+    pep2OzPerPizza: 0, pep2Sticks: 0, pep2BatchLbs: 0, pep2Type: "",
+    pep1Combined: false,
+    pep1TypeB: "", pep1OzPerPizzaB: 0, pep1SticksB: 0, pep1BatchLbsB: 0,
+    pep2TypeB: "", pep2OzPerPizzaB: 0, pep2SticksB: 0, pep2BatchLbsB: 0,
+    ...raw,
+  } as CalcFormValues;
+  const progress = payload.packagingProgress?.[run.id];
+  const v = { ...base, ...(progress ?? {}) };
+  const ve = applyTemporaryOverrides(v);
+  return {
+    runId: run.id,
+    calc: computeCalc({
+      v, ve, currentRun: run, nowTimeMs,
+      doughSubTab: (run as CalcRunMeta & { subTab?: string }).subTab ?? "dough",
+      defaultPepTypes,
+    }),
   };
-
-  const doughSubTab = (run as { subTab?: string }).subTab ?? "dough";
-
-  const calc = computeCalc({
-    v: vEffective,
-    ve: vEffective, // Server uses the same FormValues for both (no temp overrides stored separately)
-    currentRun: run,
-    nowTimeMs: Date.now(),
-    doughSubTab,
-    defaultPepTypes,
-  });
-  return { runId: run.id, calc };
 }
 
-// ── Server-side auto-track schedule (refactor step 6a) ─────────────────────
-export {
-  AUTO_TRACK_SCHEDULE_CHANNELS,
-  buildAutoTrackScheduleFromPayload,
-  computeAutoTrackElapsedMs,
-  computeAutoTrackSchedule,
-  type AutoTrackSchedule,
-  type AutoTrackScheduleChannel,
-  type AutoTrackScheduleCoordinationState,
-  type AutoTrackScheduleEntry,
-  type AutoTrackScheduleInput,
-  type AutoTrackScheduleProgress,
-} from "./autoTrackSchedule";
-
-// ── Pure auto-track decision math (refactor step 6b foundation) ─────────────
-export {
-  buildAppSlotClaimMutations,
-  buildCaseClaimMutations,
-  buildSauceClaimMutations,
-  clampWebPeriodMs,
-  computeAppSlotInfo,
-  computeAutoTrackSuggestion,
-  computeBatchTick,
-  computeCaseTickWrite,
-  computeNetSecondDue,
-  computeTrayTick,
-  getAutoTrackTiming,
-  suggestedDoughStaging,
-  type AppSlotInfo,
-  type AppSlotKey,
-  type AutoTrackSuggestion,
-  type AutoTrackSuggestionInput,
-  type AutoTrackTiming,
-  type BatchTickResult,
-  type CaseTickWriteDecision,
-  type SuggestedDoughStagingReturn,
-  type TrayTickResult,
-} from "./autoTrackEngine";
-
-// ── Pure wall-clock auto-track engine (refactor Task 2) ────────────────────
-export {
-  buildRunningSegments,
-  computeWallClockDueRefs,
-  createWallClockBookkeeping,
-  rearmWallClockTimers,
-  tickWallClock,
-  type WallClockBookkeeping,
-  type WallClockChannel,
-  type WallClockDueRefs,
-  type WallClockMutation,
-  type WallClockRunStatus,
-  type WallClockStoppage,
-  type WallClockTickEvent,
-  type WallClockTickInput,
-} from "./wallClockEngine";
+export * from "./autoTrackEngine";
+export * from "./autoTrackSchedule";
+export * from "./wallClockEngine";
+export * from "./linePhases";
+export * from "./operationalRunView";

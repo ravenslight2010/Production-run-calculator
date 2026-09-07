@@ -37,6 +37,7 @@ node_modules
 /release-evidence/release-check-checkpoint.md
 /release-evidence/release-check-report.md
 /release-evidence/release-check-state.json
+/release-evidence/report-key-rotation-preflight.json
 /release-evidence-full/
 /rollback-rehearsal-report.md
 /libpeerconnection.log
@@ -54,4 +55,8 @@ Thumbs.db
 
 # Replit
 .cache/
-.local/
+!/.local/
+.local/*
+!.local/custom_skills/
+!.local/custom_skills/**
+.local/custom_skills/**/.fingerprint

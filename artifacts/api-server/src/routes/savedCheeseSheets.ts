@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, savedCheeseSheetsTable, type SavedCheeseSheetRow } from "@workspace/db";
 import { SaveCheeseSheetBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
@@ -54,34 +54,44 @@ router.post("/cheese-sheets", requireCapability("manage-inventory"), async (req:
   }
   const label = (parsed.data.label ?? "").trim().slice(0, MAX_LABEL_LEN) || "Cheese recipe sheet";
   const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
+  const scope = currentScope();
 
   try {
-    const inserted = await db.insert(savedCheeseSheetsTable).values({
-      scope: currentScope(),
-      label,
-      sourceKey,
-      data: parsed.data.data,
-    }).returning({ id: savedCheeseSheetsTable.id });
-    const snapshotId = inserted[0]?.id;
-    if (snapshotId == null) throw new Error("Cheese snapshot was not inserted");
+    const snapshotId = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${"saved-cheese-sheets:" + scope}, 0))`,
+      );
+      const inserted = await tx.insert(savedCheeseSheetsTable).values({
+        scope,
+        label,
+        sourceKey,
+        data: parsed.data.data,
+      }).returning({ id: savedCheeseSheetsTable.id });
+      const insertedId = inserted[0]?.id;
+      if (insertedId == null) throw new Error("Cheese snapshot was not inserted");
 
-    const rows = await db
-      .select({ id: savedCheeseSheetsTable.id, sourceKey: savedCheeseSheetsTable.sourceKey })
-      .from(savedCheeseSheetsTable)
-      .where(eq(savedCheeseSheetsTable.scope, currentScope()))
-      .orderBy(desc(savedCheeseSheetsTable.createdAt), desc(savedCheeseSheetsTable.id));
-    const perKeyCount = new Map<string, number>();
-    for (const row of rows) {
-      const key = row.sourceKey ?? "";
-      const count = (perKeyCount.get(key) ?? 0) + 1;
-      perKeyCount.set(key, count);
-      if (count > MAX_SAVED) {
-        await db.delete(savedCheeseSheetsTable).where(and(
-          eq(savedCheeseSheetsTable.scope, currentScope()),
-          eq(savedCheeseSheetsTable.id, row.id),
+      const rows = await tx
+        .select({ id: savedCheeseSheetsTable.id, sourceKey: savedCheeseSheetsTable.sourceKey })
+        .from(savedCheeseSheetsTable)
+        .where(eq(savedCheeseSheetsTable.scope, scope))
+        .orderBy(desc(savedCheeseSheetsTable.createdAt), desc(savedCheeseSheetsTable.id));
+      const perKeyCount = new Map<string, number>();
+      const stale: number[] = [];
+      for (const row of rows) {
+        const key = row.sourceKey ?? "";
+        const count = (perKeyCount.get(key) ?? 0) + 1;
+        perKeyCount.set(key, count);
+        if (count > MAX_SAVED) stale.push(row.id);
+      }
+      if (stale.length > 0) {
+        await tx.delete(savedCheeseSheetsTable).where(and(
+          eq(savedCheeseSheetsTable.scope, scope),
+          inArray(savedCheeseSheetsTable.id, stale),
         ));
       }
-    }
+      return insertedId;
+    });
+
     res.json({ snapshotId, cheeseSheets: await listAll() });
   } catch (err) {
     req.log.error({ err }, "failed to save cheese sheet");

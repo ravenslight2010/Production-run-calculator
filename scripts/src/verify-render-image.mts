@@ -274,8 +274,8 @@ async function main(): Promise<void> {
   console.log(
     "PASS Render image: / serves the compiled calculator entry point",
   );
-  await waitForHttp(`${baseUrl}/api/healthz`, assertHealthyApi);
-  console.log("PASS Render image: /api/healthz returns a healthy API response");
+  await waitForHttp(`${baseUrl}/api/readyz`, assertHealthyApi);
+  console.log("PASS Render image: /api/readyz returns a healthy API response");
 }
 
 process.once("SIGINT", () => {

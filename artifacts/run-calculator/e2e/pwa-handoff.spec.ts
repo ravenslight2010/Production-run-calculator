@@ -22,7 +22,16 @@ import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtemp, cp, readFile, rm, writeFile, stat } from "node:fs/promises";
+import {
+  mkdtemp,
+  cp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+  stat,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -59,7 +68,7 @@ function safeRequestPath(requestUrl: string | undefined) {
 
 async function stampBuild(buildDir: string, version: Version) {
   const indexPath = path.join(buildDir, "index.html");
-  const workerPath = path.join(buildDir, "sw.js");
+  const workerPath = path.join(buildDir, "service-worker.js");
   const index = await readFile(indexPath, "utf8");
   const worker = await readFile(workerPath, "utf8");
   const stampedIndex = index.replace(
@@ -68,8 +77,8 @@ async function stampBuild(buildDir: string, version: Version) {
   );
   const indexRevision = createHash("sha256").update(stampedIndex).digest("hex");
   const stampedWorker = worker.replace(
-    /url:"index\.html",revision:"[^"]+"/,
-    `url:"index.html",revision:"${indexRevision}"`,
+    /"revision":"[^"]+","url":"index\.html"/,
+    `"revision":"${indexRevision}","url":"index.html"`,
   );
   if (stampedWorker === worker) {
     throw new Error("The PWA fixture could not stamp index.html's precache revision");
@@ -84,6 +93,30 @@ async function stampBuild(buildDir: string, version: Version) {
     workerPath,
     `${stampedWorker}\n// pwa-handoff-smoke:${version}\n`,
   );
+}
+
+async function divergeHomeChunk(buildDir: string) {
+  const assetsDir = path.join(buildDir, "assets");
+  const assetNames = await readdir(assetsDir);
+  const oldName = assetNames.find((name) => /^home-[\w-]+\.js$/.test(name));
+  if (!oldName) throw new Error("The PWA fixture could not find Home's lazy chunk");
+  const newName = oldName.replace(/\.js$/, "-current.js");
+  await rename(path.join(assetsDir, oldName), path.join(assetsDir, newName));
+
+  const files = [
+    path.join(buildDir, "index.html"),
+    path.join(buildDir, "service-worker.js"),
+    ...(await readdir(assetsDir))
+      .filter((name) => name.endsWith(".js"))
+      .map((name) => path.join(assetsDir, name)),
+  ];
+  await Promise.all(files.map(async (file) => {
+    const source = await readFile(file, "utf8");
+    if (source.includes(oldName)) {
+      await writeFile(file, source.replaceAll(oldName, newName));
+    }
+  }));
+  return oldName;
 }
 
 async function buildTwoVersionFixture() {
@@ -101,12 +134,21 @@ async function buildTwoVersionFixture() {
   await cp(builtSite, oldDir, { recursive: true });
   await cp(builtSite, newDir, { recursive: true });
   await Promise.all([stampBuild(oldDir, "old"), stampBuild(newDir, "new")]);
+  const staleHomeChunk = await divergeHomeChunk(newDir);
 
-  return { root, oldDir, newDir };
+  return { root, oldDir, newDir, staleHomeChunk };
 }
 
-async function startVersionedServer(versionDirs: Record<Version, string>) {
+async function startVersionedServer(
+  versionDirs: Record<Version, string>,
+  staleHomeChunk?: string,
+) {
   let currentVersion: Version = "old";
+  let staleAssetFailureArmed = false;
+  let staleAssetRequestCount = 0;
+  const oldIndex = await readFile(path.join(versionDirs.old, "index.html"), "utf8");
+  const entryScript = oldIndex.match(/<script[^>]+src="\/?([^"]+\.js)"/)?.[1];
+  if (!entryScript) throw new Error("The PWA fixture could not find the entry script");
   const server = createServer(async (request, response) => {
     try {
       const requestPath = safeRequestPath(request.url);
@@ -147,13 +189,32 @@ async function startVersionedServer(versionDirs: Record<Version, string>) {
           ? candidate
           : path.join(root, "index.html");
       const content = await readFile(target);
+      if (
+        staleAssetFailureArmed
+        && currentVersion === "old"
+        && requestPath === entryScript
+      ) {
+        // Finish serving the old entry bundle, then deploy the new release
+        // before its lazy Home import. The removed old Home filename now falls
+        // through to new index.html with text/html, matching the production
+        // failure this recovery path handles.
+        currentVersion = "new";
+      }
+      if (
+        staleAssetFailureArmed
+        && currentVersion === "new"
+        && staleHomeChunk
+        && requestPath === `assets/${staleHomeChunk}`
+      ) {
+        staleAssetRequestCount += 1;
+      }
       const headers: Record<string, string> = {
         "content-type": mimeType(target),
         // The browser must revalidate the worker when focus triggers
         // registration.update(); application assets can be read fresh too.
-        "cache-control": target.endsWith("sw.js") ? "no-cache" : "no-store",
+        "cache-control": target.endsWith("service-worker.js") ? "no-cache" : "no-store",
       };
-      if (target.endsWith("sw.js")) headers["service-worker-allowed"] = "/";
+      if (target.endsWith("service-worker.js")) headers["service-worker-allowed"] = "/";
       response.writeHead(200, headers).end(content);
     } catch (error) {
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
@@ -176,6 +237,12 @@ async function startVersionedServer(versionDirs: Record<Version, string>) {
     publish(version: Version) {
       currentVersion = version;
     },
+    armStaleAssetFailure() {
+      staleAssetFailureArmed = true;
+    },
+    staleAssetRequestCount() {
+      return staleAssetRequestCount;
+    },
     async close() {
       // Browser keep-alive sockets can otherwise keep Node's close callback
       // pending after an assertion failure.
@@ -195,7 +262,7 @@ test.describe("PWA update handoff", () => {
   });
 
   test.afterAll(async () => {
-    await rm(fixture.root, { recursive: true, force: true });
+    if (fixture) await rm(fixture.root, { recursive: true, force: true });
   });
 
   test("preserves unsafe work, then auto-reloads after safe inactivity", async ({
@@ -365,6 +432,43 @@ test.describe("PWA update handoff", () => {
         undefined,
         { timeout: 20_000 },
       );
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("recovers an old HTML-served Home chunk onto the current build once", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer({
+      old: fixture.oldDir,
+      new: fixture.newDir,
+    }, fixture.staleHomeChunk);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+
+    try {
+      server.armStaleAssetFailure();
+      await page.goto(server.baseUrl);
+      await expect.poll(() => server.staleAssetRequestCount()).toBe(1);
+
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(page.getByText(/older app version needs an update/i)).toBeVisible();
+      expect(server.staleAssetRequestCount()).toBe(1);
+
+      await page.getByRole("button", { name: "Update and reload" }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
+        timeout: 20_000,
+      });
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await expect(page.getByRole("button", { name: "Update and reload" })).toHaveCount(0);
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(pageErrors).toEqual([]);
     } finally {
       await server.close();
     }

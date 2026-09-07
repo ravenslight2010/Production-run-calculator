@@ -5,15 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AiStatus } from './aiStatus';
 import type { SummaryStats } from './summaryStats';
 
 export interface SummaryResult {
-  /** Plain-language recap (AI narration, or deterministic fallback) */
+  /** Deterministic plain-language recap */
   summary: string;
   stats: SummaryStats;
   generatedAt: number;
-  /** True when the AI narrated; false when the deterministic fallback was used */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }

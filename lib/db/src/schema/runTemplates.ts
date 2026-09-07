@@ -2,6 +2,8 @@ import {
   pgTable,
   text,
   jsonb,
+  numeric,
+  boolean,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -31,6 +33,12 @@ export const runTemplatesTable = pgTable(
     brand: text("brand"),
     flavor: text("flavor"),
     createdAt: text("created_at").notNull(),
+    // Revisions are client-assigned, monotonically increasing JS-safe integers.
+    // The API bounds writes to Number.MAX_SAFE_INTEGER.
+    revision: numeric("revision", { precision: 16, scale: 0, mode: "number" })
+      .notNull()
+      .default(0),
+    deleted: boolean("deleted").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("run_templates_id_scope_idx").on(t.id, t.scope)],

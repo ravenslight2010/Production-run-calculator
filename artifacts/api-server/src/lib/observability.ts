@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
 import { cacheMaintenanceEventsTable, db } from "@workspace/db";
 import { logger } from "./logger";
+import type { StartupHealthSnapshot } from "./startupHealth";
 
 export type OperationOutcome = "success" | "error" | "degraded";
 export type CacheMaintenanceOutcome = "success" | "error";
@@ -13,6 +14,8 @@ type CacheMaintenanceLogger = {
   info?: (obj: unknown, msg?: string) => void;
   warn?: (obj: unknown, msg?: string) => void;
 };
+
+export { recordCostLimitEvent } from "./costLimitTelemetry";
 
 const MAX_CACHE_MAINTENANCE_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
 export const CACHE_MAINTENANCE_FAILURE_THRESHOLD = 3;
@@ -44,6 +47,8 @@ function trackPendingSharedCacheMaintenance<T>(promise: Promise<T>): Promise<T> 
 }
 
 const OPERATION_NAMES: Array<[RegExp, string]> = [
+  [/^\/(?:api\/)?(?:healthz|readyz|livez)\/?$/, "health"],
+  [/^\/api\/?$/, "health"],
   [/\/sync(?:\/|$)/, "sync"],
   [/\/(?:ai|photo|quality|label|waste)/, "ai"],
   [/\/(?:inventory|ingredients|mixes)/, "inventory"],
@@ -52,6 +57,9 @@ const OPERATION_NAMES: Array<[RegExp, string]> = [
   [/\/(?:import|spec-sheet|shipping-guide|premix)/, "import"],
 ];
 
+export function isHealthProbePath(path: string): boolean {
+  return operationType(path) === "health";
+}
 export function operationType(path: string): string {
   return OPERATION_NAMES.find(([pattern]) => pattern.test(path))?.[1] ?? "request";
 }
@@ -446,17 +454,17 @@ export function logOperation(
 }
 
 export function observabilityMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const requestCorrelationId =
-    typeof req.header("x-correlation-id") === "string" &&
-    /^[a-zA-Z0-9_.:-]{1,128}$/.test(req.header("x-correlation-id")!)
-      ? req.header("x-correlation-id")!
-      : typeof req.id === "string" ? req.id : randomUUID();
-  const correlationId = requestCorrelationId;
+  // Correlation references are server-owned opaque UUIDs. Never reflect a
+  // client header: token-shaped values must not become trusted log references.
+  const correlationId = randomUUID();
   const startedAt = performance.now();
   res.setHeader("X-Correlation-ID", correlationId);
   (req as Request & { correlationId?: string }).correlationId = correlationId;
 
   res.once("finish", () => {
+    // The health handler emits its own bounded health_check event. Avoid
+    // duplicating platform 503 polls as generic degraded operations.
+    if (isHealthProbePath(req.path)) return;
     const statusCode = res.statusCode;
     logOperation((req as Request & { log?: Logger }).log ?? logger, {
       correlationId,
@@ -484,4 +492,26 @@ export function recordStartupEvent(
     ...fields,
     startupEvent: event,
   });
+}
+
+type StartupWarningLogger = Pick<Logger, "warn">;
+
+export function recordStartupSlowWarning(
+  startup: StartupHealthSnapshot,
+  log: StartupWarningLogger = logger,
+): void {
+  try {
+    log.warn(
+      {
+        event: "startup_slow",
+        stage: startup.stage,
+        durationMs: Math.max(0, Math.round(startup.durationMs)),
+        outcome: "degraded",
+        errorCode: startup.failure?.errorCode ?? "initialization_in_progress",
+      },
+      "Startup initialization is taking longer than expected",
+    );
+  } catch {
+    // Observability is fail-safe. A broken warning logger must not affect boot.
+  }
 }

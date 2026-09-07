@@ -15,6 +15,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
 export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
 export const DEFAULT_FROM_DATE = "2026-08-26";
+export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;
+export type SourceLibraryEvidenceEnvironment = (typeof SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS)[number];
 const SOURCE_LINK_FIELDS = [
   "doughRecipeName",
   "frontlineRecipeName",
@@ -77,6 +79,13 @@ function stable(value: unknown): string {
 
 function reportError(message: string): never {
   throw new Error(message);
+}
+
+export function parseSourceLibraryEvidenceEnvironment(value: unknown): SourceLibraryEvidenceEnvironment {
+  if (value === "development" || value === "release") return value;
+  return reportError(
+    "Invalid source-library evidence environment; expected --environment development or --environment release",
+  );
 }
 
 function parseReport(value: unknown): Report {
@@ -473,6 +482,7 @@ function markerCheck(marker: Record<string, unknown> | undefined, report: Report
 
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
+  environment: SourceLibraryEvidenceEnvironment;
   repairBoundary: { fromDate: string };
   report: { sha256: string; formatVersion: number; automaticProposals: number; stubs: number };
   marker: ReturnType<typeof markerCheck>;
@@ -493,6 +503,7 @@ export async function verifySourceLibraryReconciliation(
   healId: string,
   query: ReadOnlyQuery,
   fromDate = DEFAULT_FROM_DATE,
+  environment: SourceLibraryEvidenceEnvironment = "development",
 ): Promise<VerificationOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(TABLES.map((table) => [
@@ -543,6 +554,7 @@ export async function verifySourceLibraryReconciliation(
   };
   return {
     verifier: "source-library-reconciliation",
+    environment,
     repairBoundary: { fromDate },
     report: {
       sha256: sha256(reportBytes),
@@ -593,6 +605,16 @@ async function main() {
     : path.resolve(ROOT, DEFAULT_REPORT);
   const healId = argument("--heal-id", DEFAULT_HEAL_ID)!;
   const fromDate = argument("--from-date", dateFromHealId(healId) ?? DEFAULT_FROM_DATE)!;
+  const environmentArgument = argument(
+    "--environment",
+    process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT,
+  );
+  if (environmentArgument === undefined) {
+    throw new Error(
+      "Missing --environment; choose development or release so source-library evidence cannot be compared across databases",
+    );
+  }
+  const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
   const outputPath = outputPathArgument();
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);
@@ -610,6 +632,7 @@ async function main() {
         return { rows: result.rows as Array<Record<string, unknown>> };
       },
       fromDate,
+      environment,
     );
     await client.query("ROLLBACK");
     await writeOutput(outputPath, output);
@@ -622,8 +645,14 @@ async function main() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
+    const environmentIndex = process.argv.indexOf("--environment");
+    const requestedEnvironment =
+      environmentIndex >= 0 && process.argv[environmentIndex + 1]
+        ? process.argv[environmentIndex + 1]
+        : process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT;
     const output = {
       verifier: "source-library-reconciliation",
+      environment: requestedEnvironment ?? "unknown",
       ok: false,
       failures: [{ check: "input-or-database", count: 1 }],
       error: error instanceof Error ? error.message : "Verification failed",

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, ingredientBatchWeightsTable, type IngredientBatchWeight } from "@workspace/db";
 import { SaveIngredientBatchWeightsBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -50,7 +51,7 @@ router.get("/ingredient-batch-weights", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/ingredient-batch-weights", async (req: Request, res: Response) => {
+router.post("/ingredient-batch-weights", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const parsed = SaveIngredientBatchWeightsBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

@@ -106,6 +106,13 @@ pnpm --filter @workspace/api-spec run codegen
 pnpm --filter @workspace/db run push
 ```
 
+For department Playwright checks on a fresh isolated database, run
+`pnpm --filter @workspace/run-calculator run prepare:e2e:department` in place
+of the normal API workflow. The command rejects production and unapproved
+shared databases, applies the canonical Drizzle schema, and only then starts
+the development API. Leave it running and execute `test:e2e:department` from a
+second shell; no separate schema command is required.
+
 Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (gates public sign-up, fails closed), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed).
 
 ## Verification
@@ -127,8 +134,11 @@ roots. The catalog contract treats `.agents/skills` and
 `.local/custom_skills` as editable, and `.local/skills` and
 `.local/secondary_skills` as platform-managed. Editable skills must have valid
 kebab-case metadata, complete local references, and stay within the 500-line
-guidance; managed-root findings are reported as warnings because those files
-are platform-owned. The checker only follows local Markdown link targets in a
+guidance; managed-root findings are reported as non-blocking warnings because
+ those files are platform-owned. Reviewed managed findings are tracked in
+ `skill-catalog-managed-baseline.json`; new findings remain visibly
+ undocumented warnings instead of blending into the reviewed inventory. The
+ checker only follows local Markdown link targets in a
 skill folder (`SKILL.md`, `./`, `../`, `references/`, `scripts/`, or `assets/`)
 and ignores URLs, anchors, and other prose. Intentional cross-root duplicates
 belong in `skill-catalog-allowlist.json` with an explicit routing target.
@@ -137,6 +147,13 @@ belong in `skill-catalog-allowlist.json` with an explicit routing target.
 
 - Pizza production line planning, scheduling, and inventory for floor staff (web + mobile).
 - AI issue diagnosis & manager alerts: any signed-in user can report an issue and get an immediate plain-language AI diagnosis plus a safe workaround; uncaught crashes are auto-captured and become server-side incidents with AI diagnosis.
+
+### Production line layout
+
+The approved floor-layout reference is available as a
+[full-resolution PNG](docs/production-line/production-line.png).
+
+![Production line material flow map](docs/production-line/production-line.png)
 
 ## Document map
 

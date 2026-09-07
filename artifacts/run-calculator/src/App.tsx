@@ -25,10 +25,12 @@ import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
+import { Loader2 } from "lucide-react";
 import { recordPerformance } from "./performanceDiagnostics";
 import { MasterDataPolling } from "./masterData";
 import { emitFieldCheckSignal, FieldVerificationObserver } from "./fieldChecks";
 import { WEB_BUILD_ID } from "./buildIdentity";
+import { installBrowserFailureCapture } from "./browserIncidentCapture";
 import {
   getAutomaticUpdateReloadSafety,
   startUpdateReloadIdleTracking,
@@ -38,6 +40,7 @@ import {
 const queryClient = new QueryClient();
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
 const LazyHome = lazy(() => {
   const startedAt = typeof performance === "undefined" ? null : performance.now();
   return import("@/pages/home")
@@ -59,14 +62,40 @@ const LazyHome = lazy(() => {
     });
 });
 
+function AppLoadingSurface() {
+  return (
+    <main
+      className="dark flex min-h-[100dvh] items-center justify-center bg-background px-6 py-12 text-foreground"
+      data-testid="app-loading"
+    >
+      <div
+        className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-border/50 bg-card/60 p-8 text-center shadow-md"
+        role="status"
+        aria-live="polite"
+      >
+        <img
+          src={logoUrl}
+          alt=""
+          className="mb-5 h-16 w-16 rounded-2xl shadow-lg"
+        />
+        <Loader2 className="mb-4 h-7 w-7 animate-spin text-amber-400" aria-hidden="true" />
+        <h1 className="text-xl font-semibold">Opening Run Calculator</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Confirming your staff session…
+        </p>
+      </div>
+    </main>
+  );
+}
+
 // "/" renders the calculator for signed-in staff, and a branded welcome with a
 // sign-in CTA for everyone else (no auto-redirect into the sign-in form).
 function HomeGate() {
   const { isAuthenticated, isLoading } = useAuth();
-  if (isLoading) return null;
+  if (isLoading) return <AppLoadingSurface />;
   return isAuthenticated ? (
     <MasterDataPolling>
-      <Suspense fallback={null}>
+      <Suspense fallback={<AppLoadingSurface />}>
         <LazyHome />
       </Suspense>
     </MasterDataPolling>
@@ -295,6 +324,7 @@ function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
 }
 
 function App() {
+  useEffect(() => installBrowserFailureCapture(), []);
   return (
     <WouterRouter base={basePath}>
       <QueryClientProvider client={queryClient}>

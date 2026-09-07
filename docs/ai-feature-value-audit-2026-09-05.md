@@ -3,7 +3,18 @@
 **Audit date:** 2026-09-05  
 **Scope:** Production Run Calculator and API Server  
 **Decision standard:** Skeptical review of operational necessity, unique value, overlap, cost, risk, maintenance burden, and removal independence  
-**Change status:** Documentation only. No production feature, prompt, model, permission, limit, persistence rule, or UI surface was changed.
+**Change status:** Phase 1 deterministic-workflow cleanup is implemented alongside the disable-first boundary for risky voice/photo entry points. Production recap, anomaly, schedule ordering, reconciliation, expiry/use-first, incident grouping, and Run Insights no longer depend on model-written narration; compatibility fields remain where clients still read them. Shared extraction infrastructure and existing records remain in place.
+
+## Disable-first retention decision
+
+The following entry points are disabled without deleting generated or human-reviewed data:
+
+- Voice command classification returns a fail-closed disabled response; manual controls and typed assistant questions remain available.
+- Count-from-photos creation is disabled, while existing open count drafts remain available for manual correction, Apply, or Cancel. Applied count observations, lots, ledger entries, and product references remain reviewable.
+- AI quality-photo and label-verification analysis are disabled. Human quality procedures, quality history, and barcode/typed label workflows remain available.
+- Shared image compression, retry, photo-intake, and spec-photo/document extraction code is retained for the workflows that remain supported.
+
+No persisted generated data is deleted in this change. Any future cleanup of conversation, quality-memory, observation, or other AI-generated records requires a separate retention review with export/restore criteria and an explicit migration.
 
 ## Executive decision
 
@@ -106,7 +117,7 @@ High N and U favor retention. High O, C, R, M, and I favor simplification or ret
 | **Cost and request limiting** | Per-operation limits, production-shared stores, cost accounting, and friendly 429 behavior bound paid usage. | 5/5/1/1/2/4/1 | **Keep.** Retained full/vision import calls make this mandatory. Delete only counters for retired operations after callers are gone. |
 | **Bounded JSON retry and response sanitization** | Retries malformed JSON/provider 429 once; route-specific validation canonicalizes output to known fields/options. | 5/5/1/2/2/4/1 | **Keep.** This is safety infrastructure for document extraction and unresolved-name resolution. |
 | **AI result cache and in-flight deduplication** | Prompt/model fingerprinted DB cache with TTL, size/row bounds, and failure-not-cached behavior. | 4/4/1/1/2/4/2 | **Keep.** Narrow namespaces to retained operations during cleanup; do not remove the shared cache before import benchmarks confirm acceptable cost and latency without it. |
-| **Second-pass AI reviewer** | A full-model advisory pass labels model suggestions `ok`, `warn`, or `reject`; failure leaves original suggestions unchanged. | 2/2/4/5/3/5/4 | **Retire or sharply narrow.** It can double cost and cannot make first-model output authoritative. For imports, rely on deterministic sanitizers, source evidence, and mandatory human review; retain only if benchmarked against the real corpus and shown to catch errors not caught elsewhere. |
+| **Second-pass AI reviewer** | Retired compatibility boundary returns no verdicts and makes no model call. | 2/2/4/5/3/5/4 | **Retired.** The source-hash-bound retained-corpus benchmark found zero uniquely caught material errors: all labeled discrepancies were already surfaced by deterministic reconciliation. The reviewer added a serial full-model call, could not authorize or block suggestions, and failed the predeclared retention thresholds. See `docs/second-pass-reviewer-benchmark-2026-09-05.md`. |
 | **Correction and alias memory** | Confirmed name equivalences, denied pairs, canonical aliases, and correction context improve future imports/matches. Health tooling supports scoped audit, delete, and retarget repair. | 5/5/1/1/3/5/1 | **Keep.** This is durable operational learning, not chat memory. It is shared by retained import parsing and matching. Preserve strict domains, scoping, cycle/poison guards, and manager repair tools. |
 | **Facility knowledge** | Stores bounded facts for quality, forecast, proactive alerts, incidents, ingredients, and general grounding. | 2/2/4/2/4/5/3 | **Consolidate.** Retain only domains with a surviving, verified consumer. Remove quality/forecast/proactive/incident-generated facts in a separate data-safe cleanup; do not mix them with correction aliases. |
 | **Conversation memory** | Per-user bounded chat turns support Ask follow-ups. | 1/2/5/1/3/3/5 | **Retire with Ask.** Delete or expire turns under an explicit retention plan; do not remove facility corrections with them. |

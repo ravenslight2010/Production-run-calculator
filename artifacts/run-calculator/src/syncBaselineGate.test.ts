@@ -103,11 +103,22 @@ describe("SSE sync baseline gate", () => {
 
   it("wires the first SSE frame as authoritative and re-arms the gate on reconnect errors", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+    const coordinationSource = readFileSync(
+      resolve(process.cwd(), "src/hooks/useHomeSyncCoordination.ts"),
+      "utf8",
+    );
+    const lifecycleSource = readFileSync(
+      resolve(process.cwd(), "src/hooks/useHomeFormLifecycle.ts"),
+      "utf8",
+    );
     expect(source).toContain("initialSnapshot: msg.initial === true");
     expect(source).toContain("shouldAtomicallyAdoptFirstSnapshot");
     expect(source).toContain("hasLocalUserEdit: form.formState.isDirty");
     expect(source).toContain("const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;");
-    expect(source).toContain("const formHandoffRef = useRef(false);");
+    expect(source).toContain("useHomeFormIdentityFences()");
+    expect(lifecycleSource).toContain("formHandoffRef: useRef(false)");
+    expect(source).toContain("useHomeSyncCoordination()");
+    expect(coordinationSource).toContain("createSyncBaselineGate(synchronizationStateMachineRef.current)");
     const errorHandler = source.match(/es\.onerror = \(\) => \{([\s\S]*?)\n    \};/);
     expect(errorHandler?.[1]).toContain("syncBaselineGateRef.current.beginConnection()");
   });
@@ -128,14 +139,17 @@ describe("SSE sync baseline gate", () => {
   });
 
   it("claims a seed after a genuine form edit, while programmatic resets stay local-only", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/hooks/useHomeFormLifecycle.ts"),
+      "utf8",
+    );
     const autosave = source.slice(
-      source.indexOf("if (deepEqual(loadRunValues(runId), v)) return;"),
-      source.indexOf("schedulePush(ds);"),
+      source.indexOf("if (!shouldAutosaveHomeForm("),
+      source.indexOf("flashSaved();"),
     );
     expect(autosave).toContain("if (run.seeded)");
     expect(autosave).toContain("seeded: false");
-    expect(autosave).toContain("saveDayState(ds);");
+    expect(autosave).toContain("saveDayState(dayState);");
   });
 
   it("coalesces ordinary edits quickly while keeping recovery pushes immediate", () => {

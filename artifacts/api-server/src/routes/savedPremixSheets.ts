@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, savedPremixSheetsTable, type SavedPremixSheetRow } from "@workspace/db";
 import { SavePremixSheetBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
@@ -9,7 +9,7 @@ const router: IRouter = Router();
 
 // Saved premix sheets: snapshots of imported premix workbooks (the Mix[] they
 // declared) so the current mixes can later be reconciled against them (see
-// /ai/mix-reconcile). Shared factory-wide across all signed-in users (the
+// /operations-insights/mix-reconciliation). Shared factory-wide across all signed-in users (the
 // router-level requireAuth gates them) and scope-isolated like the learned
 // spec-import aliases. Only the two most recent snapshots are kept; older ones
 // are pruned on save. Mirrors savedSpecSheets.ts exactly.
@@ -63,41 +63,46 @@ router.post("/premix-sheets", requireCapability("manage-inventory"), async (req:
   }
   const label = (parsed.data.label ?? "").trim().slice(0, MAX_LABEL_LEN) || "Premix sheet";
   const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
+  const scope = currentScope();
 
   try {
-    const inserted = await db.insert(savedPremixSheetsTable).values({
-      scope: currentScope(),
-      label,
-      sourceKey,
-      data: parsed.data.data,
-    }).returning({ id: savedPremixSheetsTable.id });
-    const snapshotId = inserted[0]?.id;
-    if (snapshotId == null) throw new Error("Premix snapshot was not inserted");
+    const snapshotId = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${"saved-premix-sheets:" + scope}, 0))`,
+      );
+      const inserted = await tx.insert(savedPremixSheetsTable).values({
+        scope,
+        label,
+        sourceKey,
+        data: parsed.data.data,
+      }).returning({ id: savedPremixSheetsTable.id });
+      const insertedId = inserted[0]?.id;
+      if (insertedId == null) throw new Error("Premix snapshot was not inserted");
 
-    // Keep only the two most recent snapshots PER distinct file (sourceKey), not
-    // two overall — the factory has many distinct premix workbooks and wants the
-    // last two versions of each. Rows without a sourceKey (older/mobile clients)
-    // share a single legacy bucket. Newest first, delete past the per-key cap.
-    const rows = await db
-      .select({ id: savedPremixSheetsTable.id, sourceKey: savedPremixSheetsTable.sourceKey })
-      .from(savedPremixSheetsTable)
-      .where(eq(savedPremixSheetsTable.scope, currentScope()))
-      .orderBy(desc(savedPremixSheetsTable.createdAt), desc(savedPremixSheetsTable.id));
-    const perKeyCount = new Map<string, number>();
-    const stale: number[] = [];
-    for (const r of rows) {
-      const key = r.sourceKey ?? "";
-      const n = (perKeyCount.get(key) ?? 0) + 1;
-      perKeyCount.set(key, n);
-      if (n > MAX_SAVED) stale.push(r.id);
-    }
-    for (const id of stale) {
-      await db
-        .delete(savedPremixSheetsTable)
-        .where(
-          and(eq(savedPremixSheetsTable.scope, currentScope()), eq(savedPremixSheetsTable.id, id)),
+      // Keep only the two most recent snapshots PER distinct file (sourceKey), not
+      // two overall — the factory has many distinct premix workbooks and wants the
+      // last two versions of each. Rows without a sourceKey (older/mobile clients)
+      // share a single legacy bucket. Newest first, delete past the per-key cap.
+      const rows = await tx
+        .select({ id: savedPremixSheetsTable.id, sourceKey: savedPremixSheetsTable.sourceKey })
+        .from(savedPremixSheetsTable)
+        .where(eq(savedPremixSheetsTable.scope, scope))
+        .orderBy(desc(savedPremixSheetsTable.createdAt), desc(savedPremixSheetsTable.id));
+      const perKeyCount = new Map<string, number>();
+      const stale: number[] = [];
+      for (const r of rows) {
+        const key = r.sourceKey ?? "";
+        const n = (perKeyCount.get(key) ?? 0) + 1;
+        perKeyCount.set(key, n);
+        if (n > MAX_SAVED) stale.push(r.id);
+      }
+      if (stale.length > 0) {
+        await tx.delete(savedPremixSheetsTable).where(
+          and(eq(savedPremixSheetsTable.scope, scope), inArray(savedPremixSheetsTable.id, stale)),
         );
-    }
+      }
+      return insertedId;
+    });
 
     const premixSheets = await listAll();
     res.json({ snapshotId, premixSheets });

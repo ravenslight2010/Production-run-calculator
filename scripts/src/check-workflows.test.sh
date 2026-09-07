@@ -480,6 +480,7 @@ assert_stopped_summary_workflow_contract() {
     "RELEASE_BASE_REPOSITORY: \${{ github.repository }}"
   assert_contains "$summary_block" \
     "RELEASE_HEAD_REPOSITORY: \${{ github.event.pull_request.head.repo.full_name || github.repository }}"
+  assert_contains "$summary_block" "RELEASE_EVENT_NAME: \${{ github.event_name }}"
   assert_contains "$summary_block" "RELEASE_MODE: ${mode}"
   assert_contains "$summary_block" "RESUME_COMMAND: ${resume_command}"
   assert_contains "$summary_block" "REGENERATE_COMMAND: ${regenerate_command}"
@@ -1021,6 +1022,48 @@ EOF
   echo "PASS: rejects non-positive timeouts in remaining workflows"
 }
 
+test_department_navigation_readiness_contract() {
+  local workflow_content
+  local api_wait_line
+  local web_start_line
+  local evidence_upload_line
+
+  workflow_content=$(<"$DEPARTMENT_NAVIGATION_WORKFLOW")
+  assert_contains "$workflow_content" \
+    "AI_INTEGRATIONS_GEMINI_API_KEY: department-navigation-configured"
+  assert_contains "$workflow_content" \
+    "VITE_API_PROXY_TARGET: http://127.0.0.1:5000"
+  assert_contains "$workflow_content" \
+    'PORT=5000 pnpm --filter @workspace/api-server run start'
+  assert_contains "$workflow_content" \
+    "curl --fail --silent http://127.0.0.1:5000/api/healthz"
+  assert_contains "$workflow_content" \
+    'pnpm --filter @workspace/run-calculator run dev'
+  assert_contains "$workflow_content" \
+    "name: Upload browser server logs on failure"
+  assert_contains "$workflow_content" "path: /tmp/department-*.log"
+  assert_contains "$workflow_content" \
+    "name: Upload Playwright evidence on failure"
+  assert_contains "$workflow_content" \
+    "artifacts/run-calculator/test-results/department"
+  assert_contains "$workflow_content" \
+    "pnpm --filter @workspace/scripts run check-department-playwright-projects"
+
+  api_wait_line=$(grep -nF -- "      - name: Wait for API server" \
+    "$DEPARTMENT_NAVIGATION_WORKFLOW" | cut -d: -f1)
+  web_start_line=$(grep -nF -- "      - name: Start web server" \
+    "$DEPARTMENT_NAVIGATION_WORKFLOW" | cut -d: -f1)
+  evidence_upload_line=$(grep -nF -- "      - name: Upload Playwright evidence on failure" \
+    "$DEPARTMENT_NAVIGATION_WORKFLOW" | cut -d: -f1)
+  if [[ -z "$api_wait_line" || -z "$web_start_line" ||
+    -z "$evidence_upload_line" || "$api_wait_line" -ge "$web_start_line" ||
+    "$evidence_upload_line" -le "$web_start_line" ]]; then
+    printf 'Department navigation must wait for the API before starting the web journey and retain failure evidence afterward.\n' >&2
+    return 1
+  fi
+  echo "PASS: preserves department API readiness, proxy, projects, and diagnostics"
+}
+
 test_accepts_matching_versions
 test_accepts_quoted_ci_version_with_inline_comment
 test_accepts_quoted_ci_version_without_comment
@@ -1044,6 +1087,7 @@ test_rejects_non_positive_nightly_job_timeout
 test_remaining_workflow_jobs_have_positive_timeouts
 test_rejects_missing_remaining_workflow_job_timeout
 test_rejects_non_positive_remaining_workflow_job_timeout
+test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
 test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract

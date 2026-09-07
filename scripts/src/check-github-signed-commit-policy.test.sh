@@ -52,7 +52,7 @@ write_valid_fixtures() {
       {"context": "Typecheck", "app_id": 15368},
       {"context": "Unit tests (web + libs)", "app_id": 15368},
       {"context": "API tests (Postgres)", "app_id": 15368},
-      {"context": "Security audit (prod deps)", "app_id": 15368},
+      {"context": "Informational security audit (high severity; registry best-effort)", "app_id": 15368},
       {"context": "Docker image", "app_id": 15368},
       {"context": "Build (web + API)", "app_id": 15368},
       {"context": "Desktop and phone department journey", "app_id": 15368},

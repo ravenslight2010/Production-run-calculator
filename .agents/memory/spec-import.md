@@ -447,23 +447,20 @@ Any change to one app's order/logic must land in the other verbatim.
   (topping blends), mapped to specific flavors by mix name — the existing cheese-tab
   handling + catch-all scrub covers them; no new code path needed.
 
-## Recipe row units: sheets are in OUNCES by default — AI reports, sanitizer converts
-- This factory's spec sheets ALWAYS write recipe ingredient amounts in OZ, but
-  the canonical `RecipeRow.lbs` is real POUNDS (recipe totals are used as
-  absolute batch/barrel lbs in inventory-math — a raw oz read is 16× too big).
-- **Rule:** the AI NEVER converts. It copies row numbers verbatim into `lbs`
-  and reports the sheet's unit per recipe via `rowsUnit: "oz"|"lbs"`.
-  `sanitizeParsedSpecImport` converts EVERY recipe row oz→lbs (÷16, 3-decimal
-  round) UNLESS `rowsUnit` explicitly says pounds (lb/lbs/pound variants, ci).
-  Missing/unknown unit = assume oz (user: "spec sheets are always in oz").
-- **Double-conversion guard:** sanitize is server-only (the parse route);
-  clients/saved-sheet reconcile/premix never re-sanitize. If a new caller ever
-  re-runs sanitize on already-converted data it will divide by 16 twice.
-- App-exported recipe workbooks label columns `Lbs`, giving the model the
-  pounds signal on re-import.
+## Recipe row units: raw numbers are preserved; `rowsUnit` is provenance only
+- The parse contract treats every dough, sauce, and cheese recipe row number as
+  an opaque value copied exactly from the workbook. The AI reports the observed
+  unit via `rowsUnit: "oz"|"lbs"` for provenance, but neither the prompt nor
+  `sanitizeParsedSpecImport` converts, rescales, or reinterprets it.
+- **Why:** large chunked imports exposed a dangerous implicit ÷16 path: a
+  pound-valued row could be labeled ounces by the model and every dough/sauce
+  value would be corrupted. Unit semantics are reviewed with the source data,
+  not guessed by arithmetic in the importer.
+- App-exported recipe workbooks may still label columns `Lbs`; that label is
+  preserved as source context but does not change the numeric row value.
 - Embedded applicator-blend extraction (client-side, post-sanitize) keeps
-  numbers verbatim on purpose (no unit signal in those cells). `doughballOz`
-  is oz by definition — untouched.
+  numbers verbatim as well. `doughballOz` is oz by definition and remains
+  untouched.
 
 ## Cheese blend identity is its NAME — strip BOTH the "Applicator" label and the per-weight suffix
 - A cheese recipe dedupes by NAME (`collectSpecImportCheeseRecipes` /

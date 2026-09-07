@@ -34,9 +34,6 @@
       "path": "./lib/cheese-import"
     },
     {
-      "path": "./lib/voice-commands"
-    },
-    {
       "path": "./lib/name-match"
     },
     {

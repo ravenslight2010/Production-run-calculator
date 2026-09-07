@@ -11,6 +11,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(process.cwd(), "..");
 const REPORT = path.join(ROOT, "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json");
 const OUTPUT = path.join(ROOT, "artifacts/api-server/src/lib/sourceLibraryReconciliationPlan.generated.ts");
+// This intentionally lives outside generated output. Altering v1 requires an
+// explicit reviewed contract/version change, not merely regenerating a file.
+export const SOURCE_LIBRARY_RECONCILIATION_V1_EXPECTED_PLAN_SHA256 = "c9a6295b3bd8868ea4f002472214a7ee8c4d05baf9eca99e12e787af3eb4a2ce";
 const sha = (value: string | Buffer) => crypto.createHash("sha256").update(value).digest("hex");
 const stable = (value: unknown) => JSON.stringify(value);
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -40,6 +43,9 @@ export function sourceLibraryHealPlan(value: unknown) {
 
 export function generatedSource(plan: ReturnType<typeof sourceLibraryHealPlan>): string {
   const json = stable(plan);
+  if (sha(json) !== SOURCE_LIBRARY_RECONCILIATION_V1_EXPECTED_PLAN_SHA256) {
+    throw new Error("Source-library reconciliation v1 plan differs from immutable release contract; version the repair before changing it");
+  }
   // Node emits gzip streams with the mtime header zeroed; fixing level avoids
   // compressor-default drift while keeping the base64 reproducible.
   const gzipBase64 = gzipSync(Buffer.from(json), { level: 9 }).toString("base64");

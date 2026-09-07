@@ -1,20 +1,27 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { useEvent } from "../hooks/useEvent";
+import {
+  useHomeFormIdentityFences,
+  useHomeFormLifecycle,
+} from "../hooks/useHomeFormLifecycle";
+import { useHomeSyncCoordination } from "../hooks/useHomeSyncCoordination";
+import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
+import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
-import { WarehouseTabCtx } from "../contexts/WarehouseTabCtx";
-import { InventoryTabCtx } from "../contexts/InventoryTabCtx";
-import { MixesTabCtx } from "../contexts/MixesTabCtx";
-import { SetupTabCtx } from "../contexts/SetupTabCtx";
+import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/WarehouseTabCtx";
+import { InventoryTabCtx, type InventoryTabContextValue } from "../contexts/InventoryTabCtx";
+import { MixesTabCtx, type MixesTabContextValue } from "../contexts/MixesTabCtx";
+import { SetupTabCtx, type SetupTabContextValue } from "../contexts/SetupTabCtx";
 import WarehouseTabContent from "../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
-import { type NeedRow } from "../components/WarehouseNeedsList";
 import InventoryTabContent from "../components/InventoryTabContent";
 import MixesTabContent from "../components/MixesTabContent";
 import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
-import { NumField } from "../components/NumField";
-export { SetupMathConflictBadge } from "../components/SetupContent";
+import ScreenModeView from "../components/ScreenModeView";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,
@@ -22,15 +29,17 @@ import {
   useAutomaticUpdateReloadBlocker,
 } from "../updateReloadSafety";
 import {
+  browserIsOnline,
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
 import GlanceOverlay from "../components/GlanceOverlay";
-import ScreenModeView from "../components/ScreenModeView";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
+import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
+import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -122,6 +131,13 @@ import {
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
+import { deriveFrontlineNeedRows } from "../frontlineRows";
+import {
+  isSharedRecipeRefreshEligible,
+  orchestrateSharedRecipeRefresh,
+  refreshNamedRecipeProfilesAndPropagate,
+  runSharedRecipeRefresh,
+} from "../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
@@ -135,31 +151,13 @@ import {
   PackagingSpeedNudgeFeedback,
 } from "../components/PackagingSpeedNudgeFeedback";
 import {
-  freshDayState,
   loadDayState,
   saveDayState,
-  overlayRunMetaStamps,
-  shouldKeepLocalRunLifecycle,
-  selectInboundRunLifecycles,
-  adoptStrictlyNewerRemoteLifecycles,
   loadHistory,
   filterMeaningfulHistory,
   archiveDayToHistory,
-  loadRunValues,
-  saveRunValues,
-  subscribeRunValuesWrites,
-  loadRunValuesUpdated,
-  saveRunValuesUpdated,
-  markRunValuesUpdated,
-  deepEqual,
-  pickCurrentRunPushValue,
-  isEmptyOverPopulated,
-  shouldHealFormFromStored,
-  isPristineSeedRun,
-  isBlankRemovableRun,
+  overlayRunMetaStamps,
   removeRunByIdFromDayState,
-  shouldResetFormOnRunSwitch,
-  acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
   dropTombstonesForAliveNames,
   clearRecipeNameSelections,
@@ -196,8 +194,6 @@ import {
   loadPendingServerMixPushes,
   clearPendingServerMixPushes,
   applyMixCheeseOverlapDedupeIfNeeded,
-  getStoredResetEpoch,
-  applyResetWipe,
   purgeOrphanedProfilesIfNeeded,
   applyProfileCleanupIfNeeded,
   deleteProfilesForBrand,
@@ -241,11 +237,36 @@ import {
   rewriteRecipeNameInProfiles,
   saveProfileSubTab,
   loadProfileSubTab,
-  createSyncBaselineGate,
-  shouldAcceptSyncDaySnapshot,
-  shouldAtomicallyAdoptFirstSnapshot,
   type SpecImportDisplayKind,
 } from "../storage";
+import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCompletedHistory, loadCompletedHistoryForActiveScope, pendingCompletedHistoryCount, queueCompletedRun, setCompletedHistoryScope, startRunAndQueueCompetingCompletions } from "../completedHistorySync";
+import { applyResetWipe, getStoredResetEpoch } from "../adapters/browserResetPersistence";
+import {
+  loadRunValues,
+  loadRunValuesUpdated,
+  markRunValuesUpdated,
+  saveRunValues,
+  saveRunValuesUpdated,
+  subscribeRunValuesWrites,
+} from "../adapters/browserRunPersistence";
+import {
+  acceptRemoteRunValueOnSync,
+  adoptStrictlyNewerRemoteLifecycles,
+  createSyncBaselineGate,
+  deepEqual,
+  freshDayState,
+  isBlankRemovableRun,
+  isEmptyOverPopulated,
+  isPristineSeedRun,
+  pickCurrentRunPushValue,
+  reconcileOperationalIntentCanonical,
+  selectInboundRunLifecycles,
+  shouldAcceptSyncDaySnapshot,
+  shouldAtomicallyAdoptFirstSnapshot,
+  shouldHealFormFromStored,
+  shouldKeepLocalRunLifecycle,
+  shouldResetFormOnRunSwitch,
+} from "../domain/runSyncPolicy";
 import {
   loadPackagingProgress,
   overlayPackagingProgress,
@@ -275,17 +296,18 @@ import {
   flushFactoryQueue,
   FACTORY_KV_CACHED_KEYS,
   runFactoryKvMigration,
-  runTemplatesMigration,
 } from "../factoryDataSync";
 import {
   useRunTemplates,
   saveRunTemplateApi,
   deleteRunTemplatesApi,
+  runTemplatesQueryKey,
   RUN_TEMPLATES_QUERY_KEY,
 } from "../hooks/useRunTemplates";
 import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
 import { saveDieLineDefaults } from "../dieLineDefaultsServer";
 import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../hooks/useDieLineDefaults";
+import RunInsightsCard from "../components/RunInsightsCard";
 import {
   reportRunInsightsAfterFinalize,
   buildTunnelDieDefaultEntry,
@@ -300,7 +322,7 @@ import {
 } from "../dieTypesServer";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
-import { type WarehouseArea } from "../warehouseGrouping";
+import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
@@ -320,16 +342,13 @@ import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
-import ProductionRulesManager from "../components/ProductionRulesManager";
-import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
-import CycleCountManager from "../components/CycleCountManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
 import ManagerAttentionDialog, {
   buildManagerAttentionItems,
   managerAttentionCount,
-  type ManagerAttentionKind,
+  type ManagerAttentionItem,
 } from "../components/ManagerAttentionDialog";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
@@ -353,13 +372,14 @@ import {
   getFreezerSurplusRemainingMs,
   replaceFreezerSurplusAllocation,
 } from "../freezerSurplus";
-import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
 import { useIngredients } from "../hooks/useIngredients";
 import {
+  invalidateMasterDataBootstrap,
   invalidateMasterDataSlice,
   setMasterDataSlice,
+  shouldRefreshMasterData,
 } from "../masterData";
 import {
   saveIngredients as saveIngredientsRemote,
@@ -370,6 +390,7 @@ import {
 } from "../ingredients";
 import { buildIngredientUniverse, type IngredientCategory } from "@workspace/ingredient-catalog";
 import {
+  buildMixPlan,
   OZ_PER_LB,
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
@@ -394,14 +415,7 @@ import { describeSubstitution } from "../components/SubstitutionsManager";
 import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
-import MixAssistChat from "../components/MixAssistChat";
-import {
-  dispatchVoiceCommand,
-  type VoiceCommandAction,
-  type VoiceCommandHandlers,
-  type VoiceCommandResult,
-} from "@workspace/voice-commands";
-import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
+import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
   saveIngredientBatchWeights,
@@ -413,35 +427,31 @@ import {
   type IngredientBatchWeightRow,
   type BatchWeightPropagationProfile,
 } from "../ingredientBatchWeights";
+import FillMissingPanel from "../components/FillMissingPanel";
+import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
+import ManagerActionQueue from "../components/ManagerActionQueue";
+import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
-import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
-import {
-  buildRecipeAssistContext,
-  type RecipeAssistSuggestion,
-  type RecipeFieldId,
-} from "../aiRecipe";
-import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
-import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
+import {
+  applyRecipeSuggestion as applyRecipeSuggestionShared,
+  type RecipeFieldId,
+  type RecipeSuggestionLike,
+} from "@workspace/recipe-apply";
 import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
-import { useProactiveAlert } from "../aiProactive";
-import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
-import AiStatusNotice from "../components/AiStatusNotice";
 import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
   consumeSauceBarrel,
   deriveCandidateItems,
-  consumeRun,
   scoreNameMatch,
-  buildReorderDemandByKey,
 } from "../inventoryShared";
 import {
   applyRecipeSubstitutions,
@@ -472,10 +482,25 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, isCurrentMergeSuggestionRequest, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
+import {
+  suggestMerges,
+  saveMergeAliases,
+  denyMerge,
+  fetchMergedAwayNames,
+  saveMergedAwayNames,
+  deleteMergedAwayNames,
+  fetchPendingDuplicateReviews,
+  savePendingDuplicateReviews,
+  resolvePendingDuplicateReview,
+  duplicateReviewGroupKey,
+  isCurrentMergeSuggestionRequest,
+  type ReviewedMergeSuggestion,
+  type MergeSuggestCategory,
+} from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
+import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
 import {
   buildActiveRunIds,
@@ -496,32 +521,48 @@ import {
   publishAutoTrackCoordination,
   publishAutoTrackSchedule,
   subscribeAutoTrackCoordination,
+  DOUGH_TIMER_CONTROL_EVENT,
+  DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
+import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
+import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
-import type { Calc } from "@workspace/live-calc";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
+import {
+  type OperationalSnapshotReceipt,
+} from "../operationalState";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 import {
   DepartmentProvider,
+  DeferredCheeseRecipesManager,
+  DeferredCycleCountManager,
+  DeferredDieLineDefaultsManager,
+  DeferredFreezerPullItemsManager,
+  DeferredInventoryTab,
+  DeferredMixesManager,
+  DeferredNamedRecipesManager,
+  DeferredProductionRulesManager,
   DeferredStaffManagementSurface,
   ManagementDepartment,
+  preloadManagementEditors,
   preloadStaffManagementSurface,
   ProductionLineDepartment,
   QcDowntimeSurface,
   QcIncidentsSurface,
   QcQualitySurface,
   WarehouseInventoryDepartment,
+  preloadWarehouseInventorySurface,
   type DepartmentAppContext,
 } from "../departments";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
 import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../sauceBarrelStore";
-import { usePendingResetCount } from "../hooks/usePendingResetCount";
-import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
+import { usePendingResetSummary } from "../hooks/usePendingResetCount";
+import { useUnreviewedIncidentSummary } from "../hooks/useUnreviewedIncidentCount";
 import { useProductionRules } from "../hooks/useProductionRules";
 import { usePrepPhase, mergePrepPhaseClient, getPrepPhase, FRESH_PREP_PHASE } from "../hooks/usePrepPhase";
 import {
@@ -616,34 +657,29 @@ import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
 import { loadWorkbookWorkflow } from "@/workbookWorkflow";
 import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
-import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
-import SpecImportDialog from "@/components/SpecImportDialog";
+import {
+  PENDING_DUPLICATE_REVIEW_SCAN,
+  loadPendingDuplicateReview,
+  pendingDuplicateReviewAfterResolution,
+  savePendingDuplicateReview,
+} from "@/pendingDuplicateReview";
+import type { ImportCommit } from "@/components/ExcelImportDialog";
 import { CameraFilePicker } from "@/components/CameraFilePicker";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import type { SpecImportPrepared } from "@/specImport";
 import { requestParseSpecImages } from "@/parseSpecSheet";
 import type { ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
-import PremixImportDialog from "@/components/PremixImportDialog";
-import ShippingImportDialog from "@/components/ShippingImportDialog";
-import { SauceGuideImportDialog, DoughGuideImportDialog } from "@/components/RecipeGuideImportDialog";
-import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
-import { prepareShippingImport, commitShippingImport, type ShippingImportPrepared } from "@/shippingImport";
-import {
-  prepareSauceGuideImport, commitSauceGuideImport,
-  prepareDoughGuideImport, commitDoughGuideImport,
-  type SauceGuideImportPrepared, type DoughGuideImportPrepared,
-} from "@/recipeGuideImport";
+import type { PremixImportPrepared } from "@/premixImport";
+import type { ShippingImportPrepared } from "@/shippingImport";
+import type { SauceGuideImportPrepared, DoughGuideImportPrepared } from "@/recipeGuideImport";
 import type { ShippingPatch } from "@workspace/shipping-import";
 import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
 import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
-import CheeseRecipesManager from "@/components/CheeseRecipesManager";
 import CheeseReconcilePanel from "@/components/CheeseReconcilePanel";
-import DieLineDefaultsManager from "@/components/DieLineDefaultsManager";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
-import CheeseImportDialog from "@/components/CheeseImportDialog";
-import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
+import type { CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe, CheeseComponent } from "@workspace/cheese-recipes";
 import {
@@ -656,7 +692,6 @@ import {
   addCheeseRecipesIfAbsentByName,
 } from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
-import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
@@ -675,6 +710,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -685,21 +721,44 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DeferredSurface } from "../departments/DeferredDepartmentSurface";
 
-const LazyDeferredManagementAiSurface = lazy(() => {
+const LazyDeferredManagementSurface = lazy(() => {
   const startedAt = typeof performance === "undefined" ? null : performance.now();
-  return import("../components/DeferredManagementAiSurface").then((module) => {
-    if (startedAt !== null && typeof performance !== "undefined") {
-      recordPerformance("management:ai-review-chunk-load", performance.now() - startedAt, "load");
-    }
+  return import("../components/DeferredManagementSurface").then((module) => {
+    if (startedAt !== null && typeof performance !== "undefined") recordPerformance("management:review-chunk-load", performance.now() - startedAt, "load");
     return module;
   });
 });
+
+const loadExcelImportDialog = () => import("@/components/ExcelImportDialog");
+const loadSpecImportDialog = () => import("@/components/SpecImportDialog");
+const loadPremixImportDialog = () => import("@/components/PremixImportDialog");
+const loadShippingImportDialog = () => import("@/components/ShippingImportDialog");
+const loadSauceGuideImportDialog = () =>
+  import("@/components/RecipeGuideImportDialog").then((module) => ({
+    default: module.SauceGuideImportDialog,
+  }));
+const loadDoughGuideImportDialog = () =>
+  import("@/components/RecipeGuideImportDialog").then((module) => ({
+    default: module.DoughGuideImportDialog,
+  }));
+const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
 
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
@@ -718,6 +777,7 @@ applyMixCheeseOverlapDedupeIfNeeded();
 // writes (manage-profiles capability) — they run in a capability-gated effect
 // inside Home instead of at module init (see the profile-heal effect there).
 
+type NeedRow = { label: string; value: string; sub?: string; area?: WarehouseArea };
 function recordHomeCommit(
   _id: string,
   phase: "mount" | "update" | "nested-update",
@@ -786,6 +846,42 @@ function buildNeedRows(vals: FormValues): {
   }
   return { dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] };
 }
+
+function NeedsList({ rows }: { rows: NeedRow[] }) {
+  if (rows.length === 0)
+    return <p className="text-xs text-muted-foreground italic">No data</p>;
+  return (
+    <div className="space-y-1.5">
+      {rows.map((row, i) => (
+        <div key={i} className="flex items-baseline justify-between gap-2 text-sm">
+          <span className="text-muted-foreground truncate">{row.label}</span>
+          <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
+            {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const WarehouseNeedsList = memo(function WarehouseNeedsList({ rows }: { rows: NeedRow[] }) {
+  const groups = groupWarehouseNeedRows(rows);
+  if (groups.length === 0) {
+    return <p className="text-xs text-muted-foreground italic">No data</p>;
+  }
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => (
+        <section key={group.area} aria-label={`${group.area} needs`}>
+          <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {group.area}
+          </h3>
+          <NeedsList rows={group.rows} />
+        </section>
+      ))}
+    </div>
+  );
+});
 
 // opts.warehouse tailors the rows for warehouse staff: sauce rows are omitted
 // (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
@@ -2198,6 +2294,49 @@ export function TypeDropdown({
   );
 }
 
+export function NumField({
+  control,
+  name,
+  label,
+  step,
+  testId,
+  disabled,
+}: {
+  control: any;
+  name: keyof FormValues;
+  label: string;
+  step?: string;
+  testId?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
+          <FormControl>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step={step ?? "any"}
+              className="font-mono bg-background/50 h-9 text-sm"
+              data-testid={testId ?? `input-${name}`}
+              disabled={disabled}
+              {...field}
+              onChange={(e) =>
+                field.onChange(e.target.value === "" ? "" : Number(e.target.value))
+              }
+              onFocus={e => e.target.select()}
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
 
 // How long a manual stepper edit holds off auto-track writes. 1 minute is the
 // user's explicit preference on web (a manual entry is the new baseline and
@@ -2847,6 +2986,11 @@ async function encodeSpecPhoto(file: File): Promise<{ imageBase64: string; mimeT
   return { imageBase64: encoded, mimeType: "image/jpeg" };
 }
 
+const HOME_DIALOG_OVERLAY_CLASS =
+  "fixed inset-x-0 top-0 z-[70] flex h-[100dvh] items-center justify-center overflow-y-auto bg-black/60 p-4";
+const HOME_DIALOG_CARD_SCROLL_CLASS =
+  "my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto";
+
 export default function Home() {
   useAccessibleDialogStack();
   const {
@@ -2865,6 +3009,16 @@ export default function Home() {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     } : null);
+    setOperationalIntentIdentity(me ? {
+      scope: me.sandbox ? "sandbox" : "live",
+      userId: me.userId,
+    } : null);
+    setCompletedHistoryScope(me ? (me.sandbox ? "sandbox" : "live") : null);
+    if (me) {
+      const scopedHistory = loadCompletedHistoryForActiveScope();
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(scopedHistory)); } catch {}
+      setHistory(scopedHistory);
+    }
   }, [me?.sandbox, me?.userId]);
   // Shared auto-track suppress ref — owned in Home, passed to LiveRunProvider
   // so both Home callbacks and useAutoTrack suppress the same latch.
@@ -2943,6 +3097,17 @@ export default function Home() {
   // One identity adapter feeds autosave, packaging progress, rollover, and
   // station composition. It does not own selection or persistence.
   const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
+  // Keep operational corrections on explicit operator paths only.  Autosave and
+  // automatic ticks deliberately never call this helper.
+  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>) => {
+    const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
+    if (!run) return;
+    queueOperationalIntent({
+      runId, values, effectiveAt: Date.now(), action: "correction",
+      observedGeneration: `${runId}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
+    });
+    void flushOperationalIntentOutbox();
+  }, []);
   const persistManualPackagingProgress = useCallback((
     runId: string,
     skidsCompleted: number,
@@ -2959,13 +3124,17 @@ export default function Home() {
     });
     markRunValuesUpdated(runId, now);
     lastLocalEditRef.current = now;
+    queueManualCorrection(runId, {
+      skidsCompleted: Math.max(0, skidsCompleted),
+      casesOnCurrentSkid: Math.max(0, casesOnCurrentSkid),
+    });
     if (runId === currentRunIdRef.current) {
       autoSuppressUntilRef.current = Math.max(
         autoSuppressUntilRef.current,
         manualOverrideUntil,
       );
     }
-  }, []);
+  }, [queueManualCorrection]);
   const persistAutomaticPackagingProgress = useCallback((
     skidsCompleted: number,
     casesOnCurrentSkid: number,
@@ -2996,7 +3165,28 @@ export default function Home() {
   }, undefined);
 
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
+  const [pendingHistoryUploads, setPendingHistoryUploads] = useState(() => pendingCompletedHistoryCount());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
+  useEffect(() => {
+    if (!me) return;
+    const updatePending = () => setPendingHistoryUploads(pendingCompletedHistoryCount());
+    const reconcile = async () => {
+      await flushCompletedHistoryOutbox();
+      updatePending();
+      await hydrateCompletedHistory(loadHistory(), (days) => {
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(days)); } catch {}
+        setHistory(days);
+      });
+    };
+    void reconcile();
+    const onOnline = () => { void reconcile(); };
+    window.addEventListener("online", onOnline);
+    window.addEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
+    };
+  }, [me?.sandbox, me?.userId]);
   const [sauceWeightsOpen, setSauceWeightsOpen] = useState(false);
   // Bumped on each write to a non-active run so cached day snapshots refresh.
   // Active-form writes already flow through `v`; ignoring those avoids a
@@ -3747,10 +3937,10 @@ export default function Home() {
     }
   }
 
-  async function replaceRunSurplus(
+  const replaceRunSurplus = useEvent(async (
     run: RunMeta,
     allocations: Array<{ lotId: string; cases: number }>,
-  ) {
+  ) => {
     setFreezerSurplusBusy(true);
     setFreezerSurplusError(null);
     try {
@@ -3771,7 +3961,7 @@ export default function Home() {
     } finally {
       setFreezerSurplusBusy(false);
     }
-  }
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -3936,9 +4126,11 @@ export default function Home() {
     return () => window.clearInterval(interval);
   }, []);
   // Manager-only nav badge: pending password reset requests awaiting approval.
-  const pendingResetCount = usePendingResetCount();
+  const pendingResetSummary = usePendingResetSummary();
+  const pendingResetCount = pendingResetSummary.count;
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
-  const unreviewedIncidentCount = useUnreviewedIncidentCount();
+  const incidentAttentionSummary = useUnreviewedIncidentSummary();
+  const unreviewedIncidentCount = incidentAttentionSummary.count;
   // Factory-wide freezer-pull items (open to all signed-in users) — drives the
   // Warehouse "Pull Out Freezer" notices.
   const { items: freezerPullItems } = useFreezerPullItems(
@@ -4353,6 +4545,7 @@ export default function Home() {
   }, [enabledCheeseRecipes, serverCheeseNames]);
   // The make-day chosen on the Mix Plan tab (defaults to today).
   const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
+  const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
   // Warehouse "Time to Count" card. Marking a section counted is open to any
   // signed-in user (floor staff perform the counts).
@@ -4370,7 +4563,7 @@ export default function Home() {
   async function saveServerTemplate(tpl: import("../types").RunTemplate): Promise<void> {
     try {
       const updated = await saveRunTemplateApi(tpl);
-      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
+      cycleCountQc.setQueryData(runTemplatesQueryKey(), updated);
     } catch {
       void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
     }
@@ -4378,7 +4571,7 @@ export default function Home() {
   async function deleteServerTemplate(id: string): Promise<void> {
     try {
       const updated = await deleteRunTemplatesApi([id]);
-      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
+      cycleCountQc.setQueryData(runTemplatesQueryKey(), updated);
     } catch {
       void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
     }
@@ -4443,80 +4636,103 @@ export default function Home() {
     async (entries: { name: string; lbs: number }[]) => {
       if (entries.length === 0) return;
 
+      // Capture the form snapshot before profile hydration begins. The
+      // orchestration below captures the selected run at this same boundary
+      // and only applies these open-form updates if that run is still active.
+      const openForm = form.getValues() as Record<string, unknown>;
+      let openFormUpdates: Partial<Record<string, number>> = {};
+
       // Ensure all server profiles are present in localStorage before scanning
       // (gap-fill only — never clobbers local edits). This covers the race
       // where a manager saves a batch weight before the boot reconciliation
       // effect has finished downloading the full factory profile pool.
-      let serverPairs: { brand: string; flavor: string }[] = [];
-      try {
-        serverPairs = await seedProfilesFromServer();
-      } catch {
-        // Network unavailable — fall back to whatever localStorage already holds.
-      }
+      await orchestrateSharedRecipeRefresh({
+        getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+        refreshProfiles: async () => {
+          let serverPairs: { brand: string; flavor: string }[] = [];
+          try {
+            serverPairs = await seedProfilesFromServer();
+          } catch {
+            // Network unavailable — fall back to whatever localStorage already holds.
+          }
 
-      // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
-      // then union with the server pairs so profiles seeded above are included.
-      const seenSuffixes = new Set<string>();
-      const profileSuffixes: string[] = [];
-      const PREFIX = "run-calc-profile-";
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k) continue;
-        if (!k.startsWith(PREFIX)) continue;
-        const suffix = k.slice(PREFIX.length);
-        // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
-        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-      // Add any server profiles that seedProfilesFromServer reported but
-      // couldn't write to localStorage (quota issues) — we still want to
-      // attempt to load them if they're already there under a different casing.
-      for (const { brand, flavor } of serverPairs) {
-        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-        if (!seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
+          // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
+          // then union with the server pairs so profiles seeded above are included.
+          const seenSuffixes = new Set<string>();
+          const profileSuffixes: string[] = [];
+          const PREFIX = "run-calc-profile-";
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k) continue;
+            if (!k.startsWith(PREFIX)) continue;
+            const suffix = k.slice(PREFIX.length);
+            // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
+            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
+          // Add any server profiles that seedProfilesFromServer reported but
+          // couldn't write to localStorage (quota issues) — we still want to
+          // attempt to load them if they're already there under a different casing.
+          for (const { brand, flavor } of serverPairs) {
+            const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+            if (!seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
 
-      const profiles: BatchWeightPropagationProfile[] = [];
+          const profiles: BatchWeightPropagationProfile[] = [];
 
-      for (const suffix of profileSuffixes) {
-        const dunderIdx = suffix.indexOf("__");
-        if (dunderIdx < 0) continue;
-        const brand  = suffix.slice(0, dunderIdx);
-        const flavor = suffix.slice(dunderIdx + 2);
+          for (const suffix of profileSuffixes) {
+            const dunderIdx = suffix.indexOf("__");
+            if (dunderIdx < 0) continue;
+            const brand  = suffix.slice(0, dunderIdx);
+            const flavor = suffix.slice(dunderIdx + 2);
 
-        const profile = loadProfile(brand, flavor);
-        if (!profile) continue;
-        profiles.push({ brand, flavor, profile: profile as Record<string, unknown> });
-      }
+            const profile = loadProfile(brand, flavor);
+            if (!profile) continue;
+            profiles.push({ brand, flavor, profile: profile as Record<string, unknown> });
+          }
 
-      await executeBatchWeightPropagation({
-        profiles,
-        openForm: form.getValues() as Record<string, unknown>,
-        entries,
-        defaultPepTypes: DEFAULT_PEP_TYPES,
-        saveProfile: (brand, flavor, updates) => {
-          const profile = loadProfile(brand, flavor);
-          if (!profile) return false;
-          // Profile writes are manager-only; non-managers still get the
-          // in-memory heal (open-form update below) but never persist it.
-          return canManageProfiles && saveProfile(
-            brand,
-            flavor,
-            { ...profile, ...updates } as FormValues,
-          );
+          const result = await executeBatchWeightPropagation({
+            profiles,
+            openForm,
+            entries,
+            defaultPepTypes: DEFAULT_PEP_TYPES,
+            saveProfile: (brand, flavor, updates) => {
+              const profile = loadProfile(brand, flavor);
+              if (!profile) return false;
+              // Profile writes are manager-only; non-managers still get the
+              // in-memory heal (open-form update below) but never persist it.
+              return canManageProfiles && saveProfile(
+                brand,
+                flavor,
+                { ...profile, ...updates } as FormValues,
+              );
+            },
+            propagateToPendingRuns: propagateProfileToPendingRuns,
+            // The open form is applied only by refreshOpenForm after the
+            // originating-run identity check. Saved profiles and pending runs
+            // above must still finish if the operator switched runs.
+            setOpenFormValue: () => {},
+            notify: toast,
+          });
+          openFormUpdates = result.plan.openFormUpdates;
+          return result;
         },
-        propagateToPendingRuns: propagateProfileToPendingRuns,
-        setOpenFormValue: (field, lbs) => form.setValue(
-          field as Parameters<typeof form.setValue>[0],
-          lbs as never,
-          { shouldDirty: true },
-        ),
-        notify: toast,
+        refreshOpenForm: () => {
+          for (const [field, lbs] of Object.entries(openFormUpdates)) {
+            if (lbs !== undefined) {
+              form.setValue(
+                field as Parameters<typeof form.setValue>[0],
+                lbs as never,
+                { shouldDirty: true },
+              );
+            }
+          }
+        },
       });
     },
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)
@@ -4543,35 +4759,6 @@ export default function Home() {
       }
       if (recipeByName.size === 0) return;
 
-      // Seed all server profiles into localStorage before scanning.
-      let serverPairs: { brand: string; flavor: string }[] = [];
-      try {
-        serverPairs = await seedProfilesFromServer();
-      } catch {
-        // Network unavailable — fall back to whatever localStorage already holds.
-      }
-
-      // Collect all brand__flavor profile keys.
-      const seenSuffixes = new Set<string>();
-      const profileSuffixes: string[] = [];
-      const PREFIX = "run-calc-profile-";
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k?.startsWith(PREFIX)) continue;
-        const suffix = k.slice(PREFIX.length);
-        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-      for (const { brand, flavor } of serverPairs) {
-        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-        if (!seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-
       const cheeseSlots = [
         { nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe" },
         { nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe" },
@@ -4579,60 +4766,95 @@ export default function Home() {
         { nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe" },
       ] as const;
 
-      let updatedCount = 0;
-      const propagations: Promise<void>[] = [];
+      const updatedCount = await orchestrateSharedRecipeRefresh({
+        getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+        refreshProfiles: async () => {
+          // Keep profile hydration inside the orchestrated work so the
+          // originating run is captured before this first async boundary.
+          let serverPairs: { brand: string; flavor: string }[] = [];
+          try {
+            serverPairs = await seedProfilesFromServer();
+          } catch {
+            // Network unavailable — fall back to whatever localStorage already holds.
+          }
 
-      for (const suffix of profileSuffixes) {
-        const dunderIdx = suffix.indexOf("__");
-        if (dunderIdx < 0) continue;
-        const brand  = suffix.slice(0, dunderIdx);
-        const flavor = suffix.slice(dunderIdx + 2);
+          const seenSuffixes = new Set<string>();
+          const profileSuffixes: string[] = [];
+          const PREFIX = "run-calc-profile-";
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k?.startsWith(PREFIX)) continue;
+            const suffix = k.slice(PREFIX.length);
+            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
+          for (const { brand, flavor } of serverPairs) {
+            const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+            if (!seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
 
-        const profile = loadProfile(brand, flavor);
-        if (!profile) continue;
+          let count = 0;
+          const propagations: Promise<void>[] = [];
 
-        const profileRec = profile as unknown as Record<string, unknown>;
-        const updates: Record<string, unknown> = {};
+          for (const suffix of profileSuffixes) {
+            const dunderIdx = suffix.indexOf("__");
+            if (dunderIdx < 0) continue;
+            const brand  = suffix.slice(0, dunderIdx);
+            const flavor = suffix.slice(dunderIdx + 2);
 
-        for (const { nameField, rowsField } of cheeseSlots) {
-          const recipeName = ((profileRec[nameField] as string) ?? "").trim();
-          if (!recipeName) continue;
-          const freshRows = recipeByName.get(recipeName.toLowerCase());
-          if (!freshRows) continue;
-          // Skip if every ingredient and its lbs is already identical (full row comparison,
-          // not just sum — catches ingredient renames, additions, or removals that preserve total).
-          const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
-          const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => {
-            const cr = currentRows[i];
-            return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001;
-          });
-          if (!rowsChanged) continue;
-          updates[rowsField] = freshRows;
-        }
+            const profile = loadProfile(brand, flavor);
+            if (!profile) continue;
 
-        if (Object.keys(updates).length === 0) continue;
+            const profileRec = profile as unknown as Record<string, unknown>;
+            const updates: Record<string, unknown> = {};
 
-        const updated = { ...profile, ...updates } as FormValues;
-        // Profile writes are manager-only; non-managers still get the
-        // in-memory heal (open-form update below) but never persist it.
-        const saved = canManageProfiles && saveProfile(brand, flavor, updated);
-        if (saved) {
-          updatedCount++;
-          propagations.push(propagateProfileToPendingRuns(brand, flavor));
-        }
-      }
+            for (const { nameField, rowsField } of cheeseSlots) {
+              const recipeName = ((profileRec[nameField] as string) ?? "").trim();
+              if (!recipeName) continue;
+              const freshRows = recipeByName.get(recipeName.toLowerCase());
+              if (!freshRows) continue;
+              // Skip if every ingredient and its lbs is already identical (full row comparison,
+              // not just sum — catches ingredient renames, additions, or removals that preserve total).
+              const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+              const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => {
+                const cr = currentRows[i];
+                return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001;
+              });
+              if (!rowsChanged) continue;
+              updates[rowsField] = freshRows;
+            }
 
-      await Promise.allSettled(propagations);
+            if (Object.keys(updates).length === 0) continue;
 
-      // Update the open form if it references any of the updated recipes.
-      const cv = form.getValues() as unknown as Record<string, unknown>;
-      for (const { nameField, rowsField } of cheeseSlots) {
-        const recipeName = ((cv[nameField] as string) ?? "").trim();
-        if (!recipeName) continue;
-        const freshRows = recipeByName.get(recipeName.toLowerCase());
-        if (!freshRows) continue;
-        form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
-      }
+            const updated = { ...profile, ...updates } as FormValues;
+            // Profile writes are manager-only; non-managers still get the
+            // in-memory heal (open-form update below) but never persist it.
+            const saved = canManageProfiles && saveProfile(brand, flavor, updated);
+            if (saved) {
+              count++;
+              propagations.push(propagateProfileToPendingRuns(brand, flavor));
+            }
+          }
+
+          await Promise.allSettled(propagations);
+          return count;
+        },
+        refreshOpenForm: () => {
+          const cv = form.getValues() as unknown as Record<string, unknown>;
+          for (const { nameField, rowsField } of cheeseSlots) {
+            const recipeName = ((cv[nameField] as string) ?? "").trim();
+            if (!recipeName) continue;
+            const freshRows = recipeByName.get(recipeName.toLowerCase());
+            if (!freshRows) continue;
+            form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
+          }
+        },
+      });
 
       if (updatedCount > 0) {
         toast({
@@ -5015,6 +5237,7 @@ export default function Home() {
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
   const [showManagerAttention, setShowManagerAttention] = useState(false);
+  const managerAttentionTriggerRef = useRef<HTMLButtonElement>(null);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
@@ -5183,7 +5406,16 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Schedule check failed (${response.status})`);
+        return response.json();
+      })
+      .then((data) => {
+        setScheduledDays(normalizeScheduledDays(data));
+        setScheduledAttentionState("ready");
+      })
+      .catch(() => setScheduledAttentionState("unavailable"));
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -5201,7 +5433,7 @@ export default function Home() {
   const [mgSelectedPreset, setMgSelectedPreset] = useState<string | null>(null);
   const [mgPresetRows, setMgPresetRows] = useState<RecipeRow[]>([]);
   const [exportSelection, setExportSelection] = useState<ExportSelection>({
-    profiles: true,
+    specs: true,
     dough: true,
     sauce: true,
     cheese: true,
@@ -5230,6 +5462,14 @@ export default function Home() {
   // because counts intersect against the live list).
   const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
   const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
+  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
+  const [pendingDuplicateReviewCount, setPendingDuplicateReviewCount] = useState(() => {
+    try {
+      return loadPendingDuplicateReview(localStorage);
+    } catch {
+      return 0;
+    }
+  });
   const mergeSuggestRequestRef = useRef<{ generation: number; controller: AbortController | null }>({
     generation: 0,
     controller: null,
@@ -5253,6 +5493,50 @@ export default function Home() {
   // or merge flavors within one chosen brand.
   const [mergeBfMode, setMergeBfMode] = useState<"brands" | "flavors">("brands");
   const [mergeBfBrand, setMergeBfBrand] = useState("");
+
+  const persistPendingDuplicateReview = useCallback((count: number) => {
+    const next =
+      count === PENDING_DUPLICATE_REVIEW_SCAN
+        ? PENDING_DUPLICATE_REVIEW_SCAN
+        : Number.isFinite(count) && count > 0
+          ? Math.floor(count)
+          : 0;
+    setPendingDuplicateReviewCount(next);
+    try {
+      savePendingDuplicateReview(localStorage, next);
+    } catch {}
+  }, []);
+
+  // Duplicate-review state is facility-scoped on the server. Keep the local
+  // value as a fail-safe cache: a failed or stale read must not make outstanding
+  // review work disappear from this device.
+  useEffect(() => {
+    if (!canManageInventory) return;
+    let active = true;
+    const refresh = () => {
+      void fetchPendingDuplicateReviews()
+        .then((result) => {
+          if (active) persistPendingDuplicateReview(result.count);
+        })
+        .catch(() => {
+          // Preserve the last known reminder when the server is unavailable.
+        });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [canManageInventory, persistPendingDuplicateReview]);
+
+  const openPendingDuplicateReview = useCallback(() => {
+    setMergeFromImport(true);
+    setMergeCategory("ingredients");
+    setManageCategory("merge");
+  }, []);
 
   // Local (per-device) master-data change history for the undo trail.
   const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
@@ -5864,7 +6148,7 @@ export default function Home() {
   // "previously merged" aliases. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number> {
+  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number | null> {
     if (!fromImport) setMergeFromImport(false);
     // The import-triggered auto-scan always lands on (and scans) the
     // Ingredients tab — read from the closured `mergeFullUniverse` directly
@@ -5894,24 +6178,56 @@ export default function Home() {
         brands,
         { signal: controller.signal, forceRefresh },
       );
-      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return 0;
-      setMergeSuggestions(suggestions);
+      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
+       let visibleSuggestions = suggestions;
+       if (scope.category === "ingredient" && canManageInventory) {
+         try {
+           const remote = await savePendingDuplicateReviews(
+             suggestions,
+             "ingredient",
+             undefined,
+             controller.signal,
+           );
+           if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) {
+             return null;
+           }
+           persistPendingDuplicateReview(remote.count);
+           const localKeys = new Set(
+             suggestions.map((suggestion) =>
+               duplicateReviewGroupKey(suggestion.target, suggestion.sources, "ingredient"),
+             ),
+           );
+           const remoteSuggestions = remote.groups
+             .filter((group) => group.category === "ingredient" && group.status === "pending")
+              .filter((group) =>
+                !localKeys.has(
+                  duplicateReviewGroupKey(group.target, group.sources, "ingredient"),
+                ),
+              )
+             .map(({ target, sources }) => ({ target, sources }));
+           visibleSuggestions = [...suggestions, ...remoteSuggestions];
+         } catch {
+           // The scan remains useful locally; retain the local reminder rather
+           // than hiding it when the shared ledger is temporarily unavailable.
+         }
+       }
+       setMergeSuggestions(visibleSuggestions);
       setMergeSuggestSelected(new Set());
       if (!usedAi && error) {
         setMergeSuggestError(
           `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
         );
       }
-      if (usedAi && suggestions.length === 0) {
+       if (usedAi && visibleSuggestions.length === 0) {
         setMergeSuggestNote("No duplicate groups found.");
       }
-      return suggestions.length;
+       return visibleSuggestions.length;
     } catch (e) {
-      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return 0;
+      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
       setMergeSuggestions([]);
       setMergeSuggestSelected(new Set());
       setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
-      return 0;
+      return null;
     } finally {
       if (isCurrentMergeSuggestionRequest(generation, request.generation)) {
         request.controller = null;
@@ -5925,13 +6241,36 @@ export default function Home() {
   // the manager's back, and leaving the surface cancels any active request.
   useEffect(() => {
     if (manageCategory === "merge") {
-      void handleSuggestMerges();
+       void handleSuggestMerges();
     } else {
       mergeSuggestRequestRef.current.controller?.abort();
     }
     // The request snapshots the current merge scope when the surface opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manageCategory]);
+
+  // Recipe imports can introduce ingredient spellings that duplicate existing
+  // master data. Keep the success toast transient, but persist the review count
+  // so the Import tab still offers the existing non-destructive review later.
+  useEffect(() => {
+    if (mergeCheckRequest === 0) return;
+    persistPendingDuplicateReview(PENDING_DUPLICATE_REVIEW_SCAN);
+    setMergeCategory("ingredients");
+    setMergeFromImport(true);
+    void handleSuggestMerges(true).then((count) => {
+      if (count === null || count <= 0) return;
+      toast({
+        title: "Possible duplicate ingredients",
+        description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
+        action: (
+          <ToastAction altText="Review duplicates" onClick={openPendingDuplicateReview}>
+            Review
+          </ToastAction>
+        ),
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeCheckRequest]);
 
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
@@ -5998,7 +6337,18 @@ export default function Home() {
       : isRecipeNameCategory
       ? await handleApplyRecipeNameMerge(mergeCategory as RecipeNameMergeCategory, sources, s.target)
       : await handleApplyMerge(sources, s.target);
-    if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    if (ok) {
+      setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+      if (mergeCategory === "ingredients") {
+        void resolvePendingDuplicateReview(
+          duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
+          "resolved",
+        ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
+      }
+      if (mergeCategory === "ingredients" && mergeSuggestions.length <= 1) {
+        persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
+      }
+    }
     return ok;
   }
 
@@ -6010,15 +6360,26 @@ export default function Home() {
     const chosen = mergeSuggestions.filter((s) => mergeSuggestSelected.has(mergeSuggestKey(s)));
     if (chosen.length === 0 || mergeBatchBusy) return;
     setMergeBatchBusy(true);
+    let allChosenResolved = true;
     try {
       for (const s of chosen) {
         const ok = await applyMergeSuggestion(s);
-        if (!ok) break;
+        if (!ok) {
+          allChosenResolved = false;
+          break;
+        }
         setMergeSuggestSelected((prev) => {
           const next = new Set(prev);
           next.delete(mergeSuggestKey(s));
           return next;
         });
+      }
+      if (
+        allChosenResolved &&
+        mergeCategory === "ingredients" &&
+        chosen.length === mergeSuggestions.length
+      ) {
+        persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
       }
     } finally {
       setMergeBatchBusy(false);
@@ -6034,12 +6395,21 @@ export default function Home() {
     if (sources.length === 0) return;
     setMergeFromImport(false);
     setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    if (mergeCategory === "ingredients" && mergeSuggestions.length <= 1) {
+      persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
+    }
     const scope = mergeSuggestScope;
     try {
       await denyMerge(s.target, sources, scope.category, scope.brand);
     } catch {
       // Non-fatal: the suggestion is already hidden for this session; it may
       // reappear on a later scan if the deny didn't persist.
+    }
+    if (mergeCategory === "ingredients") {
+      void resolvePendingDuplicateReview(
+        duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
+        "ignored",
+      ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
     }
   }
 
@@ -6732,23 +7102,21 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
+  const {
+    showImportDialog, setShowImportDialog, importResult, setImportResult, importInputRef, scheduleImportInputRef,
+    showSpecImport, setShowSpecImport, specImportLoading, setSpecImportLoading, specImportApplying, setSpecImportApplying, specImportError, setSpecImportError, specImportPrepared, setSpecImportPrepared, specImportProgress, setSpecImportProgress, specImportInputRef,
+    showPremixImport, setShowPremixImport, premixImportLoading, setPremixImportLoading, premixImportApplying, setPremixImportApplying, premixImportError, setPremixImportError, premixImportPrepared, setPremixImportPrepared, premixImportProgress, setPremixImportProgress, premixImportInputRef,
+    showShippingImport, setShowShippingImport, shippingImportLoading, setShippingImportLoading, shippingImportApplying, setShippingImportApplying, shippingImportError, setShippingImportError, shippingImportPrepared, setShippingImportPrepared, shippingImportInputRef,
+    showSauceGuideImport, setShowSauceGuideImport, sauceGuideImportLoading, setSauceGuideImportLoading, sauceGuideImportApplying, setSauceGuideImportApplying, sauceGuideImportError, setSauceGuideImportError, sauceGuideImportPrepared, setSauceGuideImportPrepared, sauceGuideImportInputRef,
+    showDoughGuideImport, setShowDoughGuideImport, doughGuideImportLoading, setDoughGuideImportLoading, doughGuideImportApplying, setDoughGuideImportApplying, doughGuideImportError, setDoughGuideImportError, doughGuideImportPrepared, setDoughGuideImportPrepared, doughGuideImportInputRef,
+    showCheeseImport, setShowCheeseImport, cheeseImportLoading, setCheeseImportLoading, cheeseImportApplying, setCheeseImportApplying, cheeseImportError, setCheeseImportError, cheeseImportPrepared, setCheeseImportPrepared, cheeseImportProgress, setCheeseImportProgress, cheeseImportInputRef,
+  } = useHomeImportDialogs();
   // Re-import case-count offers for in-progress runs, awaiting the user's
   // per-run Accept/Keep choice (null = no dialog). Never auto-applied.
   const [caseUpdatePrompt, setCaseUpdatePrompt] = useState<CaseUpdateOffer[] | null>(null);
   const [caseUpdateAccepted, setCaseUpdateAccepted] = useState<Record<string, boolean>>({});
-  const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-  const scheduleImportInputRef = useRef<HTMLInputElement | null>(null);
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
-  const [showSpecImport, setShowSpecImport] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-  const [specImportLoading, setSpecImportLoading] = useState(false);
-  const [specImportApplying, setSpecImportApplying] = useState(false);
-  const [specImportError, setSpecImportError] = useState<string | null>(null);
-  const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
-  const [specImportProgress, setSpecImportProgress] = useState<{ done: number; total: number } | null>(null);
-  const specImportInputRef = useRef<HTMLInputElement | null>(null);
   const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
   const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
   const specPhotoPreviews = useMemo(
@@ -6758,43 +7126,13 @@ export default function Home() {
   useEffect(() => () => {
     for (const url of specPhotoPreviews) URL.revokeObjectURL(url);
   }, [specPhotoPreviews]);
-  const [showPremixImport, setShowPremixImport] = useState(false);
-  const [premixImportLoading, setPremixImportLoading] = useState(false);
-  const [premixImportApplying, setPremixImportApplying] = useState(false);
-  const [premixImportError, setPremixImportError] = useState<string | null>(null);
-  const [premixImportPrepared, setPremixImportPrepared] = useState<PremixImportPrepared | null>(null);
-  const [premixImportProgress, setPremixImportProgress] = useState<{ done: number; total: number } | null>(null);
-  const premixImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showShippingImport, setShowShippingImport] = useState(false);
-  const [shippingImportLoading, setShippingImportLoading] = useState(false);
-  const [shippingImportApplying, setShippingImportApplying] = useState(false);
-  const [shippingImportError, setShippingImportError] = useState<string | null>(null);
-  const [shippingImportPrepared, setShippingImportPrepared] = useState<ShippingImportPrepared | null>(null);
-  const shippingImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showSauceGuideImport, setShowSauceGuideImport] = useState(false);
-  const [sauceGuideImportLoading, setSauceGuideImportLoading] = useState(false);
-  const [sauceGuideImportApplying, setSauceGuideImportApplying] = useState(false);
-  const [sauceGuideImportError, setSauceGuideImportError] = useState<string | null>(null);
-  const [sauceGuideImportPrepared, setSauceGuideImportPrepared] = useState<SauceGuideImportPrepared | null>(null);
-  const sauceGuideImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showDoughGuideImport, setShowDoughGuideImport] = useState(false);
-  const [doughGuideImportLoading, setDoughGuideImportLoading] = useState(false);
-  const [doughGuideImportApplying, setDoughGuideImportApplying] = useState(false);
-  const [doughGuideImportError, setDoughGuideImportError] = useState<string | null>(null);
-  const [doughGuideImportPrepared, setDoughGuideImportPrepared] = useState<DoughGuideImportPrepared | null>(null);
-  const doughGuideImportInputRef = useRef<HTMLInputElement | null>(null);
-  const [showCheeseImport, setShowCheeseImport] = useState(false);
-  const [cheeseImportLoading, setCheeseImportLoading] = useState(false);
-  const [cheeseImportApplying, setCheeseImportApplying] = useState(false);
-  const [cheeseImportError, setCheeseImportError] = useState<string | null>(null);
-  const [cheeseImportPrepared, setCheeseImportPrepared] = useState<CheeseImportPrepared | null>(null);
-  const [cheeseImportProgress, setCheeseImportProgress] = useState<{ done: number; total: number } | null>(null);
-  const cheeseImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
   const [scheduledDays, setScheduledDays] = useState<ScheduledDay[]>([]);
+  const [scheduledAttentionState, setScheduledAttentionState] =
+    useState<"loading" | "ready" | "unavailable">("loading");
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
@@ -6826,13 +7164,15 @@ export default function Home() {
     if (showEditReasonsDialog)  { setShowEditReasonsDialog(false);  return; }
     if (showManageDialog)       { setShowManageDialog(false);       return; }
     if (showScheduleDialog)     { setShowScheduleDialog(false); setScheduleView("list"); return; }
-    if (showImportDialog)       { setShowImportDialog(false);       return; }
-    if (showSpecImport)         { setShowSpecImport(false);         return; }
-    if (showPremixImport)       { setShowPremixImport(false);       return; }
-    if (showShippingImport)     { setShowShippingImport(false);     return; }
-    if (showSauceGuideImport)   { setShowSauceGuideImport(false);   return; }
-    if (showDoughGuideImport)   { setShowDoughGuideImport(false);   return; }
-    if (showCheeseImport)       { setShowCheeseImport(false);       return; }
+    if (closeTopmostImportDialog([
+      { open: showImportDialog, close: () => setShowImportDialog(false) },
+      { open: showSpecImport, close: () => setShowSpecImport(false) },
+      { open: showPremixImport, close: () => setShowPremixImport(false) },
+      { open: showShippingImport, close: () => setShowShippingImport(false) },
+      { open: showSauceGuideImport, close: () => setShowSauceGuideImport(false) },
+      { open: showDoughGuideImport, close: () => setShowDoughGuideImport(false) },
+      { open: showCheeseImport, close: () => setShowCheeseImport(false) },
+    ])) return;
     if (setupEditorOpen)        { setSetupEditorOpen(false);        return; }
     if (showScreensDialog)      { setShowScreensDialog(false);      return; }
     if (showReorderDialog)      { setShowReorderDialog(false);      return; }
@@ -7264,40 +7604,39 @@ export default function Home() {
   // (form.reset hasn't fired yet for the new run), the effect would stamp A's
   // applicator/recipe data onto B's localStorage slot — cross-run contamination.
   // Guard: skip the autosave whenever the form ID and the current run ID disagree.
-  const lastFormRunIdRef = useRef<string>("");
+  const { lastFormRunIdRef, formHandoffRef } = useHomeFormIdentityFences();
   // The first server snapshot must switch the run list and bind the live form as
   // one handoff. The fence rises immediately before that identity change; local
   // offline edits remain available before a connection establishes a baseline.
-  const formHandoffRef = useRef(false);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncBaselineGateRef = useRef(createSyncBaselineGate());
-  const isSyncApplyingRef = useRef(false);
+  const {
+    syncBaselineGateRef, synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
+    foregroundSyncBarrierRef, foregroundPushPendingRef, foregroundStopIntentRef,
+    foregroundRecoveryRetryRef, foregroundRecoveryNoticeTimerRef,
+    foregroundRecoveryOwnerRef, syncPushGenerationRef, syncPushAbortControllersRef,
+    autoTrackBlocked, setAutoTrackBlocked,
+    autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock,
+    pendingForegroundStopRunId, setPendingForegroundStopRunId,
+    foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement,
+    foregroundRecoveryNotice, setForegroundRecoveryNotice,
+  } = useHomeSyncCoordination();
   // A local lifecycle action can land in the same frame as an inbound SSE
   // snapshot. Keep that write queued instead of dropping it behind the
   // receive-side form/state handoff.
-  const syncApplyPushPendingRef = useRef(false);
   // Foreground reconciliation fence. A clock snap can arrive in the same
   // frame as a stale recovery push, so keep auto-track and outgoing pushes
   // blocked until the date-scoped shared row has been pulled and applied.
-  const foregroundSyncBarrierRef = useRef(false);
-  const foregroundPushPendingRef = useRef(false);
   // A lifecycle tap made during wake recovery is bound to the run visible at
   // tap time. It must not be replayed against whatever run becomes current.
-  const foregroundStopIntentRef = useRef<ForegroundStopIntent | null>(null);
-  const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
-  const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // React Strict Mode can tear down and re-run this effect while an initial
   // reconciliation is still settling. The owner token prevents the old
   // promise from releasing a newer recovery barrier, while still allowing a
   // cancelled first pass to release the fence it raised.
-  const foregroundRecoveryOwnerRef = useRef(0);
   // Every foreground reconciliation starts a new push generation and aborts
   // requests built before wake. The server's metaUpdatedAt merge is still the
   // durable last line of defense if an already-received request completes, but
   // stale responses/retries may no longer update this client's sync signature
   // or re-publish a captured running snapshot after a remote Stop is adopted.
-  const syncPushGenerationRef = useRef(0);
-  const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPushQueueRef = useRef(
     new SingleFlightSyncQueue<{
@@ -7306,13 +7645,11 @@ export default function Home() {
       queuedAtPerf?: number;
       queuedAtEpoch?: number;
       trigger?: SyncMeasurementTrigger;
-    }>(),
+    }>(synchronizationStateMachineRef.current),
   );
   const syncPushTimingRef = useRef<{ queuedAtPerf: number; queuedAtEpoch: number } | null>(null);
   const syncPushTriggerRef = useRef<SyncMeasurementTrigger>("edit");
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
-  const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
-  const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
   const applySyncCallbackRef = useRef<
     (
       p: SyncPayload,
@@ -7337,12 +7674,38 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
-  const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
   const autoTrackClaimQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastAcceptedAutoTrackStampRef = useRef<Record<string, number>>({});
+  // Advisory server calculations travel beside canonical sync data. They never
+  // overwrite local form state or LWW stamps; later server-ownership work can
+  // adopt these refs without changing today's client-owned ticking semantics.
+  const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
+  const [serverCalc, setServerCalc] = useState<Calc | null>(null);
+  const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
+  const [serverCalcReceipt, setServerCalcReceipt] =
+    useState<OperationalSnapshotReceipt | null>(null);
+  function adoptServerCalcReceipt(
+    serverCalc: { runId: string; calc: Calc } | null | undefined,
+    snapshotId: string | undefined,
+  ) {
+    if (!serverCalc || !snapshotId) return;
+    const receipt: OperationalSnapshotReceipt = {
+      runId: serverCalc.runId,
+      snapshotId,
+      capturedAt: Date.now(),
+    };
+    const previous = serverCalcReceiptRef.current;
+    if (
+      previous?.runId === receipt.runId
+      && previous.snapshotId === receipt.snapshotId
+    ) return;
+    serverCalcReceiptRef.current = receipt;
+    setServerCalcReceipt(receipt);
+  }
+  const autoTrackScheduleRef = useRef<AutoTrackSchedule | null>(null);
   useEffect(() => subscribeAutoTrackCoordination((payload) => {
     for (const [runId, channels] of Object.entries(payload.runs ?? {})) {
       const acceptedStamp = Math.max(
@@ -7364,11 +7727,6 @@ export default function Home() {
   // from ordinary live updates.
   const lastSyncedHistorySigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
-  const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
-  const [foregroundRecoveryNotice, setForegroundRecoveryNotice] = useState<{
-    kind: "recovering" | "failed" | "outcome";
-    message: string;
-  } | null>(null);
   function showForegroundRecoveryNotice(
     kind: "recovering" | "failed" | "outcome",
     message: string,
@@ -7397,21 +7755,142 @@ export default function Home() {
         : lastAcknowledgedAt
           ? "synchronized"
           : "connected";
+  // The normal snapshot sync remains a recovery path; this separate queue keeps
+  // operator occurrence times and can be retried after a tab/browser restart.
+  useEffect(() => {
+    setOperationalIntentCanonicalAdopter((data, intent, outcome) => {
+      const payload = data as SyncPayload;
+      const acceptedFinalization =
+        outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
+      if (outcome === "accepted" && !acceptedFinalization) {
+        applySyncCallbackRef.current(payload);
+        return;
+      }
+      if (
+        outcome !== "accepted"
+        && outcome !== "superseded"
+        && outcome !== "rebased"
+        && outcome !== "conflicted"
+        && outcome !== "review-required"
+      ) {
+        applySyncCallbackRef.current(payload);
+        return;
+      }
+      // A finalization/review/rebase response is authoritative for the command it resolves,
+      // even when the rejected browser edit minted a newer LWW stamp. Restore
+      // only that command's lifecycle/correction fields before ordinary inbound
+      // reconciliation, then feed the ordinary path the preserved hybrid so it
+      // cannot replace unrelated newer local fields from the same run.
+      const localDay = dayStateRef.current;
+      const localValues = loadRunValues(intent.runId);
+      const localUpdated = loadRunValuesUpdated();
+      const forced = reconcileOperationalIntentCanonical({
+        dayState: localDay,
+        runValues: localValues,
+        runValuesUpdatedAt: localUpdated,
+        payload,
+        intent,
+        outcome,
+      });
+      let inbound = payload;
+      if (forced.lifecycleChanged || forced.valueFields.length) {
+        if (forced.lifecycleChanged) {
+          saveDayState(forced.dayState, { stampMeta: false });
+          dayStateRef.current = forced.dayState;
+          setDayState(forced.dayState);
+        }
+        if (forced.valueFields.length) {
+          saveRunValues(intent.runId, forced.runValues);
+          saveRunValuesUpdated(forced.runValuesUpdatedAt);
+          canonicalRunValuesUpdatedAtRef.current = {
+            ...canonicalRunValuesUpdatedAtRef.current,
+            [intent.runId]: forced.runValuesUpdatedAt[intent.runId] ?? 0,
+          };
+        }
+
+        const selectedId =
+          forced.dayState.runs[forced.dayState.currentIndex]?.id;
+        if (selectedId === intent.runId && forced.valueFields.length) {
+          const restored = mergeRunDefaults(forced.runValues);
+          lastFormRunIdRef.current = intent.runId;
+          form.reset(restored);
+          resetFieldArrays(restored);
+        }
+        // The rejected edit is no longer a local write candidate. In particular,
+        // do not let the quiet-window guard preserve it over this response.
+        lastLocalEditRef.current = 0;
+
+        inbound = {
+          ...payload,
+          dayState: forced.lifecycleChanged
+            ? {
+                ...payload.dayState,
+                runs: payload.dayState.runs.map((run) =>
+                  run.id === intent.runId
+                    ? forced.dayState.runs.find((local) => local.id === run.id) ?? run
+                    : run,
+                ),
+              }
+            : payload.dayState,
+          runValues: forced.valueFields.length
+            ? { ...payload.runValues, [intent.runId]: forced.runValues }
+            : payload.runValues,
+          runValuesUpdatedAt: forced.valueFields.length
+            ? {
+                ...(payload.runValuesUpdatedAt ?? {}),
+                [intent.runId]: forced.runValuesUpdatedAt[intent.runId] ?? 0,
+              }
+            : payload.runValuesUpdatedAt,
+        };
+      }
+      applySyncCallbackRef.current(inbound);
+    });
+    const flush = () => { void flushOperationalIntentOutbox(); };
+    flush();
+    window.addEventListener("online", flush);
+    return () => {
+      setOperationalIntentCanonicalAdopter(undefined);
+      window.removeEventListener("online", flush);
+    };
+  }, []);
+  // Cursor recovery complements the normal snapshot/SSE paths for a device
+  // that missed accepted offline commands. It adopts canonical materialized
+  // snapshots only; commands themselves are never replayed in the browser.
+  useEffect(() => {
+    if (!me) return;
+    const identity: { scope: "live" | "sandbox"; userId: string } = {
+      scope: me.sandbox ? "sandbox" : "live",
+      userId: me.userId,
+    };
+    const pull = () => {
+      void consumeOperationalMutationCursor(identity, (snapshot) =>
+        applySyncCallbackRef.current(snapshot as SyncPayload),
+      );
+    };
+    pull();
+    window.addEventListener("online", pull);
+    return () => window.removeEventListener("online", pull);
+  }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
       .then(async (): Promise<AutoTrackEventResult> => {
-    const waitStartedAt = typeof performance === "undefined" ? 0 : performance.now();
-    while (
-      navigator.onLine
-      && (foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current)
-      && (typeof performance === "undefined" || performance.now() - waitStartedAt < 2_000)
-    ) {
+    const sharedSyncSettled = () =>
+      foregroundSyncAcknowledgement > 1 && !foregroundSyncBarrierRef.current;
+    while (navigator.onLine) {
+      if (
+        !foregroundSyncBarrierRef.current
+        && (pushAcknowledgedRef.current || sharedSyncSettled())
+      ) break;
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
-    if (!navigator.onLine || foregroundSyncBarrierRef.current || !pushAcknowledgedRef.current) {
+    if (
+      !navigator.onLine
+      || foregroundSyncBarrierRef.current
+      || (!pushAcknowledgedRef.current && !sharedSyncSettled())
+    ) {
       throw new Error("Automatic tracking is waiting for shared sync");
     }
     const currentBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
@@ -7465,7 +7944,6 @@ export default function Home() {
       state?: AutoTrackEventResult["state"];
       values?: AutoTrackEventResult["values"];
       data?: SyncPayload;
-      autoTrackSchedule?: import("@workspace/live-calc").AutoTrackSchedule | null;
       snapshotId?: string;
     } | null;
     if (!response.ok || !body?.outcome || !body.state || !body.values) {
@@ -7477,7 +7955,6 @@ export default function Home() {
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
       publishAutoTrackCoordination(body.data);
-      if (body.autoTrackSchedule) publishAutoTrackSchedule(body.autoTrackSchedule);
       canonicalRunValuesUpdatedAtRef.current = { ...(body.data.runValuesUpdatedAt ?? {}) };
       if (body.outcome === "accepted" || body.outcome === "duplicate") {
         lastAcceptedAutoTrackStampRef.current[claim.runId] =
@@ -7504,61 +7981,6 @@ export default function Home() {
   // totals) overlays it without threading it through each call. See
   // substitutionState.ts. Runs synchronously enough for the next render's calc.
   useEffect(() => { setActiveSubstitutions(dayState.substitutions ?? []); }, [dayState.substitutions]);
-
-  // ── Proactive shift alerts ────────────────────────────────────────────────
-  // Poll the server on a cadence for at most one timely, dismissible nudge.
-  // Manager-only; runs even on an idle day so an expiring-stock heads-up can
-  // surface before any run begins (the server gates behind-plan/break nudges to
-  // an active day and skips the AI call when idle with no at-risk stock). The
-  // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
-  // provider in (tabs)/_layout.tsx (replit.md parity).
-  const {
-    alert: proactiveAlert,
-    dismiss: dismissProactiveAlert,
-    aiStatus: proactiveAiStatus,
-  } = useProactiveAlert({
-    enabled: isManager,
-    buildInput: () => {
-      // Resolve upcoming scheduled runs to their FormValues (scheduled runs carry
-      // no recipe rows) exactly like the warehouse "Reorder Now" card does, then
-      // aggregate to a per-item demand map. Sent to the server so the proactive
-      // reorder nudge subtracts the SAME projected demand as the card and the two
-      // can never disagree (the server can't resolve this itself — profiles are
-      // client-side). scheduledDays is already today-or-later (server-filtered).
-      const scheduledValsList: FormValues[] = scheduledDays.flatMap((day) =>
-        (day.runs ?? [])
-          .filter((r) => r.brand)
-          .map((r) => {
-            const profile = loadProfile(r.brand, r.flavor);
-            return {
-              ...(profile ?? DEFAULT_VALUES),
-              casesNeeded: r.casesNeeded,
-              ...(r.dieType ? { dieType: r.dieType } : {}),
-            } as FormValues;
-          }),
-      );
-      return {
-        ...buildOptimizeInput({
-          date: todayStr(),
-          nowMs: Date.now(),
-          runToTime,
-          runs: dayState.runs,
-          runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
-          history,
-          scheduledDays: scheduledDays.map((d) => ({
-            date: d.date,
-            runs: (d.runs ?? []).map((r) => ({
-              brand: r.brand,
-              flavor: r.flavor,
-              casesNeeded: r.casesNeeded,
-              dieType: r.dieType,
-            })),
-          })),
-        }),
-        reorderDemandByKey: buildReorderDemandByKey(scheduledValsList),
-      };
-    },
-  });
 
   // This is the same shared check shown in Schedule. It supplies the durable
   // configuration count for Manager attention, so the two surfaces cannot
@@ -7589,8 +8011,7 @@ export default function Home() {
         canReviewIncidents,
         scheduledRecipeIssueCount: scheduledRecipeIssues.length,
         canManageProfiles,
-        proactiveAlert,
-        isManager,
+        nextScheduledRecipeIssue: scheduledRecipeIssues[0],
       }),
     [
       pendingResetCount,
@@ -7598,34 +8019,30 @@ export default function Home() {
       unreviewedIncidentCount,
       canReviewIncidents,
       scheduledRecipeIssues.length,
+      scheduledRecipeIssues,
       canManageProfiles,
-      proactiveAlert,
-      isManager,
     ],
   );
   const managerAttentionTotal = managerAttentionCount(managerAttentionItems);
   const canViewManagerAttention =
     isManager || canApproveResets || canReviewIncidents || canManageProfiles;
 
-  function resolveManagerAttention(kind: ManagerAttentionKind) {
+  function resolveManagerAttention(item: ManagerAttentionItem) {
     setShowManagerAttention(false);
-    if (kind === "password-resets") {
+    if (item.kind === "password-resets") {
       setActiveTab("staff");
       return;
     }
-    if (kind === "incidents") {
+    if (item.kind === "incidents") {
       setActiveTab("incidents");
       return;
     }
-    if (kind === "recipe-setup") {
-      const next = scheduledRecipeIssues[0];
-      if (next) openSetupEditor(next.brand, next.flavor);
+    if (item.kind === "recipe-setup") {
+      if (item.destination?.brand) {
+        openSetupEditor(item.destination.brand, item.destination.flavor);
+      }
       return;
     }
-    // The existing banner owns proactive alert state and Apply/Dismiss behavior.
-    // Returning to Run keeps this inbox from becoming a second alert lifecycle.
-    setActiveTab("run");
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   // Update the apply-sync callback so it always captures fresh form/state refs
@@ -8321,7 +8738,11 @@ export default function Home() {
         const res = await fetch("/api/sync/reset-epoch");
         if (!res.ok) return;
         const { epoch } = (await res.json()) as { epoch: number };
-        if (typeof epoch === "number" && applyResetWipe(epoch)) window.location.reload();
+        if (typeof epoch === "number" && epoch > getStoredResetEpoch()) {
+          const generation = synchronizationStateMachineRef.current.beginReset(epoch);
+          if (applyResetWipe(epoch)) window.location.reload();
+          else synchronizationStateMachineRef.current.completeReset(generation);
+        }
       } catch {}
     })();
   }, []);
@@ -8346,7 +8767,6 @@ export default function Home() {
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
         void runFactoryKvMigration(data);
-        void runTemplatesMigration();
       } catch {
         // Offline / error — keep whatever is in localStorage already
       }
@@ -8389,6 +8809,14 @@ export default function Home() {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
+  // Dough pause/resume is immediate in the hook; this listener durably queues
+  // the corresponding server-visible control without coupling the hook to Home.
+  useEffect(() => {
+    const sync = () => schedulePush(dayStateRef.current, 0, "edit");
+    window.addEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
+    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
+  }, []);
+
   // SSE connection — receives updates from other clients
   useEffect(() => {
     syncBaselineGateRef.current.beginConnection();
@@ -8415,19 +8843,56 @@ export default function Home() {
           resetEpoch?: number;
           initial?: boolean;
           serverCalc?: { runId: string; calc: Calc } | null;
-          autoTrackSchedule?: import("@workspace/live-calc").AutoTrackSchedule | null;
+          autoTrackSchedule?: AutoTrackSchedule | null;
+          masterDataChanged?: boolean;
+          senderId?: string | null;
         };
+        if (msg.serverCalc) {
+          serverCalcRef.current = msg.serverCalc;
+          setServerCalc(msg.serverCalc.calc);
+          adoptServerCalcReceipt(msg.serverCalc, msg.snapshotId);
+        } else if (msg.initial && msg.snapshotId) {
+          serverCalcRef.current = null;
+          setServerCalc(null);
+          serverCalcReceiptRef.current = null;
+          setServerCalcReceipt(null);
+        }
+        if (
+          msg.masterDataChanged &&
+          shouldRefreshMasterData(msg.senderId, clientId.current)
+        ) {
+          void invalidateMasterDataBootstrap(cycleCountQc);
+        }
+        if (msg.autoTrackSchedule) {
+          autoTrackScheduleRef.current = msg.autoTrackSchedule;
+          publishAutoTrackSchedule(msg.autoTrackSchedule);
+        }
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
         if (msg.reset && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
-          if (applyResetWipe(msg.resetEpoch)) window.location.reload();
+          if (msg.resetEpoch > getStoredResetEpoch()) {
+            const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
+            if (applyResetWipe(msg.resetEpoch)) window.location.reload();
+            else synchronizationStateMachineRef.current.completeReset(generation);
+          }
           return;
         }
         if (msg.unchanged) {
-          if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+          if (typeof msg.snapshotId === "string") {
+            syncSnapshotIdRef.current = msg.snapshotId;
+          }
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
+          if (msg.data.doughTimerControls) {
+            localStorage.setItem(
+              "run-calculator:dough-timer-controls",
+              JSON.stringify(msg.data.doughTimerControls),
+            );
+            window.dispatchEvent(new CustomEvent(DOUGH_TIMER_CONTROL_ADOPT_EVENT, {
+              detail: msg.data.doughTimerControls,
+            }));
+          }
           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
@@ -8463,14 +8928,7 @@ export default function Home() {
             requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
           }
         }
-      
-        // Store server-computed calc and adopt the server's auto-track schedule
-        // (refactor step 6a): the schedule arms due refs via the same
-        // coordination event claims use, so a device opening mid-run or waking
-        // converges onto the canonical tick times without re-deriving them.
-        if (msg.serverCalc) serverCalcRef.current = msg.serverCalc;
-        if (msg.autoTrackSchedule) publishAutoTrackSchedule(msg.autoTrackSchedule);
-} catch {}
+      } catch {}
     };
     es.onerror = () => {
       recordSyncEvent("failure", isOnline ? "Live sync connection delayed; local changes are retained" : "Offline; local changes are retained");
@@ -8502,14 +8960,15 @@ export default function Home() {
     let cancelled = false;
 
     const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
-      const recoveryOwner = ++foregroundRecoveryOwnerRef.current;
+      const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
+      foregroundRecoveryOwnerRef.current = recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
       showForegroundRecoveryNotice(
         "recovering",
         queuedStop
-          ? "Stop requested. Checking the current run state before applying it…"
-          : "Checking the current production state…",
+          ? "Still recovering: stop requested. Checking the current run state before applying it…"
+          : "Still recovering: checking the current production state…",
       );
       // Raise both the synchronous ref fence and its rendered companion before
       // the wake clock can publish hidden-time progress. A normal unchanged
@@ -8522,7 +8981,6 @@ export default function Home() {
         syncRetryTimerRef.current = null;
       }
       setSyncRetryWaiting(false);
-      syncPushQueueRef.current.reset();
       syncPushTimingRef.current = null;
       for (const controller of syncPushAbortControllersRef.current) controller.abort();
       syncPushAbortControllersRef.current.clear();
@@ -8542,9 +9000,13 @@ export default function Home() {
           const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
           if (epochRes.ok) {
             const epochBody = await epochRes.json().catch(() => null) as { epoch?: number } | null;
-            if (typeof epochBody?.epoch === "number" && applyResetWipe(epochBody.epoch)) {
-              window.location.reload();
-              return false;
+            if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
+              const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
+              if (applyResetWipe(epochBody.epoch)) {
+                window.location.reload();
+                return false;
+              }
+              synchronizationStateMachineRef.current.completeReset(generation);
             }
           }
 
@@ -8655,7 +9117,7 @@ export default function Home() {
           return false;
          } finally {
            if (foregroundRecoveryOwnerRef.current === recoveryOwner) {
-            if (reconciled) {
+            if (reconciled && synchronizationStateMachineRef.current.completeWake(recoveryOwner, true)) {
                // Resolve the tap while the barrier is still raised. This keeps
                // the canonical adoption and the same-run Stop in one fenced
                // handoff; endRun's resulting push remains queued until below.
@@ -8690,24 +9152,25 @@ export default function Home() {
                    );
                  }
                } else {
-                 showForegroundRecoveryNotice("outcome", "Production state recovered.");
+                  showForegroundRecoveryNotice("outcome", "Production state synchronized.");
                }
-              foregroundSyncBarrierRef.current = false;
-              // No-op if this wake did not adopt lifecycle state. If it did,
-              // the hook sees the true→false transition and re-baselines safely.
-              if (!cancelled) {
-                setAutoTrackBlocked(false);
-                const shouldPush = foregroundPushPendingRef.current;
-                foregroundPushPendingRef.current = false;
-                if (shouldPush) {
-                   // The canceled pre-wake write must be replayed before an
-                   // automatic claim can use the pulled baseline. Keep the
-                   // claim queue behind that replay's acknowledgment.
-                   pushAcknowledgedRef.current = false;
-                  requestAnimationFrame(() => {
-                    if (!cancelled) schedulePush(dayStateRef.current, 0);
-                  });
-                }
+             foregroundSyncBarrierRef.current = false;
+             // No-op if this wake did not adopt lifecycle state. If it did,
+             // the hook sees the true→false transition and re-baselines safely.
+             if (!cancelled) {
+               setForegroundSyncAcknowledgement((value) => value + 1);
+               setAutoTrackBlocked(false);
+               const shouldPush = foregroundPushPendingRef.current;
+               foregroundPushPendingRef.current = false;
+               if (shouldPush) {
+                 // The canceled pre-wake write must be replayed before an
+                 // automatic claim can use the pulled baseline. Keep the
+                 // claim queue behind that replay's acknowledgment.
+                 pushAcknowledgedRef.current = false;
+                 requestAnimationFrame(() => {
+                   if (!cancelled) schedulePush(dayStateRef.current, 0);
+                 });
+               }
               } else {
                 // The first Strict Mode pass can be cancelled after doing the
                 // work but before its state updates. Do not strand the
@@ -8908,19 +9371,29 @@ export default function Home() {
         // Auto-end any active run before archiving yesterday
         const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
         if (prevDs && stored.date) {
-          // Auto-deduct inventory for every run being closed by the rollover, the
-          // same as an explicit endRun. consume is idempotent per runId, so runs
-          // already deducted via endRun won't double-count.
+          const rolloverEndedAt = Date.now();
+          // Rollover completion uses the same durable atomic finalization as an
+          // explicit End. Preserve yesterday's date in the intent outbox.
           for (const r of prevDs.runs) {
             if (r.startedAt && !r.endedAt) {
               const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+              queueOperationalIntent({
+                date: stored.date,
+                runId: r.id,
+                observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
+                effectiveAt: rolloverEndedAt,
+                action: "lifecycle",
+                lifecycle: "end",
+                preEndLifecycle: capturePreEndLifecycle(r),
+                inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, vals)),
+              });
             }
           }
+          if (browserIsOnline()) void flushOperationalIntentOutbox();
           const finalDs: DayState = {
             ...prevDs,
             runs: prevDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+              r.startedAt && !r.endedAt ? { ...r, endedAt: rolloverEndedAt, pausedAt: undefined } : r
             ),
           };
           archiveDayToHistory(finalDs, stored.date);
@@ -8935,15 +9408,11 @@ export default function Home() {
         // session boundary (resetBoundaryAt) will be established on the next
         // successful push once the connection recovers.
         let serverConfirmedNoRuns = false;
-        // Retry once after a short delay when the initial fetch fails.
-        // On Render free-tier the service spins down after inactivity; a
-        // cold-start GET can time out while the server is still waking.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const res = await fetch(`/api/sync/${newDate}`);
-            if (res.ok) {
-              const payload = await res.json() as SyncPayload | null;
-              if (payload?.dayState?.runs?.length) {
+        try {
+          const res = await fetch(`/api/sync/${newDate}`);
+          if (res.ok) {
+            const payload = await res.json() as SyncPayload | null;
+            if (payload?.dayState?.runs?.length) {
               // Apply the saved line-type (dough/crusts) preference to each run
               // that has no subTab set — so brands always scheduled as "crusts"
               // start in the right mode without a manual toggle every morning.
@@ -8994,13 +9463,7 @@ export default function Home() {
             }
             serverConfirmedNoRuns = true;
           }
-          } catch {}
-          // Brief pause before retry to allow a cold-starting server to
-          // finish waking; skip on the final attempt.
-          if (attempt === 0 && !serverConfirmedNoRuns) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 5_000));
-          }
-        }
+        } catch {}
         // Fallback: fresh empty state. Only push to the server if the GET
         // confirmed there are no scheduled runs — otherwise we'd risk wiping
         // them via the wholesale-adopt escape hatch (see comment above).
@@ -9061,7 +9524,11 @@ export default function Home() {
   function handleStaleSyncWrite(body: unknown): boolean {
     const b = body as { stale?: boolean; epoch?: number } | null;
     if (!b?.stale) return false;
-    if (typeof b.epoch === "number" && applyResetWipe(b.epoch)) window.location.reload();
+    if (typeof b.epoch === "number" && b.epoch > getStoredResetEpoch()) {
+      const generation = synchronizationStateMachineRef.current.beginReset(b.epoch);
+      if (applyResetWipe(b.epoch)) window.location.reload();
+      else synchronizationStateMachineRef.current.completeReset(generation);
+    }
     return true;
   }
 
@@ -9360,9 +9827,15 @@ export default function Home() {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
-      dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,
+      ...(() => {
+        try {
+          const controls = JSON.parse(localStorage.getItem("run-calculator:dough-timer-controls") ?? "{}");
+          return controls && typeof controls === "object" ? { doughTimerControls: controls } : {};
+        } catch { return {}; }
+      })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
       ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
     };
@@ -9458,141 +9931,25 @@ export default function Home() {
     replaceFrontline(vals.frontlineRecipe ?? []);
   }
 
-  // Heal the live form when the CURRENT RUN changes without going through an
-  // imperative run-switch handler (those form.reset the target run's values
-  // themselves). The main case: a fresh device's FIRST sync-apply right after
-  // sign-in. The initial SSE payload adopts the remote day (auto-selecting run
-  // 0) and saves every run's values to localStorage, but the apply callback's
-  // form-reset block reads the PRE-apply dayStateRef — whose blank local run id
-  // isn't in the payload — so it skips, leaving the form all-default ("0 cases
-  // needed") until some later remote push happens to land. Anything reading
-  // form.getValues() for the current run (the re-import case-update dialog's
-  // "from" count) sees that stale 0 too. When the current run id changes and
-  // the live form is all-default while the stored copy is populated, load the
-  // stored values. shouldHealFormFromStored (storage.ts) holds the pure
-  // decision: isEmptyOverPopulated (the same guard the sync receive path uses)
-  // means a genuinely edited or legitimately blank form is never touched, and
-  // the lastLocalEditRef window keeps a just-typed edit safe.
-  useEffect(() => {
-    if (!currentRunId) return;
-    const stored = loadRunValues(currentRunId);
-    if (
-      shouldHealFormFromStored(
-        form.getValues(),
-        stored,
-        lastLocalEditRef.current,
-        Date.now(),
-      )
-    ) {
-      const merged = mergeRunDefaults(stored);
-      lastFormRunIdRef.current = currentRunId;
-      form.reset(merged);
-      resetFieldArrays(merged);
-    } else if (
-      // The form was last settled for a DIFFERENT run and still shows values
-      // that differ from this run's stored copy — i.e. it is still displaying
-      // the PREVIOUS run's data. This happens when the current run id changes
-      // without an imperative run-switch handler (which would form.reset
-      // itself): a peer's day reset or a fully-tombstoned run union seeds a
-      // fresh blank placeholder and the sync-apply index clamp lands on it,
-      // but its id isn't in the payload so no reset fires. Settling here
-      // (the old else-branch behavior) let the next form.watch autosave copy
-      // the previous run's casesNeeded/skidsCompleted/recipes into the blank
-      // run's slot — the source of the daily contaminated "Unnamed Run" rows.
-      // Reset the form to the new run's stored copy instead.
-      shouldResetFormOnRunSwitch(
-        form.getValues(),
-        mergeRunDefaults(stored),
-        lastFormRunIdRef.current === currentRunId,
-      )
-    ) {
-      const merged = mergeRunDefaults(stored);
-      lastFormRunIdRef.current = currentRunId;
-      form.reset(merged);
-      resetFieldArrays(merged);
-    } else {
-      // Even when no heal is needed, record that the form is now settled for
-      // this run so the autosave guard doesn't block the first genuine edit.
-      lastFormRunIdRef.current = currentRunId;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRunId]);
-
-  // ──────────────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    let ds = dayStateRef.current;
-    const run = ds?.runs[ds?.currentIndex];
-    const runId = run?.id;
-    if (!runId) return;
-    // Guard: if the form hasn't been explicitly reset for this run yet (e.g. the
-    // dayState ref advanced to a new run but form.reset hasn't fired), `v` still
-    // carries the previous run's values. Saving them here would stamp the wrong
-    // product's applicator/recipe data onto the new run's localStorage slot and
-    // profile — the cross-run contamination bug. Only proceed once the form is
-    // confirmed settled for the current run.
-    if (lastFormRunIdRef.current !== runId) return;
-    if (formHandoffRef.current) return;
-    // Only treat this as a real user edit when the live form actually DIFFERS from
-    // the values already stored for this run. A programmatic form.reset() — run
-    // switch, sync-apply (the merge resets the live form to the accepted remote),
-    // daily rollover, or post-login load — re-emits the SAME persisted values
-    // through form.watch(). Without this guard the effect would re-stamp them with
-    // a fresh markRunValuesUpdated() time, defeating the per-run lost-update guard
-    // and letting a loaded/stale/empty value win the merge across devices and
-    // clobber a peer's genuine edit (the "I entered cases needed and it vanished"
-    // multi-device data loss). Mirrors mobile's primed-baseline diffStampRunEdits,
-    // which only stamps genuine changes.
-    if (deepEqual(loadRunValues(runId), v)) return;
-    // Safety net for the recurring "I entered cases-needed, waited, refreshed,
-    // and it all vanished" data loss on the shared day-state row. A genuine user
-    // edit never reduces EVERY field to its default at once — an all-default form
-    // is always a programmatic reset (mount/init race, daily rollover, or a
-    // sync-apply echo) re-emitting through form.watch() while localStorage still
-    // holds the real values. Saving + stamping it would mint a FRESH
-    // markRunValuesUpdated() time that then wins the per-run lost-update guard on
-    // every other connected tab/device and clobber the real run data. Never let
-    // an empty form overwrite a populated stored value. (Equality of stored ==
-    // DEFAULT is already short-circuited above, so this only blocks the
-    // populated→empty transition, never a legitimately blank run.)
-    if (isEmptyOverPopulated(v, loadRunValues(runId))) return;
-    const now = Date.now();
-    // Claim an automatic placeholder as soon as an actual operator edit lands.
-    // A clean programmatic form reset never reaches this point (the stored-value
-    // equality guard above returns), so stale form contamination stays local-only.
-    // Persisting the provenance before the delayed sync push means reconnects and
-    // offline recovery retain this intentional run instead of treating it as a
-    // disposable startup seed.
-    if (run.seeded) {
-      ds = {
-        ...ds,
-        runs: ds.runs.map((candidate) =>
-          candidate.id === runId ? { ...candidate, seeded: false } : candidate,
-        ),
-      };
-      dayStateRef.current = ds;
-      saveDayState(ds);
-      setDayState(ds);
-    }
-    saveRunValues(runId, v);
-    // Stamp this run's edit time so an in-flight stale remote can't clobber it
-    // (the "click away and my change disappeared" lost-update).
-    markRunValuesUpdated(runId, now);
-    // Profile writes are manager-only: floor staff editing the run form must
-    // never silently overwrite the manager-configured profile (run values
-    // above still save for everyone).
-    if (canManageProfiles && (run?.brand || run?.flavor)) {
-      if (saveProfile(run.brand, run.flavor, v)) {
-        void propagateProfileToPendingRuns(run.brand, run.flavor);
-      }
-    }
-    lastLocalEditRef.current = now;
-    // Keep the edit debounce below the one-second auto-track cadence so a
-    // normal edit is shared promptly while rapid edits still collapse into
-    // one newest-snapshot request.
-    schedulePush(ds, undefined, "edit");
-    flashSaved();
-  }, [v]);
+  // This hook owns the settled-form identity fence and its two coupled effects.
+  // Home remains the sole owner of the canonical day, form, and providers.
+  useHomeFormLifecycle({
+    currentRunId,
+    dayStateRef,
+    form,
+    values: v,
+    fences: { lastFormRunIdRef, formHandoffRef },
+    lastLocalEditRef,
+    resetFieldArrays,
+    mergeRunDefaults,
+    saveDayState,
+    setDayState,
+    canManageProfiles,
+    saveProfileForRun: saveProfile,
+    propagateProfileToPendingRuns,
+    schedulePush: (state, delay, trigger) => schedulePush(state, delay, trigger),
+    flashSaved,
+  });
 
   // ── Unified setup editing: edit once, updates everywhere ──────────────────
   // (1) Setup Profiles editor → open run form. After Save Setup persists a
@@ -9615,28 +9972,32 @@ export default function Home() {
     ) {
       return;
     }
-    const profile = loadProfile(liveRun.brand, liveRun.flavor);
-    if (!profile) return;
-    // Same guard as the spec-import reload: a mix recipe name must never land
-    // in the sauce fields (mixes live on the applicator cards).
-    if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
-      profile.frontlineRecipeName = "";
-      profile.frontlineRecipe = [];
-    }
-    const current = form.getValues();
-    const merged = mergeProfileIntoOpenForm(current, profile);
-    if (merged === current) return;
-    const now = Date.now();
-    saveRunValues(liveRun.id, merged);
-    markRunValuesUpdated(liveRun.id, now);
-    lastLocalEditRef.current = now;
-    lastFormRunIdRef.current = liveRun.id;
-    form.reset(merged);
-    resetFieldArrays(merged);
-    schedulePush(dayStateRef.current, 0);
-    toast({
-      title: "Run form updated",
-      description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
+    // Start is the immutable snapshot boundary. Shared setup/profile changes
+    // continue updating future work, but never rewrite production or history.
+    runSharedRecipeRefresh(liveRun, () => {
+      const profile = loadProfile(liveRun.brand, liveRun.flavor);
+      if (!profile) return;
+      // Same guard as the spec-import reload: a mix recipe name must never land
+      // in the sauce fields (mixes live on the applicator cards).
+      if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+        profile.frontlineRecipeName = "";
+        profile.frontlineRecipe = [];
+      }
+      const current = form.getValues();
+      const merged = mergeProfileIntoOpenForm(current, profile);
+      if (merged === current) return;
+      const now = Date.now();
+      saveRunValues(liveRun.id, merged);
+      markRunValuesUpdated(liveRun.id, now);
+      lastLocalEditRef.current = now;
+      lastFormRunIdRef.current = liveRun.id;
+      form.reset(merged);
+      resetFieldArrays(merged);
+      schedulePush(dayStateRef.current, 0);
+      toast({
+        title: "Run form updated",
+        description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
+      });
     });
   }
 
@@ -9710,7 +10071,7 @@ export default function Home() {
     const now = Date.now();
     let todayChanged = false;
     for (const r of ds.runs) {
-      if (r.id === openId || r.startedAt || r.endedAt) continue;
+      if (r.id === openId || !isSharedRecipeRefreshEligible(r)) continue;
       if (!matches(r)) continue;
       const stored = loadRunValues(r.id);
       const merged = mergeProfileIntoOpenForm(stored, profile);
@@ -9744,7 +10105,7 @@ export default function Home() {
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
         for (const run of payload.dayState.runs) {
-          if (!matches(run) || run.startedAt || run.endedAt) continue;
+          if (!matches(run) || !isSharedRecipeRefreshEligible(run)) continue;
           const stored = rv[run.id];
           const merged = mergeProfileIntoOpenForm(stored ?? { ...DEFAULT_VALUES }, profile);
           if (stored && merged === stored) continue;
@@ -9780,7 +10141,7 @@ export default function Home() {
   // stamps it. The first snapshot of each pool only primes the ref — a page
   // load must not look like "everything changed".
   const namedPoolSnapRef = useRef<{ dough: Map<string, string> | null; sauce: Map<string, string> | null }>({ dough: null, sauce: null });
-  function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
+  async function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
     const snap = new Map<string, string>();
     const byKey = new Map<string, NamedRecipePoolPatch>();
     for (const r of list) {
@@ -9823,10 +10184,20 @@ export default function Home() {
       if (patches.length > 0) {
         const markerKey = `run-calc-${kind}-row-heal-v1`;
         if (!localStorage.getItem(markerKey)) {
-          refreshProfilesFromNamedRecipes(kind, patches);
+          refreshNamedRecipeProfilesAndPropagate(
+            kind,
+            patches,
+            undefined,
+            handleSetupProfileSaved,
+          );
           localStorage.setItem(markerKey, "1");
         } else {
-          refreshProfilesFromNamedRecipes(kind, patches, { emptyRowsOnly: true });
+          refreshNamedRecipeProfilesAndPropagate(
+            kind,
+            patches,
+            { emptyRowsOnly: true },
+            handleSetupProfileSaved,
+          );
         }
       }
       return;
@@ -9836,37 +10207,50 @@ export default function Home() {
       if (prev.get(key) !== undefined && prev.get(key) !== sig) changed.push(byKey.get(key)!);
     }
     if (changed.length === 0) return;
-    const touched = refreshProfilesFromNamedRecipes(kind, changed);
-    const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
-    const linked = String(linkedRaw ?? "").trim().toLowerCase();
-    const hit = linked ? changed.find((c) => c.name.trim().toLowerCase() === linked) : undefined;
     let formUpdated = false;
-    if (hit) {
-      const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
-      if (!recipeRowsEqual(curRows, hit.rows)) {
-        const copy = hit.rows.map((row) => ({ ...row }));
-        if (kind === "dough") {
-          form.setValue("doughRecipe", copy, { shouldDirty: true });
-          replaceDough(copy);
-        } else {
-          form.setValue("frontlineRecipe", copy, { shouldDirty: true });
-          replaceFrontline(copy);
+    const touched = await orchestrateSharedRecipeRefresh({
+      getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+      refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
+        kind,
+        changed,
+        undefined,
+        handleSetupProfileSaved,
+      ),
+      refreshOpenForm: () => {
+        const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
+        const linked = String(linkedRaw ?? "").trim().toLowerCase();
+        const hit = linked
+          ? changed.find((c) => c.name.trim().toLowerCase() === linked)
+          : undefined;
+        if (hit) {
+          const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
+          if (!recipeRowsEqual(curRows, hit.rows)) {
+            const copy = hit.rows.map((row) => ({ ...row }));
+            if (kind === "dough") {
+              form.setValue("doughRecipe", copy, { shouldDirty: true });
+              replaceDough(copy);
+            } else {
+              form.setValue("frontlineRecipe", copy, { shouldDirty: true });
+              replaceFrontline(copy);
+            }
+            formUpdated = true;
+          }
         }
-        formUpdated = true;
-      }
-      // Weight/per-tray are per-flavor — pool values only fill a blank form,
-      // never overwrite a value the profile/operator already set.
-      const wantW = hit.doughballWeightOz ?? 0;
-      if (kind === "dough" && wantW > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) {
-        form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
-        formUpdated = true;
-      }
-      const wantTray = hit.doughballsPerTray ?? 0;
-      if (kind === "dough" && wantTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) {
-        form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
-        formUpdated = true;
-      }
-    }
+        if (!hit) return;
+        // Weight/per-tray are per-flavor — pool values only fill a blank form,
+        // never overwrite a value the profile/operator already set.
+        const wantW = hit.doughballWeightOz ?? 0;
+        if (kind === "dough" && wantW > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) {
+          form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
+          formUpdated = true;
+        }
+        const wantTray = hit.doughballsPerTray ?? 0;
+        if (kind === "dough" && wantTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) {
+          form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
+          formUpdated = true;
+        }
+      },
+    });
     if (!formUpdated && touched.length === 0) return;
     const label = kind === "dough" ? "dough" : "sauce";
     toast({
@@ -9877,11 +10261,11 @@ export default function Home() {
     });
   }
   useEffect(() => {
-    applyNamedPoolChange("dough", doughRecipesList);
+    void applyNamedPoolChange("dough", doughRecipesList);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doughRecipesList]);
   useEffect(() => {
-    applyNamedPoolChange("sauce", sauceRecipesList);
+    void applyNamedPoolChange("sauce", sauceRecipesList);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList]);
 
@@ -9916,19 +10300,26 @@ export default function Home() {
         .filter((c) => c.ingredient);
     }
 
+    const touched = new Map<string, { brand: string; flavor: string }>();
+    const remember = (profiles: { brand: string; flavor: string }[]) => {
+      for (const profile of profiles) {
+        touched.set(`${profile.brand.toLowerCase()}::${profile.flavor.toLowerCase()}`, profile);
+      }
+    };
     if (markerSet) {
-      // Ongoing pass — runs on every dep change without a ref guard.
+      // Ongoing pass — recipe edits are authoritative for linked pending work,
+      // not just for profiles whose rows happened to be empty.
       for (const r of cheeseRecipesList) {
         if (r.enabled === false || !r.name.trim()) continue;
         const rows = normalizeRecipeRowsForCompare(r.components);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(r.name, rows, { emptyRowsOnly: true });
+        remember(refreshCheeseOrMixProfileRows(r.name, rows));
       }
       for (const m of mixes) {
         if (!m.name.trim()) continue;
         const rows = mixRows(m);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(m.name, rows, { emptyRowsOnly: true });
+        remember(refreshCheeseOrMixProfileRows(m.name, rows));
       }
     } else {
       // First-time full heal — wait for pool data, run once per mount.
@@ -9939,15 +10330,18 @@ export default function Home() {
         if (r.enabled === false || !r.name.trim()) continue;
         const rows = normalizeRecipeRowsForCompare(r.components);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(r.name, rows);
+        remember(refreshCheeseOrMixProfileRows(r.name, rows));
       }
       for (const m of mixes) {
         if (!m.name.trim()) continue;
         const rows = mixRows(m);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(m.name, rows);
+        remember(refreshCheeseOrMixProfileRows(m.name, rows));
       }
       localStorage.setItem(markerKey, "1");
+    }
+    for (const profile of touched.values()) {
+      handleSetupProfileSaved(profile.brand, profile.flavor);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cheeseRecipesList, mixes]);
@@ -9957,7 +10351,9 @@ export default function Home() {
   // recipe rows. Covers: page load before mixes arrive from the server, and
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
-    if (serverMixRowsByName.size === 0) return;
+    const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+    runSharedRecipeRefresh(liveRun, () => {
+      if (serverMixRowsByName.size === 0) return;
     const mixFormSlots = [
       { typeField: "app1Type", nameField: "app1CheeseRecipeName", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza", replace: replaceCheese1 },
       { typeField: "app2Type", nameField: "app2CheeseRecipeName", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza", replace: replaceCheese2 },
@@ -9982,7 +10378,8 @@ export default function Home() {
       replace(rows);
       const rowSum = serverRows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
       if (rowSum > 0) form.setValue(ozField as "app1OzPerPizza", rowSum, { shouldDirty: true });
-    }
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverMixRowsByName]);
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
@@ -10113,9 +10510,9 @@ export default function Home() {
   // Commit a single confirmed value from the "Fill in missing data" panel. Goes
   // through the normal form path (setValue → autosave effect persists run values
   // + profile), so there is no separate write path and no auto-apply.
-  function commitMissingField(key: string, value: string | number) {
+  const commitMissingField = useEvent((key: string, value: string | number) => {
     form.setValue(key as keyof FormValues, value as never, { shouldDirty: true });
-  }
+  });
 
   function switchToRun(newIndex: number) {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
@@ -10166,21 +10563,21 @@ export default function Home() {
   function makeSubLogEntry(kind: SubstitutionLogEntry["kind"], description: string): SubstitutionLogEntry {
     return { id: genId(), ts: Date.now(), kind, description, ...(me?.name ? { user: me.name } : {}) };
   }
-  function addSubstitution(sub: IngredientSubstitution) {
+  const addSubstitution = useEvent((sub: IngredientSubstitution) => {
     const existing = dayStateRef.current.substitutions ?? [];
     // One active substitution per affected ingredient — replace if it exists.
     const next = [...existing.filter(s => s.ingredient !== sub.ingredient), sub];
     persistSubstitutions(next, [makeSubLogEntry("added", describeSubstitution(sub))]);
-  }
-  function removeSubstitution(id: string) {
+  });
+  const removeSubstitution = useEvent((id: string) => {
     const existing = dayStateRef.current.substitutions ?? [];
     const removed = existing.find(s => s.id === id);
     persistSubstitutions(
       existing.filter(s => s.id !== id),
       removed ? [makeSubLogEntry("cleared", describeSubstitution(removed))] : [],
     );
-  }
-  function clearSubstitutions() {
+  });
+  const clearSubstitutions = useEvent(() => {
     const existing = dayStateRef.current.substitutions ?? [];
     if (existing.length === 0) {
       persistSubstitutions([]);
@@ -10191,7 +10588,7 @@ export default function Home() {
         ? describeSubstitution(existing[0])
         : `All substitutions (${existing.length})`;
     persistSubstitutions([], [makeSubLogEntry("cleared", description)]);
-  }
+  });
 
   // ── Warehouse staging checklist (day-state overlay) ────────────────────────
   // Warehouse staff tick off per-run need rows as they pull/stage them. Like
@@ -10199,7 +10596,7 @@ export default function Home() {
   // at the daily reset. Only checked rows are stored (true); unchecking deletes
   // the key. Keyed by `${runId}::${label}__${unit}` so it lines up across web +
   // mobile and survives row re-renders.
-  function toggleStagedItem(runId: string, rowKey: string) {
+  const toggleStagedItem = useEvent((runId: string, rowKey: string) => {
     const key = `${runId}::${rowKey}`;
     const prev = dayStateRef.current.stagedItems ?? {};
     const next = { ...prev };
@@ -10210,7 +10607,7 @@ export default function Home() {
     saveDayState(newDs);
     lastLocalEditRef.current = Date.now();
     schedulePush(newDs, 0);
-  }
+  });
 
   function addRun() {
     if (dayState.runs.length >= MAX_RUNS) return;
@@ -11008,6 +11405,8 @@ export default function Home() {
     if (!activeRun) return;
     const activeRunId = activeRun.id;
     const now = Date.now();
+    queueOperationalIntent({ runId: activeRunId, observedGeneration: `${activeRunId}:${activeRun.metaUpdatedAt ?? activeRun.startedAt ?? 0}`, effectiveAt: now, action: "lifecycle", lifecycle: "start" });
+    void flushOperationalIntentOutbox();
     // A pending run owns no Packaging completion. If a run-switch handoff ever
     // leaked the prior run's counters into this form/storage, clear them before
     // the lifecycle starts so the new run cannot begin already "complete".
@@ -11032,14 +11431,22 @@ export default function Home() {
     initialFinishTimestampRef.current =
       now + (calcRef.current?.totalTimeSec ?? 0) * 1000;
     // Starting a run stops any other run that is currently running. Finalize each
-    // like an explicit endRun: deduct its own inventory (idempotent per runId,
-    // from its stored values) before marking it ended.
+    // through the same durable intent as an explicit End.
     for (const r of base.runs) {
       if (r.id !== activeRunId && r.startedAt && !r.endedAt) {
         const runValues = loadRunValues(r.id);
-        void consumeRun(r.id, computeRunConsumptionLines(effectiveValuesForRun(r, runValues))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+        queueOperationalIntent({
+          runId: r.id,
+          observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
+          effectiveAt: now,
+          action: "lifecycle",
+          lifecycle: "end",
+          preEndLifecycle: capturePreEndLifecycle(r),
+          inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, runValues)),
+        });
       }
     }
+    if (browserIsOnline()) void flushOperationalIntentOutbox();
     // An explicit Warehouse allocation is carried into the live packaging
     // register once, so the operator sees the confirmed opening count while
     // the original casesNeeded target remains intact in the run form.
@@ -11078,13 +11485,13 @@ export default function Home() {
       // Mark carried even if no dough batches — prevents re-check on next startRun.
       nextPrepPhase = { ...prep, prepCarriedOver: true };
     }
-    const newRuns = base.runs.map((r, i) =>
-      i === index
-        ? { ...r, startedAt: now, endedAt: undefined }
-        : r.startedAt && !r.endedAt
-          ? { ...r, endedAt: now, pausedAt: undefined }
-          : r
-    );
+    const { runs: newRuns, autoEnded } = startRunAndQueueCompetingCompletions({
+      date: base.date || todayStr(),
+      runs: base.runs,
+      currentIndex: index,
+      now,
+      loadValues: loadRunValues,
+    });
     const newDs = { ...base, runs: newRuns, prepPhase: nextPrepPhase };
     dayStateRef.current = newDs;
     setDayState(newDs);
@@ -11092,10 +11499,6 @@ export default function Home() {
     schedulePush(newDs, 0);
     // Run Insights: runs auto-finalized by starting this one get the same
     // post-run evaluation as an explicit Stop Run (best-effort).
-    const autoEnded = newRuns.filter(
-      (r, i) =>
-        i !== index && r.endedAt === now && base.runs[i]?.startedAt && !base.runs[i]?.endedAt,
-    );
     if (autoEnded.length > 0) {
       void reportRunInsightsAfterFinalize(
         autoEnded,
@@ -11114,6 +11517,8 @@ export default function Home() {
     // records for one lifecycle.
     if (!run?.startedAt || run.pausedAt || run.endedAt) return;
     const now = Date.now();
+    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "pause" });
+    void flushOperationalIntentOutbox();
     // Persist the conservative default before displaying the question. This is
     // intentionally not deferred to the ten-second timer: a reload, a lost
     // foreground event, or another tablet must all see the same safe choice.
@@ -11186,6 +11591,8 @@ export default function Home() {
     const run = base.runs[index];
     if (!run) return;
     const now = Date.now();
+    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "resume" });
+    void flushOperationalIntentOutbox();
     const resumed = applyResumeToRun(run, now);
     if (!resumed) return;
     const newRuns = base.runs.map((r, i) =>
@@ -11239,7 +11646,7 @@ export default function Home() {
 
   // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
   // never called automatically. Returns a confirmation line for the card.
-  async function applyRunSuggestion(s: RunSuggestion): Promise<string> {
+  const applyRunSuggestion = useEvent(async (s: RunSuggestion): Promise<string> => {
     if (s.type === "speed-target") {
       const changed: string[] = [];
       // Targeted profile write: load → patch one field → save. saveProfile's
@@ -11313,13 +11720,13 @@ export default function Home() {
       );
     }
     return `Tunnel time updated to ${s.recommendedValue} min (${changed.join(" + ")}).`;
-  }
+  });
 
   // Pre-flight check for RunInsightsCard: returns a warning string when Accept
   // is likely to throw (no saved profile AND not the current open run).  This
   // mirrors the throw conditions in applyRunSuggestion so managers see the
   // problem before clicking rather than only after.
-  function getRunSuggestionAcceptWarning(s: RunSuggestion): string | null {
+  const getRunSuggestionAcceptWarning = useEvent((s: RunSuggestion): string | null => {
     const isCurrentRun =
       !!currentRun &&
       (currentRun.brand ?? "") === s.brand &&
@@ -11362,7 +11769,7 @@ export default function Home() {
       return "No saved setup or die defaults for this product — open its Setup profile first.";
     }
     return null;
-  }
+  });
 
   function endRun(expectedRunId?: string, fromForegroundRecovery = false) {
     // Guard: a run that was never started cannot be ended. Every UI call-site
@@ -11405,10 +11812,21 @@ export default function Home() {
         void propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
       }
     }
-    // Auto-deduct this run's materials from inventory (idempotent by runId;
-    // no-op for any material that has no inventory item).
-    void consumeRun(activeRunId, computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
     const endedAt = Date.now();
+    // Online and offline completion use the same durable command. The bounded
+    // canonical lines are captured now (not recomputed after recipes change).
+    // Until this commits, buildSyncPayload removes the optimistic endedAt.
+    const observedRun = overlayRunMetaStamps([activeRun])[0];
+    queueOperationalIntent({
+      runId: activeRunId,
+      observedGeneration: `${activeRunId}:${observedRun.metaUpdatedAt ?? observedRun.startedAt ?? 0}`,
+      effectiveAt: endedAt,
+      action: "lifecycle",
+      lifecycle: "end",
+      preEndLifecycle: capturePreEndLifecycle(observedRun),
+      inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur)),
+    });
+    if (browserIsOnline()) void flushOperationalIntentOutbox();
     const newRuns = base.runs.map((r, i) =>
       i === index ? { ...r, pausedAt: undefined, endedAt } : r
     );
@@ -11486,428 +11904,6 @@ export default function Home() {
     };
   }
 
-  // Apply a one-tap AI recommendation action by routing it to the existing
-  // run/schedule mutations. Returns a result the AssistantTab renders inline;
-  // nothing is applied without the manager's explicit tap.
-  function applyOptimizeAction(action: OptimizeAction): { ok: boolean; message: string; undo?: () => void } {
-    if (action.kind === "set_target_time") {
-      const time = (action.time ?? "").trim();
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, message: "Invalid time" };
-      const prevTime = runToTime;
-      setRunToTime(time);
-      return {
-        ok: true,
-        message: `Finish time set to ${time}`,
-        undo: () => setRunToTime(prevTime),
-      };
-    }
-
-    if (action.kind === "set_run_target") {
-      const runId = action.runId ?? "";
-      const cases = Math.round(action.casesNeeded ?? NaN);
-      if (!Number.isFinite(cases) || cases <= 0) return { ok: false, message: "Invalid target" };
-      const idx = dayState.runs.findIndex((r) => r.id === runId);
-      if (idx < 0) return { ok: false, message: "Run no longer exists" };
-      const prevCases =
-        runId === currentRunId
-          ? (form.getValues("casesNeeded") as number)
-          : loadRunValues(runId).casesNeeded;
-      const writeCases = (value: number) => {
-        const now = Date.now();
-        if (runId === currentRunId) {
-          form.setValue("casesNeeded", value, { shouldDirty: true });
-          saveRunValues(currentRunId, form.getValues());
-        } else {
-          const vals = loadRunValues(runId);
-          saveRunValues(runId, { ...vals, casesNeeded: value });
-        }
-        // Stamp the edit: this bypasses the form-watch autosave (saveRunValues
-        // above makes its loadRunValues===v guard skip), and an unstamped value
-        // loses the per-run LWW merge to a peer's stale stamped copy.
-        markRunValuesUpdated(runId, now);
-        lastLocalEditRef.current = now;
-        schedulePush(dayStateRef.current, 0);
-      };
-      writeCases(cases);
-      return {
-        ok: true,
-        message: `Target set to ${cases} cases`,
-        undo: () => writeCases(prevCases),
-      };
-    }
-
-    if (action.kind === "adjust_line_speed") {
-      const newValue = action.newValue;
-      if (!newValue || !Number.isFinite(newValue) || newValue <= 0) {
-        return { ok: false, message: "Invalid speed value" };
-      }
-      const isCrust = action.isCrustMode ?? false;
-      const field = isCrust ? "approxLineSpeed" : "speedAdjustment";
-      const prevValue = form.getValues(field) as number;
-      const writeSpeed = (val: number) => {
-        const now = Date.now();
-        form.setValue(field, val, { shouldDirty: true });
-        saveRunValues(currentRunId, form.getValues());
-        markRunValuesUpdated(currentRunId, now);
-        lastLocalEditRef.current = now;
-        schedulePush(dayStateRef.current, 0);
-      };
-      writeSpeed(newValue);
-      return {
-        ok: true,
-        message: isCrust
-          ? `Approximate Line Speed set to ${newValue}`
-          : `Speed Adjustment set to ${newValue}`,
-        undo: () => writeSpeed(prevValue),
-      };
-    }
-
-    // reorder_run
-    const runId = action.runId ?? "";
-    const fromIdx = dayState.runs.findIndex((r) => r.id === runId);
-    if (fromIdx < 0) return { ok: false, message: "Run no longer exists" };
-    const beforeId = action.beforeRunId ?? null;
-    let toIdx: number;
-    if (beforeId === null) {
-      toIdx = dayState.runs.length - 1;
-    } else {
-      const remaining = dayState.runs.filter((r) => r.id !== runId);
-      const beforePos = remaining.findIndex((r) => r.id === beforeId);
-      if (beforePos < 0) return { ok: false, message: "Target run no longer exists" };
-      toIdx = beforePos;
-    }
-    if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
-    const prevRuns = dayState.runs;
-    const prevIndex = dayState.currentIndex;
-    moveRun(fromIdx, toIdx);
-    return {
-      ok: true,
-      message: "Run order updated",
-      undo: () => {
-        const restored = { ...dayStateRef.current, runs: prevRuns, currentIndex: prevIndex };
-        setDayState(restored);
-        saveDayState(restored);
-        schedulePush(restored);
-      },
-    };
-  }
-
-  // Voice commands: build the platform handler set that the shared dispatcher
-  // calls. Every handler forwards to an EXISTING run/inventory mutation (no new
-  // write surface) and returns an undo so a misheard command can be reverted
-  // within the AssistantTab's short window. Server-resolved ids are validated
-  // again here (the run may have changed since classification). Mobile mirrors
-  // this exactly via RunContext in artifacts/run-calculator-mobile (replit.md
-  // parity) — same kinds, same arguments through dispatchVoiceCommand.
-  function buildVoiceHandlers(): VoiceCommandHandlers {
-    // Function declarations are hoisted, so capture the page-level mutations
-    // whose names collide with handler methods to call them unambiguously.
-    const pageAddRun = addRun;
-    const pageRemoveRun = removeRun;
-    const pageUpdateRunMeta = updateRunMeta;
-    const findIdx = (runId: string) => dayStateRef.current.runs.findIndex((r) => r.id === runId);
-
-    return {
-      setTargetTime(time) {
-        return applyOptimizeAction({ kind: "set_target_time", label: "", time });
-      },
-      clearTargetTime() {
-        const prev = runToTime;
-        setRunToTime("");
-        return {
-          ok: true,
-          message: "Finish time cleared",
-          undo: () => setRunToTime(prev),
-        };
-      },
-      setRunTarget(runId, casesNeeded) {
-        return applyOptimizeAction({ kind: "set_run_target", label: "", runId, casesNeeded });
-      },
-      reorderRun(runId, beforeRunId) {
-        return applyOptimizeAction({ kind: "reorder_run", label: "", runId, beforeRunId });
-      },
-      addRun(brand, flavor) {
-        if (dayStateRef.current.runs.length >= MAX_RUNS) {
-          return { ok: false, message: "Maximum runs reached" };
-        }
-        const prevDs = dayStateRef.current;
-        const prevIndex = prevDs.currentIndex;
-        pageAddRun();
-        setRunBrandFlavor(brand, flavor);
-        const name = `${brand} ${flavor}`.trim() || "run";
-        return {
-          ok: true,
-          message: `Added ${name}`,
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            const vals = loadRunValues(prevDs.runs[prevIndex].id);
-            form.reset(vals);
-            resetFieldArrays(vals);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      removeRun(runId) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const run = dayStateRef.current.runs[idx];
-        if (run.startedAt || run.endedAt) {
-          return { ok: false, message: "Can't remove a started or finished run" };
-        }
-        if (dayStateRef.current.runs.length <= 1) {
-          return { ok: false, message: "Can't remove the only run" };
-        }
-        const prevDs = dayStateRef.current;
-        const prevIndex = prevDs.currentIndex;
-        if (idx !== prevIndex) switchToRun(idx);
-        pageRemoveRun();
-        return {
-          ok: true,
-          message: "Run removed",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            const vals = loadRunValues(prevDs.runs[prevIndex].id);
-            form.reset(vals);
-            resetFieldArrays(vals);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      switchRun(runId) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prevIndex = dayStateRef.current.currentIndex;
-        if (idx === prevIndex) return { ok: true, message: "Already on that run" };
-        switchToRun(idx);
-        return {
-          ok: true,
-          message: "Switched run",
-          undo: () => switchToRun(prevIndex),
-        };
-      },
-      updateRunMeta(runId, brand, flavor) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const run = dayStateRef.current.runs[idx];
-        const newBrand = brand ?? run.brand;
-        const newFlavor = flavor ?? run.flavor;
-        const prevBrand = run.brand;
-        const prevFlavor = run.flavor;
-        const name = `${newBrand} ${newFlavor}`.trim() || "run";
-        if (idx === dayStateRef.current.currentIndex) {
-          setRunBrandFlavor(newBrand, newFlavor);
-          return {
-            ok: true,
-            message: `Renamed to ${name}`,
-            undo: () => setRunBrandFlavor(prevBrand, prevFlavor),
-          };
-        }
-        pageUpdateRunMeta(runId, { brand: newBrand, flavor: newFlavor });
-        return {
-          ok: true,
-          message: `Renamed to ${name}`,
-          undo: () => pageUpdateRunMeta(runId, { brand: prevBrand, flavor: prevFlavor }),
-        };
-      },
-      finishRun(runId) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const run = dayStateRef.current.runs[idx];
-        if (run.endedAt) return { ok: false, message: "Run already finished" };
-        if (!run.startedAt) return { ok: false, message: "Run hasn't started yet" };
-        const prevDs = dayStateRef.current;
-        const prevIndex = prevDs.currentIndex;
-        if (idx !== prevIndex) switchToRun(idx);
-        endRun();
-        return {
-          ok: true,
-          message: "Run finished",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            const vals = loadRunValues(prevDs.runs[prevIndex].id);
-            form.reset(vals);
-            resetFieldArrays(vals);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      startStoppage(runId, reason) {
-        const targetIdx = runId ? findIdx(runId) : dayStateRef.current.currentIndex;
-        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
-        const prevDs = dayStateRef.current;
-        const prevActive = activeStopId;
-        if (runId && targetIdx !== dayStateRef.current.currentIndex) switchToRun(targetIdx);
-        logStop(reason, "");
-        return {
-          ok: true,
-          message: reason ? `Stoppage started: ${reason}` : "Stoppage started",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            setActiveStopId(prevActive);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      endStoppage(runId) {
-        const targetIdx = runId ? findIdx(runId) : dayStateRef.current.currentIndex;
-        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
-        if (runId && targetIdx !== dayStateRef.current.currentIndex) switchToRun(targetIdx);
-        if (!activeStopId) return { ok: false, message: "No active stoppage" };
-        const prevDs = dayStateRef.current;
-        const prevActive = activeStopId;
-        endStop();
-        return {
-          ok: true,
-          message: "Stoppage ended",
-          undo: () => {
-            setDayState(prevDs);
-            saveDayState(prevDs);
-            setActiveStopId(prevActive);
-            schedulePush(prevDs, 0);
-          },
-        };
-      },
-      setRunProgress(runId, progress) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const isCurrent = idx === dayStateRef.current.currentIndex;
-        const before = isCurrent ? form.getValues() : loadRunValues(runId);
-        const prev = {
-          skidsCompleted: before.skidsCompleted,
-          casesOnCurrentSkid: before.casesOnCurrentSkid,
-          casesPerSkid: before.casesPerSkid,
-        };
-        const writeProgress = (p: {
-          skidsCompleted?: number;
-          casesOnCurrentSkid?: number;
-          casesPerSkid?: number;
-        }) => {
-          const nextSkids = p.skidsCompleted ?? before.skidsCompleted;
-          const nextCases = p.casesOnCurrentSkid ?? before.casesOnCurrentSkid;
-          if (p.skidsCompleted != null || p.casesOnCurrentSkid != null) {
-            persistManualPackagingProgress(runId, nextSkids, nextCases);
-          }
-          if (isCurrent) {
-            if (p.skidsCompleted != null)
-              form.setValue("skidsCompleted", p.skidsCompleted, { shouldDirty: true });
-            if (p.casesOnCurrentSkid != null)
-              form.setValue("casesOnCurrentSkid", p.casesOnCurrentSkid, { shouldDirty: true });
-            if (p.casesPerSkid != null)
-              form.setValue("casesPerSkid", p.casesPerSkid, { shouldDirty: true });
-            saveRunValues(currentRunId, form.getValues());
-          } else {
-            const cur = loadRunValues(runId);
-            saveRunValues(runId, {
-              ...cur,
-              ...(p.skidsCompleted != null ? { skidsCompleted: p.skidsCompleted } : {}),
-              ...(p.casesOnCurrentSkid != null ? { casesOnCurrentSkid: p.casesOnCurrentSkid } : {}),
-              ...(p.casesPerSkid != null ? { casesPerSkid: p.casesPerSkid } : {}),
-            });
-          }
-          // Stamp: bypasses the form-watch autosave; unstamped values lose the
-          // per-run LWW merge to a peer's stale stamped copy.
-          const now = Date.now();
-          markRunValuesUpdated(isCurrent ? currentRunId : runId, now);
-          lastLocalEditRef.current = now;
-          schedulePush(dayStateRef.current, 0);
-        };
-        writeProgress(progress);
-        return {
-          ok: true,
-          message: "Progress updated",
-          undo: () => writeProgress(prev),
-        };
-      },
-      logActualCases(runId, actualCases) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prev = dayStateRef.current.runs[idx].actualCases;
-        pageUpdateRunMeta(runId, { actualCases });
-        return {
-          ok: true,
-          message: `Logged ${actualCases} cases`,
-          undo: () => pageUpdateRunMeta(runId, { actualCases: prev }),
-        };
-      },
-      logWaste(runId, wasteLbs) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prev = dayStateRef.current.runs[idx].wasteLbs;
-        pageUpdateRunMeta(runId, { wasteLbs });
-        return {
-          ok: true,
-          message: `Logged ${wasteLbs} lbs waste`,
-          undo: () => pageUpdateRunMeta(runId, { wasteLbs: prev }),
-        };
-      },
-      async restockItem(body) {
-        await restockInventory({
-          itemKey: body.itemKey,
-          category: body.category,
-          name: body.name,
-          unit: body.unit,
-          qty: body.qty,
-        });
-        return { ok: true, message: `Restocked ${body.qty} ${body.unit} of ${body.name}` };
-      },
-      async adjustItem(body) {
-        await adjustInventory({ itemId: body.itemId, qtyDelta: body.qtyDelta, note: body.note });
-        const sign = body.qtyDelta >= 0 ? "+" : "";
-        return {
-          ok: true,
-          message: `Adjusted stock ${sign}${body.qtyDelta}`,
-          undo: async () => {
-            await adjustInventory({
-              itemId: body.itemId,
-              qtyDelta: -body.qtyDelta,
-              note: "Undo voice adjustment",
-            });
-          },
-        };
-      },
-      rollover() {
-        // Manually trigger the same day close-out the midnight reset performs:
-        // auto-deduct inventory for open runs, freeze them at now, archive the
-        // day to history, then reset to a fresh day and push it. Irreversible by
-        // design (no undo) — gated to managers in VOICE_COMMAND_ROLES.
-        const cur = dayStateRef.current;
-        for (const r of cur.runs) {
-          if (r.startedAt && !r.endedAt) {
-            const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-            void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
-          }
-        }
-        const now = Date.now();
-        const finalDs: DayState = {
-          ...cur,
-          runs: cur.runs.map((r) =>
-            r.startedAt && !r.endedAt ? { ...r, endedAt: now, pausedAt: undefined } : r,
-          ),
-        };
-        archiveDayToHistory(finalDs, cur.date ?? todayStr());
-        const fresh = { ...freshDayState(), resetAt: now };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        setDayState(fresh);
-        saveDayState(fresh);
-        setRunToTime("19:15");
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        schedulePush(fresh, 0);
-        return { ok: true, message: "Day rolled over" };
-      },
-    };
-  }
-
-  // Entry point passed to AssistantTab: dispatch the server-resolved actions
-  // through the shared, parity-critical mapping with this user's role.
-  const applyVoiceCommand = (actions: VoiceCommandAction[]): Promise<VoiceCommandResult[]> =>
-    dispatchVoiceCommand(actions, buildVoiceHandlers(), isManager);
-
   // Apply a confirm-first recipe suggestion (a scaled recipe or substitution) to
   // a CHOSEN run's matching recipe rows. The target defaults to the current run
   // but the worker may pick any of the day's runs from the SuggestionCard. The
@@ -11917,7 +11913,7 @@ export default function Home() {
   // per-run write paths, no new write surface. Undo restores the chosen run's
   // previous rows. Mirrored verbatim on mobile (replit.md parity).
   function applyRecipeSuggestion(
-    s: RecipeAssistSuggestion,
+    s: RecipeSuggestionLike,
     runId?: string,
   ): { ok: boolean; message: string; undo?: () => void } {
     // Field-array writers for the current run's live form.
@@ -12102,34 +12098,6 @@ export default function Home() {
     saveDayState(newDs);
     if (activeStopId === stopId) setActiveStopId(null);
     schedulePush(newDs, 0);
-  }
-
-  // ── AI demand forecast → editable schedule ────────────────────────────────
-  // Non-destructive: the forecast plan only pre-fills the schedule editor for the
-  // target date. The manager reviews/adjusts and explicitly saves; nothing is
-  // committed by accepting the forecast.
-  function applyForecast(plan: ForecastPlan) {
-    const rows: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
-    const values: Record<string, FormValues> = {};
-    for (const r of plan.runs) {
-      const id = genId();
-      const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
-      const base: FormValues = profile ?? { ...DEFAULT_VALUES };
-      const cases = Number.isFinite(r.casesNeeded) && r.casesNeeded > 0 ? Math.round(r.casesNeeded) : 0;
-      rows.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: cases });
-      values[id] = { ...base, casesNeeded: cases, ...(r.dieType ? { dieType: r.dieType } : {}) };
-    }
-    if (rows.length === 0) {
-      const id = genId();
-      rows.push({ id, brand: "", flavor: "", casesNeeded: 0 });
-      values[id] = { ...DEFAULT_VALUES };
-    }
-    setScheduleAdvancedRunId(null);
-    setScheduleEditorDate(plan.targetDate || todayStr());
-    setScheduleEditorRunValues(values);
-    setScheduleEditorRuns(rows);
-    setScheduleView("editor");
-    setShowScheduleDialog(true);
   }
 
   function updateRunMeta(id: string, patch: Partial<RunMeta>) {
@@ -12873,6 +12841,7 @@ export default function Home() {
       setSpecImportPrepared(null);
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
       // have re-rendered. Never blocks or fails the already-committed import.
+      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
@@ -12948,7 +12917,8 @@ export default function Home() {
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms; re-importing updates existing mixes by id.
   async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES);
+    const { premixImport } = await loadWorkbookWorkflow();
+    const files = Array.from(e.target.files ?? []).slice(0, premixImport.MAX_PREMIX_IMPORT_FILES);
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
@@ -12971,7 +12941,7 @@ export default function Home() {
       for (const f of files) {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
-      const prepared = await preparePremixImport(
+      const prepared = await premixImport.preparePremixImport(
         buffers,
         (done, total) => {
           if (gen === premixImportGenRef.current)
@@ -13043,7 +13013,7 @@ export default function Home() {
     setPremixImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     try {
-      const result = await commitPremixImport(
+      const result = await (await loadWorkbookWorkflow()).premixImport.commitPremixImport(
         premixImportPrepared,
         mixesToApply,
         freezerPulls,
@@ -13161,7 +13131,7 @@ export default function Home() {
     setShowShippingImport(true);
     try {
       const buffer = await file.arrayBuffer();
-      const prepared = await prepareShippingImport(buffer);
+      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer);
       if (gen !== shippingImportGenRef.current) return;
       setShippingImportPrepared(prepared);
     } catch (err) {
@@ -13175,7 +13145,7 @@ export default function Home() {
     }
   }
 
-  function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[], acknowledged = false) {
+  async function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -13190,7 +13160,7 @@ export default function Home() {
     }
     setShippingImportApplying(true);
     try {
-      const result = commitShippingImport(rows, acknowledged);
+      const result = (await loadWorkbookWorkflow()).shippingImport.commitShippingImport(rows, acknowledged);
       const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
       void recordImportHistory({
         importType: "shipping",
@@ -13285,7 +13255,7 @@ export default function Home() {
         fetchNamedRecipes("sauce").catch(() => [] as NamedRecipe[]),
       ]);
       const extraSauceNames = serverSauceRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await prepareSauceGuideImport(buffer, extraSauceNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareSauceGuideImport(buffer, extraSauceNames);
       if (gen !== sauceGuideImportGenRef.current) return;
       setSauceGuideImportPrepared(prepared);
     } catch (err) {
@@ -13297,7 +13267,7 @@ export default function Home() {
     }
   }
 
-  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
+  async function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -13312,7 +13282,7 @@ export default function Home() {
     }
     setSauceGuideImportApplying(true);
     try {
-      const result = commitSauceGuideImport(rows, acknowledged);
+      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
       void recordImportHistory({
         importType: "sauce",
         sourceLabel: "Sauce recipe guide",
@@ -13360,7 +13330,7 @@ export default function Home() {
         fetchNamedRecipes("dough").catch(() => [] as NamedRecipe[]),
       ]);
       const extraDoughNames = serverDoughRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await prepareDoughGuideImport(buffer, extraDoughNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
     } catch (err) {
@@ -13372,7 +13342,7 @@ export default function Home() {
     }
   }
 
-  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
+  async function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -13387,7 +13357,7 @@ export default function Home() {
     }
     setDoughGuideImportApplying(true);
     try {
-      const result = commitDoughGuideImport(rows, acknowledged);
+      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
       void recordImportHistory({
         importType: "dough",
         sourceLabel: "Dough recipe guide",
@@ -13425,7 +13395,8 @@ export default function Home() {
   // Nothing is written until the user confirms; re-importing updates existing
   // cheese recipes by id.
   async function handleCheeseImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_CHEESE_IMPORT_FILES);
+    const { cheeseImport } = await loadWorkbookWorkflow();
+    const files = Array.from(e.target.files ?? []).slice(0, cheeseImport.MAX_CHEESE_IMPORT_FILES);
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
     if (files.length === 0) return;
@@ -13446,7 +13417,7 @@ export default function Home() {
       for (const f of files) {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
-      const prepared = await prepareCheeseImport(
+      const prepared = await cheeseImport.prepareCheeseImport(
         buffers,
         (done, total) => {
           if (gen === cheeseImportGenRef.current)
@@ -13516,7 +13487,7 @@ export default function Home() {
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     const importRollbackBefore = captureMasterDataSnapshot();
     try {
-      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -14107,7 +14078,7 @@ export default function Home() {
   // Effective values for calculation/display: the Run-tab temporary overrides
   // (Freeze tunnel time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
   // Setup fields themselves are never touched.
-  const ve = useMemo(() => withTempOverrides(v), [v]);
+  const ve = useMemo(() => applyTemporaryOverrides(v), [v]);
 
 
   useEffect(() => {
@@ -14150,19 +14121,28 @@ export default function Home() {
           catch { return null; }
         })();
         if (storedDs?.date && storedDs.date !== todayStr()) {
-          // Auto-deduct inventory for every run closed by the midnight rollover,
-          // matching endRun. consume is idempotent per runId — no double-count.
+          const rolloverEndedAt = Date.now();
           for (const r of storedDs.runs) {
             if (r.startedAt && !r.endedAt) {
               const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+              queueOperationalIntent({
+                date: storedDs.date,
+                runId: r.id,
+                observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
+                effectiveAt: rolloverEndedAt,
+                action: "lifecycle",
+                lifecycle: "end",
+                preEndLifecycle: capturePreEndLifecycle(r),
+                inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, vals)),
+              });
             }
           }
+          if (browserIsOnline()) void flushOperationalIntentOutbox();
           // Auto-end any run that was still active when midnight hit
           const finalDs: DayState = {
             ...storedDs,
             runs: storedDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+              r.startedAt && !r.endedAt ? { ...r, endedAt: rolloverEndedAt, pausedAt: undefined } : r
             ),
           };
           archiveDayToHistory(finalDs, storedDs.date);
@@ -14561,50 +14541,6 @@ export default function Home() {
           } as FormValues)),
       );
   }, [needsWarehouseSnapshot, scheduledDays, effectiveValuesForRun]);
-  // ── Warehouse tab context (narrow, like HomeTabCtx) ────────────────────────
-  // Memoized on warehouse-relevant production data only. Dialog/manage/merge
-  // state changes do NOT invalidate this value → WarehouseTabContent (memo'd)
-  // skips re-renders when only dialogs/imports/AI/merge change.
-  //
-  // !! KEEP IN SYNC: warehouseTabCtxDeps.ts mirrors this dep list for the
-  // freeze-guard test (LiveTabMemo.snappy.test.tsx Suite 4). Update BOTH when
-  // adding/removing a dep.  Dialog/manage/merge/import fields must NOT appear.
-  const warehouseTabCtxValueRaw = useMemo(
-    () => ({
-      activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
-      cycleCountSchedules, dayState, freezerPullPlan,
-      freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
-      isSupervisor, markCountedMutation,
-      refreshFreezerSurplus, replaceRunSurplus, runValuesById,
-      scheduledDays, scheduledValues, setPinError, setPinInput, setScheduleDeleteConfirm,
-      setScheduledDays, setScheduleView, setShowPinDialog, setShowScheduleDialog,
-      todayScheduledValues, toggleStagedItem,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      activeRunNeedDetails, activeRunValues, activeRuns,
-      activeWarehouseRows, activePackagingRows,
-      cycleCountSchedules, dayState,
-      freezerPullPlan,
-      freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
-      isSupervisor, markCountedMutation,
-      runValuesById,
-      scheduledDays, scheduledValues, todayScheduledValues,
-    ],
-  );
-  const warehouseTabCtxRef = useRef(warehouseTabCtxValueRaw);
-  warehouseTabCtxRef.current = warehouseTabCtxValueRaw;
-  const warehouseTabCtxValue = useMemo(() => warehouseTabCtxRef.current, [
-    // Keep in sync with WAREHOUSE_TAB_CTX_DEP_FIELDS
-    activeRunNeedDetails, activeRunValues, activeRuns,
-    activeWarehouseRows, activePackagingRows,
-    cycleCountSchedules, dayState,
-    freezerPullPlan,
-    freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
-    isSupervisor, markCountedMutation,
-    runValuesById,
-    scheduledDays, scheduledValues, todayScheduledValues,
-  ]);
   const inventoryRunValues = useMemo(
     () => needsInventorySnapshot
       ? dayState.runs.map((run) =>
@@ -14637,108 +14573,40 @@ export default function Home() {
     }
     return [...options].sort();
   }, [needsInventorySnapshot, inventoryCandidates, inventoryRunValues]);
-  // ── Inventory tab context (narrow, like WarehouseTabCtx) ───────────────────
-  // Memoized on inventory production data only. Dialog/manage/merge state
-  // changes do NOT invalidate this value → InventoryTabContent (memo'd) skips
-  // re-renders when only dialogs/imports/AI/merge change.
-  //
-  // !! KEEP IN SYNC: inventoryTabCtxDeps.ts mirrors this dep list for the
-  // freeze-guard test (LiveTabMemo.snappy.test.tsx Suite 4). Update BOTH when
-  // adding/removing a dep.  Dialog/manage/merge/import fields must NOT appear.
-  const inventoryTabCtxValueRaw = useMemo(
-    () => ({
-      candidates: inventoryCandidates,
-      runValsList: inventoryRunValues,
-      coverageRunVals: inventoryRunValues,
-      substitutions: dayState.substitutions ?? [],
-      substitutionLog: dayState.substitutionLog ?? [],
-      substitutionOptions: inventorySubstitutionOptions,
-      onAddSubstitution: addSubstitution,
-      onRemoveSubstitution: removeSubstitution,
-      onClearSubstitutions: clearSubstitutions,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      dayState,
-      inventoryCandidates, inventoryRunValues, inventorySubstitutionOptions,
-    ],
-  );
-  const inventoryTabCtxRef = useRef(inventoryTabCtxValueRaw);
-  inventoryTabCtxRef.current = inventoryTabCtxValueRaw;
-  const inventoryTabCtxValue = useMemo(() => inventoryTabCtxRef.current, [
-    // Keep in sync with INVENTORY_TAB_CTX_DEP_FIELDS
-    dayState,
-    inventoryCandidates, inventoryRunValues, inventorySubstitutionOptions,
-  ]);
-  // ── Mix Plan tab context (narrow, like WarehouseTabCtx) ────────────────────
-  // Memoized on mix-plan production data only. Dialog/manage/merge state
-  // changes do NOT invalidate this value → MixesTabContent (memo'd) skips
-  // re-renders when only dialogs/imports/AI/merge change. `freezerSurplus` is
-  // a dep because effectiveValuesForRun (which the plan uses for live runs)
-  // closes over it; the fresh closure arrives via the ref when it fires.
-  //
-  // !! KEEP IN SYNC: mixesTabCtxDeps.ts mirrors this dep list for the
-  // freeze-guard test (LiveTabMemo.snappy.test.tsx Suite 4). Update BOTH when
-  // adding/removing a dep.  Dialog/manage/merge/import fields must NOT appear.
-  const mixesTabCtxValueRaw = useMemo(
-    () => ({
-      canManageInventory, currentRunId, dayState, effectiveValuesForRun, form,
-      mixMakeDay, mixPlanItems, mixes, scheduledDays,
-      saveMixAlreadyMadeOptimistically, acknowledgeMixAlreadyMadeSave, setMixMakeDay,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      canManageInventory, currentRunId, dayState,
-      freezerSurplus, mixMakeDay, mixPlanItems, mixes,
-      scheduledDays,
-    ],
-  );
-  const mixesTabCtxRef = useRef(mixesTabCtxValueRaw);
-  mixesTabCtxRef.current = mixesTabCtxValueRaw;
-  const mixesTabCtxValue = useMemo(() => mixesTabCtxRef.current, [
-    // Keep in sync with MIXES_TAB_CTX_DEP_FIELDS
-    canManageInventory, currentRunId, dayState,
-    freezerSurplus, mixMakeDay, mixPlanItems, mixes,
-    scheduledDays,
-  ]);
 
-  // ── Setup tab context (narrow, like WarehouseTabCtx) ──────────────────────
-  // Memoized on setup-relevant data only. Dialog/manage/merge state changes
-  // do NOT invalidate this value → SetupContent (memo'd) skips re-renders
-  // when only dialogs/imports/AI/merge change. `form` and the callbacks
-  // (commitMissingField / applyRunSuggestion / getRunSuggestionAcceptWarning)
-  // are intentionally kept out of the dep list: they are stable or fresh via
-  // the ref, and the reactive values their closures read (v, currentRun,
-  // currentRunId) are listed below.
-  //
-  // !! KEEP IN SYNC: setupTabCtxDeps.ts mirrors this dep list for the
-  // freeze-guard test (LiveTabMemo.snappy.test.tsx Suite 4). Update BOTH when
-  // adding/removing a dep.  Dialog/manage/merge/import fields must NOT appear.
-  const setupTabCtxValueRaw = useMemo(
-    () => ({
-      applyRunSuggestion, circles, commitMissingField, currentRun, doughSubTab,
-      form, getRunSuggestionAcceptWarning, gripSheets,
-      isManager, isSupervisor, shipper, skidStacking, v,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      v,
-      circles, shipper, skidStacking, gripSheets,
-      isManager, isSupervisor,
-      currentRun,
-      doughSubTab,
-    ],
-  );
-  const setupTabCtxRef = useRef(setupTabCtxValueRaw);
-  setupTabCtxRef.current = setupTabCtxValueRaw;
-  const setupTabCtxValue = useMemo(() => setupTabCtxRef.current, [
-    // Keep in sync with SETUP_TAB_CTX_DEP_FIELDS
-    v,
-    circles, shipper, skidStacking, gripSheets,
-    isManager, isSupervisor,
-    currentRun,
-    doughSubTab,
-  ]);
+  // Focused values include their action callbacks in dependencies: a tab can
+  // never keep a closure from an earlier Home render.
+  const warehouseTabCtxValue = useMemo<WarehouseTabContextValue>(() => ({
+    activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
+    cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
+    freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
+    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    setPinError, setPinInput, setScheduleDeleteConfirm, setScheduledDays, setScheduleView,
+    setShowPinDialog, setShowScheduleDialog, todayScheduledValues, toggleStagedItem,
+  }), [activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
+    cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
+    freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
+    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    todayScheduledValues, toggleStagedItem]);
+  const inventoryTabCtxValue = useMemo<InventoryTabContextValue>(() => ({
+    candidates: inventoryCandidates, runValsList: inventoryRunValues, coverageRunVals: inventoryRunValues,
+    substitutions: dayState.substitutions ?? [], substitutionLog: dayState.substitutionLog ?? [],
+    substitutionOptions: inventorySubstitutionOptions, onAddSubstitution: addSubstitution,
+    onRemoveSubstitution: removeSubstitution, onClearSubstitutions: clearSubstitutions,
+  }), [dayState, inventoryCandidates, inventoryRunValues, inventorySubstitutionOptions,
+    addSubstitution, removeSubstitution, clearSubstitutions]);
+  const mixesTabCtxValue = useMemo<MixesTabContextValue>(() => ({
+    canManageInventory, currentRunId, dayState, effectiveValuesForRun, form, mixMakeDay,
+    mixPlanItems, mixes, scheduledDays, saveMixAlreadyMadeOptimistically,
+    acknowledgeMixAlreadyMadeSave, setMixMakeDay,
+  }), [canManageInventory, currentRunId, dayState, effectiveValuesForRun, form, mixMakeDay,
+    mixPlanItems, mixes, scheduledDays, saveMixAlreadyMadeOptimistically,
+    acknowledgeMixAlreadyMadeSave]);
+  const setupTabCtxValue = useMemo<SetupTabContextValue>(() => ({
+    applyRunSuggestion, circles, commitMissingField, currentRun, doughSubTab, form,
+    getRunSuggestionAcceptWarning, gripSheets, isManager, isSupervisor, shipper, skidStacking, v,
+  }), [applyRunSuggestion, circles, commitMissingField, currentRun, doughSubTab, form,
+    getRunSuggestionAcceptWarning, gripSheets, isManager, isSupervisor, shipper, skidStacking, v]);
 
   // ── Context value for extracted sub-components ──────────────────────────
   // Wrapped in useMemo so the object reference only changes when reactive
@@ -14756,11 +14624,11 @@ export default function Home() {
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
     appendCheese1, appendCheese2, appendCheese3, appendCheese4, appendDough, appendFrontline,
-    applyCaseUpdateChoices, applyForecast, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange, applyOptimizeAction,
-    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef, applyVoiceCommand,
+    applyCaseUpdateChoices, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange,
+    applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightCandidatesSig, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
-    buildSyncPayload, buildVoiceHandlers, canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
     checklistSatisfied, cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields, cheeseImportApplying,
     cheeseImportError, cheeseImportGenRef, cheeseImportInputRef, cheeseImportLoading, cheeseImportPrepared, cheeseImportProgress,
@@ -14770,7 +14638,7 @@ export default function Home() {
     confirmDeleteFlavorRef, confirmDeleteStopId, confirmRemoveBlanks, confirmRemoveRun, copiedSummary,
     currentMixPresets, currentRun, currentRunId, currentRunIdRef, customAllergens, cycleCountQc,
     cycleCountSchedules, dayState, dayStateRef, dedupSorted, deleteCatalogEntryByName, deleteScheduledDay,
-    deleteStop, dieLineDefaultOverrides, dieTypes, dismissGetStarted, dismissProactiveAlert,
+    deleteStop, dieLineDefaultOverrides, dieTypes, dismissGetStarted,
     doFetch, doughFields, doughIngredients, doughPoolDrift, doughRecipeNameOptions, doughRecipeNames,
     doughRecipesList, doughSauceMigratedRef, doughSubTab, doughVariantPick, downtimeDays, editingStop,
     enabledCheeseRecipes, endRun, endStop, existingImportRecipeNames, expandedHistoryDay, expandedScheduleDay,
@@ -14801,8 +14669,8 @@ export default function Home() {
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
-    premixImportProgress, printSummary, proactiveAlert, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
-    persistManualPackagingProgress,
+    premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
+    persistManualPackagingProgress, queueManualCorrection,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
     removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
@@ -14905,7 +14773,7 @@ export default function Home() {
     noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingResetCount, pepTypes,
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
-    premixImportPrepared, premixImportProgress, proactiveAlert, productionRules,
+    premixImportPrepared, premixImportProgress, productionRules,
     promotingRecipeKind, resolvedPin, pauseDecisionRunId, role, ruleViolations,
     runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
@@ -14978,7 +14846,7 @@ export default function Home() {
       lastEndedRun, lastRunRecall, learnedBatchWeightRows, learnedBatchWeights,
       me, mixIngredients, mixMakeDay, mixNameBrandTags, mixRecipeNames, mixes,
       newReasonInput, nextRunDieType,
-      pep1ShowB, pep2ShowB, pepTypes, proactiveAlert, productionRules,
+      pep1ShowB, pep2ShowB, pepTypes, productionRules,
       promotingRecipeKind, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
       saucePoolDrift, sauceRecipesList, sauceWeightsOpen, scheduledDays,
       screenMode, serverCheeseByName, serverCheeseNames, serverCheeseRowsByName,
@@ -15093,7 +14961,29 @@ export default function Home() {
         onOpenChange={setShowManagerAttention}
         items={managerAttentionItems}
         onResolve={resolveManagerAttention}
+        onOpenQueue={isManager ? () => {
+          setShowManagerAttention(false);
+          setActiveTab("summary");
+        } : undefined}
         authorized={canViewManagerAttention}
+        sourceStates={[
+          ...(canApproveResets
+            ? [pendingResetSummary.isUnavailable
+                ? "unavailable" as const
+                : pendingResetSummary.isLoading
+                  ? "loading" as const
+                  : pendingResetSummary.isStale ? "stale" as const : "ready" as const]
+            : []),
+          ...(canReviewIncidents
+            ? [incidentAttentionSummary.isUnavailable
+                ? "unavailable" as const
+                : incidentAttentionSummary.isLoading
+                  ? "loading" as const
+                  : incidentAttentionSummary.isStale ? "stale" as const : "ready" as const]
+            : []),
+          ...(canManageProfiles ? [scheduledAttentionState] : []),
+        ]}
+        returnFocusRef={managerAttentionTriggerRef}
       />
 
       {/* ── Floor Mode overlay ──────────────────────────────────────────── */}
@@ -15139,7 +15029,7 @@ export default function Home() {
             key: "warehouse",
             icon: <Warehouse className="w-5 h-5 text-amber-400" />,
             title: "Warehouse",
-            desc: "Total ingredient needs across all active runs + upcoming schedule",
+            desc: "Production material needs across all active runs + upcoming schedule",
             url: `${base}?screen=warehouse`,
           },
           {
@@ -15158,7 +15048,7 @@ export default function Home() {
           },
         ];
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h3 id="cast-screens-dialog-title" className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
@@ -15255,7 +15145,7 @@ export default function Home() {
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
       {showReorderDialog && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-4"
           onClick={() => setShowReorderDialog(false)}
         >
           <div
@@ -15518,7 +15408,7 @@ export default function Home() {
 
         return (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
             onClick={() => setShowManageDialog(false)}
           >
             <div
@@ -15578,10 +15468,12 @@ export default function Home() {
                         Cheese tabs. The run form's Dough / Sauce cards pick one
                         by name and hydrate their rows from the chosen recipe. */}
                     {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
-                      <NamedRecipesManager
-                        kind={manageCategory === "dough" ? "dough" : "sauce"}
-                        ingredientSuggestions={unifiedIngredientUniverse}
-                      />
+                      <div data-testid={`${manageCategory}-recipe-editor`}>
+                        <DeferredNamedRecipesManager
+                          kind={manageCategory === "dough" ? "dough" : "sauce"}
+                          ingredientSuggestions={unifiedIngredientUniverse}
+                        />
+                      </div>
                     )}
                   </div>
                 )}
@@ -16118,6 +16010,29 @@ export default function Home() {
                 {manageCategory === "import" && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
+                    {canManageInventory && pendingDuplicateReviewCount !== 0 && (
+                      <div
+                        className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between"
+                        data-testid="pending-duplicate-review"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">Possible duplicate ingredients</p>
+                          <p className="text-xs text-muted-foreground">
+                            {pendingDuplicateReviewCount === PENDING_DUPLICATE_REVIEW_SCAN
+                              ? "A recent import still needs a duplicate review."
+                              : `${pendingDuplicateReviewCount} group${pendingDuplicateReviewCount === 1 ? "" : "s"} from a recent import still need review.`}{" "}
+                            Nothing changes until you confirm a merge.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={openPendingDuplicateReview}
+                          className="w-full shrink-0 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 sm:w-auto"
+                        >
+                          Review duplicates
+                        </button>
+                      </div>
+                    )}
                     {(canManageProfiles || canManageInventory) && (
                       <ImportHistoryPanel
                         refreshSignal={sheetListSignal}
@@ -16240,14 +16155,14 @@ export default function Home() {
 
                     {canExportSpec && (
                       <div className="pt-3 mt-1 border-t border-border space-y-2">
-                        <p className="text-xs text-muted-foreground">Export spec sheets &amp; recipes to an Excel workbook. Choose what to include — the file re-imports through the spec/premix importers.</p>
+                        <p className="text-xs text-muted-foreground">Download separate, re-importable Excel workbooks. Selecting all five downloads five files.</p>
                         <div className="grid grid-cols-2 gap-2">
                           {([
-                            ["profiles", "Profiles"],
-                            ["dough", "Dough Recipes"],
-                            ["sauce", "Sauce Recipes"],
-                            ["cheese", "Cheese Recipes"],
-                            ["mixes", "Mix Recipes"],
+                            ["specs", "Specs"],
+                            ["dough", "Dough"],
+                            ["sauce", "Sauce"],
+                            ["cheese", "Cheese"],
+                            ["mixes", "Mixes"],
                           ] as [keyof ExportSelection, string][]).map(([key, label]) => (
                             <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
                               <input
@@ -16270,13 +16185,29 @@ export default function Home() {
                               const res = await (await loadWorkbookWorkflow()).specExport.exportSpecRecipes(exportSelection, todayStr());
                               if (exportStartedAt !== null && typeof performance !== "undefined")
                                 recordPerformance("import-spec-export", performance.now() - exportStartedAt, "storage");
-                              if (res.specSheets === 0 && res.mixSheets === 0) {
+                              const downloaded = Object.entries(res.downloaded);
+                              if (downloaded.length === 0 && res.failed.length === 0) {
                                 toast({ title: "Nothing to export", description: "The selected data is empty. Add spec profiles, recipes, or mixes first." });
                               } else {
-                                const parts: string[] = [];
-                                if (res.specSheets) parts.push(`spec/recipes (${res.specSheets} sheet${res.specSheets === 1 ? "" : "s"})`);
-                                if (res.mixSheets) parts.push(`mixes (${res.mixSheets} sheet${res.mixSheets === 1 ? "" : "s"})`);
-                                toast({ title: "Export ready", description: `Downloaded ${parts.join(" and ")}.` });
+                                const labels: Record<keyof ExportSelection, string> = {
+                                  specs: "Specs",
+                                  dough: "Dough",
+                                  sauce: "Sauce",
+                                  cheese: "Cheese",
+                                  mixes: "Mixes",
+                                };
+                                const parts = downloaded.map(([kind, sheets]) =>
+                                  `${labels[kind as keyof ExportSelection]} (${sheets} sheet${sheets === 1 ? "" : "s"})`,
+                                );
+                                if (res.failed.length) {
+                                  toast({
+                                    variant: "destructive",
+                                    title: downloaded.length ? "Some exports failed" : "Export failed",
+                                    description: `${parts.length ? `Downloaded ${parts.join(", ")}. ` : ""}Couldn't download ${res.failed.map((kind) => labels[kind]).join(", ")}.`,
+                                  });
+                                } else {
+                                  toast({ title: "Exports ready", description: `Downloaded ${parts.join(", ")}.` });
+                                }
                               }
                             } catch {
                               toast({ variant: "destructive", title: "Export failed", description: "Couldn't build the workbook. Please try again." });
@@ -16285,7 +16216,7 @@ export default function Home() {
                             }
                           }}
                           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed">
-                          <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Exporting…" : "Export Spec/Recipes"}
+                          <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Exporting…" : "Download Workbooks"}
                         </button>
                       </div>
                     )}
@@ -16330,11 +16261,11 @@ export default function Home() {
                 )}
 
                 {/* Rules */}
-                {manageCategory === "rules" && canEditRules && <ProductionRulesManager />}
+                {manageCategory === "rules" && canEditRules && <DeferredProductionRulesManager />}
 
                 {/* Freezer-pull items */}
                 {manageCategory === "freezer" && canManageInventory && (
-                  <FreezerPullItemsManager
+                  <DeferredFreezerPullItemsManager
                     suggestions={[
                       // Top-level need-row labels that aggregateNeedRows emits.
                       "Dough",
@@ -16366,13 +16297,12 @@ export default function Home() {
                         <Upload className="w-4 h-4" /> Import Premix Sheet
                       </button>
                     )}
-                    <MixesManager
+                    <DeferredMixesManager
                       brands={brands}
                       brandFlavors={brandFlavors}
                       ingredientSuggestions={unifiedIngredientUniverse}
                     />
                     <MixReconcilePanel isManager={isManager} canManageInventory={canManageInventory} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
-                    <MixAssistChat />
                   </div>
                 )}
 
@@ -16385,7 +16315,7 @@ export default function Home() {
                         <Upload className="w-4 h-4" /> Import Cheese Mix Recipe Specs
                       </button>
                     )}
-                    <CheeseRecipesManager
+                    <DeferredCheeseRecipesManager
                       brands={brands}
                       ingredientSuggestions={unifiedIngredientUniverse}
                       onSaved={propagateCheeseRecipeUpdates}
@@ -16400,12 +16330,12 @@ export default function Home() {
 
                 {/* Per-die line-setting defaults (server master-data) */}
                 {manageCategory === "dieDefaults" && canManageInventory && (
-                  <DieLineDefaultsManager dieTypes={dieTypes} />
+                  <DeferredDieLineDefaultsManager dieTypes={dieTypes} />
                 )}
 
                 {/* Cycle-count schedules */}
                 {manageCategory === "cycleCount" && canManageInventory && (
-                  <CycleCountManager suggestions={DEFAULT_CYCLE_COUNT_SECTIONS} />
+                  <DeferredCycleCountManager suggestions={DEFAULT_CYCLE_COUNT_SECTIONS} />
                 )}
 
                 {/* Staff (roster + roles) */}
@@ -16481,8 +16411,8 @@ export default function Home() {
 
       {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
       {showPinDialog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          <div
+           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
@@ -16656,6 +16586,7 @@ export default function Home() {
             >
               <DropdownMenuTrigger asChild>
                 <button
+                  ref={managerAttentionTriggerRef}
                   type="button"
                   title="More"
                   aria-label={
@@ -16678,10 +16609,16 @@ export default function Home() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {canViewManagerAttention && (
-                  <DropdownMenuItem onClick={() => setShowManagerAttention(true)}>
+                  <DropdownMenuItem
+                    aria-label="Manager attention"
+                    onClick={() => setShowManagerAttention(true)}
+                  >
                     <AlertTriangle className="w-4 h-4 mr-2" /> Manager attention
                     {managerAttentionTotal > 0 && (
-                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                      <span
+                        aria-hidden="true"
+                        className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+                      >
                         {managerAttentionTotal}
                       </span>
                     )}
@@ -16693,11 +16630,15 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("summary")}>
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
-                  <ClipboardList className="w-4 h-4 mr-2" /> Stock
+                <DropdownMenuItem
+                  onPointerEnter={preloadWarehouseInventorySurface}
+                  onFocus={preloadWarehouseInventorySurface}
+                  onClick={() => setActiveTab("inventory")}
+                >
+                  <ClipboardList className="w-4 h-4 mr-2" /> Inventory
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
-                  <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
+                  <Sparkles className="w-4 h-4 mr-2" /> Operations Insights
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("mixes")}>
                   <Blend className="w-4 h-4 mr-2" /> Mix Plan
@@ -16746,7 +16687,11 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
+                <DropdownMenuItem
+                  onPointerEnter={preloadManagementEditors}
+                  onFocus={preloadManagementEditors}
+                  onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
+                >
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowPasswordDialog(true)}>
@@ -16819,9 +16764,14 @@ export default function Home() {
                 }`}
                 role="status"
                 aria-live="polite"
+                aria-atomic="true"
                 data-testid="foreground-recovery-status"
+                data-foreground-sync-ack={foregroundSyncAcknowledgement}
+                data-foreground-recovery-state={foregroundRecoveryNotice.kind}
               >
-                <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+                {foregroundRecoveryNotice.kind === "outcome"
+                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  : <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />}
                 <span className="min-w-0 flex-1">{foregroundRecoveryNotice.message}</span>
                 {foregroundRecoveryNotice.kind === "failed" && (
                   <button
@@ -16844,35 +16794,6 @@ export default function Home() {
                 )}
               </div>
             )}
-            <AiStatusNotice status={proactiveAiStatus ?? undefined} feature="AI proactive alerts" />
-            <ProactiveAlertBanner
-              alert={proactiveAlert}
-              onDismiss={dismissProactiveAlert}
-              onApply={(() => {
-                const action = proactiveAlert?.suggestedAction;
-                if (!action) return undefined;
-                const runningRun = dayState.runs.find((r) => !!r.startedAt && !r.endedAt);
-                if (!runningRun) return undefined;
-                // Validate action values against the run's actual capacity so a
-                // badly-calibrated model response can't silently overwrite progress
-                // with nonsense (e.g. more cases-on-skid than skid capacity, or a
-                // total that far exceeds the run target).
-                const runVals = runningRun.id === currentRunId ? form.getValues() : loadRunValues(runningRun.id);
-                const casesPerSkid = runVals.casesPerSkid ?? 0;
-                const casesNeeded = runVals.casesNeeded ?? 0;
-                // casesOnCurrentSkid must be < casesPerSkid (can't overfill a skid).
-                if (casesPerSkid > 0 && action.casesOnCurrentSkid >= casesPerSkid) return undefined;
-                // Implied total must not exceed casesNeeded by more than 20%.
-                const impliedTotal = action.skidsCompleted * (casesPerSkid || 1) + action.casesOnCurrentSkid;
-                if (casesNeeded > 0 && impliedTotal > casesNeeded * 1.2) return undefined;
-                return () => {
-                  buildVoiceHandlers().setRunProgress(runningRun.id, {
-                    skidsCompleted: action.skidsCompleted,
-                    casesOnCurrentSkid: action.casesOnCurrentSkid,
-                  });
-                };
-              })()}
-            />
             <HomeStationTabs activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as HomeTab)}>
               {/* ─── RUN ─── */}
               <ProductionLineDepartment run={<LiveRunTabContent />} />
@@ -16904,46 +16825,8 @@ export default function Home() {
               </MixesTabCtx.Provider>
 
               <ManagementDepartment ai={
-                <LazyDeferredManagementAiSurface
-                    assistant={{
-                      buildInput: () =>
-                        buildOptimizeInput({
-                          date: todayStr(),
-                          nowMs: Date.now(),
-                          runToTime,
-                          runs: dayState.runs,
-                          runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
-                          history,
-                          scheduledDays: scheduledDays.map((d) => ({
-                            date: d.date,
-                            runs: (d.runs ?? []).map((r) => ({
-                              brand: r.brand,
-                              flavor: r.flavor,
-                              casesNeeded: r.casesNeeded,
-                              dieType: r.dieType,
-                            })),
-                          })),
-                        }),
-                      buildRecipeContext: () =>
-                        buildRecipeAssistContext(
-                          form.getValues(),
-                          [...cheeseIngredients, ...doughIngredients, ...frontlineIngredients],
-                          {
-                            brand: currentRun?.brand,
-                            flavor: currentRun?.flavor,
-                            casesNeeded: v.casesNeeded,
-                            pizzasPerCase: v.pizzasPerCase,
-                            doughballWeightOz: v.targetDoughballWeight,
-                          },
-                        ),
-                      onApplyRecipeSuggestion: applyRecipeSuggestion,
-                      recipeApplyTargets: dayState.runs.map((r, i) => ({
-                        id: r.id,
-                        label: `Run ${i + 1} · ${runLabel(r)}`,
-                      })),
-                      recipeDefaultTargetId: currentRunId,
-                      onApplyAction: applyOptimizeAction,
-                      onApplyVoiceCommand: applyVoiceCommand,
+                <LazyDeferredManagementSurface
+                    operationsInsights={{
                       buildSummary: (scope) =>
                         scope === "week"
                           ? buildWeekSummaryInput({
@@ -16977,30 +16860,6 @@ export default function Home() {
                             run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
                         }),
                       onApplySchedule: applyScheduleOrder,
-                      buildForecast: (targetDate, horizonDays) =>
-                        buildForecastInput({
-                          targetDate: targetDate || tomorrowStr(),
-                          horizonDays,
-                          nowMs: Date.now(),
-                          history,
-                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                          scheduledDays: scheduledDays.map((d) => ({
-                            date: d.date,
-                            runs: (d.runs ?? []).map((r) => ({
-                              brand: r.brand,
-                              flavor: r.flavor,
-                              casesNeeded: r.casesNeeded,
-                              dieType: r.dieType,
-                            })),
-                          })),
-                        }),
-                      onApplyForecast: applyForecast,
-                      buildAccuracy: () =>
-                        buildForecastAccuracyInput({
-                          nowMs: Date.now(),
-                          history,
-                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                        }),
                     }}
                     specReconcile={{
                       autoCheckSignal: specReconcileSignal,
@@ -17037,7 +16896,7 @@ export default function Home() {
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid h-12 min-h-12 grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Run</span>
@@ -17058,9 +16917,16 @@ export default function Home() {
                   <Package className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Pack</span>
                 </TabsTrigger>
-                <TabsTrigger value="warehouse" data-testid="tab-warehouse" className="flex flex-col items-center gap-0.5 px-1">
-                  <Warehouse className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Whse</span>
+                <TabsTrigger
+                  value="warehouse"
+                  data-testid="tab-warehouse"
+                  aria-label="Warehouse"
+                  onPointerEnter={preloadWarehouseInventorySurface}
+                  onFocus={preloadWarehouseInventorySurface}
+                  className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
+                >
+                  <Warehouse className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                  <span className="whitespace-nowrap text-[9px] leading-tight sm:text-[10px]">Warehouse</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -17107,7 +16973,7 @@ export default function Home() {
 
         {/* ── Re-import case-count offer: per-run Accept / Keep ────────────── */}
         {caseUpdatePrompt && caseUpdatePrompt.length > 0 && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
               <div className="flex items-center gap-2">
                 <h2 id="case-counts-dialog-title" className="text-base font-bold">Case counts changed</h2>
@@ -17158,8 +17024,8 @@ export default function Home() {
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
         {showStopDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="presentation" onClick={() => setShowStopDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} role="presentation" onClick={() => setShowStopDialog(false)}>
+            <div className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <OctagonX className="w-5 h-5 text-orange-400 shrink-0" />
                 <h2 id="stop-dialog-title" className="text-base font-bold">Log Line Stop</h2>
@@ -17229,8 +17095,8 @@ export default function Home() {
 
         {/* ── Edit Stoppage Dialog ───────────────────────────────────────────── */}
         {editingStop && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingStop(null)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setEditingStop(null)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-primary shrink-0" />
                 <h2 id="edit-event-dialog-title" className="text-base font-bold">Edit Event</h2>
@@ -17307,8 +17173,8 @@ export default function Home() {
 
         {/* ── Manual Entry Dialog ────────────────────────────────────────────── */}
         {showManualStopDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowManualStopDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="add-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowManualStopDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="add-event-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
                 <h2 id="add-event-dialog-title" className="text-base font-bold">Add Past Event</h2>
@@ -17395,8 +17261,8 @@ export default function Home() {
 
         {/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */}
         {showEditReasonsDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="quick-reason-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowEditReasonsDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="quick-reason-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <ListChecks className="w-5 h-5 text-primary shrink-0" />
                 <h2 id="quick-reason-dialog-title" className="text-base font-bold">Quick Reason List</h2>
@@ -17533,8 +17399,8 @@ export default function Home() {
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowPasswordDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-md`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-primary" />
@@ -17552,26 +17418,38 @@ export default function Home() {
         )}
 
         {/* ── Excel Import Dialog ──────────────────────────────────────────── */}
-        <ExcelImportDialog
-          open={showImportDialog}
-          onClose={() => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); }}
-          result={importResult}
-          brands={brands}
-          brandFlavors={brandFlavors}
-          canCreate={isSupervisor}
-          defaultDate={importDefaultDate}
-          onConfirm={(payload) => {
-            if (payload.multiDay) { void commitMultiDayImport(payload); return; }
-            if (importIntoEditor) importExcelIntoEditor(payload);
-            else void commitExcelImport(payload);
-          }}
-          progress={importProgress}
-        />
+        {showImportDialog && (
+          <DeferredSurface
+            label="schedule import"
+            load={loadExcelImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); },
+              result: importResult,
+              brands,
+              brandFlavors,
+              canCreate: isSupervisor,
+              defaultDate: importDefaultDate,
+              onConfirm: (payload) => {
+                if (payload.multiDay) { void commitMultiDayImport(payload); return; }
+                if (importIntoEditor) importExcelIntoEditor(payload);
+                else void commitExcelImport(payload);
+              },
+              progress: importProgress,
+            }}
+          />
+        )}
 
         {/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */}
-        <SpecImportDialog
-          open={showSpecImport}
-          onClose={() => {
+        {showSpecImport && (
+          <DeferredSurface
+            label="spec sheet import"
+            load={loadSpecImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.
@@ -17593,20 +17471,27 @@ export default function Home() {
             setSpecImportProgress(null);
             setSpecPhotoFiles([]);
             setSpecPhotoReplaceIndex(null);
-          }}
-          loading={specImportLoading}
-          progress={specImportProgress}
-          error={specImportError}
-          prepared={specImportPrepared}
-          applying={specImportApplying}
-          existingRecipeNamesByKind={existingImportRecipeNames}
-          onConfirm={handleSpecImportConfirm}
-        />
+              },
+              loading: specImportLoading,
+              progress: specImportProgress,
+              error: specImportError,
+              prepared: specImportPrepared,
+              applying: specImportApplying,
+              existingRecipeNamesByKind: existingImportRecipeNames,
+              onConfirm: handleSpecImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Premix Sheet Import Dialog ───────────────────────────────────── */}
-        <PremixImportDialog
-          open={showPremixImport}
-          onClose={() => {
+        {showPremixImport && (
+          <DeferredSurface
+            label="premix import"
+            load={loadPremixImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             premixImportGenRef.current++;
             premixImportAbortRef.current?.abort();
             premixImportAbortRef.current = null;
@@ -17621,19 +17506,26 @@ export default function Home() {
             setPremixImportError(null);
             setPremixImportLoading(false);
             setPremixImportProgress(null);
-          }}
-          loading={premixImportLoading}
-          progress={premixImportProgress}
-          error={premixImportError}
-          prepared={premixImportPrepared}
-          applying={premixImportApplying}
-          onConfirm={handlePremixImportConfirm}
-        />
+              },
+              loading: premixImportLoading,
+              progress: premixImportProgress,
+              error: premixImportError,
+              prepared: premixImportPrepared,
+              applying: premixImportApplying,
+              onConfirm: handlePremixImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Shipping & Palletizing Guide Import Dialog ───────────────────── */}
-        <ShippingImportDialog
-          open={showShippingImport}
-          onClose={() => {
+        {showShippingImport && (
+          <DeferredSurface
+            label="shipping guide import"
+            load={loadShippingImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             shippingImportGenRef.current++;
             if (shippingImportLoading) {
               toast({
@@ -17645,52 +17537,73 @@ export default function Home() {
             setShippingImportPrepared(null);
             setShippingImportError(null);
             setShippingImportLoading(false);
-          }}
-          loading={shippingImportLoading}
-          error={shippingImportError}
-          prepared={shippingImportPrepared}
-          applying={shippingImportApplying}
-          onConfirm={handleShippingImportConfirm}
-        />
+              },
+              loading: shippingImportLoading,
+              error: shippingImportError,
+              prepared: shippingImportPrepared,
+              applying: shippingImportApplying,
+              onConfirm: handleShippingImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Sauce Guide Import Dialog ─────────────────────────────────────── */}
-        <SauceGuideImportDialog
-          open={showSauceGuideImport}
-          onClose={() => {
+        {showSauceGuideImport && (
+          <DeferredSurface
+            label="sauce guide import"
+            load={loadSauceGuideImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             sauceGuideImportGenRef.current++;
             setShowSauceGuideImport(false);
             setSauceGuideImportPrepared(null);
             setSauceGuideImportError(null);
             setSauceGuideImportLoading(false);
-          }}
-          loading={sauceGuideImportLoading}
-          error={sauceGuideImportError}
-          prepared={sauceGuideImportPrepared}
-          applying={sauceGuideImportApplying}
-          onConfirm={handleSauceGuideImportConfirm}
-        />
+              },
+              loading: sauceGuideImportLoading,
+              error: sauceGuideImportError,
+              prepared: sauceGuideImportPrepared,
+              applying: sauceGuideImportApplying,
+              onConfirm: handleSauceGuideImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Dough Recipe Guide Import Dialog ─────────────────────────────── */}
-        <DoughGuideImportDialog
-          open={showDoughGuideImport}
-          onClose={() => {
+        {showDoughGuideImport && (
+          <DeferredSurface
+            label="dough guide import"
+            load={loadDoughGuideImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             doughGuideImportGenRef.current++;
             setShowDoughGuideImport(false);
             setDoughGuideImportPrepared(null);
             setDoughGuideImportError(null);
             setDoughGuideImportLoading(false);
-          }}
-          loading={doughGuideImportLoading}
-          error={doughGuideImportError}
-          prepared={doughGuideImportPrepared}
-          applying={doughGuideImportApplying}
-          onConfirm={handleDoughGuideImportConfirm}
-        />
+              },
+              loading: doughGuideImportLoading,
+              error: doughGuideImportError,
+              prepared: doughGuideImportPrepared,
+              applying: doughGuideImportApplying,
+              onConfirm: handleDoughGuideImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Cheese Mix Recipe Specs Import Dialog ────────────────────────── */}
-        <CheeseImportDialog
-          open={showCheeseImport}
-          onClose={() => {
+        {showCheeseImport && (
+          <DeferredSurface
+            label="cheese recipe import"
+            load={loadCheeseImportDialog}
+            presentation="dialog"
+            componentProps={{
+              open: true,
+              onClose: () => {
             cheeseImportGenRef.current++;
             cheeseImportAbortRef.current?.abort();
             cheeseImportAbortRef.current = null;
@@ -17705,14 +17618,16 @@ export default function Home() {
             setCheeseImportError(null);
             setCheeseImportLoading(false);
             setCheeseImportProgress(null);
-          }}
-          loading={cheeseImportLoading}
-          progress={cheeseImportProgress}
-          error={cheeseImportError}
-          prepared={cheeseImportPrepared}
-          applying={cheeseImportApplying}
-          onConfirm={handleCheeseImportConfirm}
-        />
+              },
+              loading: cheeseImportLoading,
+              progress: cheeseImportProgress,
+              error: cheeseImportError,
+              prepared: cheeseImportPrepared,
+              applying: cheeseImportApplying,
+              onConfirm: handleCheeseImportConfirm,
+            }}
+          />
+        )}
 
         {/* ── Setup Profiles Dialog ─────────────────────────────────────────
             Standalone brand/flavor setup editor. Lets a manager/supervisor
@@ -17770,8 +17685,8 @@ export default function Home() {
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScheduleDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md flex flex-col`} onClick={e => e.stopPropagation()}>
               {scheduleView === "list" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
@@ -18491,11 +18406,18 @@ export default function Home() {
         autoTrackBlocked={autoTrackBlocked}
         autoTrackBlockedRef={foregroundSyncBarrierRef}
         autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
+        autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        operationalSnapshotReceipt={serverCalcReceipt}
+        operationalServerCalc={serverCalc}
+        operationalOnline={isOnline}
+        operationalSyncConnected={syncConnected}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
-        {screenMode ? <ScreenModeView /> : mainContent}
+        <main>
+          {screenMode ? <ScreenModeView /> : mainContent}
+        </main>
         </LiveRunProvider>
         </DepartmentProvider>
         </HomeTabCtx.Provider>
@@ -18509,7 +18431,6 @@ export default function Home() {
 // ScreenModeView and GlanceOverlay use the narrow HomeTab context. FloorModeView
 // uses HomeCtx because it must surface the short-lived pause decision overlay.
 // ═══════════════════════════════════════════════════════════════════════════
-
 
 function PauseTunnelDecision({
   pausedAt,
@@ -18555,10 +18476,40 @@ function PauseTunnelDecision({
   );
 }
 
+function OperationalStateBadge({
+  overlay = false,
+  displayState,
+  receipt,
+}: {
+  overlay?: boolean;
+  displayState: "confirmed" | "provisional" | "offline";
+  receipt: OperationalSnapshotReceipt | null;
+}) {
+  const copy = displayState === "confirmed"
+    ? "Confirmed server baseline"
+    : displayState === "offline"
+      ? "Offline — local projection"
+      : "Provisional — awaiting server confirmation";
+  const tone = displayState === "confirmed"
+    ? "border-emerald-400/40 bg-emerald-950/40 text-emerald-200"
+    : "border-amber-400/50 bg-amber-950/40 text-amber-100";
+  return (
+    <div
+      className={`${overlay ? "pointer-events-none fixed bottom-3 left-3 z-20" : "w-fit"} rounded-full border px-3 py-1 text-[10px] font-semibold tracking-wide ${tone}`}
+      data-testid="operational-state-badge"
+      title={receipt
+        ? `Server snapshot ${receipt.snapshotId.slice(0, 12)}`
+        : "This device has not adopted a server calculation for the selected run"}
+    >
+      {copy}
+    </div>
+  );
+}
+
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
-    endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    endRun, endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
     persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
@@ -18572,7 +18523,9 @@ function FloorModeView() {
     showBatchDue, setShowBatchDue,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
+    operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
+  const [confirmComplete, setConfirmComplete] = useState(false);
 
         const totalSkids = v.casesNeeded > 0 && v.casesPerSkid > 0 ? Math.ceil(v.casesNeeded / v.casesPerSkid) : 0;
         const floorStatus = runStatus === "ended" ? "paused" : runStatus === "pending" ? "paused" : runStatus;
@@ -18600,12 +18553,17 @@ function FloorModeView() {
         return (
           <div
             data-testid="floor-mode-overlay"
-            className="fixed inset-0 z-[40] flex flex-col font-sans select-none"
+            className="fixed inset-0 z-[60] flex flex-col overflow-y-auto font-sans select-none"
             style={{ background: bg, color: "white" }}
           >
+            <OperationalStateBadge
+              overlay
+              displayState={operationalDisplayState}
+              receipt={operationalSnapshotReceipt}
+            />
             {/* Header */}
             <header
-              className="relative z-10 flex justify-between items-center pb-2 shrink-0"
+                className="sticky top-0 z-10 flex justify-between items-center pb-2 shrink-0"
               style={{
                 paddingTop: "calc(1.25rem + env(safe-area-inset-top))",
                 paddingLeft: "calc(1.25rem + env(safe-area-inset-left))",
@@ -18617,7 +18575,7 @@ function FloorModeView() {
                   {currentRun ? runLabel(currentRun) : "No Active Run"}
                 </span>
                 <span className="flex items-center gap-1.5 self-start px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest" style={{ background: badge, color: badgeText }}>
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: accentColor }} />
+                  <span className="w-1.5 h-1.5 rounded-full motion-safe:animate-pulse" style={{ background: accentColor }} />
                   {statusLabel}
                 </span>
               </div>
@@ -18633,11 +18591,11 @@ function FloorModeView() {
               </button>
             </header>
 
-            <div className="floor-drift flex flex-1 flex-col min-h-0">
+            <div className="floor-drift flex min-h-full flex-1 flex-col">
             {/* Big three numbers */}
-            <main className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
+            <div className="flex-1 grid grid-cols-2 min-[700px]:grid-cols-3 items-center justify-items-center gap-4 min-h-[250px] px-4 py-3 sm:gap-7 sm:min-h-[360px]">
               <div className="flex flex-col items-center">
-                <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
+                <div className="text-6xl sm:text-8xl leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
                 {calc.casesInFreezer > 0 && (
                   <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZE TUNNEL</div>
@@ -18652,18 +18610,20 @@ function FloorModeView() {
               {doughSubTab !== "crusts" && (
                 <div className="flex flex-col items-center">
                   <div
-                    className="text-[96px] leading-none font-black tracking-tight tabular-nums"
-                    style={{ color: accentColor, ...(mm === 0 && ss < 120 && runStatus === "running" ? { animation: "pulse 1s ease-in-out infinite" } : {}) }}
+                    className={`text-5xl sm:text-8xl leading-none font-black tracking-tight tabular-nums ${
+                      mm === 0 && ss < 120 && runStatus === "running" ? "motion-safe:animate-pulse" : ""
+                    }`}
+                    style={{ color: accentColor }}
                   >
                     {batchStr}
                   </div>
                   <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>NEXT BATCH</div>
                 </div>
               )}
-            </main>
+            </div>
 
             {/* Bottom */}
-            <div className="px-4 pb-6 space-y-4 shrink-0">
+            <div className="sticky bottom-0 px-3 pt-3 space-y-3 shrink-0 sm:px-4" style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))", background: `linear-gradient(transparent, ${bg} 12%)` }}>
               {/* Smarter insights: pace, ETA, supply + food-safety heads-up */}
               {(() => {
                 type Chip = { key: string; label: string; bg: string; fg: string };
@@ -18742,7 +18702,8 @@ function FloorModeView() {
                 }
                 if (items.length === 0) return null;
                 return (
-                  <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <details className="rounded-xl px-3 py-2.5" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <summary className="min-h-11 flex cursor-pointer items-center text-sm font-bold tracking-wide">Frontline details</summary>
                     <div className="text-[9px] font-bold tracking-[0.18em] mb-2" style={{ color: "rgba(255,255,255,0.25)" }}>FRONTLINE</div>
                     <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(items.length, 4)}, 1fr)` }}>
                       {items.map((item: any, i: any) => (
@@ -18753,7 +18714,7 @@ function FloorModeView() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 );
               })()}
 
@@ -18765,12 +18726,27 @@ function FloorModeView() {
                 />
               )}
               {/* Action buttons */}
-              <div className="flex gap-3">
+              {(runStatus === "running" || runStatus === "paused") && (
+                <div className="grid grid-cols-3 gap-2" aria-label="Case corrections">
+                  <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
+                    const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
+                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                  }} className="min-h-12 rounded-xl text-lg font-bold" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
+                  <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
+                  <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
+                    const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
+                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                  }} disabled={v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {hasActiveStop ? (
                   <button
                     type="button"
                     onClick={endStop}
-                    className="flex-1 h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 animate-pulse transition-colors"
+                    className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 motion-safe:animate-pulse transition-colors"
                     style={{ background: "rgba(234,88,12,0.5)", color: "#fed7aa", border: "1px solid rgba(234,88,12,0.4)" }}
                   >
                     <CircleDot className="w-5 h-5" /> End Stop
@@ -18779,7 +18755,7 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: "rgba(127,29,29,0.45)", color: "#fca5a5", border: "1px solid rgba(239,68,68,0.2)" }}
                   >
                     🛑 Log Stop
@@ -18789,7 +18765,8 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={pauseRun}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    data-testid="floor-pause-run"
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: "rgba(255,255,255,0.06)", color: "#fbbf24", border: "1px solid rgba(255,255,255,0.08)" }}
                   >
                     ⏸ Pause
@@ -18799,7 +18776,8 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={resumeRun}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    data-testid="floor-resume-run"
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
                   >
                     ▶ Resume
@@ -18819,13 +18797,41 @@ function FloorModeView() {
                       form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                       form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
-                    className="flex-[1.3] h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
+                    data-testid="floor-skid-done"
+                    className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: accentBar, color: bg }}
                   >
                     ✅ Skid Done
                   </button>
                 )}
+                {(runStatus === "running" || runStatus === "paused") && (
+                  <button
+                    type="button"
+                    data-testid="floor-complete-run"
+                    onClick={() => setConfirmComplete(true)}
+                    className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: "rgba(127,29,29,0.65)", color: "#fecaca", border: "1px solid rgba(248,113,113,0.35)" }}
+                  >
+                    <Square className="w-5 h-5 fill-current" /> Complete Run
+                  </button>
+                )}
               </div>
+              <AlertDialog open={confirmComplete} onOpenChange={setConfirmComplete}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Complete this run?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This ends production tracking for {currentRun ? runLabel(currentRun) : "the active run"} and advances to the next queued run.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Keep running</AlertDialogCancel>
+                    <AlertDialogAction data-testid="floor-confirm-complete-run" className="bg-red-700 hover:bg-red-600" onClick={() => endRun(currentRun?.id)}>
+                      Complete run
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             </div>
           </div>
@@ -18870,6 +18876,44 @@ export function ElapsedTimeBadge({
   return <span data-testid={testId} className={className}>{fmtElapsed(runAge + addend)}</span>;
 }
 
+/**
+ * SetupMathConflictBadge — aggregate math conflicts for the Setup header.
+ *
+ * The count is intentionally derived during render so edits to any applicator
+ * slot are reflected immediately, including in-place recipe-row updates from
+ * react-hook-form.
+ */
+export function SetupMathConflictBadge({
+  slots,
+}: {
+  slots: Array<{
+    rows?: RecipeRow[];
+    ozPerPizza?: number;
+  }>;
+}) {
+  const conflictCount = slots.reduce(
+    (count, slot) =>
+      count +
+      detectAppSlotConflicts(
+        (slot.rows ?? []) as { ingredient: string; lbs: number }[],
+        Number(slot.ozPerPizza) || 0,
+      ).length,
+    0,
+  );
+
+  if (conflictCount === 0) return null;
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400"
+      data-testid="setup-math-conflict-count"
+      aria-label={`${conflictCount} math conflict${conflictCount === 1 ? "" : "s"}`}
+    >
+      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+      {conflictCount} math conflict{conflictCount === 1 ? "" : "s"}
+    </span>
+  );
+}
 
 /**
  * PerRunMixSlotBadge — the math-check badge as it appears on the per-run
@@ -18943,6 +18987,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     fireAutoTrackNow, tickDueRefs, packagingDrainActive,
     stallPrompt, setStallPrompt, stallCheck,
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
+    operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
   useAutomaticUpdateReloadBlocker(
     "live-run-operational-alert",
@@ -18981,9 +19026,13 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 
   return (
     <>
+                <OperationalStateBadge
+                  displayState={operationalDisplayState}
+                  receipt={operationalSnapshotReceipt}
+                />
                 {/* Blank-run sweep confirmation dialog */}
                 {confirmRemoveBlanks && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
+                  <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
                     <div className="bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
                       <h2 className="text-base font-bold">Remove {blankRunIds.length} blank run{blankRunIds.length > 1 ? "s" : ""}?</h2>
                       <p className="text-sm text-muted-foreground">
@@ -19741,10 +19790,15 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   if (!(Number(v.pizzasPerCase) > 0)) missing.push("Pizzas Per Case");
                   const freezerMissing = !(Number(ve.freezerTime) > 0);
                   if (missing.length === 0 && !freezerMissing) return null;
-                  const headline = missing.length > 0
+                  const frontlineNeedsBlocked = !computeSummaryStats(v).productionNeedsAvailable;
+                  const headline = frontlineNeedsBlocked
+                    ? "Frontline quantities can't be calculated — Pizzas Per Case is not set"
+                    : missing.length > 0
                     ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Total line time"] : [])].join(", ")} not set`
                     : "Line phase status can't show yet — Total line time not set";
-                  const detail = missing.length > 0
+                  const detail = frontlineNeedsBlocked
+                    ? "Open Setup Profiles for this product, enter Pizzas Per Case, and save the setup. Sauce, Frontline, warehouse pulls, and tracking stay unavailable until it is corrected."
+                    : missing.length > 0
                     ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
                     : "If this run uses a Freeze tunnel, scroll down and enter Freeze tunnel time (min) under the line settings to see the 3-stage filling/emptying status.";
                   return (
@@ -20407,8 +20461,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     </>
   );
 });
-
-
 
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
@@ -21223,7 +21275,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
-    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, setWriteError,
+    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection, setWriteError,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
@@ -21278,7 +21330,11 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     const now = Date.now();
     markRunValuesUpdated(currentRunId, now);
     lastLocalEditRef.current = now;
-  }, [currentRunId, form, lastLocalEditRef]);
+    queueManualCorrection(currentRunId, {
+      sauceBarrelsMade: made, sauceBarrelAnchorNetSec: anchor,
+      sauceBarrelCorrectionGeneration: correctionGeneration,
+    });
+  }, [currentRunId, form, lastLocalEditRef, queueManualCorrection]);
   const setShowSauceBarrelDue = useCallback(
     (val: boolean) => {
       getSauceBarrelEntry(currentRunId).showBarrelDue = val;
@@ -21669,7 +21725,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
 
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef } = hx;
+  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection } = hx;
   const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
 
   // These are canonical run values, not tab-local state: switching Frontline
@@ -21681,9 +21737,10 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     const generationField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
     form.setValue(madeField, Math.max(0, Math.floor(made)) as never, { shouldDirty: true });
     form.setValue(anchorField, Math.max(0, elapsedBatchSec) as never, { shouldDirty: true });
+    const correctionGeneration = Math.max(0, Number(form.getValues(generationField)) || 0) + 1;
     form.setValue(
       generationField,
-      (Math.max(0, Number(form.getValues(generationField)) || 0) + 1) as never,
+      correctionGeneration as never,
       { shouldDirty: true },
     );
     // The shared one-minute correction fence means a due automatic tick cannot
@@ -21692,9 +21749,19 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     const now = Date.now();
     markRunValuesUpdated(currentRunId, now);
     lastLocalEditRef.current = now;
-  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef]);
+    queueManualCorrection(currentRunId, {
+      [madeField]: Math.max(0, Math.floor(made)),
+      [anchorField]: Math.max(0, elapsedBatchSec),
+      [generationField]: correctionGeneration,
+    });
+  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
+  const frontlineRows = deriveFrontlineNeedRows(v, {
+    ...calc,
+    sauceLbs: Math.max(0, calc.casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase)
+      * v.sauceOzPerPizza / 16 + 30,
+  });
 
   return (
     <>
@@ -21718,145 +21785,42 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       pizzas/case
                     </p>
                     {(() => {
-                      const bd = calc.sauceBatches > 0 ? sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel) : null;
-                      return (
-                        <StatRow
-                          label="Sauce"
-                          value={bd ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(calc.sauceBatches, 2) + " batches"}
-                          testId="output-sauce-batches"
-                          highlight={calc.sauceBatches > 0}
-                          sub={v.frontlineRecipeName?.trim() || undefined}
-                        />
-                      );
-                    })()}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app1Type.trim().toLowerCase().includes("mix") ? (
-                      <StatRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        value={fmtNum(calc.app1Lbs, 1) + " lbs"}
-                        testId="output-app1-batches"
-                        highlight={calc.app1Lbs > 0}
-                        sub={v.app1CheeseRecipeName?.trim() || undefined}
-                      />
-                    ) : (
-                      <BatchMadeRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        totalBatches={calc.app1Batches}
-                        made={Math.max(0, Number(v.app1BatchesMade) || 0)}
-                        onIncrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) + 1)}
-                        onDecrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) - 1)}
-                        isLive={isLive}
-                        testId="output-app1-batches"
-                        sub={v.app1CheeseRecipeName?.trim() || undefined}
-                      />
-                    )}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app2Type.trim().toLowerCase().includes("mix") ? (
-                      <StatRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        value={fmtNum(calc.app2Lbs, 1) + " lbs"}
-                        testId="output-app2-batches"
-                        highlight={calc.app2Lbs > 0}
-                        sub={v.app2CheeseRecipeName?.trim() || undefined}
-                      />
-                    ) : (
-                      <BatchMadeRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        totalBatches={calc.app2Batches}
-                        made={Math.max(0, Number(v.app2BatchesMade) || 0)}
-                        onIncrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) + 1)}
-                        onDecrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) - 1)}
-                        isLive={isLive}
-                        testId="output-app2-batches"
-                        sub={v.app2CheeseRecipeName?.trim() || undefined}
-                      />
-                    )}
-                    {/* Pep applicators sit between App 2 and App 3, matching
-                        the physical line order (and the Run tab's card order). */}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    <StatRow
-                      label={
-                        v.pep1Type
-                          ? `Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1Type}`
-                          : `Pep Applicator ${v.pep1Combined === true ? "1 & 2" : "1"}`
-                      }
-                      value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
-                      testId="output-pep1-batches"
-                      highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
-                    />
-                    {(v.pep1TypeB ?? "").trim() && (
-                      <StatRow
-                        label={`Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1TypeB}`}
-                        value={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? fmtNum(calc.pep1LbsB, 2) + " lbs" : fmtNum(calc.pep1BatchesB, 2) + " batches"}
-                        testId="output-pep1b-batches"
-                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? calc.pep1LbsB > 0 : calc.pep1BatchesB > 0}
-                      />
-                    )}
-                    {v.pep1Combined !== true && (
-                      <>
-                        <div className="border-t border-border/60" aria-hidden="true" />
-                        <StatRow
-                          label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
-                          value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
-                          testId="output-pep2-batches"
-                          highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
-                        />
-                        {(v.pep2TypeB ?? "").trim() && (
+                      return frontlineRows.map((row) => {
+                        const testId = `output-${row.key}-batches`;
+                        if (row.batchProgressField) {
+                          const slot = row.station as "app1" | "app2" | "app3" | "app4";
+                          const made = Math.max(0, Number(v[row.batchProgressField]) || 0);
+                          return (
+                            <BatchMadeRow
+                              key={row.key}
+                              label={row.label}
+                              totalBatches={row.amount}
+                              made={made}
+                              onIncrement={() => setManualAppProgress(slot, made + 1)}
+                              onDecrement={() => setManualAppProgress(slot, made - 1)}
+                              isLive={isLive}
+                              testId={testId}
+                              sub={row.recipeName}
+                            />
+                          );
+                        }
+                        const bd = row.station === "sauce" && row.unit === "batches"
+                          ? sauceBarrelBreakdown(row.amount, calc.sauceEffBarrel)
+                          : null;
+                        return (
                           <StatRow
-                            label={`Pep 2 — ${v.pep2TypeB}`}
-                            value={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? fmtNum(calc.pep2LbsB, 2) + " lbs" : fmtNum(calc.pep2BatchesB, 2) + " batches"}
-                            testId="output-pep2b-batches"
-                            highlight={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? calc.pep2LbsB > 0 : calc.pep2BatchesB > 0}
+                            key={row.key}
+                            label={row.label}
+                            value={bd
+                              ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
+                              : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`}
+                            testId={testId}
+                            highlight={row.amount > 0}
+                            sub={row.recipeName}
                           />
-                        )}
-                      </>
-                    )}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app3Type.trim() && (v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0) && (
-                      v.app3Type.trim().toLowerCase().includes("mix") ? (
-                        <StatRow
-                          label={`App 3 — ${v.app3Type}`}
-                          value={fmtNum(calc.app3Lbs, 1) + " lbs"}
-                          testId="output-app3-batches"
-                          highlight={calc.app3Lbs > 0}
-                          sub={v.app3CheeseRecipeName?.trim() || undefined}
-                        />
-                      ) : (
-                        <BatchMadeRow
-                          label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                          totalBatches={calc.app3Batches}
-                          made={Math.max(0, Number(v.app3BatchesMade) || 0)}
-                          onIncrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) + 1)}
-                          onDecrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) - 1)}
-                          isLive={isLive}
-                          testId="output-app3-batches"
-                          sub={v.app3CheeseRecipeName?.trim() || undefined}
-                        />
-                      )
-                    )}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app4Type.trim() && (v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0) && (
-                      v.app4Type.trim().toLowerCase().includes("mix") ? (
-                        <StatRow
-                          label={`App 4 — ${v.app4Type}`}
-                          value={fmtNum(calc.app4Lbs, 1) + " lbs"}
-                          testId="output-app4-batches"
-                          highlight={calc.app4Lbs > 0}
-                          sub={v.app4CheeseRecipeName?.trim() || undefined}
-                        />
-                      ) : (
-                        <BatchMadeRow
-                          label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                          totalBatches={calc.app4Batches}
-                          made={Math.max(0, Number(v.app4BatchesMade) || 0)}
-                          onIncrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) + 1)}
-                          onDecrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) - 1)}
-                          isLive={isLive}
-                          testId="output-app4-batches"
-                          sub={v.app4CheeseRecipeName?.trim() || undefined}
-                        />
-                      )
-                    )}
+                        );
+                      });
+                    })()}
                   </CardContent>
                 </Card>
                 {[
@@ -21939,7 +21903,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRunId, dayState, dayStateRef, doughSubTab,
-    form, isSupervisor, persistManualPackagingProgress, runStatus, runToTime,
+    form, isSupervisor, persistManualPackagingProgress, queueManualCorrection, runStatus, runToTime,
     schedulePush, setDayState, setRunToTime, v,
   } = hx;
 
@@ -22289,7 +22253,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         hopperSec: Math.max(0, Number(v.hopperSec) || 0),
                       },
                     );
-                    const onManual = () => {
+                    const onManual = (values: Record<string, number>) => {
                       const now = Date.now();
                       if (timing.trayMs > 0) {
                         doughAutoSuppressUntilRef.current = now + timing.trayMs;
@@ -22302,6 +22266,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         resumeDoughTimers();
                       }
                       markRunValuesUpdated(currentRunId, now);
+                      queueManualCorrection(currentRunId, values);
                     };
                     // Stop auto-track TickBars once the press is done — no more
                     // batches are needed for this run at that point.
@@ -22327,8 +22292,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
                                 : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
                               suggestion={!trayAutoActive ? suggestedTrays : null}
-                              onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true }); }}
-                              onManualChange={onManual}
+                              onSuggest={() => { const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }); }}
+                              onManualChange={(next) => onManual({ traysOnLine: next })}
                             />
                             {doughSubTab !== "crusts" && (
                               <div className="mt-1.5 space-y-1" data-testid="tray-section-capacity-guide">
@@ -22379,8 +22344,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
                                 max={3}
                                 suggestion={!batchAutoActive ? suggestedBatches : null}
-                                onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true }); }}
-                                onManualChange={onManual}
+                              onSuggest={() => { const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }); }}
+                              onManualChange={(next) => onManual({ batchesReady: next })}
                               />
                               {v.batchesReady >= 3 && (
                                 <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
@@ -23809,6 +23774,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
 
   const { isManager } = useMe();
   const { calc, liveFreezerMin } = useLiveRun();
+  const pendingHistoryUploads = pendingCompletedHistoryCount();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
   useAutomaticUpdateReloadBlocker(
     "ingredient-detail-dialog",
@@ -23925,25 +23891,28 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                       : 0;
                     const doughName = (vals.doughRecipeName ?? "").trim() || "Dough";
 
+                    const summaryFrontlineRows = deriveFrontlineNeedRows(vals, s);
                     const frontlineItems: { label: string; value: string }[] = [];
                     // Dough row first
                     if (doughBatches > 0) {
                       frontlineItems.push({ label: `Dough — ${doughName}`, value: `${fmtNum(doughBatches, 2)} batches` });
                     }
-                    if (s.sauceBatches > 0) {
-                      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                      frontlineItems.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+                    for (const row of summaryFrontlineRows) {
+                      if (row.station === "sauce" && row.unit === "batches") {
+                        const bd = sauceBarrelBreakdown(row.amount, s.sauceEffBarrel);
+                        frontlineItems.push({
+                          label: row.label,
+                          value: bd
+                            ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
+                            : `${fmtNum(row.amount, 2)} batches`,
+                        });
+                      } else {
+                        frontlineItems.push({
+                          label: row.label,
+                          value: `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`,
+                        });
+                      }
                     }
-                    if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
-                    if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
-                    // Pep applicators sit between App 2 and App 3 (physical line order).
-                    const pepCombinedLbl = vals.pep1Combined === true ? "1 & 2" : "1";
-                    if (s.pep1Type) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-                    if (s.pep1TypeB) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep1TypeB) ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
-                    if (vals.pep1Combined !== true && s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
-                    if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
-                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
-                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
 
                     // ── Packaging for the detail modal ──
 
@@ -23954,6 +23923,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     return (
 
                       <Card
+                        data-testid={`run-summary-${run.id}`}
                         className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"}`}
                         onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
                       >
@@ -24464,6 +24434,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                           <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                             <History className="w-4 h-4" />
                             History ({displayHistory.length} {displayHistory.length === 1 ? "day" : "days"})
+                            {pendingHistoryUploads > 0 && (
+                              <span className="text-xs font-normal text-amber-600">
+                                {Math.min(pendingHistoryUploads, 99)}{pendingHistoryUploads > 99 ? "+" : ""} pending offline upload{pendingHistoryUploads === 1 ? "" : "s"}
+                              </span>
+                            )}
                           </div>
                           {displayHistory.map((day: any) => {
                             const finishedRuns = day.runs.filter((r: any) => r.endedAt && r.startedAt);

@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
-import { runNetSecondServerTicks, runWallClockServerTicks } from "../routes/sync";
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
 // driven by the CLIENT's local midnight, but the server runs in UTC in
@@ -29,6 +28,9 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
+let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
+let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 
@@ -40,6 +42,7 @@ let baseUrl: string;
 
 const USER = "user-1";
 const MANAGER = "manager-1";
+const SANDBOX = "sandbox-1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
@@ -79,6 +82,9 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
+  completedRunHistoryTable = dbMod.completedRunHistoryTable;
+  dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
 
@@ -123,13 +129,17 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
     { id: MANAGER, username: "manager", passwordHash: "x" },
+    { id: SANDBOX, username: "sandbox", passwordHash: "x", sandbox: true },
   ]);
-  await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);
+  await db.insert(userRolesTable).values([
+    { userId: MANAGER, role: "manager" },
+    { userId: SANDBOX, role: "manager" },
+  ]);
   // Three consecutive dates well clear of any real "today" so the assertions
   // don't depend on when the suite runs.
   await db.insert(dailySyncTable).values([
@@ -146,6 +156,442 @@ function authHeaders(): Record<string, string> {
 function managerAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(MANAGER)}` };
 }
+
+function sandboxAuthHeaders(): Record<string, string> {
+  return { authorization: `Bearer ${signToken(SANDBOX)}` };
+}
+
+describe("POST /sync/operational-intents — atomic run finalization", () => {
+  const DATE = "2030-03-10";
+  const RUN = "final-run";
+
+  async function seedFinalization() {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: RUN,
+            brand: "Acme",
+            flavor: "Pep",
+            startedAt: 50,
+            pausedAt: 75,
+            pausedStoppageId: "pause-1",
+            stoppages: [{ id: "pause-1", type: "pause", reason: "Break", startedAt: 75 }],
+            metaUpdatedAt: 100,
+          }],
+        },
+        runValues: { [RUN]: { casesNeeded: 10 } },
+        runValuesUpdatedAt: { [RUN]: 100 },
+      },
+    }).where(eq(dailySyncTable.date, DATE));
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:Flour:lbs", category: "ingredient", name: "Flour", unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id, qtyReceived: 20, qtyRemaining: 20,
+    });
+  }
+
+  function finalization(id: string, observedGeneration = `${RUN}:100`) {
+    return {
+      senderId: "end-client",
+      intent: {
+        version: 1,
+        id,
+        date: DATE,
+        runId: RUN,
+        observedGeneration,
+        resetEpoch: 0,
+        effectiveAt: Date.now(),
+        action: "lifecycle",
+        lifecycle: "end",
+        inventoryLines: [{ itemKey: "ingredient:Flour:lbs", qty: 4 }],
+      },
+    };
+  }
+
+  async function postFinalization(body: ReturnType<typeof finalization>) {
+    return fetch(`${baseUrl}/api/sync/operational-intents?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("keeps a fenced pre-intent snapshot open, then commits End, inventory, and retained day state once", async () => {
+    await seedFinalization();
+    // This is the ordinary snapshot emitted after the local UI projected End:
+    // the pending-intent fence has removed endedAt and restored its observed stamp.
+    const snapshot = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "end-client",
+        payload: {
+          dayState: {
+            date: DATE,
+            runs: [{
+              id: RUN,
+              startedAt: 50,
+              pausedAt: 75,
+              pausedStoppageId: "pause-1",
+              stoppages: [{ id: "pause-1", type: "pause", reason: "Break", startedAt: 75 }],
+              metaUpdatedAt: 100,
+            }],
+          },
+          runValues: { [RUN]: { casesNeeded: 10 } },
+          runValuesUpdatedAt: { [RUN]: 100 },
+        },
+      }),
+    });
+    expect(snapshot.status).toBe(200);
+    const fencedRun = ((await snapshot.json()) as any).data.dayState.runs.find((r: any) => r.id === RUN);
+    expect(fencedRun).toMatchObject({
+      startedAt: 50,
+      pausedAt: 75,
+      pausedStoppageId: "pause-1",
+      stoppages: [{ id: "pause-1", type: "pause", reason: "Break", startedAt: 75 }],
+      metaUpdatedAt: 100,
+    });
+    expect(fencedRun.endedAt).toBeUndefined();
+
+    const first = await postFinalization(finalization("offline:final-one"));
+    const firstBody = await first.json() as any;
+    expect(firstBody.outcome).toBe("accepted");
+    expect(firstBody.duplicate).toBe(false);
+    expect(firstBody.cursor).toBeTypeOf("number");
+    expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
+    expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
+    // Completed history is the retained daily document flow: the canonical ended
+    // run remains in dayState for archive/history synchronization.
+    expect(firstBody.data.dayState.runs.some((r: any) => r.id === RUN)).toBe(true);
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+    const [completion] = await db.select().from(completedRunHistoryTable);
+    expect(completion).toMatchObject({
+      scope: "live",
+      operationId: "offline:final-one",
+      runId: RUN,
+      date: DATE,
+      actorId: USER,
+    });
+    expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
+      .toBe(completion.completedAt.getTime());
+
+    // A later materialized document must not change the original duplicate
+    // receipt. Retried offline commands adopt the snapshot they actually
+    // committed, not an unrelated later writer's state.
+    await db.update(dailySyncTable).set({
+      data: { dayState: { date: DATE, runs: [{ id: "later-run", startedAt: 999 }] }, runValues: {} },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    const replay = await postFinalization(finalization("offline:final-one"));
+    const replayBody = await replay.json() as any;
+    expect(replayBody).toMatchObject({ outcome: "accepted", duplicate: true, cursor: firstBody.cursor });
+    expect(replayBody.data.dayState.runs.find((run: any) => run.id === RUN)?.endedAt)
+      .toBe(firstBody.data.dayState.runs.find((run: any) => run.id === RUN).endedAt);
+    expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(false);
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+  });
+
+  it("returns review-required for stale generation and leaves inventory unchanged", async () => {
+    await seedFinalization();
+    const response = await postFinalization(finalization("offline:stale-end", `${RUN}:99`));
+    expect(await response.json()).toMatchObject({ outcome: "conflicted", duplicate: false });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+  });
+
+  it("finishes atomically when a bounded-window legacy history upload arrived first", async () => {
+    await seedFinalization();
+    const legacyCompletedAt = new Date();
+    await db.insert(completedRunHistoryTable).values({
+      id: "legacy-history",
+      scope: "live",
+      operationId: `completed:${DATE}:${RUN}`,
+      runId: RUN,
+      date: DATE,
+      completedAt: legacyCompletedAt,
+      snapshot: {
+        dayState: {
+          date: DATE,
+          currentIndex: 0,
+          runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 50, endedAt: legacyCompletedAt.getTime() }],
+        },
+        runValues: { [RUN]: { casesNeeded: 10 } },
+      },
+      snapshotHash: "legacy-hash",
+      actorId: USER,
+    });
+
+    const compatibleIntent = finalization("offline:after-legacy");
+    compatibleIntent.intent.effectiveAt = legacyCompletedAt.getTime();
+    const response = await postFinalization(compatibleIntent);
+    const body = await response.json() as any;
+    expect(body.outcome).toBe("accepted");
+    expect(body.data.dayState.runs.find((run: any) => run.id === RUN).endedAt).toBe(legacyCompletedAt.getTime());
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+  });
+
+  it("requires review when an unrelated immutable history row already exists", async () => {
+    await seedFinalization();
+    await db.insert(completedRunHistoryTable).values({
+      id: "unrelated-history",
+      scope: "live",
+      operationId: "other-operation",
+      runId: RUN,
+      date: DATE,
+      completedAt: new Date(),
+      snapshot: {
+        dayState: { date: DATE, runs: [{ id: RUN, startedAt: 999, endedAt: Date.now() }] },
+        runValues: { [RUN]: { casesNeeded: 10 } },
+      },
+      snapshotHash: "unrelated-hash",
+      actorId: USER,
+    });
+    const response = await postFinalization(finalization("offline:blocked-by-history"));
+    expect(await response.json()).toMatchObject({ outcome: "review-required", duplicate: false });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).dayState.runs.find((run: any) => run.id === RUN).endedAt).toBeUndefined();
+  });
+
+  it("lets a reset holding the first lock force review without inventory side effects", async () => {
+    await seedFinalization();
+    const client = await pool.connect();
+    let pending: Promise<Response>;
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "INSERT INTO data_reset (scope, epoch, reset_at) VALUES ('live', 0, NOW()) ON CONFLICT (scope) DO NOTHING",
+      );
+      await client.query("SELECT * FROM data_reset WHERE scope = 'live' FOR UPDATE");
+      await client.query("UPDATE data_reset SET epoch = 1, reset_at = NOW() WHERE scope = 'live'");
+      await client.query("DELETE FROM daily_sync WHERE scope = 'live'");
+      pending = postFinalization(finalization("offline:reset-race"));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    expect(await (await pending).json()).toMatchObject({ outcome: "review-required" });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+});
+
+describe("GET /sync/operational-intents/cursor", () => {
+  it("pages materialized receipts and never leaks another scope", async () => {
+    await db.insert(operationalIntentLedgerTable).values([
+      ...Array.from({ length: 101 }, (_, index) => ({
+        scope: "live",
+        date: "2030-03-10",
+        intentId: `cursor-live-${index}`,
+        outcome: "accepted",
+        snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `live-${index}` }] }, runValues: {} },
+      })),
+      {
+        scope: "sandbox",
+        date: "2030-03-10",
+        intentId: "cursor-sandbox",
+        outcome: "accepted",
+        snapshot: { dayState: { date: "2030-03-10", runs: [{ id: "sandbox-only" }] }, runValues: {} },
+      },
+    ]);
+
+    const first = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, {
+      headers: authHeaders(),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as any;
+    expect(firstBody).toMatchObject({ hasMore: true });
+    expect(firstBody.mutations).toHaveLength(100);
+    expect(firstBody.mutations.every((item: any) => item.snapshot.dayState.runs[0].id !== "sandbox-only")).toBe(true);
+    expect(firstBody.mutations.every((item: any) => typeof item.cursor === "number")).toBe(true);
+
+    const second = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=${firstBody.cursor}`, {
+      headers: authHeaders(),
+    });
+    const secondBody = await second.json() as any;
+    expect(secondBody).toMatchObject({ hasMore: false });
+    expect(secondBody.mutations).toHaveLength(1);
+    expect(secondBody.mutations[0].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+  });
+
+  it("compacts old heavy snapshots while cursor recovery uses the materialized day", async () => {
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 201 }, (_, index) => ({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: `compact-${index}`,
+      outcome: "accepted",
+      snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `historic-${index}` }] }, runValues: {} },
+    })));
+    const { compactOperationalIntentSnapshots } = await import("../lib/mutationCompaction");
+    expect(await compactOperationalIntentSnapshots("live")).toMatchObject({ compacted: 1, retained: 200 });
+
+    const response = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, { headers: authHeaders() });
+    const body = await response.json() as any;
+    expect(body.mutations[0].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+    expect(body.mutations[1].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+  });
+
+  it("converges across multiple cursor pages without adopting retained history", async () => {
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 205 }, (_, index) => ({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: `multi-page-${index}`,
+      outcome: index === 150 ? "review-required" : "accepted",
+      snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `historical-${index}` }] }, runValues: {} },
+    })));
+    const canonical = {
+      dayState: { date: "2030-03-10", runs: [{ id: "canonical-current", metaUpdatedAt: 999 }] },
+      runValues: { "canonical-current": { casesNeeded: 12 } },
+    };
+    await db.update(dailySyncTable).set({ data: canonical })
+      .where(and(eq(dailySyncTable.date, "2030-03-10"), eq(dailySyncTable.scope, "live")));
+    const { compactOperationalIntentSnapshots } = await import("../lib/mutationCompaction");
+    await compactOperationalIntentSnapshots("live");
+
+    let cursor = 0;
+    let adopted: unknown;
+    let pages = 0;
+    for (;;) {
+      const response = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=${cursor}`, {
+        headers: authHeaders(),
+      });
+      const body = await response.json() as any;
+      pages++;
+      for (const mutation of body.mutations) {
+        if (mutation.snapshot) adopted = mutation.snapshot;
+        cursor = mutation.cursor;
+      }
+      if (!body.hasMore) break;
+    }
+    expect(pages).toBe(3);
+    expect(adopted).toEqual(canonical);
+  });
+
+  it("preserves old review evidence while compacting old materialized accepted receipts", async () => {
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 202 }, (_, index) => ({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: index === 0 ? "preserve-review" : index === 1 ? "compact-accepted" : `keep-${index}`,
+      outcome: index === 0 ? "review-required" : "accepted",
+      snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `receipt-${index}` }] }, runValues: {} },
+    })));
+    const { compactOperationalIntentSnapshots } = await import("../lib/mutationCompaction");
+    expect(await compactOperationalIntentSnapshots("live")).toMatchObject({ compacted: 1, retained: 200 });
+    const evidence = await db.select({
+      intentId: operationalIntentLedgerTable.intentId,
+      snapshot: operationalIntentLedgerTable.snapshot,
+    }).from(operationalIntentLedgerTable).where(and(
+      eq(operationalIntentLedgerTable.scope, "live"),
+      sql`${operationalIntentLedgerTable.intentId} IN ('preserve-review', 'compact-accepted')`,
+    ));
+    expect(evidence.find((row) => row.intentId === "preserve-review")?.snapshot).toEqual(
+      { dayState: { date: "2030-03-10", runs: [{ id: "receipt-0" }] }, runValues: {} },
+    );
+    expect(evidence.find((row) => row.intentId === "compact-accepted")?.snapshot).toBeNull();
+
+    const page = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, { headers: authHeaders() });
+    const body = await page.json() as any;
+    expect(body.mutations[0].snapshot).toBeNull();
+    expect(body.mutations[1].snapshot).toEqual((await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, "2030-03-10"))))[0].data);
+  });
+});
+
+describe("POST /sync/operational-intents — canonical transitions", () => {
+  const DATE = "2030-03-10";
+  const RUN = "transition-run";
+
+  async function post(intent: Record<string, unknown>) {
+    return fetch(`${baseUrl}/api/sync/operational-intents?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "transition-client", intent }),
+    }).then((response) => response.json()) as Promise<any>;
+  }
+
+  function intent(
+    id: string,
+    observedGeneration: string,
+    action: "pause" | "resume" | "lifecycle" | "correction",
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      version: 1,
+      id,
+      date: DATE,
+      runId: RUN,
+      observedGeneration,
+      resetEpoch: 0,
+      // The occurrence time orders queued work, but the server clock must issue
+      // every accepted canonical lifecycle timestamp.
+      effectiveAt: Date.now() - 60_000,
+      action,
+      ...extra,
+    };
+  }
+
+  it("serializes Start, correction, Pause, and Resume with server-issued timestamps", async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, runs: [{ id: RUN, brand: "Acme", flavor: "Pep" }] },
+        runValues: { [RUN]: { traysOnLine: 2 } },
+        runValuesUpdatedAt: { [RUN]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const beforeStart = Date.now();
+    const started = await post(intent("ordered:start", `${RUN}:0`, "lifecycle", { lifecycle: "start" }));
+    const startedRun = started.data.dayState.runs.find((run: any) => run.id === RUN);
+    expect(started.outcome).toBe("accepted");
+    expect(startedRun.startedAt).toBeGreaterThanOrEqual(beforeStart);
+    expect(startedRun.startedAt).toBeLessThanOrEqual(Date.now());
+    expect(startedRun.startedAt).not.toBe(started.data.operationalIntentHistory.outcomes.at(-1).effectiveAt);
+
+    const startGeneration = `${RUN}:${startedRun.metaUpdatedAt}`;
+    const corrected = await post(intent("ordered:correct", startGeneration, "correction", {
+      values: { traysOnLine: 7 },
+    }));
+    expect(corrected).toMatchObject({ outcome: "accepted" });
+    expect(corrected.data.runValues[RUN].traysOnLine).toBe(7);
+
+    const beforePause = Date.now();
+    const paused = await post(intent("ordered:pause", startGeneration, "pause"));
+    const pausedRun = paused.data.dayState.runs.find((run: any) => run.id === RUN);
+    expect(paused.outcome).toBe("accepted");
+    expect(pausedRun.pausedAt).toBeGreaterThanOrEqual(beforePause);
+    expect(pausedRun.stoppages.at(-1).startedAt).toBe(pausedRun.pausedAt);
+
+    const pauseGeneration = `${RUN}:${pausedRun.metaUpdatedAt}`;
+    const beforeResume = Date.now();
+    const resumed = await post(intent("ordered:resume", pauseGeneration, "resume"));
+    const resumedRun = resumed.data.dayState.runs.find((run: any) => run.id === RUN);
+    expect(resumed.outcome).toBe("accepted");
+    expect(resumedRun.pausedAt).toBeUndefined();
+    expect(resumedRun.stoppages.at(-1).endedAt).toBeGreaterThanOrEqual(beforeResume);
+    expect(resumedRun.startedAt).toBeGreaterThan(startedRun.startedAt);
+
+    const stale = await post(intent("ordered:stale-pause", startGeneration, "pause"));
+    expect(stale.outcome).toBe("conflicted");
+    expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
+  });
+});
 
 describe("POST /sync/auto-track/claim", () => {
   const DATE = "2030-03-10";
@@ -577,7 +1023,7 @@ describe("/sync snapshot conditionals", () => {
 
     const changed = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
       method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({
         senderId: "c1",
         snapshotId: firstBody.snapshotId,
@@ -1160,7 +1606,7 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     const futureDate = "2030-07-15";
     const res = await fetch(`${baseUrl}/api/sync/${futureDate}?today=${DATE}`, {
       method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({
         senderId: "c1",
         payload: { ...meta, runValues: { r1: { casesNeeded: 77 } }, runValuesUpdatedAt: { r1: 1 } },
@@ -1491,7 +1937,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const putFuture = (payload: unknown) =>
       fetch(`${baseUrl}/api/sync/${future}?today=${DATE}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({ senderId: "schedule-device", payload }),
       });
 
@@ -1557,7 +2003,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const putScheduled = ({ id, casesNeeded }: (typeof writes)[number]) =>
       fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${clientToday}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({
           senderId: id,
           payload: {
@@ -1805,7 +2251,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const putFuture = (payload: unknown) =>
       fetch(`${baseUrl}/api/sync/${future}?today=${DATE}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({ senderId: "schedule-editor", payload }),
       });
     await putFuture({
@@ -1898,10 +2344,14 @@ describe("/sync/events — date-scoped broadcasts", () => {
       initial?: boolean;
       senderId?: string | null;
       data?: { dayState?: { runs?: Array<{ id: string }> } };
+      serverCalc?: { runId: string } | null;
+      autoTrackSchedule?: { runId: string; entries: unknown[] } | null;
     };
     expect(initial.initial).toBe(true);
     expect(initial.senderId).toBeNull();
     expect(initial.data?.dayState?.runs?.map((run) => run.id)).toContain("scheduled-run");
+    expect(initial.serverCalc?.runId).toBe("scheduled-run");
+    expect(initial.autoTrackSchedule).toMatchObject({ runId: "scheduled-run", entries: [] });
   });
 
   it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {
@@ -1942,7 +2392,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     await new Promise((r) => setTimeout(r, 400));
     await fetch(`${baseUrl}/api/sync/2030-04-01?today=2030-04-01`, {
       method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({ senderId: "importer", payload: { dayState: { runs: [], date: "2030-04-01" }, runValues: {} } }),
     });
     await new Promise((r) => setTimeout(r, 600));
@@ -1970,422 +2420,154 @@ describe("/sync/events — date-scoped broadcasts", () => {
   });
 });
 
-// A real client sync payload carries the run's COMPLETE FormValues (web
-// DEFAULT_VALUES plus live edits). The server schedule cannot be computed
-// from a skeletal value object (e.g. only casesNeeded), so this fixture
-// mirrors a real running run: full values plus crusts-mode meta so the
-// server calc yields a live schedule with real entries.
-const FULL_RUN_VALUES = {
-    casesNeeded: 240,
-    crustsPerCycle: 12,
-    cycleSpeed: 600,
-    speedAdjustment: 1.0,
-    approxLineSpeed: 450,
-    freezerTime: 3.5,
-    pizzasPerCase: 12,
-    casesPerSkid: 48,
-    casesPerLayer: 12,
-    doughballsPerTray: 36,
-    crustsPerStack: 6,
-    doughBatchYield: 150,
-    crustsPerCase: 12,
-    skidsCompleted: 0,
-    casesOnCurrentSkid: 0,
-    traysOnLine: 0,
-    batchesReady: 0,
-    mixerLowSec: 330,
-    mixerHighSec: 180,
-    hopperSec: 70,
-    carryOverDone: false,
-    sauceOzPerPizza: 2,
-    sauceBarrelLbs: 50,
-    sauceBarrelsMade: 0,
-    sauceBarrelAnchorNetSec: 0,
-    sauceBarrelCorrectionGeneration: 0,
-    app1OzPerPizza: 2.5,
-    app1BatchLbs: 100,
-    app1BatchesMade: 0,
-    app1BatchAnchorNetSec: 0,
-    app1BatchCorrectionGeneration: 0,
-    app2OzPerPizza: 0,
-    app2BatchLbs: 0,
-    app2BatchesMade: 0,
-    app2BatchAnchorNetSec: 0,
-    app2BatchCorrectionGeneration: 0,
-    app3OzPerPizza: 0,
-    app3BatchLbs: 0,
-    app3BatchesMade: 0,
-    app3BatchAnchorNetSec: 0,
-    app3BatchCorrectionGeneration: 0,
-    app4OzPerPizza: 0,
-    app4BatchLbs: 0,
-    app4BatchesMade: 0,
-    app4BatchAnchorNetSec: 0,
-    app4BatchCorrectionGeneration: 0,
-    pep1Sticks: 0,
-    pep1OzPerPizza: 0,
-    pep1BatchLbs: 0,
-    pep2Sticks: 0,
-    pep2OzPerPizza: 0,
-    pep2BatchLbs: 0,
-    pep1Combined: true,
-    pep1TypeB: "",
-    pep2TypeB: "",
-    pep1SticksB: 0,
-    pep1OzPerPizzaB: 0,
-    pep1BatchLbsB: 0,
-    pep2SticksB: 0,
-    pep2OzPerPizzaB: 0,
-    pep2BatchLbsB: 0,
-    app1Type: "app",
-    app2Type: "",
-    app3Type: "",
-    app4Type: "",
-    pep1Type: "",
-    pep2Type: "",
-    dieType: "Round 12",
-    allergen: "none",
-    doughRecipeName: "",
-    targetDoughballWeight: 8,
-    doughRecipe: [],
-    app1CheeseRecipeName: "",
-    app1CheeseRecipe: [],
-    app2CheeseRecipeName: "",
-    app2CheeseRecipe: [],
-    app3CheeseRecipeName: "",
-    app3CheeseRecipe: [],
-    app4CheeseRecipeName: "",
-    app4CheeseRecipe: [],
-    frontlineRecipeName: "Classic Sauce",
-    frontlineRecipe: [],
+describe("/sync/events — facility-wide master-data broadcasts", () => {
+  type SyncFrame = Record<string, unknown>;
 
-};
-
-describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
-  it("pushes a delta-only schedule frame over an existing SSE connection", async () => {
-    const date = "2030-04-03";
-    process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
-    try {
-      await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-        method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({
-          senderId: "heartbeat-writer",
-          payload: {
-            dayState: {
-              runs: [{
-                id: "heartbeat-run",
-                brand: "Acme",
-                flavor: "Pep",
-                subTab: "crusts",
-                startedAt: Date.now() - 60_000,
-                metaUpdatedAt: 1,
-              }],
-              resetAt: 1,
-            },
-            runValues: { "heartbeat-run": FULL_RUN_VALUES },
-            runValuesUpdatedAt: { "heartbeat-run": 1 },
-          },
-        }),
-      });
-
-      const ctrl = new AbortController();
-      const res = await fetch(
-        `${baseUrl}/api/sync/events?clientId=heartbeat-watcher&today=${date}`,
-        { headers: authHeaders(), signal: ctrl.signal },
-      );
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let scheduleFrames = 0;
-      let commentBeats = 0;
-      let heartbeatRunId: string | undefined;
-      const deadline = Date.now() + 5_000;
+  function collectEvents(
+    date: string,
+    clientId: string,
+    headers: Record<string, string>,
+    ctrl: AbortController,
+    sink: SyncFrame[],
+  ): Promise<void> {
+    return (async () => {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
-        // Read until one schedule-carrying beat AND at least two subsequent
-        // comment-only beats arrive — proving the schedule frame is pushed
-        // once and then SKIPPED while it is unchanged (delta-only).
-        while (Date.now() < deadline && (scheduleFrames < 1 || commentBeats < 2)) {
+        const res = await fetch(
+          `${baseUrl}/api/sync/events?clientId=${clientId}&today=${date}`,
+          { headers, signal: ctrl.signal },
+        );
+        reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done) return;
           buf += decoder.decode(value, { stream: true });
           const frames = buf.split("\n\n");
           buf = frames.pop() ?? "";
-          for (const f of frames) {
-            if (f.includes(": heartbeat")) commentBeats++;
-            const line = f.split("\n").find((l) => l.startsWith("data: "));
+          for (const frame of frames) {
+            const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
             if (!line) continue;
-            const parsed = JSON.parse(line.slice("data: ".length)) as {
-              heartbeat?: boolean;
-              autoTrackSchedule?: { runId?: string } | null;
-            };
-            if (parsed.heartbeat === true && parsed.autoTrackSchedule) {
-              scheduleFrames++;
-              heartbeatRunId = parsed.autoTrackSchedule.runId;
-            }
+            const parsed = JSON.parse(line.slice("data: ".length)) as SyncFrame;
+            sink.push(parsed);
           }
         }
+      } catch {
+        // Aborted or stream error — collection is best-effort.
       } finally {
-        // Abort and cancel deterministically so the open stream never hangs
-        // afterAll's server.close().
-        await reader.cancel().catch(() => {});
-        ctrl.abort();
+        await reader?.cancel().catch(() => {});
       }
-      expect(scheduleFrames).toBe(1);
-      expect(commentBeats).toBeGreaterThanOrEqual(2);
-      expect(heartbeatRunId).toBe("heartbeat-run");
-    } finally {
-      delete process.env.AUTO_TRACK_HEARTBEAT_MS;
-    }
-  }, 15_000);
-});
+    })();
+  }
 
-describe("runNetSecondServerTicks — server-owned net-second execution (step 7a)", () => {
-  const DATE = "2030-04-04";
-  const RUN = "tick-run";
+  it("nudges every different-date peer for dough, sauce, cheese, and mix writes without self-echo or scope leakage", async () => {
+    const writerCtrl = new AbortController();
+    const peerCtrl = new AbortController();
+    const sandboxCtrl = new AbortController();
+    const writerEvents: SyncFrame[] = [];
+    const peerEvents: SyncFrame[] = [];
+    const sandboxEvents: SyncFrame[] = [];
 
-  async function seedRun(options: {
-    startedAtMs: number;
-    pausedAt?: number;
-    endedAt?: number;
-    values?: Record<string, unknown>;
-    date?: string;
-  }) {
-    const date = options.date ?? DATE;
-    const response = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({
-        senderId: "tick-seed",
-        payload: {
-          dayState: {
-            runs: [{
-              id: RUN,
-              brand: "Acme",
-              flavor: "Pep",
-              subTab: "crusts",
-              startedAt: options.startedAtMs,
-              ...(options.pausedAt ? { pausedAt: options.pausedAt } : {}),
-              ...(options.endedAt ? { endedAt: options.endedAt } : {}),
-              metaUpdatedAt: 2,
-            }],
-          },
-          runValues: { [RUN]: options.values ?? FULL_RUN_VALUES },
-          runValuesUpdatedAt: { [RUN]: 1 },
+    const writerStream = collectEvents(
+      "2030-03-10",
+      "recipe-writer",
+      managerAuthHeaders(),
+      writerCtrl,
+      writerEvents,
+    );
+    const peerStream = collectEvents(
+      "2030-03-11",
+      "recipe-peer",
+      authHeaders(),
+      peerCtrl,
+      peerEvents,
+    );
+    const sandboxStream = collectEvents(
+      "2030-03-12",
+      "sandbox-peer",
+      sandboxAuthHeaders(),
+      sandboxCtrl,
+      sandboxEvents,
+    );
+
+    // Different local dates must not affect facility-wide recipe refreshes, but
+    // the sandbox stream must remain isolated from the live facility.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const writeRecipe = (path: string, item: Record<string, unknown>) =>
+      fetch(`${baseUrl}/api/${path}`, {
+        method: "POST",
+        headers: {
+          ...managerAuthHeaders(),
+          "content-type": "application/json",
+          "x-client-id": "recipe-writer",
         },
+        body: JSON.stringify({ items: [item] }),
+      });
+
+    const responses = await Promise.all([
+      writeRecipe("dough-recipes", {
+        id: "refresh-dough",
+        name: "Refresh Dough",
+        notes: "",
+        components: [],
+        enabled: true,
+        brand: "",
+        flavors: [],
       }),
-    });
-    expect(response.status).toBe(200);
-  }
-
-  async function storedData(date = DATE): Promise<Record<string, any>> {
-    const [row] = await db
-      .select()
-      .from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")));
-    return row?.data as Record<string, any>;
-  }
-
-  it("advances due sauce barrels and app batches server-side, converging over beats", async () => {
-    const nowMs = Date.now();
-    const [item] = await db.insert(inventoryItemsTable).values({
-      key: "ingredient:Classic Sauce:lbs",
-      category: "ingredient",
-      name: "Classic Sauce",
-      unit: "lbs",
-    }).returning();
-    await db.insert(inventoryLotsTable).values({
-      itemId: item.id,
-      qtyReceived: 200,
-      qtyRemaining: 200,
-    });
-    await seedRun({ startedAtMs: nowMs - 120_000 });
-
-    let totalAccepted = 0;
-    for (let pass = 0; pass < 5; pass++) {
-      const summary = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
-      totalAccepted += summary.accepted;
-      if (summary.builtClaims === 0) break;
-    }
-
-    const data = await storedData();
-    const values = data.runValues[RUN] as Record<string, unknown>;
-    // netSec = 120s: sauce cadence 53.33s → 2 barrels; app1 cadence ~85.33s → 1 batch.
-    expect(values.sauceBarrelsMade).toBe(2);
-    expect(values.app1BatchesMade).toBe(1);
-    expect(values.sauceBarrelAnchorNetSec).toBeCloseTo(106.667, 2);
-    const coordination = data.autoTrackCoordination.runs[RUN] as Record<string, { sequence: number }>;
-    expect(coordination["sauce-barrel"].sequence).toBe(2);
-    expect(coordination["app1-batch"].sequence).toBe(1);
-    expect(totalAccepted).toBe(3);
-    // Both barrels consumed 50 lbs each from the sauce inventory lot.
-    const [lot] = await db.select().from(inventoryLotsTable);
-    expect(lot.qtyRemaining).toBe(100);
-    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
-    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(2);
-    // A beat later nothing is due (anchors advanced past netSec).
-    const after = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
-    expect(after.builtClaims).toBe(0);
-    expect(after.accepted).toBe(0);
-  });
-
-  it("never ticks paused, ended, or un-computable runs", async () => {
-    const nowMs = Date.now();
-    await seedRun({ startedAtMs: nowMs - 120_000, pausedAt: nowMs - 10_000 });
-    await seedRun({ startedAtMs: nowMs - 120_000, endedAt: nowMs - 10_000, date: "2030-04-05" });
-    const response = await fetch(`${baseUrl}/api/sync/today?today=2030-04-06`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({
-        senderId: "tick-seed",
-        payload: {
-          dayState: { runs: [{ id: "skeletal-run", brand: "Acme", flavor: "Pep" }] },
-          runValues: { "skeletal-run": { casesNeeded: 240 } },
-          runValuesUpdatedAt: { "skeletal-run": 1 },
-        },
+      writeRecipe("sauce-recipes", {
+        id: "refresh-sauce",
+        name: "Refresh Sauce",
+        notes: "",
+        components: [],
+        enabled: true,
+        brand: "",
+        flavors: [],
       }),
-    });
-    expect(response.status).toBe(200);
-
-    const summary = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
-    expect(summary.builtClaims).toBe(0);
-    expect(summary.accepted).toBe(0);
-    expect(summary.examinedDates).toBeGreaterThanOrEqual(3);
-    const data = await storedData();
-    expect((data.runValues[RUN] as Record<string, unknown>).sauceBarrelsMade).toBe(0);
-  });
-
-  it("bounds each pass and continues on later beats", async () => {
-    const nowMs = Date.now();
-    const [item] = await db.insert(inventoryItemsTable).values({
-      key: "ingredient:Classic Sauce:lbs",
-      category: "ingredient",
-      name: "Classic Sauce",
-      unit: "lbs",
-    }).returning();
-    await db.insert(inventoryLotsTable).values({
-      itemId: item.id,
-      qtyReceived: 200,
-      qtyRemaining: 200,
-    });
-    await seedRun({ startedAtMs: nowMs - 120_000 });
-
-    const capped = await runNetSecondServerTicks({ nowMs, maxClaims: 1 });
-    expect(capped.accepted).toBe(1);
-    let data = await storedData();
-    let values = data.runValues[RUN] as Record<string, unknown>;
-    expect(values.sauceBarrelsMade).toBe(1);
-    expect(values.app1BatchesMade).toBe(0);
-
-    const next = await runNetSecondServerTicks({ nowMs, maxClaims: 24 });
-    expect(next.accepted).toBe(2); // second sauce barrel + the app1 batch
-    data = await storedData();
-    values = data.runValues[RUN] as Record<string, unknown>;
-    expect(values.sauceBarrelsMade).toBe(2);
-    expect(values.app1BatchesMade).toBe(1);
-    const [lot] = await db.select().from(inventoryLotsTable);
-    expect(lot.qtyRemaining).toBe(100);
-    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(2);
-  });
-});
-
-describe("runWallClockServerTicks — server wall-clock bootstrap (step 7b)", () => {
-  const DATE = "2030-04-07";
-  const RUN = "wall-clock-run";
-
-  async function seedRun(options: {
-    startedAtMs: number;
-    pausedAt?: number;
-    values?: Record<string, unknown>;
-    date?: string;
-  }) {
-    const date = options.date ?? DATE;
-    const response = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({
-        senderId: "wc-seed",
-        payload: {
-          dayState: {
-            runs: [{
-              id: RUN,
-              brand: "Acme",
-              flavor: "Pep",
-              subTab: "crusts",
-              startedAt: options.startedAtMs,
-              ...(options.pausedAt ? { pausedAt: options.pausedAt } : {}),
-              metaUpdatedAt: 2,
-            }],
-          },
-          runValues: { [RUN]: options.values ?? { ...FULL_RUN_VALUES, traysOnLine: 10, batchesReady: 4 } },
-          runValuesUpdatedAt: { [RUN]: 1 },
-        },
+      writeRecipe("cheese-recipes", {
+        id: "refresh-cheese",
+        name: "Refresh Cheese",
+        brand: "",
+        flavors: [],
+        shredderSetting: "",
+        cellulose: "",
+        notes: "",
+        components: [],
+        enabled: true,
       }),
-    });
-    expect(response.status).toBe(200);
-  }
+      writeRecipe("mixes", {
+        id: "refresh-mix",
+        name: "Refresh Mix",
+        brand: "",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        notes: "",
+        amountAlreadyMade: 0,
+        components: [],
+        isPrep: false,
+        enabled: true,
+      }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
 
-  async function storedData(date = DATE): Promise<Record<string, any>> {
-    const [row] = await db
-      .select()
-      .from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")));
-    return row?.data as Record<string, any>;
-  }
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    writerCtrl.abort();
+    peerCtrl.abort();
+    sandboxCtrl.abort();
+    await Promise.allSettled([writerStream, peerStream, sandboxStream]);
 
-  it("advances case/tray/batch/hopper for a fresh live run and persists bookkeeping", async () => {
-    const nowMs = Date.now();
-    // 5 minutes in: past the 3.5 min freezer tunnel so the case channel has
-    // expected output, and with staged dough on the line to consume.
-    await seedRun({ startedAtMs: nowMs - 300_000 });
+    const isMasterDataRefresh = (frame: SyncFrame) =>
+      frame.type === "master-data" && frame.masterDataChanged === true;
+    const writerRefreshes = writerEvents.filter(isMasterDataRefresh);
+    const peerRefreshes = peerEvents.filter(isMasterDataRefresh);
+    const sandboxRefreshes = sandboxEvents.filter(isMasterDataRefresh);
 
-    // Loop over beats: the hopper channel arms on its first encounter and
-    // fires on a later beat, and once case/tray/batch claim they go canonical.
-    // Persisted bookkeeping carries the arm-state so later beats fire hopper.
-    let totalAccepted = 0;
-    for (let pass = 0; pass < 8; pass++) {
-      const beatMs = nowMs + pass * 90_000; // advance past the hopper's 70s cycle
-      const summary = await runWallClockServerTicks({ nowMs: beatMs, maxClaims: 12 });
-      totalAccepted += summary.accepted;
-      if (summary.builtClaims === 0) break;
-    }
-    expect(totalAccepted).toBeGreaterThan(0);
-
-    const data = await storedData();
-    const values = data.runValues[RUN] as Record<string, unknown>;
-    const coordination = data.autoTrackCoordination.runs[RUN] as Record<string, { sequence: number }>;
-    expect(Number(values.casesOnCurrentSkid) + Number(values.skidsCompleted) * 48).toBeGreaterThan(0);
-    expect(Number(values.traysOnLine)).toBeLessThan(10);
-    expect(Number(values.batchesReady)).toBeLessThan(4);
-    expect(coordination.case?.sequence ?? 0).toBeGreaterThan(0);
-    expect(coordination["tray-consume"]).toBeDefined();
-    expect(coordination["batch-consume"]).toBeDefined();
-    expect(coordination.hopper).toBeDefined();
-    // Per-run arm-state persisted atomically with the accepted claims.
-    const bookkeeping = data.autoTrackServerState?.wallClockBookkeeping?.[RUN];
-    expect(bookkeeping).toBeDefined();
-    expect(bookkeeping.caseNextDueMs).toBeGreaterThan(nowMs);
-  });
-
-  it("never ticks paused runs and leaves no server bookkeeping", async () => {
-    const nowMs = Date.now();
-    await seedRun({ startedAtMs: nowMs - 300_000, pausedAt: nowMs - 10_000 });
-    const summary = await runWallClockServerTicks({ nowMs, maxClaims: 12 });
-    expect(summary.accepted).toBe(0);
-    const data = await storedData();
-    expect(data.autoTrackServerState).toBeUndefined();
-  });
-
-  it("stops driving a channel once any claim makes its register canonical", async () => {
-    const nowMs = Date.now();
-    await seedRun({ startedAtMs: nowMs - 300_000 });
-    await runWallClockServerTicks({ nowMs, maxClaims: 12 });
-    const before = await storedData();
-    const caseSeq = before.autoTrackCoordination.runs[RUN].case.sequence as number;
-    const again = await runWallClockServerTicks({ nowMs, maxClaims: 12 });
-    expect(again.accepted).toBe(0);
-    const after = await storedData();
-    expect(after.autoTrackCoordination.runs[RUN].case.sequence).toBe(caseSeq);
+    expect(writerRefreshes).toHaveLength(0);
+    expect(peerRefreshes).toHaveLength(4);
+    expect(peerRefreshes.every((frame) => frame.senderId === "recipe-writer")).toBe(true);
+    expect(sandboxRefreshes).toHaveLength(0);
   });
 });
 
@@ -2521,7 +2703,7 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
     const putScheduled = (date: string, runId: string, casesNeeded: number) =>
       fetch(`${baseUrl}/api/sync/${date}?today=2030-09-09`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({
           senderId: `scheduled-${runId}`,
           payload: {

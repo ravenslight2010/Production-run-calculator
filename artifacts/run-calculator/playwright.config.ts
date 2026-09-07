@@ -28,6 +28,10 @@ export default defineConfig({
       executablePath: resolveChromiumExecutable(),
     },
   },
+  // The release WebKit lane has its own isolated config and evidence contract.
+  // Keeping it out of the destructive full suite avoids duplicating the
+  // complete browser matrix while still making WebKit a standard release gate.
+  testIgnore: ["release-webkit-smoke.spec.ts"],
   projects: [
     {
       name: "chromium",

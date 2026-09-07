@@ -5,12 +5,21 @@ import { currentScope } from "./requestScope";
 
 // What we capture about a problem. For a user report this is mostly the user's
 // own words (`description`); for an auto-captured crash it's the error message
-// and stack. `userAgent` is recorded when the client sends one.
+// and stack. Raw user-agent strings are normalized and discarded.
 export type IncidentContext = {
   description?: string;
   errorMessage?: string;
   errorStack?: string;
-  userAgent?: string;
+  browserFamily?: string;
+  deviceClass?: string;
+  correlationId?: string;
+  relatedCorrelationId?: string;
+  action?: string;
+  outcome?: string;
+  retryCount?: number;
+  connectivity?: string;
+  syncState?: string;
+  signalKind?: string;
 };
 
 export type IncidentSource = "user_report" | "auto_crash";
@@ -104,9 +113,8 @@ export type CreateIncidentInput = {
   recurrence: IncidentRecurrence | null;
 };
 
-// Record a new incident (status defaults to "new"). The AI diagnosis is computed
-// by the route before this is called and stored alongside the raw context so a
-// manager reviewing later sees the exact explanation the reporter saw. Stamped
+// Record a new incident (status defaults to "new"). Context has already crossed
+// the route's redaction and normalization boundary. Stamped
 // with the reporting session's data scope so sandbox-originated incidents never
 // mix into the live review queue (and vice versa).
 export async function createIncident(input: CreateIncidentInput): Promise<IncidentDTO> {

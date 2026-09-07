@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchActionableIncidentCount } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "./useIdle";
+import type { AttentionCountState } from "./usePendingResetCount";
 
 // Number of reported issues / crashes a manager hasn't reviewed yet. Polls in
 // the background so managers see a nav badge soon after staff report a problem.
@@ -13,7 +14,7 @@ import { useIdle } from "./useIdle";
 // Idle throttling: steps from 20 s down to 2 min after 3 min of no activity.
 // Startup jitter: polling begins after a random 0–10 s delay so a fresh page
 // load doesn't fire all badge queries simultaneously.
-export function useUnreviewedIncidentCount(): number {
+export function useUnreviewedIncidentSummary(): AttentionCountState {
   const { hasCapability } = useMe();
   const canReview = hasCapability("review-incidents");
   const isIdle = useIdle();
@@ -25,11 +26,21 @@ export function useUnreviewedIncidentCount(): number {
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { data } = useQuery({
+  const { data, isLoading, isError, dataUpdatedAt } = useQuery({
     queryKey: ["unreviewedIncidentCount"],
     queryFn: fetchActionableIncidentCount,
     enabled: canReview,
     refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
-  return canReview ? (data?.count ?? 0) : 0;
+  return {
+    count: canReview ? (data?.count ?? 0) : 0,
+    isLoading: canReview && isLoading,
+    isUnavailable: canReview && isError,
+    isStale: canReview && dataUpdatedAt > 0 && Date.now() - dataUpdatedAt > 5 * 60_000,
+    checkedAt: canReview && dataUpdatedAt > 0 ? dataUpdatedAt : null,
+  };
+}
+
+export function useUnreviewedIncidentCount(): number {
+  return useUnreviewedIncidentSummary().count;
 }

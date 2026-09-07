@@ -5,16 +5,20 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { ProfileDataHealthFinding } from './profileDataHealthFinding';
+import type { AiRetentionReport } from './aiRetentionReport';
+import type { DataHealthFinding } from './dataHealthFinding';
 import type { ProfileDataHealthRepair } from './profileDataHealthRepair';
 import type { ProfileDataHealthWorkspaceCleanupHistory } from './profileDataHealthWorkspaceCleanupHistory';
 import type { ProfileDataHealthWorkspaceRepairBatchesItem } from './profileDataHealthWorkspaceRepairBatchesItem';
 import type { ProfileDataHealthWorkspaceSummary } from './profileDataHealthWorkspaceSummary';
+import type { SourceLibraryReconciliationStatus } from './sourceLibraryReconciliationStatus';
 
 export interface ProfileDataHealthWorkspace {
-  findings: ProfileDataHealthFinding[];
+  findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
   cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
   repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
+  aiRetention: AiRetentionReport;
+  sourceReconciliation: SourceLibraryReconciliationStatus;
 }

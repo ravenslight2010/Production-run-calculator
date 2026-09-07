@@ -44,6 +44,26 @@ const DEFAULT_TOLERANCE = 0.0005;
 
 const ci = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const listKey = (values: ReadonlyArray<string>) => values.map(ci).filter(Boolean).sort().join("\u0000");
+type AggregatedCheeseComponent = CheeseComponent & { lbs: number; ozPerPizza: number; sharePct: number };
+function aggregateComponents(components: ReadonlyArray<CheeseComponent>): Map<string, AggregatedCheeseComponent> {
+  const totals = new Map<string, AggregatedCheeseComponent>();
+  for (const component of components) {
+    const key = ci(component.ingredient);
+    const existing = totals.get(key);
+    if (existing) {
+      existing.lbs += component.lbs;
+      existing.ozPerPizza += component.ozPerPizza ?? 0;
+      existing.sharePct += component.sharePct ?? 0;
+    } else {
+      totals.set(key, {
+        ...component,
+        ozPerPizza: component.ozPerPizza ?? 0,
+        sharePct: component.sharePct ?? 0,
+      });
+    }
+  }
+  return totals;
+}
 const signature = (recipe: CheeseRecipe) => JSON.stringify({
   id: recipe.id,
   name: recipe.name,
@@ -60,12 +80,6 @@ const signature = (recipe: CheeseRecipe) => JSON.stringify({
   })).sort((a, b) => a.ingredient.localeCompare(b.ingredient)),
   enabled: recipe.enabled,
 });
-
-function componentMap(components: ReadonlyArray<CheeseComponent>) {
-  const out = new Map<string, CheeseComponent>();
-  for (const component of components) out.set(ci(component.ingredient), component);
-  return out;
-}
 
 function display(value: string | number | undefined): string {
   return typeof value === "number" ? String(value) : value || "blank";
@@ -159,9 +173,9 @@ export function reconcileCheeseRecipes(input: {
     }
 
     const recipeDiscs: CheeseRepairDiscrepancy[] = [];
-    const sourceComponents = componentMap(source.components);
-    const currentComponents = componentMap(matched.components);
-    for (const component of source.components) {
+    const sourceComponents = aggregateComponents(source.components);
+    const currentComponents = aggregateComponents(matched.components);
+    for (const component of sourceComponents.values()) {
       const currentComponent = currentComponents.get(ci(component.ingredient));
       if (!currentComponent) {
         recipeDiscs.push({
@@ -186,7 +200,7 @@ export function reconcileCheeseRecipes(input: {
         });
       }
     }
-    for (const component of matched.components) {
+    for (const component of currentComponents.values()) {
       if (!sourceComponents.has(ci(component.ingredient))) {
         recipeDiscs.push({
           source: "cheese",
@@ -228,15 +242,71 @@ export function reconcileCheeseRecipes(input: {
     }
     if (!recipeDiscs.length) continue;
 
+    const sourceGroups = new Map<string, CheeseComponent[]>();
+    const currentGroups = new Map<string, CheeseComponent[]>();
+    for (const component of source.components) {
+      const key = ci(component.ingredient);
+      sourceGroups.set(key, [...(sourceGroups.get(key) ?? []), component]);
+    }
+    for (const component of matched.components) {
+      const key = ci(component.ingredient);
+      currentGroups.set(key, [...(currentGroups.get(key) ?? []), component]);
+    }
+    const ambiguousDuplicateMapping = [...new Set([...sourceGroups.keys(), ...currentGroups.keys()])]
+      .some((key) => {
+        const sourceRows = sourceGroups.get(key) ?? [];
+        const currentRows = currentGroups.get(key) ?? [];
+        if (sourceRows.length <= 1 && currentRows.length <= 1) return false;
+        if (sourceRows.length !== currentRows.length) return true;
+        const remaining = [...currentRows];
+        return sourceRows.some((sourceRow) => {
+          const matchIndex = remaining.findIndex(
+            (currentRow) => Math.abs(currentRow.lbs - sourceRow.lbs) <= tolerance,
+          );
+          if (matchIndex < 0) return true;
+          remaining.splice(matchIndex, 1);
+          return false;
+        });
+      });
+    if (ambiguousDuplicateMapping) {
+      discrepancies.push(...recipeDiscs);
+      items.push({
+        source: "cheese",
+        status: "ambiguous",
+        recipeId: matched.id,
+        recipeName: matched.name,
+        brand: matched.brand,
+        discrepancies: recipeDiscs,
+        matchedRecipeId: matched.id,
+        currentSignature: signature(matched),
+      });
+      continue;
+    }
+
+    const usedCurrentIndexes = new Map<string, Set<number>>();
     const mergedComponents = source.components.map((sourceComponent) => {
-      const currentComponent = currentComponents.get(ci(sourceComponent.ingredient));
-      return currentComponent
-        ? {
-            ...sourceComponent,
-            ...(currentComponent.ozPerPizza != null ? { ozPerPizza: currentComponent.ozPerPizza } : {}),
-            ...(currentComponent.sharePct != null ? { sharePct: currentComponent.sharePct } : {}),
-          }
-        : { ...sourceComponent };
+      const key = ci(sourceComponent.ingredient);
+      const currentRows = matched.components.filter((component) => ci(component.ingredient) === key);
+      const used = usedCurrentIndexes.get(key) ?? new Set<number>();
+      usedCurrentIndexes.set(key, used);
+      const currentIndex = currentRows.length <= 1
+        ? 0
+        : currentRows.findIndex(
+            (component, index) =>
+              !used.has(index) && Math.abs(component.lbs - sourceComponent.lbs) <= tolerance,
+          );
+      const currentRow = currentRows[currentIndex];
+      if (currentRow) used.add(currentIndex);
+      if (!currentRow) return { ...sourceComponent };
+
+      // Ratio fields are manager-entered. Preserve them row-for-row when the
+      // source retains that row; never copy an aggregate onto every duplicate
+      // or invent a proportional distribution.
+      return {
+        ...sourceComponent,
+        ...(currentRow.ozPerPizza != null ? { ozPerPizza: currentRow.ozPerPizza } : {}),
+        ...(currentRow.sharePct != null ? { sharePct: currentRow.sharePct } : {}),
+      };
     });
     discrepancies.push(...recipeDiscs);
     items.push({

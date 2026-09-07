@@ -7,7 +7,6 @@ import {
   fetchWithDiagnostics,
   type DiagnosticIngestionTransportName,
 } from "./performanceDiagnostics";
-import type { AiStatus } from "./aiStatus";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -289,8 +288,8 @@ function toReorderInput(it: InventoryItem): ReorderInput {
 
 // Roll a list of resolved scheduled runs up into a per-item-key demand map (the
 // SAME aggregation the reorder card uses). Shared so the warehouse "Reorder Now"
-// card and the proactive reorder nudge subtract identical demand and can never
-// disagree (replit.md parity). The proactive nudge sends this map to the server.
+// card and other inventory views subtract identical demand and can never
+// disagree (replit.md parity).
 export function buildReorderDemandByKey(
   scheduledValsList: FormValues[],
 ): Record<string, number> {
@@ -555,6 +554,19 @@ async function parseApiResponse<T>(
   requestEpoch: number,
 ): Promise<T> {
   if (!res.ok) {
+    if (
+      typeof window !== "undefined"
+      && !path.includes("diagnostic:incidents")
+      && !path.startsWith("/incidents")
+    ) {
+      window.dispatchEvent(new CustomEvent("app:api-failure", {
+        detail: {
+          path: path.split("?")[0],
+          status: res.status,
+          correlationId: res.headers.get("x-correlation-id") ?? undefined,
+        },
+      }));
+    }
     if (res.status === 401 && !isSessionProbePath(path)) {
       onUnauthorized?.(requestEpoch);
     }
@@ -878,8 +890,8 @@ export type WasteInsightBody = {
   plannedItems?: CandidateItem[];
 };
 
-// Server flags expiring/expired stock and (when anything is at risk) asks the AI
-// for a run-order suggestion to consume it first. Advisory only.
+// Server flags expiring/expired stock in urgency order. The historical
+// suggestion field remains optional for response compatibility.
 export const wasteInsight = (body: WasteInsightBody = {}) =>
   api<WasteInsightResult>("/inventory/waste-insight", {
     method: "POST",
@@ -1305,7 +1317,16 @@ export type IncidentContext = {
   description?: string;
   errorMessage?: string;
   errorStack?: string;
-  userAgent?: string;
+  browserFamily?: string;
+  deviceClass?: string;
+  correlationId?: string;
+  relatedCorrelationId?: string;
+  action?: string;
+  outcome?: string;
+  retryCount?: number;
+  connectivity?: string;
+  syncState?: string;
+  signalKind?: string;
 };
 export type ReportIncidentBody = {
   source: IncidentSource;
@@ -1316,6 +1337,15 @@ export type ReportIncidentBody = {
   errorMessage?: string;
   errorStack?: string;
   userAgent?: string;
+  diagnostics?: {
+    action?: string;
+    outcome?: "error" | "rejected" | "degraded";
+    retryCount?: number;
+    connectivity?: "online" | "offline" | "unstable" | "unknown";
+    syncState?: "idle" | "pending" | "retrying" | "blocked" | "unknown";
+    signalKind?: "user_report" | "crash" | "rejected_promise" | "api_failure" | "startup" | "update" | "sync";
+    correlationId?: string;
+  };
 };
 // "Seen before" signal: how many prior similar incidents were found and the
 // recovery step that helped previously. Null when the problem has no precedent.
@@ -1325,9 +1355,11 @@ export type IncidentRecurrence = {
 };
 export type IncidentDiagnosis = {
   incidentId: string;
-  diagnosis: string;
-  workaround: string;
+  correlationId: string;
+  diagnosis: string | null;
+  workaround: string | null;
   recurrence: IncidentRecurrence | null;
+  aiGenerated: boolean;
 };
 export type Incident = {
   id: string;
@@ -1445,11 +1477,13 @@ export type FieldChecksReport = {
 export const fetchIncidents = () => api<Incident[]>("/incidents");
 export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
 export const confirmHardwareFieldCheck = (body: {
-  checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+  checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
+    "safe-area-clearance" | "camera-file-selection" | "update-handoff" |
+    "process-kill-recovery";
   checkVersion: "2026-09";
   outcome: "success" | "failure" | "incomplete";
   observedAt: string;
-  deviceCategory: "android-phone" | "android-tablet" | "ipad";
+  deviceCategory: "android-phone" | "android-tablet" | "ipad" | "iphone";
 }) => diagnosticIngestionApi<{ accepted: number; duplicate: number }>(
   "hardwareConfirmations",
   {
@@ -1473,9 +1507,8 @@ export const markIncidentReviewed = (id: string) =>
 export const markIncidentResolved = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`, { method: "POST" });
 
-// Manager-only AI root-cause clustering across the incident log. Advisory and
-// read-only: the server reads the incidents itself, the AI only proposes the
-// grouping, and a deterministic grouping is returned if the AI is unavailable.
+// Manager-only deterministic pattern grouping across the incident log.
+// Advisory and read-only: the server reads and groups the incidents itself.
 export type IncidentClusterSeverity = "low" | "medium" | "high";
 export type IncidentCluster = {
   theme: string;
@@ -1490,18 +1523,24 @@ export type IncidentClustersResult = {
   totalIncidents: number;
   note?: string;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
+  evidence: {
+    windowDays: number;
+    sampleCount: number;
+    platforms: string[];
+    builds: string[];
+    screens: string[];
+    confidence: "limited" | "moderate" | "strong";
+  };
 };
 export const requestIncidentClusters = (lookbackDays?: number) =>
-  api<IncidentClustersResult>("/ai/incident-clusters", {
+  api<IncidentClustersResult>("/operations-insights/incident-patterns", {
     method: "POST",
     body: JSON.stringify(lookbackDays ? { lookbackDays } : {}),
   });
 
-// AI predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
-// stoppages vs. a per-product baseline) is deterministic server-side; the AI
-// only narrates flagged anomalies. Advisory and read-only. Open to all staff.
+// Operations Insights anomaly flags. Drift detection (downtime/yield/stoppages
+// vs. a per-product baseline) is deterministic server-side. Advisory and
+// read-only. Open to all staff.
 export type AnomalyMetric = "downtime" | "yield" | "stoppages";
 export type AnomalySeverity = "low" | "medium" | "high";
 export type AnomalyRunInput = {
@@ -1530,19 +1569,17 @@ export type AnomalyResult = {
   summary: string;
   note?: string;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
 };
 export const requestAnomalies = (
   today: AnomalyRunInput[],
   history: AnomalyRunInput[],
 ) =>
-  api<AnomalyResult>("/ai/anomalies", {
+  api<AnomalyResult>("/operations-insights/anomalies", {
     method: "POST",
     body: JSON.stringify({ today, history }),
   });
 
-// AI schedule optimizer. The suggested run order (allergen runs end-of-day,
+// Operations Insights schedule ordering. The suggested run order (allergen runs end-of-day,
 // similar brand/die grouped to cut changeovers, factory sequence rules honored)
 // is computed deterministically server-side; the AI only narrates it, and only
 // when a strictly better order exists. Advisory and read-only — the manager
@@ -1574,14 +1611,12 @@ export type ScheduleOptimizeResult = {
   summary: string;
   note?: string;
   generatedAt: number;
-  aiGenerated: boolean;
-  aiStatus?: AiStatus;
 };
 export const requestScheduleOptimize = (
   runs: ScheduleRunInput[],
   rules?: unknown[],
 ) =>
-  api<ScheduleOptimizeResult>("/ai/schedule-optimize", {
+  api<ScheduleOptimizeResult>("/operations-insights/schedule-order", {
     method: "POST",
     body: JSON.stringify({ runs, rules: rules ?? [] }),
   });

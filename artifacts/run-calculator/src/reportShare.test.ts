@@ -2,10 +2,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   operationalReportText,
+  operationalReportCsv,
+  operationalReportRows,
+  operationalReportWorkbook,
   reportFilename,
   shareOperationalReport,
 } from "./reportShare";
 import type { OperationalReport } from "@workspace/day-summary";
+import * as XLSX from "xlsx";
 
 const report: OperationalReport = {
   scope: "week",
@@ -51,11 +55,26 @@ afterEach(() => {
 });
 
 describe("operational report sharing", () => {
-  it("formats scope, authoritative sections, unavailable values, and narration", () => {
+  it("formats scope, authoritative sections, and unavailable values", () => {
     const text = operationalReportText(report);
+    expect(text).toContain("AUTHORITATIVE SOURCE STATISTICS");
     expect(text).toContain("Period: 2026-08-29 to 2026-09-04");
     expect(text).toContain("Incidents: Unavailable — Incident history is unavailable.");
-    expect(text).toContain("OPTIONAL NARRATIVE (AI-GENERATED; NOT AUTHORITATIVE STATISTICS)");
+    expect(text).not.toContain("OPTIONAL NARRATIVE");
+    expect(text).not.toContain("One run remains unfinished.");
+  });
+
+  it("labels local exports and shares as non-authoritative", async () => {
+    const text = operationalReportText(report, "local-offline");
+    expect(text).toContain("LOCAL/OFFLINE FALLBACK — NOT AUTHORITATIVE");
+    expect(text).not.toContain("AUTHORITATIVE SOURCE STATISTICS");
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    expect(await shareOperationalReport(report, "local-offline")).toBe("copied");
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("LOCAL/OFFLINE FALLBACK — NOT AUTHORITATIVE"),
+    );
   });
 
   it("uses the clipboard when native sharing is unavailable", async () => {
@@ -71,5 +90,47 @@ describe("operational report sharing", () => {
     Object.assign(navigator, { share });
     expect(await shareOperationalReport(report)).toBe("shared");
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining("Operational week") }));
+  });
+
+  it("builds deterministic structured rows, CSV, and workbook sheets", () => {
+    const rows = operationalReportRows(report);
+    expect(rows.find((row) => row.ID === "production-summary")).toMatchObject({
+      "Cases Planned": 200,
+      "Cases Produced": 140,
+      "Attainment %": 70,
+    });
+    expect(operationalReportRows(report)).toEqual(rows);
+    const csv = operationalReportCsv(report);
+    expect(csv).toContain('"production-summary"');
+    expect(csv).toContain('"Incidents","section-status"');
+    expect(csv).toContain('"Quality","section-status"');
+    expect(csv).toContain('"Inventory","section-status"');
+    expect(csv).toContain('"available-no-detail-rows"');
+    expect(operationalReportWorkbook(report).SheetNames).toEqual([
+      "Report", "Production", "Quality", "Incidents", "Inventory", "Actions",
+    ]);
+    expect(reportFilename(report, "csv")).toBe("operational-week-2026-09-04.csv");
+    expect(reportFilename(report, "xlsx")).toBe("operational-week-2026-09-04.xlsx");
+  });
+
+  it("neutralizes spreadsheet formulas in CSV and workbook cells", () => {
+    const unsafe: OperationalReport = {
+      ...report,
+      productionRows: [{
+        id: "unsafe",
+        date: report.date,
+        run: "=HYPERLINK(\"https://example.invalid\")",
+        status: "finished",
+        casesPlanned: 1,
+        casesProduced: 1,
+        attainmentPct: 100,
+        downtimeMinutes: 0,
+        stoppages: 0,
+      }],
+    };
+    expect(operationalReportCsv(unsafe)).toContain(`"'=HYPERLINK(""https://example.invalid"")"`);
+    const sheet = operationalReportWorkbook(unsafe).Sheets.Production;
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
+    expect(rows.find((row) => row.ID === "unsafe")?.Detail).toBe(`'=HYPERLINK("https://example.invalid")`);
   });
 });

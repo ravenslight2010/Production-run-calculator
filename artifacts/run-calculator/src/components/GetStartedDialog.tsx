@@ -66,8 +66,8 @@ const TABS: Entry[] = [
 
 const MENU: Entry[] = [
   { icon: BarChart2, label: "Stoppages & Summary", desc: "Log downtime and review shift totals and exports." },
-  { icon: ClipboardList, label: "Stock", desc: "On-hand inventory, lots, and restocks." },
-  { icon: Sparkles, label: "AI Assistant", desc: "Run, break, and efficiency recommendations." },
+  { icon: ClipboardList, label: "Inventory", desc: "Review stock and maintain inventory records." },
+  { icon: Sparkles, label: "Operations Insights", desc: "Review deterministic recaps, anomalies, schedule order, and imports." },
   { icon: CalendarPlus, label: "Schedule", desc: "Plan future production days." },
   { icon: Settings, label: "Setup & Settings", desc: "Run configuration, recipes, and app options." },
   { icon: LifeBuoy, label: "Report an issue", desc: "Get instant help and alert your manager." },

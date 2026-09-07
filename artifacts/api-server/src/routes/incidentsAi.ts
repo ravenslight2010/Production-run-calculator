@@ -24,6 +24,59 @@ export type ReportValidationResult =
   | { ok: true; data: ReportInput }
   | { ok: false; status: number; error: string };
 
+const MAX_STACK_FRAMES = 12;
+const JWT_PATTERN = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
+const TOKEN_PATTERN = /\b(?:bearer\s+)?[A-Za-z0-9_-]{24,}(?:\.[A-Za-z0-9_-]{12,}){0,2}\b/gi;
+const CONTACT_PATTERN = /\b(?:[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\+?\d[\d ()-]{7,}\d)\b/g;
+const FILE_PATH_PATTERN = /(?:file:\/\/)?(?:[A-Za-z]:\\|\/(?:Users|home|var|tmp|workspace|app|opt)\/)(?:[^:\s()[\]]+[\\/])*[^:\s()[\]]+/g;
+const QUERY_PATTERN = /([a-z][a-z0-9+.-]*:\/\/[^\s?#]+|\/[^\s?#]*)\?[^\s#]*/gi;
+
+export function redactDiagnosticText(raw: string, maxChars: number): string {
+  return raw
+    .replace(QUERY_PATTERN, "$1?[redacted]")
+    .replace(CONTACT_PATTERN, "[contact redacted]")
+    .replace(FILE_PATH_PATTERN, "[path redacted]")
+    .replace(JWT_PATTERN, "[token redacted]")
+    .replace(TOKEN_PATTERN, "[token redacted]")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .slice(0, maxChars)
+    .trim();
+}
+
+export function isSafeCorrelationId(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export function safeIncidentLogMetadata(data: ReportInput, context: IncidentContext) {
+  const screenClass = /inventory|warehouse/i.test(data.screen) ? "inventory"
+    : /manage|incident|settings/i.test(data.screen) ? "management"
+      : /sign|auth|login/i.test(data.screen) ? "authentication"
+        : /run|home|production/i.test(data.screen) ? "production" : "other";
+  return {
+    appPlatform: data.appPlatform,
+    signalKind: context.signalKind,
+    outcome: context.outcome,
+    retryCount: context.retryCount,
+    connectivity: context.connectivity,
+    screenClass,
+    buildProvided: Boolean(data.appVersion),
+  };
+}
+
+function safeEnum(value: unknown, allowed: readonly string[], fallback: string): string {
+  return typeof value === "string" && allowed.includes(value) ? value : fallback;
+}
+
+function normalizeAgent(userAgent: string | undefined): Pick<IncidentContext, "browserFamily" | "deviceClass"> {
+  const ua = userAgent ?? "";
+  const browserFamily = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox"
+    : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Other";
+  const deviceClass = /iPad|Tablet|Android(?!.*Mobile)/i.test(ua) ? "tablet"
+    : /Mobile|iPhone|Android/i.test(ua) ? "phone" : "desktop";
+  return { browserFamily, deviceClass };
+}
+
 // Validate the request body for POST /incidents. A user report should carry a
 // description; a crash should carry an error message. We don't hard-reject a
 // missing one (a crash with only a stack, or a terse report, is still useful),
@@ -52,15 +105,27 @@ export function validateReportBody(body: unknown): ReportValidationResult {
 // Assemble the jsonb context we persist from the validated body, dropping empty
 // fields so the stored object stays tidy.
 export function buildIncidentContext(data: ReportInput): IncidentContext {
-  const ctx: IncidentContext = {};
-  const description = data.description?.trim();
-  const errorMessage = data.errorMessage?.trim();
-  const errorStack = data.errorStack?.trim();
-  const userAgent = data.userAgent?.trim();
+  const diagnostics = data.diagnostics;
+  const ctx: IncidentContext = {
+    ...normalizeAgent(data.userAgent),
+    action: redactDiagnosticText(diagnostics?.action ?? "report_problem", 80) || "report_problem",
+    outcome: safeEnum(diagnostics?.outcome, ["error", "rejected", "degraded"], "error"),
+    retryCount: Math.min(10, Math.max(0, Math.round(diagnostics?.retryCount ?? 0))),
+    connectivity: safeEnum(diagnostics?.connectivity, ["online", "offline", "unstable", "unknown"], "unknown"),
+    syncState: safeEnum(diagnostics?.syncState, ["idle", "pending", "retrying", "blocked", "unknown"], "unknown"),
+    signalKind: safeEnum(diagnostics?.signalKind, ["user_report", "crash", "rejected_promise", "api_failure", "startup", "update", "sync"], data.source === "auto_crash" ? "crash" : "user_report"),
+  };
+  if (isSafeCorrelationId(diagnostics?.correlationId)) {
+    ctx.relatedCorrelationId = diagnostics.correlationId;
+  }
+  const description = data.description ? redactDiagnosticText(data.description, 2000) : "";
+  const errorMessage = data.errorMessage ? redactDiagnosticText(data.errorMessage, 500) : "";
+  const errorStack = data.errorStack
+    ? data.errorStack.split("\n").slice(0, MAX_STACK_FRAMES).map((line) => redactDiagnosticText(line, 300)).filter(Boolean).join("\n").slice(0, 3000)
+    : "";
   if (description) ctx.description = description;
   if (errorMessage) ctx.errorMessage = errorMessage;
   if (errorStack) ctx.errorStack = errorStack;
-  if (userAgent) ctx.userAgent = userAgent;
   return ctx;
 }
 

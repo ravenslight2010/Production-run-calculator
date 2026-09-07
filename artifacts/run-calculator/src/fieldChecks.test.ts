@@ -3,6 +3,7 @@ import {
   createFieldCheckObserver,
   emitFieldCheckSignal,
   FIELD_CHECK_SIGNAL_EVENT,
+  FIELD_CHECK_CATALOG,
 } from "./fieldChecks";
 
 const submit = vi.hoisted(() => vi.fn().mockResolvedValue({ accepted: 1, duplicate: 0 }));
@@ -46,6 +47,13 @@ describe("field-check observer", () => {
     emitFieldCheckSignal("foreground-recovery", "success");
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
+  });
+
+  it("keeps visual and physical checks out of passive collection", () => {
+    expect(FIELD_CHECK_CATALOG.find((check) => check.name === "offline-queue-replay")?.observedBy).toBe("browser");
+    for (const name of ["orientation-layout", "safe-area-clearance", "camera-file-selection", "update-handoff"]) {
+      expect(FIELD_CHECK_CATALOG.find((check) => check.name === name)?.observedBy).toBe("hardware");
+    }
   });
 
   it("backs off a failed delivery instead of retrying in a hot loop", async () => {

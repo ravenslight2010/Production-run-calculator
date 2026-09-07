@@ -12,6 +12,20 @@ export type ForegroundStopResolution =
       reason: "changed" | "paused" | "ended" | "not-started";
     };
 
+export type EndRunRoute = "online-consume" | "offline-intent";
+
+/** Fail closed to the durable offline path when browser connectivity is absent or unavailable. */
+export function resolveEndRunRoute(online: boolean | undefined): EndRunRoute {
+  return online === true ? "online-consume" : "offline-intent";
+}
+
+export function browserIsOnline(
+  browserNavigator: Pick<Navigator, "onLine"> | null | undefined =
+    typeof navigator === "undefined" ? undefined : navigator,
+): boolean {
+  return resolveEndRunRoute(browserNavigator?.onLine) === "online-consume";
+}
+
 /**
  * Resolve a Stop request against the run that was displayed when the operator
  * tapped it. This deliberately does not search for another running run:

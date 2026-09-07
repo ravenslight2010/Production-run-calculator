@@ -3,11 +3,23 @@ import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";
 import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
-import { recordStartupEvent } from "./lib/observability";
-import { startAutoTrackServerTicks } from "./routes/sync";
+import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
-import { spawnSync } from "node:child_process";
-import path from "node:path";
+import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
+import { startAutoTrackServerTicks } from "./routes/sync";
+import { startWebPushAlertScheduler } from "./lib/webPush";
+import { startServerJobWorkerLoop } from "./lib/serverJobs";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
+import {
+  beginStartup,
+  claimStartupSlowWarning,
+  getStartupHealth,
+  getStartupWarningThresholdMs,
+  markStartupFailed,
+  markStartupReady,
+  markStartupStage,
+} from "./lib/startupHealth";
 
 const rawPort = process.env["PORT"];
 
@@ -18,37 +30,8 @@ if (!rawPort) {
 }
 
 const port = Number(rawPort);
-
-function applyDatabaseSchema(): void {
-  if (
-    process.env.NODE_ENV !== "production" ||
-    process.env.RUN_DB_MIGRATION !== "true"
-  ) {
-    return;
-  }
-
-  logger.info("Applying database schema (drizzle push-force)…");
-  const result = spawnSync(
-    process.execPath,
-    [
-      path.join(process.cwd(), "migration", "node_modules", "drizzle-kit", "bin.cjs"),
-      "push",
-      "--force",
-      "--config",
-      path.join(process.cwd(), "migration", "drizzle.config.ts"),
-    ],
-    { stdio: "inherit", env: process.env, cwd: process.cwd() },
-  );
-  if (result.error) {
-    logger.error({ err: result.error }, "Failed to run database schema push");
-    process.exit(1);
-  }
-  if (result.status !== 0) {
-    logger.error({ status: result.status }, "Database schema push failed");
-    process.exit(1);
-  }
-  logger.info("Database schema is up to date");
-}
+let stopServerJobWorker: (() => void) | undefined;
+let stopWebPushAlertScheduler: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -56,68 +39,14 @@ if (Number.isNaN(port) || port <= 0) {
 
 async function startServer(): Promise<void> {
   const startedAt = performance.now();
-  // Seed the built-in and default editable roles (additive, only-if-absent) so
-  // capability gating has a role catalog to resolve against.
-  await seedRoles().catch((err) => {
-    logger.error({ err }, "Failed to seed roles");
-    recordStartupEvent("seed_roles", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode: "seed_roles_failed" });
-  });
-
-  // Apply any pending one-time data heals (marker-guarded, exactly once per
-  // database) before accepting requests. A destructive heal must not race a
-  // manager's profile write that would make its target recipe live.
-  await runDataHeals().catch((err) => {
-    logger.error({ err }, "Failed to run data heals");
-    recordStartupEvent("data_heals", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode: "data_heals_failed" });
-  });
-
   const server = app.listen(port);
 
   server.once("listening", () => {
     logger.info({ port }, "Server listening");
+    markStartupStage("listen");
     recordStartupEvent("listen", { durationMs: performance.now() - startedAt, outcome: "success", safeCounts: { port } });
 
-    // Ensure the seeded sandbox account exists with a known password + manager
-    // role on every boot. Best-effort: a seeding failure must not take the server
-    // down (the rest of the API still works for real users). The sandbox account
-    // uses a well-known public password, so it is a non-production feature only —
-    // never seed it in a real deployment (see sandboxAllowed()).
-    if (sandboxAllowed()) {
-      seedSandboxUser().catch((err) => {
-        logger.error({ err }, "Failed to seed sandbox user");
-      });
-    }
-
-    // Keep a persisted, read-only snapshot available even when nobody has
-    // opened the manager dashboard. This is deliberately deferred until after
-    // startup and uses the existing snapshot when it is fresh; a full scan
-    // must not compete with the calculator's first requests.
-    const intervalMs = Math.max(60_000, Number(process.env.MASTER_DATA_HEALTH_SCAN_INTERVAL_MS ?? 6 * 60 * 60 * 1000));
-    const startupDelayMs = Math.max(1_000, Number(process.env.MASTER_DATA_HEALTH_STARTUP_DELAY_MS ?? 10_000));
-    const scanScopes = sandboxAllowed() ? ["live", "sandbox"] : ["live"];
-    const scan = () => Promise.all(scanScopes.map(async (scope) => {
-      try {
-        const report = await runMasterDataHealthScan(scope, { maxAgeMs: intervalMs });
-        logger.info({
-          event: "master_data_health_scan",
-          environment: report.environment,
-          outcome: "success",
-          safeCounts: { findings: report.findings.length, errors: report.summary.error, warnings: report.summary.warning },
-        }, "master-data health scan completed");
-      } catch (err) {
-        logger.error({ err, scope }, "master-data health scan failed");
-      }
-    }));
-    const startupTimer = setTimeout(() => { void scan(); }, startupDelayMs);
-    startupTimer.unref();
-    const timer = setInterval(() => { void scan(); }, intervalMs);
-    timer.unref();
-
-    // Server-owned auto-track net-second execution (refactor step 7a): the
-    // server fires due sauce/applicator claims itself so runs keep advancing
-    // even with no device open. The interval is unref'd and runs inside the
-    // same process as the SSE heartbeat, so no extra network traffic.
-    startAutoTrackServerTicks();
+    void initializeStartup(startedAt);
   });
 
   server.once("error", (err: NodeJS.ErrnoException) => {
@@ -137,6 +66,12 @@ async function startServer(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, "Stopping API server");
+    // Prevent another poll while HTTP drains. A running handler keeps its
+    // lease and will be reclaimed after expiry if the process exits first.
+    stopServerJobWorker?.();
+    stopServerJobWorker = undefined;
+    stopWebPushAlertScheduler?.();
+    stopWebPushAlertScheduler = undefined;
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -157,11 +92,139 @@ async function startServer(): Promise<void> {
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
-// This opt-in path is useful for deployments that cannot configure a
-// pre-deploy command. Compose and Render use their explicit migration paths
-// instead, so the long-lived API process does not repeat the schema push.
-applyDatabaseSchema();
-startServer().catch((err) => {
-  logger.error({ err }, "Failed to start server");
+
+async function initializeStartup(startedAt: number): Promise<void> {
+  const startupTestMode =
+    process.env.NODE_ENV !== "production" &&
+    process.env.STARTUP_TEST_MODE === "true";
+  markStartupStage("database_schema");
+  try {
+    // Keep the process listening while required database initialization runs so
+    // the platform can distinguish "not ready" from a crashed process.
+    if (
+      startupTestMode &&
+      process.env.STARTUP_TEST_FAILURE_STAGE === "database_schema"
+    ) {
+      throw new Error("forced startup test failure");
+    }
+    if (
+      !startupTestMode ||
+      process.env.STARTUP_TEST_DATABASE_READY !== "true"
+    ) {
+      await db.execute(sql`SELECT 1`);
+    }
+  } catch {
+    const errorCode = "database_schema_failed";
+    markStartupFailed("database_schema", errorCode);
+    logger.error(
+      { stage: "database_schema", durationMs: performance.now() - startedAt, outcome: "degraded", errorCode },
+      "Startup initialization failed",
+    );
+    recordStartupEvent("database_schema", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode });
+    return;
+  }
+
+  markStartupStage("seed_roles");
+  try {
+    // Seed the built-in and default editable roles (additive, only-if-absent)
+    // before any authenticated application route is allowed through.
+    if (startupTestMode && process.env.STARTUP_TEST_FAILURE_STAGE === "seed_roles") {
+      throw new Error("forced startup test failure");
+    }
+    await seedRoles();
+  } catch {
+    const errorCode = "seed_roles_failed";
+    markStartupFailed("seed_roles", errorCode);
+    logger.error(
+      { stage: "seed_roles", durationMs: performance.now() - startedAt, outcome: "degraded", errorCode },
+      "Startup initialization failed",
+    );
+    recordStartupEvent("seed_roles", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode });
+    return;
+  }
+
+  markStartupStage("data_heals");
+  try {
+    // Marker-guarded data heals must finish before application requests can
+    // mutate the same master data or day-state rows.
+    if (startupTestMode && process.env.STARTUP_TEST_FAILURE_STAGE === "data_heals") {
+      throw new Error("forced startup test failure");
+    }
+    await runDataHeals();
+  } catch (err) {
+    const { repairId, errorCode } = classifyStartupRepairFailure(err);
+    markStartupFailed("data_heals", errorCode);
+    logger.error(
+      { stage: "data_heals", repairId, durationMs: performance.now() - startedAt, outcome: "degraded", errorCode },
+      "Startup initialization failed",
+    );
+    recordStartupEvent("data_heals", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode });
+    return;
+  }
+
+  markStartupReady();
+  logger.info(
+    { stage: "ready", durationMs: performance.now() - startedAt, outcome: "success" },
+    "API startup initialization complete",
+  );
+  recordStartupEvent("ready", { durationMs: performance.now() - startedAt, outcome: "success" });
+
+  // Best-effort, bounded ownership for live automatic production tracking.
+  // The runner shares the claim transaction path with connected clients.
+  startAutoTrackServerTicks();
+  stopWebPushAlertScheduler = startWebPushAlertScheduler().stop;
+  stopServerJobWorker = startServerJobWorkerLoop({
+    onError(error, operation) {
+      logger.error(
+        { err: error, operation, outcome: "degraded", errorCode: `server_job_${operation}_failed` },
+        "Server job background task failed",
+      );
+    },
+  }).stop;
+
+  // Ensure the seeded sandbox account exists with a known password + manager
+  // role on every boot. Best-effort and non-production only.
+  if (sandboxAllowed()) {
+    seedSandboxUser().catch(() => {
+      logger.error({ stage: "sandbox_seed", outcome: "degraded", errorCode: "sandbox_seed_failed" }, "Optional startup task failed");
+    });
+  }
+
+  // Optional read-only health snapshots never hold readiness hostage.
+  const intervalMs = Math.max(60_000, Number(process.env.MASTER_DATA_HEALTH_SCAN_INTERVAL_MS ?? 6 * 60 * 60 * 1000));
+  const startupDelayMs = Math.max(1_000, Number(process.env.MASTER_DATA_HEALTH_STARTUP_DELAY_MS ?? 10_000));
+  const scanScopes = sandboxAllowed() ? ["live", "sandbox"] : ["live"];
+  const scan = () => Promise.all(scanScopes.map(async (scope) => {
+    try {
+      const report = await runMasterDataHealthScan(scope, { maxAgeMs: intervalMs });
+      logger.info({
+        event: "master_data_health_scan",
+        environment: report.environment,
+        outcome: "success",
+        safeCounts: { findings: report.findings.length, errors: report.summary.error, warnings: report.summary.warning },
+      }, "master-data health scan completed");
+    } catch {
+      logger.error({ scope, outcome: "degraded", errorCode: "master_data_health_scan_failed" }, "Optional background task failed");
+    }
+  }));
+  const startupTimer = setTimeout(() => { void scan(); }, startupDelayMs);
+  startupTimer.unref();
+  const timer = setInterval(() => { void scan(); }, intervalMs);
+  timer.unref();
+}
+// Schema changes are exclusively owned by the matching one-shot migration
+// image (or Render's pre-deploy command). In particular, a long-lived runtime
+// must never infer a migration from its environment: replacing it with an
+// earlier runtime is an application rollback, not a schema rollback.
+beginStartup();
+const startupWarningTimer = setTimeout(() => {
+  if (claimStartupSlowWarning()) {
+    recordStartupSlowWarning(getStartupHealth());
+  }
+}, getStartupWarningThresholdMs());
+startupWarningTimer.unref();
+startServer().catch(() => {
+  markStartupFailed("listen", "server_start_failed");
+  logger.error({ stage: "listen", outcome: "degraded", errorCode: "server_start_failed" }, "API server failed to start");
   process.exit(1);
 });

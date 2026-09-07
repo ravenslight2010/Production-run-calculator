@@ -13,7 +13,8 @@ import {
 } from "../utils";
 import { groupWarehouseNeedRows } from "../warehouseGrouping";
 import { loadRunValues } from "../storage";
-import { withTempOverrides, DEFAULT_VALUES, DEFAULT_PEP_TYPES, type RunMeta } from "../types";
+import { withTempOverrides, DEFAULT_VALUES, type RunMeta } from "../types";
+import { deriveFrontlineNeedRows } from "../frontlineRows";
 import { Factory, ArrowRight, Droplets, Layers, Clock, AlertTriangle, BarChart2, Warehouse } from "lucide-react";
 
 
@@ -237,54 +238,20 @@ export default function ScreenModeView() {
 
   if (screenMode === "frontline") {
     const s = computeSummaryStats(v);
-    const items: { label: string; value: string; sub?: string }[] = [];
-    if (s.sauceBatches > 0) {
-      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-      items.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
-    }
-    if (s.app1Type) {
-      const isMix = s.app1Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0)
-        items.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app1Lbs, 1) + " lbs total" });
-    }
-    if (s.app2Type) {
-      const isMix = s.app2Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0)
-        items.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" });
-    }
-    // Pep applicators sit between App 2 and App 3, matching the physical line
-    // order (and the Run/Frontline tabs' card order).
-    const pep1Label = v.pep1Combined === true ? "Pep 1 & 2" : "Pep 1";
-    if (s.pep1Type) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-      if ((isPepStd ? s.pep1Lbs : s.pep1Batches) > 0)
-        items.push({ label: `${pep1Label} — ${s.pep1Type}`, value: isPepStd ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-    }
-    if (s.pep1TypeB) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
-      if ((isPepStd ? s.pep1LbsB : s.pep1BatchesB) > 0)
-        items.push({ label: `${pep1Label} — ${s.pep1TypeB}`, value: isPepStd ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
-    }
-    if (s.pep2Type) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-      if ((isPepStd ? s.pep2Lbs : s.pep2Batches) > 0)
-        items.push({ label: `Pep 2 — ${s.pep2Type}`, value: isPepStd ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
-    }
-    if (s.pep2TypeB) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
-      if ((isPepStd ? s.pep2LbsB : s.pep2BatchesB) > 0)
-        items.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: isPepStd ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
-    }
-    if (s.app3Type) {
-      const isMix = s.app3Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0)
-        items.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app3Lbs, 1) + " lbs total" });
-    }
-    if (s.app4Type) {
-      const isMix = s.app4Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
-        items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
-    }
+    const items = deriveFrontlineNeedRows(v, s).map((row) => {
+      const bd = row.station === "sauce" && row.unit === "batches"
+        ? sauceBarrelBreakdown(row.amount, s.sauceEffBarrel)
+        : null;
+      return {
+        label: row.label,
+        value: bd
+          ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
+          : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`,
+        sub: row.unit === "batches" && row.station !== "sauce"
+          ? `${fmtNum(row.totalLbs, 1)} lbs total`
+          : row.recipeName,
+      };
+    });
     const cheeseRecipes: { label: string; rows: { ingredient: string; lbs: number }[] }[] = [];
     if ((v.app1CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 1 Cheese Recipe`, rows: v.app1CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
     if ((v.app2CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 2 Cheese Recipe`, rows: v.app2CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
@@ -328,7 +295,17 @@ export default function ScreenModeView() {
         )}
 
         {/* Ingredient grid */}
-        {items.length > 0 ? (
+        {!s.productionNeedsAvailable ? (
+          <div className="flex-1 flex items-center justify-center rounded-2xl border border-amber-500/40 bg-amber-500/10 p-8">
+            <div className="max-w-2xl text-center">
+              <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-amber-500" />
+              <p className="text-3xl font-black text-amber-600 dark:text-amber-400">Pizzas Per Case is missing</p>
+              <p className="mt-3 text-xl text-muted-foreground">
+                Frontline quantities and tracking are unavailable. Ask a supervisor to open Setup Profiles for this product, enter Pizzas Per Case, and save the setup.
+              </p>
+            </div>
+          </div>
+        ) : items.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 flex-1">
             {items.map((item: any, i: any) => (
               <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
@@ -509,6 +486,7 @@ export default function ScreenModeView() {
   }
 
   if (screenMode === "sauce") {
+    const summary = computeSummaryStats(v);
     const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
@@ -533,7 +511,17 @@ export default function ScreenModeView() {
         </div>
 
         {/* Big sauce display */}
-        {calc.sauceBatches > 0 ? (
+        {!summary.productionNeedsAvailable ? (
+          <div className="flex-1 flex items-center justify-center rounded-3xl border border-amber-500/40 bg-amber-500/10 p-8">
+            <div className="max-w-2xl text-center">
+              <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-amber-500" />
+              <p className="text-3xl font-black text-amber-600 dark:text-amber-400">Pizzas Per Case is missing</p>
+              <p className="mt-3 text-xl text-muted-foreground">
+                Sauce quantities and tracking are unavailable. Ask a supervisor to open Setup Profiles for this product, enter Pizzas Per Case, and save the setup.
+              </p>
+            </div>
+          </div>
+        ) : calc.sauceBatches > 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border border-border bg-card p-12">
             <p className="text-lg font-bold uppercase tracking-widest text-muted-foreground">Sauce Needed</p>
             <p className="text-[10rem] font-black tabular-nums leading-none text-primary">{fmtNum(calc.sauceBatches, 2)}</p>
