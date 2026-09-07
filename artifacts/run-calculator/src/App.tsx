@@ -30,6 +30,7 @@ import { recordPerformance } from "./performanceDiagnostics";
 import { MasterDataPolling } from "./masterData";
 import { emitFieldCheckSignal, FieldVerificationObserver } from "./fieldChecks";
 import { WEB_BUILD_ID } from "./buildIdentity";
+import { installBrowserFailureCapture } from "./browserIncidentCapture";
 import {
   getAutomaticUpdateReloadSafety,
   startUpdateReloadIdleTracking,
@@ -323,6 +324,7 @@ function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
 }
 
 function App() {
+  useEffect(() => installBrowserFailureCapture(), []);
   return (
     <WouterRouter base={basePath}>
       <QueryClientProvider client={queryClient}>

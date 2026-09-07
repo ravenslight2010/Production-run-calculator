@@ -9,6 +9,7 @@ import type { IncidentRecurrence } from './incidentRecurrence';
 
 export interface IncidentDiagnosis {
   incidentId: string;
+  correlationId: string;
   /**
      * Retained compatibility field; null for new reports
      * @nullable

@@ -53,6 +53,26 @@ describe("isStaleDeploymentAssetError", () => {
 });
 
 describe("ErrorBoundary recovery actions", () => {
+  it("shows the safe reference returned for an auto-captured failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(reportIncident).mockResolvedValueOnce({
+      incidentId: "incident-1",
+      correlationId: "corr-visible-1",
+      diagnosis: null,
+      workaround: null,
+      recurrence: null,
+      aiGenerated: false,
+    });
+
+    render(
+      <ErrorBoundary>
+        <ThrowError error={new Error("Failed to render")} />
+      </ErrorBoundary>,
+    );
+
+    expect(await screen.findByText("corr-visible-1")).not.toBeNull();
+  });
+
   it("offers the explicit update action and only runs it after staff choose it", async () => {
     const user = userEvent.setup();
     const updateAndReload = vi.fn().mockResolvedValue(undefined);

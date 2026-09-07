@@ -212,11 +212,13 @@ describe("POST /incidents — operational reporting without generated diagnosis"
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       incidentId: string;
+      correlationId: string;
       diagnosis: string | null;
       workaround: string | null;
       aiGenerated: boolean;
     };
     expect(body.incidentId).toBeTruthy();
+    expect(body.correlationId).toBe(res.headers.get("x-correlation-id"));
     expect(body.diagnosis).toBeNull();
     expect(body.workaround).toBeNull();
     expect(body.aiGenerated).toBe(false);
@@ -233,7 +235,9 @@ describe("POST /incidents — operational reporting without generated diagnosis"
     expect(row.status).toBe("new");
     expect(row.diagnosis).toBeNull();
     expect(row.workaround).toBeNull();
-    expect((row.context as { description?: string }).description).toContain("Save button");
+    const context = row.context as { description?: string; correlationId?: string };
+    expect(context.description).toContain("Save button");
+    expect(context.correlationId).toBe(body.correlationId);
   });
 
   it("persists an auto-captured crash with the error context", async () => {
@@ -256,6 +260,25 @@ describe("POST /incidents — operational reporting without generated diagnosis"
     const ctx = row.context as { errorMessage?: string; errorStack?: string };
     expect(ctx.errorMessage).toContain("TypeError");
     expect(ctx.errorStack).toContain("InventoryScreen");
+  });
+
+  it("never persists token-shaped diagnostic references or raw screen/build payloads", async () => {
+    const token = "eyJhbGciOiJIUzI1NiJ9.abcdefghijklmnop.secretpayload";
+    const res = await req(OPERATOR, "POST", "/api/incidents", {
+      source: "auto_crash",
+      screen: `/run?token=${token}`,
+      appPlatform: "web",
+      appVersion: token,
+      errorMessage: "failed",
+      diagnostics: { correlationId: token, signalKind: "api_failure" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { incidentId: string; correlationId: string };
+    const [row] = await db.select().from(incidentsTable).where(eq(incidentsTable.id, body.incidentId));
+    const serialized = JSON.stringify(row);
+    expect(serialized).not.toContain(token);
+    expect(row.screen).toBe("/run");
+    expect((row.context as { relatedCorrelationId?: string }).relatedCorrelationId).toBeUndefined();
   });
 
   it("does not depend on the retired AI provider", async () => {

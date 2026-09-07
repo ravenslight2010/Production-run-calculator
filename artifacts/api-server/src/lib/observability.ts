@@ -454,12 +454,9 @@ export function logOperation(
 }
 
 export function observabilityMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const requestCorrelationId =
-    typeof req.header("x-correlation-id") === "string" &&
-    /^[a-zA-Z0-9_.:-]{1,128}$/.test(req.header("x-correlation-id")!)
-      ? req.header("x-correlation-id")!
-      : typeof req.id === "string" ? req.id : randomUUID();
-  const correlationId = requestCorrelationId;
+  // Correlation references are server-owned opaque UUIDs. Never reflect a
+  // client header: token-shaped values must not become trusted log references.
+  const correlationId = randomUUID();
   const startedAt = performance.now();
   res.setHeader("X-Correlation-ID", correlationId);
   (req as Request & { correlationId?: string }).correlationId = correlationId;

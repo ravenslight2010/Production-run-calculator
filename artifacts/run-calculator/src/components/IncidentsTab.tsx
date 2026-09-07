@@ -157,6 +157,22 @@ function IncidentRow({
                 : "Seen before"}
             </div>
           )}
+          <div className="rounded-md border border-border bg-muted/20 p-2 text-xs text-muted-foreground">
+            <p><span className="font-semibold text-foreground">Diagnostic reference:</span>{" "}
+              <code className="select-all">{ctx.correlationId ?? "Unavailable for older reports"}</code>
+            </p>
+            {ctx.relatedCorrelationId && (
+              <p className="mt-1"><span className="font-semibold text-foreground">Failed request:</span>{" "}
+                <code className="select-all">{ctx.relatedCorrelationId}</code>
+              </p>
+            )}
+            <p className="mt-1">
+              {ctx.action ?? "unknown action"} · {ctx.outcome ?? "unknown outcome"} · retry {ctx.retryCount ?? 0} ·
+              {" "}{ctx.connectivity ?? "unknown connection"} · {ctx.syncState ?? "unknown sync"} ·
+              {" "}{ctx.browserFamily ?? incident.appPlatform}/{ctx.deviceClass ?? "unknown device"} · build {incident.appVersion ?? "unknown"}
+            </p>
+            <p className="mt-1">Next step: retry once; if it repeats, reload or update the app, then give this reference to a developer.</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">
             <label className="text-xs text-muted-foreground">Priority
               <select className="ml-1 rounded border border-border bg-background px-1.5 py-1 text-xs" value={incident.priority}
@@ -191,26 +207,6 @@ function IncidentRow({
             <input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-sm" placeholder="Add an operational note…" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
             <Button size="sm" variant="outline" disabled={!note.trim() || busy} onClick={() => { workflow.mutate({ note }); setNote(""); }}>Add note</Button>
           </div>
-          {incident.diagnosis && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Unverified generated diagnosis
-              </p>
-              <p className="text-sm text-foreground whitespace-pre-wrap mt-0.5">
-                {incident.diagnosis}
-              </p>
-            </div>
-          )}
-          {incident.workaround && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Unverified generated workaround
-              </p>
-              <p className="text-sm text-foreground whitespace-pre-wrap mt-0.5">
-                {incident.workaround}
-              </p>
-            </div>
-          )}
           <div className="flex flex-wrap items-center gap-2">
             {incident.status === "new" && (
               <Button size="sm" variant="outline" onClick={() => review.mutate()} disabled={busy}>
@@ -457,9 +453,8 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
   );
 }
 
-// Review queue of reported issues and auto-captured crashes, each with its
-// stored AI diagnosis + workaround. Access is capability-gated; operators
-// never see this tab.
+// Review queue of privacy-redacted reports and auto-captured failures.
+// Access is capability-gated; operators never see this tab.
 export default function IncidentsTab() {
   const { hasCapability, role, isLoading: roleLoading } = useMe();
   const canReview = hasCapability("review-incidents");

@@ -18,6 +18,9 @@ import {
   sanitizeUserInput,
   buildDiagnosisPrompt,
   appendIncidentHistoryBlock,
+  buildIncidentContext,
+  isSafeCorrelationId,
+  safeIncidentLogMetadata,
 } from "./incidentsAi";
 import type { SimilarIncident } from "./incidentsAi";
 
@@ -37,6 +40,56 @@ describe("sanitizeUserInput — strips null bytes and control characters", () =>
     expect(result).toContain("\n");
     expect(result).toContain("\t");
     expect(result).not.toMatch(/[\x01\x02\x1F]/);
+  });
+});
+
+describe("buildIncidentContext — privacy-safe bounded evidence", () => {
+  it("redacts secrets, contacts, queries, and paths while normalizing the device", () => {
+    const context = buildIncidentContext({
+      source: "auto_crash",
+      screen: "/run",
+      appPlatform: "web",
+      errorMessage: "GET https://example.test/run?token=secret for person@example.com abcdefghijklmnopqrstuvwxyz123456",
+      errorStack: "Error\n    at save (/Users/person/private/source.ts:12:3)\n".repeat(20),
+      userAgent: "Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Version/17 Safari/605.1.15",
+      diagnostics: {
+        action: "save_run",
+        outcome: "error",
+        retryCount: 99,
+        connectivity: "online",
+        syncState: "retrying",
+        signalKind: "sync",
+      },
+    });
+
+    expect(context.errorMessage).toContain("?[redacted]");
+    expect(context.errorMessage).toContain("[contact redacted]");
+    expect(context.errorMessage).toContain("[token redacted]");
+    expect(context.errorStack).toContain("[path redacted]");
+    expect(context.errorStack?.split("\n").length).toBeLessThanOrEqual(12);
+    expect(context.browserFamily).toBe("Safari");
+    expect(context.deviceClass).toBe("phone");
+    expect(context.retryCount).toBe(10);
+  });
+
+  it("rejects token-shaped references and produces only allowlisted log metadata", () => {
+    const token = "eyJhbGciOiJIUzI1NiJ9.abcdefghijklmnop.secretpayload";
+    const data = {
+      source: "auto_crash" as const,
+      screen: `/Users/private/person?token=${token}`,
+      appPlatform: "web" as const,
+      appVersion: token,
+      errorMessage: "failed",
+      diagnostics: { correlationId: token },
+    };
+    const context = buildIncidentContext(data);
+    expect(context.relatedCorrelationId).toBeUndefined();
+    expect(isSafeCorrelationId(token)).toBe(false);
+    expect(isSafeCorrelationId("2bcc5135-248e-4989-aac0-e2228d30c375")).toBe(true);
+    const metadata = safeIncidentLogMetadata(data, context);
+    expect(JSON.stringify(metadata)).not.toContain(token);
+    expect(JSON.stringify(metadata)).not.toContain("private");
+    expect(metadata.screenClass).toBe("other");
   });
 });
 describe("sanitizeUserInput — strips prompt-injection override lines", () => {

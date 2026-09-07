@@ -5114,6 +5114,13 @@ export const reportIncidentBodyErrorStackMax = 8000;
 
 export const reportIncidentBodyUserAgentMax = 500;
 
+export const reportIncidentBodyDiagnosticsActionMax = 80;
+
+export const reportIncidentBodyDiagnosticsRetryCountMin = 0;
+export const reportIncidentBodyDiagnosticsRetryCountMax = 10;
+
+export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
+
 
 
 export const ReportIncidentBody = zod.object({
@@ -5124,11 +5131,21 @@ export const ReportIncidentBody = zod.object({
   "description": zod.string().max(reportIncidentBodyDescriptionMax).optional().describe('The user\'s description of the problem (user reports)'),
   "errorMessage": zod.string().max(reportIncidentBodyErrorMessageMax).optional().describe('Uncaught error message (crashes)'),
   "errorStack": zod.string().max(reportIncidentBodyErrorStackMax).optional().describe('Uncaught error stack (crashes)'),
-  "userAgent": zod.string().max(reportIncidentBodyUserAgentMax).optional()
+  "userAgent": zod.string().max(reportIncidentBodyUserAgentMax).optional(),
+  "diagnostics": zod.object({
+  "action": zod.string().max(reportIncidentBodyDiagnosticsActionMax).optional(),
+  "outcome": zod.enum(['error', 'rejected', 'degraded']).optional(),
+  "retryCount": zod.number().int().min(reportIncidentBodyDiagnosticsRetryCountMin).max(reportIncidentBodyDiagnosticsRetryCountMax).optional(),
+  "connectivity": zod.enum(['online', 'offline', 'unstable', 'unknown']).optional(),
+  "syncState": zod.enum(['idle', 'pending', 'retrying', 'blocked', 'unknown']).optional(),
+  "signalKind": zod.enum(['user_report', 'crash', 'rejected_promise', 'api_failure', 'startup', 'update', 'sync']).optional(),
+  "correlationId": zod.string().max(reportIncidentBodyDiagnosticsCorrelationIdMax).optional()
+}).optional()
 })
 
 export const ReportIncidentResponse = zod.object({
   "incidentId": zod.string(),
+  "correlationId": zod.string(),
   "diagnosis": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
   "workaround": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
   "recurrence": zod.union([zod.object({
@@ -5156,7 +5173,16 @@ export const ListIncidentsResponseItem = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5237,7 +5263,16 @@ export const GetIncidentResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5289,7 +5324,16 @@ export const ReviewIncidentResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5342,7 +5386,16 @@ export const ResolveIncidentResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5485,7 +5538,16 @@ export const UpdateIncidentWorkflowResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),

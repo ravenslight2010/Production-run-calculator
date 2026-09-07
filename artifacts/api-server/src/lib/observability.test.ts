@@ -7,6 +7,7 @@ import {
   getCacheMaintenanceDiagnostics,
   isHealthProbePath,
   operationType,
+  observabilityMiddleware,
   recordCacheMaintenance,
   recordCostLimitEvent,
   recordStartupSlowWarning,
@@ -20,6 +21,26 @@ afterEach(async () => {
 });
 
 describe("observability", () => {
+  it("always replaces client-provided correlation headers with a server UUID", () => {
+    const headers = new Map<string, unknown>();
+    const req = {
+      header: (name: string) => name.toLowerCase() === "x-correlation-id" ? "secret-token-value" : undefined,
+      id: "client-controlled-id",
+      path: "/api/incidents",
+    };
+    const res = {
+      setHeader: (name: string, value: unknown) => headers.set(name, value),
+      once: vi.fn(),
+    };
+    const next = vi.fn();
+    observabilityMiddleware(req as never, res as never, next);
+    const correlationId = String(headers.get("X-Correlation-ID"));
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(correlationId).not.toContain("secret");
+    expect((req as typeof req & { correlationId?: string }).correlationId).toBe(correlationId);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
   it("classifies operational routes without including identifiers", () => {
     expect(operationType("/api/sync/2026-08-22")).toBe("sync");
     expect(operationType("/api/inventory/items/123")).toBe("inventory");

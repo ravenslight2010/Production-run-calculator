@@ -554,6 +554,19 @@ async function parseApiResponse<T>(
   requestEpoch: number,
 ): Promise<T> {
   if (!res.ok) {
+    if (
+      typeof window !== "undefined"
+      && !path.includes("diagnostic:incidents")
+      && !path.startsWith("/incidents")
+    ) {
+      window.dispatchEvent(new CustomEvent("app:api-failure", {
+        detail: {
+          path: path.split("?")[0],
+          status: res.status,
+          correlationId: res.headers.get("x-correlation-id") ?? undefined,
+        },
+      }));
+    }
     if (res.status === 401 && !isSessionProbePath(path)) {
       onUnauthorized?.(requestEpoch);
     }
@@ -1304,7 +1317,16 @@ export type IncidentContext = {
   description?: string;
   errorMessage?: string;
   errorStack?: string;
-  userAgent?: string;
+  browserFamily?: string;
+  deviceClass?: string;
+  correlationId?: string;
+  relatedCorrelationId?: string;
+  action?: string;
+  outcome?: string;
+  retryCount?: number;
+  connectivity?: string;
+  syncState?: string;
+  signalKind?: string;
 };
 export type ReportIncidentBody = {
   source: IncidentSource;
@@ -1315,6 +1337,15 @@ export type ReportIncidentBody = {
   errorMessage?: string;
   errorStack?: string;
   userAgent?: string;
+  diagnostics?: {
+    action?: string;
+    outcome?: "error" | "rejected" | "degraded";
+    retryCount?: number;
+    connectivity?: "online" | "offline" | "unstable" | "unknown";
+    syncState?: "idle" | "pending" | "retrying" | "blocked" | "unknown";
+    signalKind?: "user_report" | "crash" | "rejected_promise" | "api_failure" | "startup" | "update" | "sync";
+    correlationId?: string;
+  };
 };
 // "Seen before" signal: how many prior similar incidents were found and the
 // recovery step that helped previously. Null when the problem has no precedent.
@@ -1324,6 +1355,7 @@ export type IncidentRecurrence = {
 };
 export type IncidentDiagnosis = {
   incidentId: string;
+  correlationId: string;
   diagnosis: string | null;
   workaround: string | null;
   recurrence: IncidentRecurrence | null;
@@ -1491,6 +1523,14 @@ export type IncidentClustersResult = {
   totalIncidents: number;
   note?: string;
   generatedAt: number;
+  evidence: {
+    windowDays: number;
+    sampleCount: number;
+    platforms: string[];
+    builds: string[];
+    screens: string[];
+    confidence: "limited" | "moderate" | "strong";
+  };
 };
 export const requestIncidentClusters = (lookbackDays?: number) =>
   api<IncidentClustersResult>("/operations-insights/incident-patterns", {

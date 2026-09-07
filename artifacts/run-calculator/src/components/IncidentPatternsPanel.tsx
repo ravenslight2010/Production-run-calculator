@@ -55,6 +55,14 @@ export function IncidentPatternsPanel({ disabled }: { disabled: boolean }) {
     : orderedClusters.slice(0, INITIAL_PATTERN_COUNT);
   const hasMore = orderedClusters.length > INITIAL_PATTERN_COUNT;
   const detailsId = "incident-pattern-details";
+  const evidence = result?.evidence ?? {
+    windowDays: ANALYSIS_WINDOW_DAYS,
+    sampleCount: result?.totalIncidents ?? 0,
+    platforms: [],
+    builds: [],
+    screens: [],
+    confidence: "limited" as const,
+  };
 
   return (
     <section
@@ -120,6 +128,12 @@ export function IncidentPatternsPanel({ disabled }: { disabled: boolean }) {
               <dd className="text-xs font-medium text-foreground">{generatedLabel(result.generatedAt)}</dd>
             </div>
           </dl>
+          <div className="rounded-md border border-border bg-card/50 p-2 text-xs text-muted-foreground">
+            Evidence: {evidence.sampleCount} samples over {evidence.windowDays} days ·
+            {" "}{evidence.platforms.join(", ") || "no platforms"} ·
+            {" "}builds {evidence.builds.join(", ") || "unknown"}.
+            Confidence is {evidence.confidence}; grouping shows recurrence, not a confirmed cause.
+          </div>
 
           {result.note ? (
             <p className="text-sm text-muted-foreground">{result.note}</p>

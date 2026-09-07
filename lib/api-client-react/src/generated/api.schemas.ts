@@ -4342,8 +4342,16 @@ export interface IncidentContext {
   errorMessage?: string;
   /** The uncaught error's stack/component trace (crashes) */
   errorStack?: string;
-  /** Client user-agent / device string, when available */
-  userAgent?: string;
+  browserFamily?: string;
+  deviceClass?: string;
+  correlationId?: string;
+  relatedCorrelationId?: string;
+  action?: string;
+  outcome?: string;
+  retryCount?: number;
+  connectivity?: string;
+  syncState?: string;
+  signalKind?: string;
 }
 
 export type ReportIncidentInputSource = typeof ReportIncidentInputSource[keyof typeof ReportIncidentInputSource];
@@ -4361,6 +4369,65 @@ export const ReportIncidentInputAppPlatform = {
   web: 'web',
   mobile: 'mobile',
 } as const;
+
+export type ReportIncidentInputDiagnosticsOutcome = typeof ReportIncidentInputDiagnosticsOutcome[keyof typeof ReportIncidentInputDiagnosticsOutcome];
+
+
+export const ReportIncidentInputDiagnosticsOutcome = {
+  error: 'error',
+  rejected: 'rejected',
+  degraded: 'degraded',
+} as const;
+
+export type ReportIncidentInputDiagnosticsConnectivity = typeof ReportIncidentInputDiagnosticsConnectivity[keyof typeof ReportIncidentInputDiagnosticsConnectivity];
+
+
+export const ReportIncidentInputDiagnosticsConnectivity = {
+  online: 'online',
+  offline: 'offline',
+  unstable: 'unstable',
+  unknown: 'unknown',
+} as const;
+
+export type ReportIncidentInputDiagnosticsSyncState = typeof ReportIncidentInputDiagnosticsSyncState[keyof typeof ReportIncidentInputDiagnosticsSyncState];
+
+
+export const ReportIncidentInputDiagnosticsSyncState = {
+  idle: 'idle',
+  pending: 'pending',
+  retrying: 'retrying',
+  blocked: 'blocked',
+  unknown: 'unknown',
+} as const;
+
+export type ReportIncidentInputDiagnosticsSignalKind = typeof ReportIncidentInputDiagnosticsSignalKind[keyof typeof ReportIncidentInputDiagnosticsSignalKind];
+
+
+export const ReportIncidentInputDiagnosticsSignalKind = {
+  user_report: 'user_report',
+  crash: 'crash',
+  rejected_promise: 'rejected_promise',
+  api_failure: 'api_failure',
+  startup: 'startup',
+  update: 'update',
+  sync: 'sync',
+} as const;
+
+export type ReportIncidentInputDiagnostics = {
+  /** @maxLength 80 */
+  action?: string;
+  outcome?: ReportIncidentInputDiagnosticsOutcome;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  retryCount?: number;
+  connectivity?: ReportIncidentInputDiagnosticsConnectivity;
+  syncState?: ReportIncidentInputDiagnosticsSyncState;
+  signalKind?: ReportIncidentInputDiagnosticsSignalKind;
+  /** @maxLength 128 */
+  correlationId?: string;
+};
 
 export interface ReportIncidentInput {
   source: ReportIncidentInputSource;
@@ -4389,6 +4456,7 @@ export interface ReportIncidentInput {
   errorStack?: string;
   /** @maxLength 500 */
   userAgent?: string;
+  diagnostics?: ReportIncidentInputDiagnostics;
 }
 
 /**
@@ -4406,6 +4474,7 @@ export interface IncidentRecurrence {
 
 export interface IncidentDiagnosis {
   incidentId: string;
+  correlationId: string;
   /**
      * Retained compatibility field; null for new reports
      * @nullable

@@ -71,6 +71,14 @@ describe("IncidentPatternsPanel", () => {
       clusters,
       totalIncidents: 27,
       generatedAt: Date.UTC(2026, 8, 7, 12),
+      evidence: {
+        windowDays: 30,
+        sampleCount: 27,
+        platforms: ["web", "mobile"],
+        builds: ["build-a", "build-b"],
+        screens: ["/run"],
+        confidence: "strong",
+      },
     });
     const user = userEvent.setup();
     renderPanel();
@@ -81,6 +89,7 @@ describe("IncidentPatternsPanel", () => {
     expect(requestIncidentClusters).toHaveBeenCalledWith();
     expect(screen.getByText("30 days")).toBeTruthy();
     expect(screen.getByText("4")).toBeTruthy();
+    expect(screen.getByText(/Confidence is strong/)).toBeTruthy();
     expect(screen.queryByText("High repeated")).toBeNull();
 
     const disclosure = screen.getByRole("button", { name: "Review pattern details" });

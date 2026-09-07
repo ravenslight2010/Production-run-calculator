@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { reportIncident } from "../inventoryShared";
+import { reportBrowserFailure } from "../browserIncidentCapture";
 import { WEB_BUILD_ID } from "../buildIdentity";
 import {
   claimStaleAssetRecoveryAttempt,
@@ -13,7 +13,7 @@ type Props = {
   children: ReactNode;
   onUpdateAndReload?: () => Promise<void> | void;
 };
-type State = { error: Error | null };
+type State = { error: Error | null; diagnosticReference: string | null };
 
 export function isMissingNotificationError(error: unknown): boolean {
   return (
@@ -53,10 +53,10 @@ const bound = (value: string | undefined, limit: number) =>
 // files a report), and show a recovery screen. The AI can't edit code, so
 // "recovery" here is a safe retry/reload — never an automated code change.
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, diagnosticReference: null };
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    return { error, diagnosticReference: null };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -66,18 +66,15 @@ export default class ErrorBoundary extends Component<Props, State> {
         ? "outdated_browser_api"
         : "application_exception";
     // Fire-and-forget: a failed report must not mask the original crash.
-    void reportIncident({
-      source: "auto_crash",
-      screen: typeof window !== "undefined" ? window.location.pathname : "unknown",
-      appPlatform: "web",
-      appVersion: WEB_BUILD_ID,
+    void reportBrowserFailure(needsUpdateFailureKind(failureKind) ? "update" : "crash", error, {
       errorMessage: bound(`[${failureKind}] ${error.message}`, 500) ?? `[${failureKind}]`,
       errorStack: bound(
         [error.stack, info.componentStack].filter(Boolean).join("\n\n"),
         4_000,
       ),
-      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-    }).catch(() => {});
+    }).then((result) => {
+      if (result?.correlationId) this.setState({ diagnosticReference: result.correlationId });
+    });
   }
 
   render() {
@@ -96,6 +93,14 @@ export default class ErrorBoundary extends Component<Props, State> {
               ? "This older app version needs an update before it can continue. We've sent the details to your manager."
               : "The app hit an unexpected error and couldn't continue. We've sent the details to your manager. Reloading usually clears it — your saved work isn't affected."}
           </p>
+          {this.state.diagnosticReference && (
+            <p className="text-xs text-muted-foreground">
+              Diagnostic reference:{" "}
+              <code className="select-all font-mono text-foreground">
+                {this.state.diagnosticReference}
+              </code>
+            </p>
+          )}
           <Button
             onClick={() => {
               if (needsUpdate && this.props.onUpdateAndReload) {
@@ -132,4 +137,8 @@ export default class ErrorBoundary extends Component<Props, State> {
       </main>
     );
   }
+}
+
+function needsUpdateFailureKind(failureKind: string): boolean {
+  return failureKind === "stale_deployment_asset" || failureKind === "outdated_browser_api";
 }

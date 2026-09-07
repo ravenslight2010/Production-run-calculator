@@ -10,8 +10,13 @@ const router: IRouter = Router();
 
 type CheckStatus = "ok" | "error" | "pending";
 
-async function readiness(_req: Request, res: Response): Promise<void> {
+async function readiness(req: Request, res: Response): Promise<void> {
   const startup = getStartupHealth();
+  const correlationId = String(
+    (req as Request & { correlationId?: string }).correlationId
+    ?? req.id
+    ?? "health",
+  );
   const checks: Record<string, { status: CheckStatus; detail?: string }> = {
     process: { status: "ok" },
     startup: { status: startup.phase === "ready" ? "ok" : "error" },
@@ -54,6 +59,7 @@ async function readiness(_req: Request, res: Response): Promise<void> {
   logger.info(
     {
       event: "health_check",
+      correlationId,
       probe: "readiness",
       outcome: allHealthy ? "success" : "degraded",
       checks: flatChecks,
@@ -71,12 +77,13 @@ async function readiness(_req: Request, res: Response): Promise<void> {
   if (allHealthy) {
     // Keep the existing contract for any caller that checks the shape
     const data = HealthCheckResponse.parse({ status: "ok" });
-    res.json({ ...data, checks: flatChecks, diagnostics, timestamp: new Date().toISOString() });
+    res.json({ ...data, checks: flatChecks, diagnostics, correlationId, timestamp: new Date().toISOString() });
   } else {
     res.status(503).json({
       status: startup.phase === "starting" ? "starting" : "degraded",
       checks: flatChecks,
       ...(diagnostics ? { diagnostics } : {}),
+      correlationId,
       timestamp: new Date().toISOString(),
     });
   }

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ReportIncidentInputAppPlatform } from './reportIncidentInputAppPlatform';
+import type { ReportIncidentInputDiagnostics } from './reportIncidentInputDiagnostics';
 import type { ReportIncidentInputSource } from './reportIncidentInputSource';
 
 export interface ReportIncidentInput {
@@ -35,4 +36,5 @@ export interface ReportIncidentInput {
   errorStack?: string;
   /** @maxLength 500 */
   userAgent?: string;
+  diagnostics?: ReportIncidentInputDiagnostics;
 }

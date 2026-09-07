@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -13,7 +14,12 @@ import {
   countActionableIncidents,
   updateIncidentWorkflow,
 } from "../lib/incidents";
-import { buildIncidentContext, validateReportBody } from "./incidentsAi";
+import {
+  buildIncidentContext,
+  redactDiagnosticText,
+  safeIncidentLogMetadata,
+  validateReportBody,
+} from "./incidentsAi";
 import {
   buildFallbackClusters,
   CLUSTER_MIN_INCIDENTS,
@@ -21,6 +27,7 @@ import {
   shapeIncidents,
   validateClustersBody,
 } from "./aiIncidentClusters";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -72,6 +79,17 @@ router.post(
     }
     const data = validation.data;
     const context = buildIncidentContext(data);
+    const correlationId = String(
+      (req as typeof req & { correlationId?: string }).correlationId
+      ?? req.id
+      ?? randomUUID(),
+    );
+    res.setHeader("X-Correlation-ID", correlationId);
+    context.correlationId = correlationId;
+    const safeScreen = redactDiagnosticText(data.screen.split("?")[0] ?? "", 120) || "unknown";
+    const safeAppVersion = data.appVersion
+      ? redactDiagnosticText(data.appVersion, 64) || null
+      : null;
 
     // Snapshot the reporter's identity so the manager view survives even if the
     // account is later removed.
@@ -102,17 +120,25 @@ router.post(
       reporterId: userId,
       reporterName,
       reporterRole,
-      screen: data.screen,
+      screen: safeScreen,
       appPlatform: data.appPlatform,
-      appVersion: data.appVersion ?? null,
+      appVersion: safeAppVersion,
       context,
       diagnosis,
       workaround,
       recurrence: history.recurrence,
     });
+    logger.info({
+      event: "incident_captured",
+      correlationId,
+      incidentId: incident.id,
+      operationType: "incident",
+      ...safeIncidentLogMetadata(data, context),
+    }, "privacy-safe incident captured");
 
     res.json({
       incidentId: incident.id,
+      correlationId,
       diagnosis,
       workaround,
       recurrence: history.recurrence,
@@ -148,6 +174,16 @@ router.post(
 
     const incidents = await listIncidents();
     const { shaped } = shapeIncidents(incidents, lookbackDays, Date.now());
+    const shapedIds = new Set(shaped.map((item) => item.id));
+    const evidenceIncidents = incidents.filter((item) => shapedIds.has(item.id));
+    const evidence = {
+      windowDays: lookbackDays,
+      sampleCount: shaped.length,
+      platforms: [...new Set(evidenceIncidents.map((item) => item.appPlatform))].slice(0, 6),
+      builds: [...new Set(evidenceIncidents.map((item) => item.appVersion).filter((value): value is string => Boolean(value)))].slice(0, 8),
+      screens: [...new Set(shaped.map((item) => item.screen))].slice(0, 8),
+      confidence: shaped.length < 5 ? "limited" : shaped.length < 15 ? "moderate" : "strong",
+    };
 
     // Too few to cluster — return an empty, honest deterministic result.
     if (shaped.length < CLUSTER_MIN_INCIDENTS) {
@@ -159,6 +195,7 @@ router.post(
             ? "No incidents in the selected window yet."
             : "Not enough incidents yet to find a pattern.",
         generatedAt: Date.now(),
+        evidence,
         ...(req.path.startsWith("/ai/")
           ? { aiGenerated: false, aiStatus: "deterministic" as const }
           : {}),
@@ -170,6 +207,7 @@ router.post(
       clusters: buildFallbackClusters(shaped),
       totalIncidents: shaped.length,
       generatedAt: Date.now(),
+      evidence,
       ...(req.path.startsWith("/ai/")
         ? { aiGenerated: false, aiStatus: "deterministic" as const }
         : {}),

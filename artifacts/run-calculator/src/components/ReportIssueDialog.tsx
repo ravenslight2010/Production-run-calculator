@@ -47,6 +47,14 @@ export default function ReportIssueDialog({
         appVersion: WEB_BUILD_ID,
         description: description.trim(),
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
+        diagnostics: {
+          action: "submit_issue_report",
+          outcome: "error",
+          retryCount: 0,
+          connectivity: typeof navigator !== "undefined" && navigator.onLine ? "online" : "offline",
+          syncState: "unknown",
+          signalKind: "user_report",
+        },
       }),
     onSuccess: (data) => setResult(data),
   });
@@ -96,7 +104,8 @@ export default function ReportIssueDialog({
               </div>
             ) : null}
             <p className="text-xs text-muted-foreground">
-              No automated diagnosis was generated. Add any immediate workaround you discover to the incident notes.
+              Diagnostic reference: <code className="select-all font-mono text-foreground">{result.correlationId}</code>.
+              {" "}A manager can match this to privacy-safe API logs. No production values or request payloads are included.
             </p>
           </div>
         ) : (
@@ -133,10 +142,10 @@ export default function ReportIssueDialog({
               <Button onClick={() => mutation.mutate()} disabled={!canSubmit}>
                 {mutation.isPending ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Diagnosing…
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Sending…
                   </>
                 ) : (
-                  "Get help"
+                  "Send report"
                 )}
               </Button>
             </>

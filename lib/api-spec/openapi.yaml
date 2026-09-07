@@ -10430,9 +10430,16 @@ components:
         errorStack:
           type: string
           description: The uncaught error's stack/component trace (crashes)
-        userAgent:
-          type: string
-          description: Client user-agent / device string, when available
+        browserFamily: { type: string }
+        deviceClass: { type: string }
+        correlationId: { type: string }
+        relatedCorrelationId: { type: string }
+        action: { type: string }
+        outcome: { type: string }
+        retryCount: { type: integer }
+        connectivity: { type: string }
+        syncState: { type: string }
+        signalKind: { type: string }
 
     ReportIncidentInput:
       type: object
@@ -10469,6 +10476,17 @@ components:
         userAgent:
           type: string
           maxLength: 500
+        diagnostics:
+          type: object
+          additionalProperties: false
+          properties:
+            action: { type: string, maxLength: 80 }
+            outcome: { type: string, enum: [error, rejected, degraded] }
+            retryCount: { type: integer, minimum: 0, maximum: 10 }
+            connectivity: { type: string, enum: [online, offline, unstable, unknown] }
+            syncState: { type: string, enum: [idle, pending, retrying, blocked, unknown] }
+            signalKind: { type: string, enum: [user_report, crash, rejected_promise, api_failure, startup, update, sync] }
+            correlationId: { type: string, maxLength: 128 }
 
     IncidentRecurrence:
       type: object
@@ -10491,12 +10509,15 @@ components:
       type: object
       required:
         - incidentId
+        - correlationId
         - diagnosis
         - workaround
         - recurrence
         - aiGenerated
       properties:
         incidentId:
+          type: string
+        correlationId:
           type: string
         diagnosis:
           type: [string, "null"]
