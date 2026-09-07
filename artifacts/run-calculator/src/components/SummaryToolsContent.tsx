@@ -8,6 +8,7 @@ import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { loadRunValues } from "../storage";
 import { todayStr } from "../utils";
 import type { HomeTab } from "../hooks/useHomeNavigation";
+import CanonicalRunViewCard from "./CanonicalRunViewCard";
 
 // Memo'd manager "Operations desk" tools header extracted from home.tsx
 // (refactor step 5). Renders nothing for non-managers. Subscribes to the
@@ -33,6 +34,9 @@ export default memo(function SummaryToolsContent() {
                     <div className="mb-3" data-testid="summary-priority-actions">
                       <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
                     </div>
+                     {currentRunId && (
+                       <CanonicalRunViewCard date={todayStr()} runId={currentRunId} />
+                     )}
                     <ShiftHandoffDigest
                       onOpenSource={(source) => {
                         if (source === "incidents") { setActiveTab("incidents"); return; }
