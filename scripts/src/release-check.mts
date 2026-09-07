@@ -218,6 +218,7 @@ const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE =
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
+  "report-key-rotation-preflight.json",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
   "clean-start/preview-home.png",
@@ -511,6 +512,26 @@ const requiresProductionSourceLibraryReconciliation =
   sourceLibraryReconciliationRequired();
 
 const steps: ReleaseStep[] = [
+  {
+    label: "operational report signing-key rotation preflight",
+    args: [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      "audit:report-key-rotation",
+    ],
+    env: {
+      REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT:
+        process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
+        ?? (process.env.CI ? "disposable-ci" : "development"),
+      REPORT_KEY_ROTATION_PREFLIGHT_OUTPUT: resolve(
+        rootDir,
+        releaseEvidenceDir,
+        "report-key-rotation-preflight.json",
+      ),
+    },
+    stage: "prerequisites",
+  },
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   ...(requiresProductionSourceLibraryReconciliation
     ? [SOURCE_LIBRARY_RECONCILIATION_STEP]

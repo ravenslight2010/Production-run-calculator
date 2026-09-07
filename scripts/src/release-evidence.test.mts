@@ -192,6 +192,12 @@ async function run(): Promise<void> {
     ),
     "standard release checks must include source-library reconciliation verification",
   );
+  assert.ok(
+    releaseGateLabelsForMode("standard").includes(
+      "operational report signing-key rotation preflight",
+    ),
+    "standard release checks must block unsafe report signing-key rotation",
+  );
   assert.equal(
     sourceLibraryReconciliationRequired({
       CI: "true",

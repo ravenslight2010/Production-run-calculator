@@ -45,6 +45,8 @@ jobs:
       # history. The verifier's focused tests run in ordinary CI; release-check
       # refuses this switch outside this disposable CI contract.
       RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
+      REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
@@ -142,6 +144,8 @@ jobs:
       # See the standard job: this excludes unavailable production history,
       # not synthetic production reconciliation evidence.
       RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
+      REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence-full
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
