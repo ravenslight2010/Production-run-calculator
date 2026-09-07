@@ -418,6 +418,35 @@ async function signInToSandbox(page: Page): Promise<boolean> {
   });
 }
 
+async function promoteToManager(username: string): Promise<void> {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    const user = await db.query("SELECT id FROM users WHERE username = $1", [username]);
+    expect(user.rows).toHaveLength(1);
+    await db.query(
+      `INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager')
+       ON CONFLICT (user_id) DO UPDATE SET role = 'manager'`,
+      [user.rows[0].id],
+    );
+    await db.query(
+      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+      [JSON.stringify([
+        "manage-staff",
+        "manage-inventory",
+        "edit-production-rules",
+        "approve-password-resets",
+        "review-incidents",
+        "use-ai-tools",
+        "manage-factory-settings",
+        "manage-profiles",
+      ])],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 async function visible(locator: Locator): Promise<boolean> {
   return locator.isVisible({ timeout: 5_000 }).catch(() => false);
 }
@@ -639,13 +668,20 @@ test.describe("phone layout smoke", () => {
       await page.getByTitle("Floor mode — big numbers, status color").click();
       const overlay = page.getByTestId("floor-mode-overlay");
       await expect(overlay).toBeVisible();
+      // Floor Mode intentionally drifts its contents for monitor burn-in. Freeze
+      // that visual-only animation in the geometry/activation smoke so Chromium
+      // can observe a stable hit target; the physical-device journey still uses
+      // real touch dispatch against the live animation.
+      await page.addStyleTag({
+        content: ".floor-drift { animation: none !important; transform: none !important; }",
+      });
       const exit = page.getByRole("button", {
         name: "Exit Floor Mode and return to calculator",
       });
       await expect(exit).toBeVisible();
       const pause = page.getByTestId("floor-pause-run");
       await expect(pause).toBeVisible();
-      await expect(pause).toHaveAccessibleName("Pause");
+      await expect(pause).toHaveAccessibleName(/Pause$/);
       await expect(page.getByTestId("floor-cases-minus")).toBeVisible();
       await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
       await expect(page.getByTestId("floor-skid-done")).toBeVisible();
@@ -1038,5 +1074,184 @@ test.describe("phone layout smoke", () => {
       "Password",
     );
     await assertPhoneLayout(page, "real mobile browser sign-in");
+  });
+
+  test("@real-mobile-browser physical Android Chrome exercises disposable floor controls", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "real-mobile-chromium",
+      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
+    );
+
+    const username = uniqueUsername();
+    testUsernames.add(username);
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    const itemName = `Physical device intake ${uniqueTestId("inventory")}`;
+    const itemKey = `ingredient:${itemName}:cases`;
+    let actionItemId: number | null = null;
+    const browserErrors: string[] = [];
+    page.on("pageerror", (error) => browserErrors.push(error.message));
+    page.on("response", (response) => {
+      if (response.status() >= 500) {
+        browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      }
+    });
+
+    try {
+      await signUpAndHandleOnboarding(page, username, "PhoneLayoutTest123!", {
+        signupCode: getSignupCode(),
+      });
+      await promoteToManager(username);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+      // Keep this journey inside the disposable E2E database. The account-backed
+      // Floor Mode setting and run lifecycle are real, but no production state is
+      // reachable from this project/command.
+      await page.getByTestId("tab-run").click();
+      const startRun = page.getByTestId("button-start-run");
+      if (await startRun.isVisible()) {
+        const casesNeeded = page.getByTestId("input-casesNeeded");
+        await casesNeeded.fill("4");
+        await startRun.tap();
+      }
+      await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+
+      await page.getByRole("button", { name: "More", exact: true }).tap();
+      await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).tap();
+      const floorSwitch = page.getByTestId("switch-floor-mode");
+      await expect(floorSwitch).toBeVisible();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
+      await page.keyboard.press("Escape");
+      await page.getByTitle("Floor mode — big numbers, status color").tap();
+
+      const overlay = page.getByTestId("floor-mode-overlay");
+      await expect(overlay).toBeVisible();
+      await expect(page.getByTestId("floor-pause-run")).toBeVisible();
+      await expect(page.getByTestId("floor-cases-minus")).toBeVisible();
+      await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
+      await expect(page.getByTestId("floor-skid-done")).toBeVisible();
+      await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+
+      // Use tap rather than click so this path exercises the device's touch
+      // dispatch. Each control is intentionally used once in a reversible order.
+      await page.getByTestId("floor-cases-plus").tap();
+      await page.getByTestId("floor-cases-minus").tap();
+      await page.getByTestId("floor-skid-done").tap();
+
+      await overlay.getByRole("button", { name: /log stop/i }).tap();
+      const stopDialog = page.getByRole("dialog", { name: "Log Line Stop" });
+      await expect(stopDialog).toBeVisible();
+      await stopDialog.getByRole("button", { name: "Log Without Reason" }).tap();
+      await expect(overlay.getByRole("button", { name: "End Stop" })).toBeVisible();
+      await overlay.getByRole("button", { name: "End Stop" }).tap();
+
+      await page.getByTestId("floor-pause-run").tap();
+      await expect(page.getByTestId("floor-resume-run")).toBeVisible();
+      const pauseDecision = page.getByTestId("pause-tunnel-decision");
+      if (await pauseDecision.isVisible().catch(() => false)) {
+        await pauseDecision.getByRole("button", { name: "Use default" }).tap();
+      }
+      await page.getByTestId("floor-resume-run").tap();
+      await expect(page.getByTestId("floor-pause-run")).toBeVisible();
+
+      await page.getByTestId("floor-complete-run").tap();
+      const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
+      await expect(completeDialog).toBeVisible();
+      await completeDialog.getByTestId("floor-confirm-complete-run").tap();
+      await expect(completeDialog).toBeHidden();
+      await expect(overlay.getByText("ENDED", { exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("physical-floor-controls-complete.png") });
+      await overlay.getByRole("button", {
+        name: "Exit Floor Mode and return to calculator",
+      }).tap();
+      await expect(overlay).toBeHidden();
+
+      // Inventory intake uses a unique item and is committed only to the
+      // disposable database. The item is removed in finally below.
+      await page.getByRole("button", { name: "More", exact: true }).tap();
+      await page.getByRole("menuitem", { name: "Inventory", exact: true }).tap();
+      await expect(page.getByTestId("inventory-page-heading")).toContainText("Inventory");
+      await page.getByRole("button", { name: "New", exact: true }).tap();
+      await page.getByRole("button", { name: "Custom", exact: true }).tap();
+      await page.getByLabel("Inventory item name").fill(itemName);
+      await page.getByLabel("Inventory unit").fill("cases");
+      await page.getByRole("button", { name: "Add to inventory", exact: true }).tap();
+      await expect(page.getByText(itemName, { exact: true })).toBeVisible();
+      const itemCard = page.getByText(itemName, { exact: true }).locator("xpath=../../..");
+      await page.getByRole("button", { name: new RegExp(itemName, "i") }).tap();
+      const restockQuantity = page.getByLabel(`Restock quantity for ${itemName}`);
+      await expect(restockQuantity).toBeVisible();
+      await restockQuantity.fill("2");
+      await itemCard.getByRole("button", { name: "Add stock", exact: true }).tap();
+      await expect(restockQuantity).toHaveValue("");
+      await page.screenshot({ path: testInfo.outputPath("physical-inventory-intake.png") });
+
+      // Seed one manager queue item after the floor/inventory journey, then
+      // exercise claim, details, status, and note controls on the same device.
+      await db.connect();
+      const queue = await db.query(
+        `INSERT INTO action_items
+          (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
+         VALUES ('live', $1, 'sync', 'warning', $2, $3, 'sync', $1, '#sync-diagnostics', 'open', 1)
+         RETURNING id`,
+        [
+          `e2e:physical_floor_queue:${uniqueTestId("queue")}`,
+          `Physical device queue ${uniqueTestId("title")}`,
+          "Disposable queue fixture for touch validation",
+        ],
+      );
+      actionItemId = queue.rows[0].id as number;
+
+      await page.getByRole("button", { name: "More", exact: true }).tap();
+      await page.getByRole("menuitem", { name: "Manager action queue", exact: true }).tap();
+      const queuePanel = page.getByTestId("manager-action-queue");
+      await expect(queuePanel).toBeVisible();
+      const queueTitle = queuePanel.getByText(/Physical device queue /).first();
+      await expect(queueTitle).toBeVisible();
+      const queueCard = queueTitle.locator("xpath=../../..");
+      const queueTitleText = (await queueTitle.textContent())?.trim() ?? "";
+      await queueCard.getByRole("button", { name: "Claim", exact: true }).tap();
+      await expect(
+        queueCard.getByLabel(`Status for ${queueTitleText}`),
+      ).toHaveValue("in_progress");
+      await queueCard.getByRole("button", { name: "Details", exact: true }).tap();
+      await queueCard.getByRole("button", { name: "Add note", exact: true }).tap();
+      await queueCard.getByPlaceholder("Resolution or handoff note").fill("Touch trial complete");
+      await queueCard.getByRole("button", { name: "Save note", exact: true }).tap();
+      await expect(queueCard).toContainText("Touch trial complete");
+      await page.screenshot({ path: testInfo.outputPath("physical-manager-queue.png") });
+
+      const deviceEvidence = await page.evaluate(() => ({
+        userAgent: navigator.userAgent,
+        viewport: {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          visualViewportWidth: window.visualViewport?.width ?? null,
+          visualViewportHeight: window.visualViewport?.height ?? null,
+        },
+        devicePixelRatio: window.devicePixelRatio,
+        touchPoints: navigator.maxTouchPoints,
+      }));
+      await testInfo.attach("physical-floor-device-evidence", {
+        body: JSON.stringify(deviceEvidence, null, 2),
+        contentType: "application/json",
+      });
+      await testInfo.attach("physical-floor-browser-errors", {
+        body: JSON.stringify(browserErrors, null, 2),
+        contentType: "application/json",
+      });
+      expect(browserErrors).toEqual([]);
+    } finally {
+      await db.end().catch(() => {});
+      const cleanup = new Client({ connectionString: process.env.DATABASE_URL });
+      await cleanup.connect().catch(() => {});
+      if (actionItemId !== null) {
+        await cleanup.query("DELETE FROM action_items WHERE id = $1", [actionItemId]).catch(() => {});
+      }
+      await cleanup.query("DELETE FROM inventory_items WHERE key = $1", [itemKey]).catch(() => {});
+      await cleanup.end().catch(() => {});
+    }
   });
 });

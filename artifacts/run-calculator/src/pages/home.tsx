@@ -18492,7 +18492,7 @@ function FloorModeView() {
         return (
           <div
             data-testid="floor-mode-overlay"
-            className="fixed inset-0 z-[40] flex flex-col overflow-y-auto font-sans select-none"
+            className="fixed inset-0 z-[60] flex flex-col overflow-y-auto font-sans select-none"
             style={{ background: bg, color: "white" }}
           >
             <OperationalStateBadge

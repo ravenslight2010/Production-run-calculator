@@ -39,6 +39,13 @@ later fail-closed sign-up-gate test intermittently gets 429 instead of 403.
 Both platforms drift the whole panel slowly and auto-dim to ~0.45 after ~90s of no
 interaction, restoring instantly on touch/mouse/key. Web uses CSS `@keyframes floor-drift`
 + `floorDimmed` state; mobile uses Animated drift loop + Animated opacity.
+The web overlay must sit above the fixed bottom navigation layer so its lower
+completion and stop controls remain touchable on short portrait viewports.
+**Why:** a 375×812 phone check showed the navigation bar intercepting the
+completion control when the overlay used a lower stacking layer.
+**How to apply:** keep the full-screen overlay's stacking layer above fixed
+navigation; geometry smoke tests should freeze only the visual drift animation,
+not bypass touch dispatch.
 
 ## Mobile idle activation gotcha
 Auto-open after 3 min idle MUST be gated on tab focus (`useFocusEffect`), not a plain
