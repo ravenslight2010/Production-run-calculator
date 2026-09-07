@@ -15,6 +15,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -54,6 +55,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
+  completedRunHistoryTable = dbMod.completedRunHistoryTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -89,7 +91,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   clearSandboxCache();
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
@@ -189,6 +191,51 @@ describe("operational report endpoints", () => {
     expect(res.status).toBe(200);
     const report = await res.json() as { production: { runsPlanned: number; casesPlanned: number } };
     expect(report.production).toMatchObject({ runsPlanned: 1, casesPlanned: 100 });
+  });
+
+  it("counts only each immutable completion's own run when snapshots contain the full day", async () => {
+    const runA = { id: "completed-a", brand: "Canonical", flavor: "A", startedAt: 1_000, endedAt: 2_000 };
+    const runB = { id: "completed-b", brand: "Canonical", flavor: "B", startedAt: 2_000, endedAt: 3_000 };
+    const snapshotA = snapshot(runA, 100);
+    const snapshotB = snapshot(runB, 50);
+    const sharedSnapshot = {
+      ...snapshotA,
+      dayState: { date: "2026-09-06", resetAt: 10, runs: [runA, runB] },
+      runValues: {
+        ...(snapshotA.runValues as Record<string, unknown>),
+        ...(snapshotB.runValues as Record<string, unknown>),
+      },
+      packagingProgress: {
+        ...(snapshotA.packagingProgress as Record<string, unknown>),
+        ...(snapshotB.packagingProgress as Record<string, unknown>),
+      },
+    };
+    await db.insert(completedRunHistoryTable).values([
+      {
+        id: "history-a", scope: "live", operationId: "operation-a", runId: runA.id,
+        date: "2026-09-06", completedAt: new Date(), snapshot: sharedSnapshot,
+        snapshotHash: "hash-a", actorId: MANAGER,
+      },
+      {
+        id: "history-b", scope: "live", operationId: "operation-b", runId: runB.id,
+        date: "2026-09-06", completedAt: new Date(), snapshot: sharedSnapshot,
+        snapshotHash: "hash-b", actorId: MANAGER,
+      },
+    ]);
+
+    const res = await req(MANAGER, "POST", "/api/reports/operational", {
+      scope: "day", date: "2026-09-06",
+    });
+    expect(res.status).toBe(200);
+    const report = await res.json() as {
+      production: { runsPlanned: number; casesPlanned: number };
+      productionRows: Array<{ id: string }>;
+    };
+    expect(report.production).toMatchObject({ runsPlanned: 2, casesPlanned: 150 });
+    expect(report.productionRows.map((row) => row.id)).toEqual([
+      "2026-09-06:completed-a",
+      "2026-09-06:completed-b",
+    ]);
   });
 
   it("refuses to label a partial canonical aggregate as authoritative", async () => {

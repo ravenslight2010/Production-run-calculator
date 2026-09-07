@@ -2,10 +2,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   operationalReportText,
+  operationalReportCsv,
+  operationalReportRows,
+  operationalReportWorkbook,
   reportFilename,
   shareOperationalReport,
 } from "./reportShare";
 import type { OperationalReport } from "@workspace/day-summary";
+import * as XLSX from "xlsx";
 
 const report: OperationalReport = {
   scope: "week",
@@ -86,5 +90,47 @@ describe("operational report sharing", () => {
     Object.assign(navigator, { share });
     expect(await shareOperationalReport(report)).toBe("shared");
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining("Operational week") }));
+  });
+
+  it("builds deterministic structured rows, CSV, and workbook sheets", () => {
+    const rows = operationalReportRows(report);
+    expect(rows.find((row) => row.ID === "production-summary")).toMatchObject({
+      "Cases Planned": 200,
+      "Cases Produced": 140,
+      "Attainment %": 70,
+    });
+    expect(operationalReportRows(report)).toEqual(rows);
+    const csv = operationalReportCsv(report);
+    expect(csv).toContain('"production-summary"');
+    expect(csv).toContain('"Incidents","section-status"');
+    expect(csv).toContain('"Quality","section-status"');
+    expect(csv).toContain('"Inventory","section-status"');
+    expect(csv).toContain('"available-no-detail-rows"');
+    expect(operationalReportWorkbook(report).SheetNames).toEqual([
+      "Report", "Production", "Quality", "Incidents", "Inventory", "Actions",
+    ]);
+    expect(reportFilename(report, "csv")).toBe("operational-week-2026-09-04.csv");
+    expect(reportFilename(report, "xlsx")).toBe("operational-week-2026-09-04.xlsx");
+  });
+
+  it("neutralizes spreadsheet formulas in CSV and workbook cells", () => {
+    const unsafe: OperationalReport = {
+      ...report,
+      productionRows: [{
+        id: "unsafe",
+        date: report.date,
+        run: "=HYPERLINK(\"https://example.invalid\")",
+        status: "finished",
+        casesPlanned: 1,
+        casesProduced: 1,
+        attainmentPct: 100,
+        downtimeMinutes: 0,
+        stoppages: 0,
+      }],
+    };
+    expect(operationalReportCsv(unsafe)).toContain(`"'=HYPERLINK(""https://example.invalid"")"`);
+    const sheet = operationalReportWorkbook(unsafe).Sheets.Production;
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
+    expect(rows.find((row) => row.ID === "unsafe")?.Detail).toBe(`'=HYPERLINK("https://example.invalid")`);
   });
 });

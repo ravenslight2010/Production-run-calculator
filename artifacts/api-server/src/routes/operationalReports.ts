@@ -113,6 +113,9 @@ function viewToSummaryRun(view: ReturnType<typeof deriveOperationalRunView>): Da
   };
 }
 
+function pct(produced: number, planned: number): number {
+  return planned > 0 ? Math.max(0, Math.round((produced / planned) * 100)) : 0;
+}
 type HandoffSeverity = "urgent" | "high" | "medium" | "low" | "info";
 type HandoffStatus = "open" | "reviewed" | "resolved" | "historical" | "current";
 type HandoffSource = "incidents" | "quality" | "inventory" | "sync" | "data-health";
@@ -397,6 +400,9 @@ router.post(
     // daily_sync document remains the source only for the active/current day.
     const nowMs = Date.now();
     const canonicalRuns: DaySummaryInput["runs"] = [];
+    const productionRows: NonNullable<OperationalReport["productionRows"]> = [];
+    const snapshotTimes: number[] = [];
+    const mutableSnapshotTimes: number[] = [];
     let canonicalFailure: { date: string; code: string } | null = null;
     const expectedDates = datesInRange(periodStart, periodEnd);
     type ReportSnapshot = {
@@ -404,6 +410,7 @@ router.post(
       data: unknown;
       updatedAt: Date;
       source: "active" | "completed";
+      completedRunId?: string;
     };
     const rowsByDate = new Map<string, ReportSnapshot[]>();
     const completedRunKeys = new Set(
@@ -421,6 +428,7 @@ router.post(
         data: row.snapshot,
         updatedAt: row.completedAt,
         source: "completed",
+        completedRunId: row.runId,
       });
       rowsByDate.set(row.date, rows);
     }
@@ -437,19 +445,28 @@ router.post(
     for (const rows of rowsByDate.values()) for (const row of rows) {
       if (canonicalFailure) break;
       const snapshot = adaptCanonicalOperationalSnapshot(row.data);
+      snapshotTimes.push(row.updatedAt.getTime());
+      if (row.source === "active") mutableSnapshotTimes.push(row.updatedAt.getTime());
       if (!snapshot || !Array.isArray(snapshot.dayState?.runs)) {
         canonicalFailure = { date: row.date, code: "invalid-snapshot" };
         break;
       }
       const resetAt = (snapshot.dayState as { resetAt?: unknown }).resetAt;
       if (
-        resetAt !== undefined &&
-        (typeof resetAt !== "number" || !Number.isFinite(resetAt) || resetAt < 0)
+        resetAt !== undefined
+        && (typeof resetAt !== "number" || !Number.isFinite(resetAt) || resetAt < 0)
       ) {
         canonicalFailure = { date: row.date, code: "reset-ambiguity" };
         break;
       }
-      for (const rawRun of snapshot.dayState.runs) {
+      const runs = row.source === "completed"
+        ? snapshot.dayState.runs.filter((run) => run?.id === row.completedRunId)
+        : snapshot.dayState.runs;
+      if (row.source === "completed" && runs.length !== 1) {
+        canonicalFailure = { date: row.date, code: "missing-run" };
+        break;
+      }
+      for (const rawRun of runs) {
         if (!rawRun || typeof rawRun.id !== "string" || !rawRun.id) {
           canonicalFailure = { date: row.date, code: "invalid-run" };
           break;
@@ -459,7 +476,7 @@ router.post(
           && completedRunKeys.has(`${row.date}\u0000${rawRun.id}`)
         ) continue;
         try {
-          canonicalRuns.push(viewToSummaryRun(deriveOperationalRunView({
+          const summaryRun = viewToSummaryRun(deriveOperationalRunView({
             snapshot,
             date: row.date,
             runId: rawRun.id,
@@ -470,7 +487,19 @@ router.post(
               date: row.date,
               ...(typeof resetAt === "number" ? { resetAt } : {}),
             },
-          })));
+          }));
+          canonicalRuns.push(summaryRun);
+          productionRows.push({
+            id: `${row.date}:${rawRun.id}`,
+            date: row.date,
+            run: [summaryRun.brand, summaryRun.flavor].filter(Boolean).join(" ") || "Unnamed run",
+            status: summaryRun.finished ? "finished" : "unfinished",
+            casesPlanned: summaryRun.casesPlanned,
+            casesProduced: summaryRun.casesProduced,
+            attainmentPct: pct(summaryRun.casesProduced, summaryRun.casesPlanned),
+            downtimeMinutes: summaryRun.downtimeMinutes,
+            stoppages: summaryRun.stoppageCount,
+          });
         } catch (error) {
           canonicalFailure = {
             date: row.date,
@@ -499,6 +528,7 @@ router.post(
       );
       return;
     }
+    productionRows.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
     const productionInput: DaySummaryInput = {
       scope: input.scope,
       date: input.date,
@@ -506,6 +536,61 @@ router.post(
       incidentCount: incidentRows.length,
       wasteFlaggedCount: flaggedItems,
     };
+
+    const qualityDetailRows = qualityRows.map((row) => ({
+      id: String(row.id),
+      occurredAt: row.createdAt.toISOString(),
+      product: row.productType,
+      status: row.status,
+      issues: Array.isArray(row.issues) ? row.issues.length : 0,
+      summary: row.summary ?? "",
+    })).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
+    const incidentDetailRows = incidentRows.map((row) => {
+      const context = row.context && typeof row.context === "object"
+        ? row.context as Record<string, unknown> : {};
+      return {
+        id: row.id,
+        occurredAt: row.createdAt.toISOString(),
+        status: row.status,
+        priority: row.priority,
+        reporter: row.reporterName ?? "Unknown reporter",
+        summary: String(context.description ?? context.errorMessage ?? row.diagnosis ?? "Incident requires review."),
+      };
+    }).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
+    const inventoryDetailRows = inventoryRows
+      .map((item) => ({
+        id: String(item.id),
+        item: item.name,
+        unit: item.unit,
+        onHand: onHand.get(item.id) ?? 0,
+        reorderThreshold: item.reorderThreshold,
+        state: item.reorderThreshold > 0 && (onHand.get(item.id) ?? 0) <= item.reorderThreshold
+          ? "at-or-below-reorder" : "ok",
+      }))
+      .filter((row) => row.state !== "ok")
+      .sort((a, b) => a.item.localeCompare(b.item) || a.id.localeCompare(b.id));
+    const unresolvedRows: NonNullable<OperationalReport["unresolvedActions"]>["value"] extends infer V
+      ? V extends { rows: infer R } ? R : never : never = [
+      ...productionRows.filter((row) => row.status === "unfinished").map((row) => ({
+        id: `production:${row.id}`, source: "production" as const, priority: "high",
+        action: "Complete or close the production run", detail: `${row.run}: ${row.casesProduced}/${row.casesPlanned} cases.`,
+      })),
+      ...qualityDetailRows.filter((row) => row.status === "warn" || row.status === "fail").map((row) => ({
+        id: `quality:${row.id}`, source: "quality" as const, priority: row.status === "fail" ? "high" : "medium",
+        action: "Review quality exception", detail: `${row.product}: ${row.summary || `${row.issues} issue(s)`}.`,
+      })),
+      ...incidentDetailRows.filter((row) => row.status !== "resolved").map((row) => ({
+        id: `incident:${row.id}`, source: "incident" as const, priority: row.priority,
+        action: "Resolve incident", detail: row.summary,
+      })),
+      ...inventoryDetailRows.map((row) => ({
+        id: `inventory:${row.id}`, source: "inventory" as const, priority: row.onHand <= 0 ? "urgent" : "high",
+        action: "Replenish inventory", detail: `${row.item}: ${row.onHand} ${row.unit} on hand; reorder at ${row.reorderThreshold}.`,
+      })),
+    ];
+    const latestSnapshot = snapshotTimes.length ? Math.max(...snapshotTimes) : Date.now();
+    const generatedAt = new Date().toISOString();
+    const oldestMutableSnapshot = mutableSnapshotTimes.length ? Math.min(...mutableSnapshotTimes) : null;
     const report: OperationalReport & {
       evidence: {
         release: { version: string; revision: string; environment: string };
@@ -516,8 +601,24 @@ router.post(
       date: input.date,
       periodStart,
       periodEnd,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
+      attribution: { generatedBy: req.userId ?? "authenticated manager", source: "canonical-server" },
+      freshness: {
+        status: oldestMutableSnapshot !== null && Date.now() - oldestMutableSnapshot > 5 * 60_000 ? "stale" : "current",
+        asOf: new Date(latestSnapshot).toISOString(),
+        note: oldestMutableSnapshot === null
+          ? "Production is based on immutable completed-run records."
+          : "Production freshness is based on the oldest mutable canonical snapshot in the selected period.",
+      },
+      calculation: {
+        period: `${periodStart} through ${periodEnd}, inclusive (UTC production dates).`,
+        production: "Canonical completed-run records plus the active daily snapshot; completed runs are counted once.",
+        quality: "Quality checks created during the selected period.",
+        incidents: "Incidents created during the selected period; unresolved excludes resolved records.",
+        inventory: "Current on-hand lots compared with reorder thresholds; ledger events are limited to the selected period.",
+      },
       production: aggregateDaySummary(productionInput),
+      productionRows,
       quality: {
         availability: "available",
         value: {
@@ -525,6 +626,7 @@ router.post(
           issues: qualityIssues,
           failed: qualityRows.filter((r) => r.status === "fail").length,
           warnings: qualityRows.filter((r) => r.status === "warn").length,
+          rows: qualityDetailRows,
         },
         note: qualityRows.length === 0 ? "No quality checks were recorded in this period." : undefined,
       },
@@ -533,13 +635,19 @@ router.post(
         value: {
           total: incidentRows.length,
           unresolved: incidentRows.filter((r) => r.status !== "resolved").length,
+          rows: incidentDetailRows,
         },
         note: incidentRows.length === 0 ? "No incidents were recorded in this period." : undefined,
       },
       inventory: {
         availability: "available",
-        value: { flaggedItems, historical: historicalInventory },
+        value: { flaggedItems, rows: inventoryDetailRows, historical: historicalInventory },
         note: "Current inventory snapshot; not a historical period total.",
+      },
+      unresolvedActions: {
+        availability: "available",
+        value: { total: unresolvedRows.length, rows: unresolvedRows },
+        note: unresolvedRows.length === 0 ? "No unresolved actions were identified from available report sections." : undefined,
       },
       evidence: {
         release: {

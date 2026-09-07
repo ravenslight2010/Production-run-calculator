@@ -124,12 +124,15 @@ describe("OperationalReportPanel", () => {
 
     expect(await screen.findByText(/Local\/offline fallback ready/i)).toBeTruthy();
     expect(screen.getByText(/local\/offline fallback:.*not authoritative/i)).toBeTruthy();
-    expect(screen.getByText("15/20")).toBeTruthy();
-    expect(screen.getByText("7m")).toBeTruthy();
-    expect(screen.getByText(/Quality: Unavailable — Unavailable in local\/offline fallback/i)).toBeTruthy();
-    expect(screen.getByText(/Incidents: Unavailable — Unavailable in local\/offline fallback/i)).toBeTruthy();
-    expect(screen.getByText(/Inventory flags: Unavailable — Unavailable in local\/offline fallback/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Export .txt/i })).toBeTruthy();
+    expect(screen.getAllByText("15/20")).toHaveLength(2);
+    expect(screen.getAllByText("7m")).toHaveLength(2);
+    expect(screen.getByText(/Quality: UNAVAILABLE — Unavailable in local\/offline fallback/i)).toBeTruthy();
+    expect(screen.getByText(/Incidents: UNAVAILABLE — Unavailable in local\/offline fallback/i)).toBeTruthy();
+    expect(screen.getByText(/Inventory flags: UNAVAILABLE — Unavailable in local\/offline fallback/i)).toBeTruthy();
+    expect(screen.getByText(/Only unfinished production runs on this device/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CSV" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Excel" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Print / PDF" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
   });
 
