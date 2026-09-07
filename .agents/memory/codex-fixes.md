@@ -426,3 +426,27 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Context:** This is the battle-tested engine foundation for full server ownership of the wall-clock channels (the remaining execution step stays gated on this port's parity). Verified: lib 120/120 (18 new engine + schedule tests), api-server tsc + build + coordination/server-tick units 28/28, web tsc + auto-track suites 81/81. PR #36.
 
 *Last updated: 2026-09-06*
+
+## 2026-09-07: Replit merge — absorb 163 commits of Replit feature evolution
+
+**File(s)**: 
+- `lib/live-calc/src/autoTrackEngine.ts`, `lib/live-calc/src/autoTrackSchedule.ts`, `lib/live-calc/src/wallClockEngine.ts`, `lib/live-calc/src/index.ts` (taken from Replit's evolved versions)
+- `lib/live-calc/src/liveCalc.test.ts` (type assertion fix)
+- `artifacts/run-calculator/src/autoTrackCoordinationClient.ts` (restored Replit's clean version, removing duplicate export)
+- `artifacts/run-calculator/src/hooks/__tests__/useAutoTrack.sauceBarrel.test.tsx` (restored Replit's version, removed incompatible Step 6b/7a test blocks)
+- `artifacts/run-calculator/src/hooks/__tests__/useAutoTrack.wallClockSkip.test.tsx` (removed — incompatible with Replit's useAutoTrack)
+- `lib/api-client-react/src/generated/*` and `lib/api-zod/src/generated/*` (regenerated from merged OpenAPI spec)
+- 768 files total
+
+**Problem**: `origin/Replit` had 163 commits since merge-base `e0f6d9f9`, diverging significantly from main. Conflicts were in auto-track/sync/home core (30 files) plus auto-merged files with duplicates.
+
+**Fix**:
+1. Favor Replit's versions for all 30 conflicted files (Replit absorbed our feature branch pre-squash, so they are supersets)
+2. Removed 3 stale test files from `lib/live-calc/` that were replaced by Replit's consolidated `liveCalc.test.ts`
+3. Fixed `liveCalc.test.ts` TS error: `brand` not in `CalcRunMeta` → added `as unknown as CalcRunMeta[]` assertion
+4. Restored `autoTrackCoordinationClient.ts` to Replit's clean version (our main had added duplicate `publishAutoTrackSchedule` overloads from auto-merge)
+5. Restored `useAutoTrack.sauceBarrel.test.tsx` to Replit's version (our Step 6b/7a appended tests were incompatible)
+6. Removed orphaned `useAutoTrack.wallClockSkip.test.tsx` (main-only test, Replit's hook implements skip differently)
+7. Ran `pnpm --filter @workspace/api-spec run codegen` to regenerate `OperationalRunView` types matching merged spec
+
+**Context**: This is the major Replit sync merge. Replit's branch is now the authoritative feature codebase; main's Step 7a/7b work is included via Replit's pre-squash merge of the feature branch. PR: https://github.com/ravenslight2010/Production-run-calculator/pull/39

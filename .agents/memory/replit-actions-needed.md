@@ -70,3 +70,38 @@ Rules: change a formula ONCE in `lib/live-calc`; never re-add inline calc to
 either app or the server. `DEFAULT_PEP_TYPES` is injected as a param (same
 pattern as inventory-math). If you touch `home.tsx`, keep the `serverCalcRef`
 SSE wiring and the `computeCalc` call in LiveRunContext intact.
+
+## 4. NEW (2026-09-07 update): Replit merge completed
+
+Codex merged `origin/Replit` (163 commits, 766 files) into `main` via PR #39
+(`merge/replit-sync-2026-09-07` branch). Conflict resolution favored Replit's
+versions throughout because Replit's branch absorbed our feature branch
+pre-squash and evolved further.
+
+**Key changes absorbed from Replit:**
+- Import review hardening on short phone layouts
+- Paused run weight/recipe snapshot preservation
+- Protected GET routes with explicit authorization registration
+- Master-data refresh push to open stations
+- Full-screen overlay navigation interception guards
+- Operational dialog viewport layout fixes
+- Case-based Frontline quantity guards
+- PWA handoff recovery
+- Browser QA regressions (batch weights, recipe units, source-library)
+
+**Merge fixes applied:**
+- Removed stale `lib/live-calc` test files (superseded by Replit's `liveCalc.test.ts`)
+- Fixed `liveCalc.test.ts` type assertion (`CalcRunMeta` cast for test fixture)
+- Restored `autoTrackCoordinationClient.ts` to Replit's clean version (duplicate export from auto-merge)
+- Removed orphaned `wallClockSkip.test.tsx` and `sauceBarrel` test append blocks
+- Regenerated OpenAPI client code (`OperationalRunView` type sync)
+
+**Open CI failures on Replit branch (pre-existing, NOT caused by this merge):**
+- Release gates: source-library reconciliation fails on fresh Postgres
+- Schema-safe rollback rehearsal: schema snapshot out of date
+- Desktop/phone department journey: API 503 during browser run
+
+**For Replit:** Your `origin/Replit` branch was the conflict-winner. After this
+merge lands, you can fast-forward to main and start pushing on a clean base.
+All your 163 commits are preserved. Your `useAutoTrack.ts`, `home.tsx`, and
+`sync.ts` are now the authoritative versions on main.
