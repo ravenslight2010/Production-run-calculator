@@ -105,3 +105,72 @@ pre-squash and evolved further.
 merge lands, you can fast-forward to main and start pushing on a clean base.
 All your 163 commits are preserved. Your `useAutoTrack.ts`, `home.tsx`, and
 `sync.ts` are now the authoritative versions on main.
+
+## 5. CODE: forward plan — the "hard work" for Replit Agent (2026-09-07)
+
+Codex owns the architectural refactor; you own feature + QA velocity. These are
+the next items, listed in priority order. All are green-lit; do them once, well,
+on a clean base AFTER PR #39 (merge/replit-sync-2026-09-07 → main) lands.
+
+### 5.1 Fix the 3 red CI workflows (highest priority — blocks every deploy)
+
+These pre-date PR #39 and are NOT caused by the merge. They fail on the Replit
+branch today and will fail on main until resolved:
+1. **Release gates / retained standard evidence** (`release-check.yml`) —
+   `source-library reconciliation verification` fails on a fresh Postgres
+   because it expects production data history (pools/aliases/stubs from the
+   2026-08-26 audit). Decide how CI should handle a missing production snapshot
+   (skip-with-cause vs. synthetic fixture).
+2. **Schema-safe application rollback rehearsal** (`ci.yml`) —
+   `check:schema-safe-rollback` fails "public schema changed during runtime
+   replacement" — the recorded/expected schema snapshot is stale vs. current
+   schema. Regenerate the snapshot.
+3. **Desktop + phone department journey** (`department-navigation.yml`) — the
+   browser journey gets an API 503 during the run. Investigate the 503 (likely
+   cold-start / schema-boot race on a disposable e2e DB; see `replit.md`
+   `prepare:e2e:department`).
+
+### 5.2 Server-side wall-clock auto-track claim EXECUTION (completes Step 7)
+
+Step 7a/7b shipped the FOUNDATION (pure `wallClockEngine.ts`, server
+`autoTrackServerTicks.ts` bootstrap, client skip-latch). What remains is the
+actual server-side EXECUTION of wall-clock claims for live runs:
+- In `artifacts/api-server/src/lib/autoTrackServerTicks.ts`, wire
+  `tickWallClock` (from `lib/live-calc/src/wallClockEngine.ts`) into a run loop
+  analogous to how net-second claims already run, for fresh live runs < 6h.
+- Route the resulting `WallClockMutation`s through the SAME
+  parse/apply/row-lock transaction path the net-second claims use (do NOT add a
+  parallel write path).
+- Persist history ONLY if replay divergence for mid-run-mount devices becomes a
+  real issue; the claim protocol re-aligns canonical nextDueAt after the first
+  claim, so prefer not re-persisting until proven necessary.
+- Run `sync-invariant-check` + `state-accuracy-check` skills before/after.
+
+### 5.3 Client skip of redundant wall-clock ticks (mirror Task 1 latch)
+
+The net-second skip-latch lives in `artifacts/run-calculator/src/hooks/useAutoTrack.ts`
+(lines ~442/450/523/596 — `serverScheduleAtRef`, 30s freshness). Mirror the same
+latch for the WALL-CLOCK channels (case, tray-consume, tray-produce,
+batch-consume, batch-produce, hopper): when the server wall-clock verdict is
+fresh and says "not due", the client must not fire its own wall-clock claim;
+when the verdict goes stale/offline, restore the local fallback exactly as the
+net-second version does. Keep the canonical-echo path unchanged (canonical echo
+still resumes local execution).
+
+### 5.4 AI/assistant subsystem — close the coverage gap
+
+Neither side touched this critically since the route reorg. After 5.1-5.3:
+- Add integration tests for the consolidated AI routes (route reorg deleted
+  several `ai*` route tests with no replacements — `ai.ts` is the big
+  consolidated router). Priorities: `aiParseSpecSheet`, `aiMatchImport`,
+  `aiMemory`, `aiMixReconcile`, `aiSummary`.
+- Wire `aiCostLimit` charges into the new consolidated router if not already
+  done (it was gated per-route before the reorg).
+- Keep changes formula-once in `lib/*`; never re-add inline AI/calc to the app.
+
+### Working agreement (unchanged)
+- Formula/math changes happen ONCE in `lib/live-calc` (or the relevant `lib/*`).
+- Use a feature branch + PR; never force-push `main` (branch protection).
+- Update `.agents/memory/codex-fixes.md` (or a memory file) after each fix.
+- Run the relevant skill (`verify-before-commit`, `sync-invariant-check`,
+  `state-accuracy-check`, `release-checklist`, `production-go`) before claiming done.
