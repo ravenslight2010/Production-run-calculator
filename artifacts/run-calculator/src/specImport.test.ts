@@ -325,7 +325,8 @@ describe("sanitizeParsedSpecImport", () => {
       profiles: [
         { brand: "Tombstone", flavor: "Pepperoni",
           pizzasPerCase: "16", sauceBarrelLbs: 500,
-          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 55 }],
+          targetDoughballWeight: "12.5", doughballsPerTray: "20",
+          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 55, slot: 3, recipeName: "House Blend" }],
           pepperonis: [{ type: "Pep", sticks: 2, ozPerPizza: 1.5, batchLbs: 25 }] },
       ],
       recipes: [
@@ -336,7 +337,11 @@ describe("sanitizeParsedSpecImport", () => {
     const p = out.profiles[0];
     expect(p.pizzasPerCase).toBe(16);
     expect(p.sauceBarrelLbs).toBe(500);
+    expect(p.targetDoughballWeight).toBe(12.5);
+    expect(p.doughballsPerTray).toBe(20);
     expect(p.applicators[0].batchLbs).toBe(55);
+    expect(p.applicators[0].slot).toBe(3);
+    expect(p.applicators[0].recipeName).toBe("House Blend");
     expect(p.pepperonis[0].batchLbs).toBe(25);
     const dough = out.recipes.find((r) => r.kind === "dough");
     expect(dough?.doughBatchYield).toBe(640);
@@ -347,7 +352,8 @@ describe("sanitizeParsedSpecImport", () => {
       profiles: [
         { brand: "Tombstone", flavor: "Cheese",
           pizzasPerCase: 0, sauceBarrelLbs: 0,
-          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 0 }],
+          targetDoughballWeight: 0, doughballsPerTray: 0,
+          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 0, recipeName: "" }],
           pepperonis: [] },
       ],
       recipes: [
@@ -358,7 +364,10 @@ describe("sanitizeParsedSpecImport", () => {
     const p = out.profiles[0];
     expect(p.pizzasPerCase).toBeUndefined();
     expect(p.sauceBarrelLbs).toBeUndefined();
+    expect(p.targetDoughballWeight).toBeUndefined();
+    expect(p.doughballsPerTray).toBeUndefined();
     expect(p.applicators[0].batchLbs).toBeUndefined();
+    expect(p.applicators[0].recipeName).toBeUndefined();
     const dough = out.recipes.find((r) => r.kind === "dough");
     expect(dough?.doughBatchYield).toBeUndefined();
     expect(dough?.doughballsPerTray).toBeUndefined();

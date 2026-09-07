@@ -38,6 +38,7 @@ const input: SpecExportInput = {
       pepperonis: [],
       doughRecipeName: "Standard Dough",
       targetDoughballWeight: 19.5,
+      doughballsPerTray: 24,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", "Cheese Blend B", undefined, undefined],
     },
@@ -50,6 +51,7 @@ const input: SpecExportInput = {
       pepperonis: [{ type: "Cup Char Pepperoni", sticks: 2, ozPerPizza: 1.2 }],
       doughRecipeName: "Standard Dough",
       targetDoughballWeight: 19.5,
+      doughballsPerTray: 24,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", undefined, undefined, undefined],
     },
@@ -62,6 +64,7 @@ const input: SpecExportInput = {
       pepperonis: [],
       doughRecipeName: "Thin Crust Dough",
       targetDoughballWeight: 11,
+      doughballsPerTray: 30,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", undefined, undefined, undefined],
     },
@@ -76,7 +79,8 @@ const input: SpecExportInput = {
       ],
       pepperonis: [{ type: "Standard Pepperoni", sticks: 1, ozPerPizza: 0.6 }],
       doughRecipeName: "Standard Dough",
-      targetDoughballWeight: 19.5,
+      targetDoughballWeight: 10.25,
+      doughballsPerTray: 20,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: [undefined, "Cheese Blend B", undefined, undefined],
     },
@@ -228,6 +232,9 @@ describe("spec export survives a real .xlsx write→read round-trip with zero lo
     ).toBe(1);
     // Size-in-brand survives verbatim (no "7in" number coercion).
     expect(flat.some((l) => l.startsWith("Lowes 7in\tSupreme\t"))).toBe(true);
+    const lowesProfile = flat.find((l) => l.startsWith("Lowes 7in\tSupreme\t"))!;
+    expect(lowesProfile).toContain("\t10.25\t20\t");
+    expect(lowesProfile).toContain("\tCheese Blend B");
     // Shared recipes keep ALL their brand targets.
     const doughLines = canon
       .filter((g) => g.name.includes("Dough"))
@@ -238,8 +245,9 @@ describe("spec export survives a real .xlsx write→read round-trip with zero lo
       .filter((g) => g.name.includes("Sauce"))
       .flatMap((g) => g.rows.map((r) => r.join("\t")));
     expect(sauceLines).toContain("Basha's Ultra Thin Crust: Cheese");
-    // Doughball weight + applicator-slot metadata rows survive.
-    expect(doughLines).toContain("Target Doughball Weight (oz)\t19.5");
+    // A shared dough with conflicting profile values emits no recipe-wide
+    // default; the unambiguous thin-crust recipe can still carry its default.
+    expect(doughLines).not.toContain("Target Doughball Weight (oz)\t19.5");
     expect(doughLines).toContain("Target Doughball Weight (oz)\t11");
     const cheeseLines = recovered
       .find((workbook) => workbook.kind === "cheese")!

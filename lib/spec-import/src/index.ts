@@ -21,6 +21,11 @@ export type ParsedApplicator = {
   type: string;
   ozPerPizza: number;
   /**
+   * Exact cheese/mix recipe linked to this physical slot. Optional for legacy
+   * workbooks, which continue to resolve links from the applicator type.
+   */
+  recipeName?: string;
+  /**
    * Batch size in lbs one made batch of this topping weighs, when the sheet
    * states it. Used only as a FALLBACK — when the profile has a cheese/topping
    * recipe for this slot, the batch math derives the batch size from the recipe
@@ -86,6 +91,10 @@ export type ParsedProfile = {
    * batch math derives the barrel size from the recipe row sum instead.
    */
   sauceBarrelLbs?: number;
+  /** Product-specific target doughball weight in oz. */
+  targetDoughballWeight?: number;
+  /** Product-specific doughballs per tray. */
+  doughballsPerTray?: number;
   applicators: ParsedApplicator[];
   pepperonis: ParsedPepperoni[];
   /**
@@ -4675,6 +4684,7 @@ export function sanitizeParsedSpecImport(
         });
       }
       const appBatchLbs = num(ao.batchLbs);
+      const recipeName = clampName(ao.recipeName, lim.maxNameChars);
       // Physical line station (1-4) when the sheet makes it discernible —
       // anything else (0, 5, 2.5, non-numeric) is dropped so a hallucinated
       // slot can't scramble the fill-in-order fallback.
@@ -4688,6 +4698,7 @@ export function sanitizeParsedSpecImport(
         ozPerPizza: ozPerPizza ?? 0,
         ...(appBatchLbs != null && appBatchLbs > 0 ? { batchLbs: appBatchLbs } : {}),
         ...(appSlot != null ? { slot: appSlot } : {}),
+        ...(recipeName ? { recipeName } : {}),
       });
     }
     const pepperonis: ParsedPepperoni[] = [];
@@ -4719,6 +4730,14 @@ export function sanitizeParsedSpecImport(
     if (die) profile.dieType = die;
     const sauceOz = num(o.sauceOzPerPizza);
     if (sauceOz != null) profile.sauceOzPerPizza = sauceOz;
+    const targetDoughballWeight = num(o.targetDoughballWeight);
+    if (targetDoughballWeight != null && targetDoughballWeight > 0) {
+      profile.targetDoughballWeight = targetDoughballWeight;
+    }
+    const profileDoughballsPerTray = num(o.doughballsPerTray);
+    if (profileDoughballsPerTray != null && profileDoughballsPerTray > 0) {
+      profile.doughballsPerTray = Math.round(profileDoughballsPerTray);
+    }
     const sauceName = clampName(o.sauceName, lim.maxNameChars);
     if (sauceName && !isGenericSauceName(sauceName)) {
       // Grounding backstop for the profile's SAUCE NAME, same snap-or-flag

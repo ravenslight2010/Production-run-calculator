@@ -11,4 +11,12 @@ export interface SpecImportApplicator {
   ozPerPizza: number;
   /** Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese/topping recipe for this slot derives the batch size from its row sum instead. Optional. */
   batchLbs?: number;
+  /**
+     * Physical applicator slot when the workbook identifies it.
+     * @minimum 1
+     * @maximum 4
+     */
+  slot?: number;
+  /** Exact cheese or mix recipe linked to this applicator slot. */
+  recipeName?: string;
 }

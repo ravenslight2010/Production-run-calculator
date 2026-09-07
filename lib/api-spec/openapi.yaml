@@ -9877,6 +9877,14 @@ components:
             Batch size in lbs one made batch of this topping weighs, when the
             sheet states it. Fallback only — a cheese/topping recipe for this
             slot derives the batch size from its row sum instead. Optional.
+        slot:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: Physical applicator slot when the workbook identifies it.
+        recipeName:
+          type: string
+          description: Exact cheese or mix recipe linked to this applicator slot.
 
     SpecImportPepperoni:
       type: object
@@ -9919,6 +9927,18 @@ components:
             Name of the sauce when the sheet names a specific one (e.g. BBQ,
             Ranch). Bought/ready-made sauces have no mixing recipe in the
             workbook; the name lets the app pull them as-is by name.
+        doughName:
+          type: string
+          description: >-
+            Exact dough or crust recipe name assigned to this product profile.
+        targetDoughballWeight:
+          type: number
+          exclusiveMinimum: 0
+          description: Product-specific target doughball weight in ounces.
+        doughballsPerTray:
+          type: integer
+          minimum: 1
+          description: Product-specific number of doughballs per tray.
         pizzasPerCase:
           type: number
           description: >-

@@ -3810,6 +3810,15 @@ export function applySpecImport(
     // authoritative and must clear a previously stored allergen.
     if (p.allergen !== undefined) values.allergen = p.allergen;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
+    // These values belong to this exact product profile. They intentionally
+    // outrank shared recipe defaults so two products can use the same formula
+    // while retaining different doughball weights or tray counts.
+    if (p.targetDoughballWeight != null && p.targetDoughballWeight > 0) {
+      values.targetDoughballWeight = p.targetDoughballWeight;
+    }
+    if (p.doughballsPerTray != null && p.doughballsPerTray > 0) {
+      values.doughballsPerTray = p.doughballsPerTray;
+    }
     // Case pack read from the sheet (how many pizzas per case). Only present when
     // the sheet stated a positive count, so this never clobbers with a default.
     if (p.pizzasPerCase != null && p.pizzasPerCase > 0) values.pizzasPerCase = p.pizzasPerCase;
@@ -3968,6 +3977,7 @@ export function applySpecImport(
             ? true
             : Math.abs(existingWeightOz - Number(poolMatched.weightOz ?? 0)) < 0.1;
         if (
+          !(Number(p.targetDoughballWeight ?? 0) > 0) &&
           w > 0 &&
           (isForced || !(existingWeightOz > 0) || (wMatchedViaCustomers && !existingMatchesVariant))
         ) {
@@ -4016,8 +4026,26 @@ export function applySpecImport(
       }
       return out;
     };
+    const assignedApps = assignApplicatorSlots(p.applicators);
+    const explicitApplicatorLinks = assignedApps.flatMap((app, index) => {
+      const recipeName = app.recipeName?.trim();
+      const kind = app.type.trim().toLowerCase();
+      if (!recipeName || (kind !== "cheese" && kind !== "mix")) return [];
+      return [{ slot: index + 1, recipeName, kind: kind as "cheese" | "mix" }];
+    });
+    const slottedApps = assignedApps.map((app) => {
+      const recipeName = app.recipeName?.trim();
+      const kind = app.type.trim().toLowerCase();
+      // The split Specs workbook carries the generic station kind and its
+      // exact recipe link independently of the recipe workbook. Preserve that
+      // pair directly even when no candidate recipe is loaded yet.
+      if (recipeName && (kind === "cheese" || kind === "mix")) {
+        return { ...app, type: kind === "mix" ? "Mix" : "cheese" };
+      }
+      return recipeName ? { ...app, type: recipeName } : app;
+    });
     const { applicators: cheeseResolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
-      assignApplicatorSlots(p.applicators),
+      slottedApps,
       [...cheeseCandidateNames, ...profileLinkCandidates("cheese")],
       p.brand,
     );
@@ -4074,6 +4102,27 @@ export function applySpecImport(
           newName: resolved,
         });
       }
+      (values as Record<string, unknown>)[field] = resolved;
+    }
+    for (const link of explicitApplicatorLinks) {
+      const field = `app${link.slot}CheeseRecipeName`;
+      const priorLink = String((values as Record<string, unknown>)[field] ?? "").trim();
+      const resolved = resolveImportName(
+        link.recipeName,
+        link.kind === "mix" ? "mixes" : "cheese",
+        importMergeAliases,
+      ).trim();
+      if (priorLink && resolved && priorLink.toLowerCase() !== resolved.toLowerCase()) {
+        nameCorrections.push({
+          kind: "appType",
+          context: null,
+          specRawName: link.recipeName,
+          oldName: priorLink,
+          newName: resolved,
+        });
+      }
+      (values as Record<string, unknown>)[`app${link.slot}Type`] =
+        link.kind === "mix" ? "Mix" : "cheese";
       (values as Record<string, unknown>)[field] = resolved;
     }
     // Post-correct any stale "cheese"-typed slot whose linked recipe is actually
@@ -4310,6 +4359,15 @@ export function applySpecImport(
       if (r.kind === "dough") {
         values.doughRecipeName = r.name;
         values.doughRecipe = rows;
+        const parsedProfile = parsed.profiles.find(
+          (profile) =>
+            profile.brand.trim().toLowerCase() === brand.toLowerCase() &&
+            profile.flavor.trim().toLowerCase() === flavor.toLowerCase(),
+        );
+        const hasProfileDoughballWeight =
+          (parsedProfile?.targetDoughballWeight ?? 0) > 0;
+        const hasProfileDoughballsPerTray =
+          (parsedProfile?.doughballsPerTray ?? 0) > 0;
         // Weight/per-tray are PER-FLAVOR: only this recipe's own explicit spec
         // targets take its values verbatim; a profile tied on by the name
         // re-link keeps its existing values (backfill blank fields only).
@@ -4332,7 +4390,11 @@ export function applySpecImport(
             continue;
           }
         }
-        if (r.doughballOz != null && (!relinked || !(Number(values.targetDoughballWeight ?? 0) > 0))) {
+        if (
+          !hasProfileDoughballWeight &&
+          r.doughballOz != null &&
+          (!relinked || !(Number(values.targetDoughballWeight ?? 0) > 0))
+        ) {
           values.targetDoughballWeight = r.doughballOz;
         }
         // Crusts-per-batch yield — fallback only; when the dough rows + doughball
@@ -4345,6 +4407,7 @@ export function applySpecImport(
           values.doughBatchYield = r.doughBatchYield;
         }
         if (
+          !hasProfileDoughballsPerTray &&
           r.doughballsPerTray != null && r.doughballsPerTray > 0 &&
           (!relinked || !(Number(values.doughballsPerTray ?? 0) > 0))
         ) {

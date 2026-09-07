@@ -50,9 +50,9 @@ export type ExportProfile = {
   pepperonis: ExportPepperoni[];
   /** doughRecipeName reference (ties this profile to a dough recipe). */
   doughRecipeName?: string;
-  /** Dough target doughball weight in oz (exported alongside the dough recipe). */
+  /** Product-specific dough target weight in oz. */
   targetDoughballWeight?: number;
-  /** Doughballs per tray (exported alongside the dough recipe). */
+  /** Product-specific doughballs per tray. */
   doughballsPerTray?: number;
   /** frontlineRecipeName reference (ties this profile to a sauce recipe). */
   sauceRecipeName?: string;
@@ -272,6 +272,8 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "
   }
   const appSlots = maxAppSlot + 1; // 0 when no applicators used
   const pepSlots = maxPepSlot + 1; // 0 when no peps used
+  const hasDoughballWeight = sorted.some((p) => (p.targetDoughballWeight ?? 0) > 0);
+  const hasDoughballsPerTray = sorted.some((p) => (p.doughballsPerTray ?? 0) > 0);
 
   // Build the header row for only the slots in use.
   const header: string[] = [
@@ -280,10 +282,16 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "
     "Die Type",
     "Sauce oz/pizza",
     "Dough Recipe",
-    "Sauce Recipe",
   ];
+  if (hasDoughballWeight) header.push("Target Doughball Weight (oz)");
+  if (hasDoughballsPerTray) header.push("Doughballs Per Tray");
+  header.push("Sauce Recipe");
   for (let i = 0; i < appSlots; i++) {
-    header.push(`Applicator ${i + 1} Type`, `Applicator ${i + 1} oz/pizza`);
+    header.push(
+      `Applicator ${i + 1} Type`,
+      `Applicator ${i + 1} oz/pizza`,
+      `Applicator ${i + 1} Recipe`,
+    );
   }
   for (let i = 0; i < pepSlots; i++) {
     header.push(`Pepperoni ${i + 1} Type`, `Pepperoni ${i + 1} Sticks`, `Pepperoni ${i + 1} oz/pizza`);
@@ -306,12 +314,18 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "
       // a factory export round-trips each product's dough/sauce assignment even
       // when the recipe itself lives on another tab (or doesn't exist yet).
       text(p.doughRecipeName),
-      text(p.sauceRecipeName),
     ];
+    if (hasDoughballWeight) row.push(num(p.targetDoughballWeight));
+    if (hasDoughballsPerTray) row.push(num(p.doughballsPerTray));
+    row.push(text(p.sauceRecipeName));
     for (let i = 0; i < appSlots; i++) {
       const a = apps[i];
       const type = text(a?.type);
-      row.push(type, type ? num(a?.ozPerPizza) : "");
+      row.push(
+        type,
+        type ? num(a?.ozPerPizza) : "",
+        type ? text(p.cheeseRecipeNames?.[i]) : "",
+      );
     }
     for (let i = 0; i < pepSlots; i++) {
       const pp = peps[i];

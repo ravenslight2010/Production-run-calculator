@@ -3913,6 +3913,14 @@ export interface SpecImportApplicator {
   ozPerPizza: number;
   /** Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese/topping recipe for this slot derives the batch size from its row sum instead. Optional. */
   batchLbs?: number;
+  /**
+     * Physical applicator slot when the workbook identifies it.
+     * @minimum 1
+     * @maximum 4
+     */
+  slot?: number;
+  /** Exact cheese or mix recipe linked to this applicator slot. */
+  recipeName?: string;
 }
 
 export interface SpecImportPepperoni {
@@ -3930,6 +3938,18 @@ export interface SpecImportProfile {
   sauceOzPerPizza?: number;
   /** Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name. */
   sauceName?: string;
+  /** Exact dough or crust recipe name assigned to this product profile. */
+  doughName?: string;
+  /**
+     * Product-specific target doughball weight in ounces.
+     * @exclusiveMinimum 0
+     */
+  targetDoughballWeight?: number;
+  /**
+     * Product-specific number of doughballs per tray.
+     * @minimum 1
+     */
+  doughballsPerTray?: number;
   /** Case pack: how many pizzas go in one case, when the sheet states it. Optional. */
   pizzasPerCase?: number;
   /** Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional. */

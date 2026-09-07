@@ -1903,6 +1903,13 @@ export const AiParseSpecSheetBody = zod.object({
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).optional().describe('Learned spec-import aliases to ground name mapping')
 })
 
+export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
+
+
+export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
+
+
+
 export const AiParseSpecSheetResponse = zod.object({
   "profiles": zod.array(zod.object({
   "brand": zod.string(),
@@ -1910,12 +1917,17 @@ export const AiParseSpecSheetResponse = zod.object({
   "dieType": zod.string().optional(),
   "sauceOzPerPizza": zod.number().optional(),
   "sauceName": zod.string().optional().describe('Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought\/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name.'),
+  "doughName": zod.string().optional().describe('Exact dough or crust recipe name assigned to this product profile.'),
+  "targetDoughballWeight": zod.number().gt(aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin).optional().describe('Product-specific target doughball weight in ounces.'),
+  "doughballsPerTray": zod.number().int().min(1).optional().describe('Product-specific number of doughballs per tray.'),
   "pizzasPerCase": zod.number().optional().describe('Case pack: how many pizzas go in one case, when the sheet states it. Optional.'),
   "sauceBarrelLbs": zod.number().optional().describe('Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional.'),
   "applicators": zod.array(zod.object({
   "type": zod.string(),
   "ozPerPizza": zod.number(),
-  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese\/topping recipe for this slot derives the batch size from its row sum instead. Optional.')
+  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese\/topping recipe for this slot derives the batch size from its row sum instead. Optional.'),
+  "slot": zod.number().int().min(1).max(aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax).optional().describe('Physical applicator slot when the workbook identifies it.'),
+  "recipeName": zod.string().optional().describe('Exact cheese or mix recipe linked to this applicator slot.')
 })),
   "pepperonis": zod.array(zod.object({
   "type": zod.string(),

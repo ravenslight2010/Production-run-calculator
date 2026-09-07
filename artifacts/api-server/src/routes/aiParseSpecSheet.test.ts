@@ -622,6 +622,16 @@ describe("profile doughName capture + grounding", () => {
     expect(system).toContain("doughName");
     expect(user).toContain('"doughName":string');
   });
+
+  it("asks for profile-specific dough metadata and exact applicator recipe links", () => {
+    const { system, user } = buildParseSpecSheetPrompt(input({}));
+    expect(system).toContain("PROFILE-SPECIFIC DOUGH FIELDS");
+    expect(system).toContain("Do not move a product-specific value onto a shared dough recipe");
+    expect(system).toContain("applicator's `recipeName`");
+    expect(user).toContain('"targetDoughballWeight":number');
+    expect(user).toContain('"doughballsPerTray":number');
+    expect(user).toContain('"recipeName":string');
+  });
 });
 
 describe("known list bounds", () => {

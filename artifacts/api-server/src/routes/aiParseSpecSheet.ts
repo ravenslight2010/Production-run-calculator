@@ -168,6 +168,12 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "Light, Original, Whole Milk, or any word that distinguishes one variant from " +
     "another). " +
     "Use the provided ALIASES as authoritative label→canonical mappings. " +
+    "PROFILE-SPECIFIC DOUGH FIELDS: when a product/profile row states Target " +
+    "Doughball Weight or Doughballs Per Tray, return those values on that exact " +
+    "profile as `targetDoughballWeight` and `doughballsPerTray`. Do not move a " +
+    "product-specific value onto a shared dough recipe. APPLICATOR RECIPE LINKS: " +
+    "when an applicator row/column names its linked recipe, return that exact name " +
+    "as the applicator's `recipeName` while preserving its physical `slot`. " +
     "A SINGLE recipe often applies to MANY brand+flavor profiles — typically a " +
     "list of 'Brand: flavors' header rows sitting above ONE shared ingredient " +
     "table (very common for dough mixing procedures). In that case return ONE " +
@@ -496,8 +502,10 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "Return ONLY JSON of the exact shape: " +
       '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
       '"sauceOzPerPizza":number,"sauceName":string,"doughName":string,"allergen":string,' +
-      '"pizzasPerCase":number,"sauceBarrelLbs":number,' +
-      '"applicators":[{"type":string,"ozPerPizza":number,"batchLbs":number,"slot":number}],' +
+      '"pizzasPerCase":number,"sauceBarrelLbs":number,"targetDoughballWeight":number,' +
+      '"doughballsPerTray":number,' +
+      '"applicators":[{"type":string,"ozPerPizza":number,"batchLbs":number,"slot":number,' +
+      '"recipeName":string}],' +
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number,"batchLbs":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
       '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +

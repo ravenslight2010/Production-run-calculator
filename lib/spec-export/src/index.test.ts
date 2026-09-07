@@ -76,14 +76,16 @@ describe("buildSpecExportGrids", () => {
     expect(row[3]).toBe("4");
     // dough/sauce recipe name columns (the product's assigned types)
     expect(row[4]).toBe("Standard Dough");
-    expect(row[5]).toBe("Pizza Sauce");
-    expect(row[6]).toBe("Mozzarella");
-    expect(row[7]).toBe("3.5");
+    expect(row[5]).toBe("12");
+    expect(row[6]).toBe("24");
+    expect(row[7]).toBe("Pizza Sauce");
+    expect(row[8]).toBe("Mozzarella");
+    expect(row[9]).toBe("3.5");
+    expect(row[10]).toBe("Cheese Blend");
     // pep 1 type/sticks/oz — now immediately after the used applicator slots
-    // (cols 8/9/10 not 14/15/16 — trimming removed the empty app 2/3/4 slots)
-    expect(row[8]).toBe("Sliced Pepperoni");
-    expect(row[9]).toBe("2");
-    expect(row[10]).toBe("1.5");
+    expect(row[11]).toBe("Sliced Pepperoni");
+    expect(row[12]).toBe("2");
+    expect(row[13]).toBe("1.5");
   });
 
   it("uses spelled-out column headers (Applicator, Pepperoni, oz/pizza)", () => {
@@ -92,6 +94,7 @@ describe("buildSpecExportGrids", () => {
     expect(header.some((h) => /^App \d/.test(h))).toBe(false);
     expect(header).toContain("Applicator 1 Type");
     expect(header).toContain("Applicator 1 oz/pizza");
+    expect(header).toContain("Applicator 1 Recipe");
     // No "Pep" abbreviation — must say "Pepperoni"
     expect(header.some((h) => /^Pep \d/.test(h))).toBe(false);
     expect(header).toContain("Pepperoni 1 Type");
@@ -99,14 +102,16 @@ describe("buildSpecExportGrids", () => {
     expect(header).toContain("Pepperoni 1 oz/pizza");
     // Sauce column shortened
     expect(header).toContain("Sauce oz/pizza");
+    expect(header).toContain("Target Doughball Weight (oz)");
+    expect(header).toContain("Doughballs Per Tray");
     expect(header.some((h) => h === "Sauce oz per pizza")).toBe(false);
   });
 
   it("trims unused applicator/pep slot columns", () => {
     // input has 2 profiles; together they use 1 applicator slot and 1 pep slot.
-    // 6 base + 1 app×2 + 1 pep×3 = 11 columns.
+    // 6 base + 2 optional dough columns + 1 app×3 + 1 pep×3 = 14 columns.
     const header = findSheet(buildSpecsExportGrids(input), "Bobo's Original").rows[0]!;
-    expect(header.length).toBe(11);
+    expect(header.length).toBe(14);
   });
 
   it("emits zero applicator/pep columns when no profile uses any", () => {
@@ -252,7 +257,7 @@ describe("buildSpecExportGrids", () => {
         {
           brand: "Alpha",
           flavor: "One",
-          applicators: [],
+          applicators: [{ type: "cheese", ozPerPizza: 3 }],
           pepperonis: [],
           doughRecipeName: "Shared Dough",
           targetDoughballWeight: 10,
@@ -262,7 +267,10 @@ describe("buildSpecExportGrids", () => {
         {
           brand: "Alpha",
           flavor: "Two",
-          applicators: [],
+          applicators: [
+            { type: "", ozPerPizza: 0 },
+            { type: "cheese", ozPerPizza: 4 },
+          ],
           pepperonis: [],
           doughRecipeName: "Shared Dough",
           targetDoughballWeight: 12,
@@ -277,6 +285,16 @@ describe("buildSpecExportGrids", () => {
     expect(buildDoughExportGrids(ambiguous)[0]!.rows.flat()).not.toContain("Target Doughball Weight (oz)");
     expect(buildDoughExportGrids(ambiguous)[0]!.rows.flat()).not.toContain("Doughballs Per Tray");
     expect(buildCheeseExportGrids(ambiguous)[0]!.rows.flat()).not.toContain("Applicator Slot");
+    const profileRows = buildSpecsExportGrids(ambiguous)[0]!.rows;
+    expect(profileRows[0]).toContain("Target Doughball Weight (oz)");
+    expect(profileRows[0]).toContain("Doughballs Per Tray");
+    expect(profileRows[0]).toContain("Applicator 2 Recipe");
+    const one = profileRows.find((row) => row[1] === "One")!;
+    const two = profileRows.find((row) => row[1] === "Two")!;
+    expect(one[profileRows[0]!.indexOf("Target Doughball Weight (oz)")]).toBe("10");
+    expect(two[profileRows[0]!.indexOf("Target Doughball Weight (oz)")]).toBe("12");
+    expect(one[profileRows[0]!.indexOf("Applicator 1 Recipe")]).toBe("Shared Cheese");
+    expect(two[profileRows[0]!.indexOf("Applicator 2 Recipe")]).toBe("Shared Cheese");
   });
 
   it("omits shared dough metadata when any tied profile leaves the field unset", () => {
