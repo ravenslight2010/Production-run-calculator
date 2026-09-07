@@ -379,4 +379,41 @@ describe("operational report endpoints", () => {
     `);
     expect(indexes.rows[0]?.indexdef).toMatch(/\(scope, period_end DESC(?: NULLS LAST)?, finalized_at DESC(?: NULLS LAST)?\)/);
   });
+
+  it("fails closed when an archived report payload no longer matches its content hash", async () => {
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2026-09-06",
+      data: snapshot({ id: "tamper-check", brand: "Original", flavor: "Snapshot", startedAt: 1_000, endedAt: 2_000 }),
+    });
+    const created = await req(MANAGER, "POST", "/api/reports/operational/finalize", {
+      scope: "day", date: "2026-09-06",
+    });
+    expect(created.status).toBe(201);
+    const archived = await created.json() as { id: string; report: Record<string, unknown> };
+
+    await db.update(finalizedOperationalReportsTable).set({
+      payload: { ...archived.report, tampered: true },
+    }).where(eq(finalizedOperationalReportsTable.id, archived.id));
+
+    const retrieved = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
+    expect(retrieved.status).toBe(409);
+    expect(await retrieved.json()).toEqual({
+      error: {
+        code: "finalized-report-integrity-failure",
+        message: "The finalized report failed integrity verification and cannot be exported.",
+      },
+    });
+
+    const retry = await req(MANAGER, "POST", "/api/reports/operational/finalize", {
+      scope: "day", date: "2026-09-06",
+    });
+    expect(retry.status).toBe(409);
+    expect(await retry.json()).toEqual({
+      error: {
+        code: "finalized-report-integrity-failure",
+        message: "The finalized report failed integrity verification and cannot be exported.",
+      },
+    });
+  });
 });
