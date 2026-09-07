@@ -23,7 +23,8 @@
 #
 # ENVIRONMENT VARIABLES
 # ─────────────────────
-#   API_BASE           Where the API server is running (default: http://localhost:5000/api).
+#   API_BASE           Where the API server is running. Defaults to the local API
+#                      artifact's configured port (currently http://localhost:8080/api).
 #                      The server must already be running when this script is called,
 #                      unless you pass --start-server (see below).
 #
@@ -89,7 +90,25 @@ if [ "$SMOKE" = "true" ]; then
   export FLAVORS="${FLAVORS:-3}"
 fi
 
-export API_BASE="${API_BASE:-http://localhost:5000/api}"
+configured_api_base() {
+  local artifact_config="${REPO_ROOT}/artifacts/api-server/.replit-artifact/artifact.toml"
+  local configured_port=""
+
+  if [ -f "$artifact_config" ]; then
+    configured_port="$(
+      sed -nE \
+        's/^[[:space:]]*localPort[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' \
+        "$artifact_config" | head -n 1
+    )"
+  fi
+
+  # Keep direct shell use working if the generated artifact metadata is absent.
+  configured_port="${configured_port:-8080}"
+  printf 'http://localhost:%s/api' "$configured_port"
+}
+
+export API_BASE="${API_BASE:-$(configured_api_base)}"
+API_BASE="${API_BASE%/}"
 export BRANDS="${BRANDS:-30}"
 export FLAVORS="${FLAVORS:-8}"
 
@@ -100,6 +119,24 @@ echo "  $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "═══════════════════════════════════════════════════════════"
 
 API_SERVER_PID=""
+
+api_health_url() {
+  case "$1" in
+    */api) printf '%s/healthz' "$1" ;;
+    *)     printf '%s/api/healthz' "$1" ;;
+  esac
+}
+
+api_port_from_base() {
+  local base="$1"
+  if [[ "$base" =~ ^https?://localhost:([0-9]+)(/|$) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  elif [[ "$base" =~ ^https?://127\.0\.0\.1:([0-9]+)(/|$) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+API_HEALTH_URL="$(api_health_url "$API_BASE")"
 
 # cleanup is invoked indirectly by the EXIT trap below.
 # shellcheck disable=SC2317
@@ -116,26 +153,37 @@ if [ "$START_SERVER" = "true" ]; then
   echo "Building API server…"
   (cd "$REPO_ROOT" && pnpm --filter @workspace/api-server run build)
 
-  echo "Starting API server on port 5000…"
-  (cd "$REPO_ROOT" && PORT=5000 pnpm --filter @workspace/api-server run start \
+  API_SERVER_PORT="${API_PORT:-$(api_port_from_base "$API_BASE")}"
+  API_SERVER_PORT="${API_SERVER_PORT:-8080}"
+  echo "Starting API server on port ${API_SERVER_PORT}…"
+  (cd "$REPO_ROOT" && PORT="$API_SERVER_PORT" pnpm --filter @workspace/api-server run start \
     > /tmp/large-spec-api-server.log 2>&1) &
   API_SERVER_PID=$!
 
   echo "Waiting for API server to be ready…"
   for i in $(seq 1 30); do
-    if curl -sf "${API_BASE%/api}/api/healthz" > /dev/null 2>&1 || \
-       curl -sf "${API_BASE}/healthz" > /dev/null 2>&1; then
+    if curl --fail --silent --show-error --connect-timeout 3 --max-time 5 \
+      "$API_HEALTH_URL" > /dev/null 2>&1; then
       echo "API server ready (attempt $i)."
       break
     fi
     if [ "$i" -eq 30 ]; then
-      echo "ERROR: API server did not become ready within 60 s." >&2
+      echo "ERROR: API readiness failure — server at ${API_BASE} did not become ready within 60 s." >&2
+      echo "       No AI parse was attempted. Check the API workflow/port or set API_BASE explicitly." >&2
       echo "--- API server log ---" >&2
       cat /tmp/large-spec-api-server.log >&2
       exit 1
     fi
     sleep 2
   done
+else
+  if ! curl --fail --silent --show-error --connect-timeout 3 --max-time 5 \
+    "$API_HEALTH_URL" > /dev/null 2>&1; then
+    echo "ERROR: API readiness failure — cannot reach ${API_BASE} (${API_HEALTH_URL})." >&2
+    echo "       No AI parse was attempted. Start the API workflow or set API_BASE explicitly." >&2
+    exit 1
+  fi
+  echo "API server ready at ${API_BASE}."
 fi
 
 echo ""

@@ -63,7 +63,8 @@
 //      ALWAYS run the full size after an AI model change.
 //
 //   Env:
-//     API_BASE          default http://localhost:5000/api
+//     API_BASE          default http://localhost:8080/api (the API artifact's
+//                       configured local port)
 //     BRANDS / FLAVORS  dataset size (default 30 × 8 — the verified full size)
 //     VERIFY_USERNAME / VERIFY_PASSWORD
 //                       existing account with the use-ai-tools capability.
@@ -90,7 +91,10 @@ import {
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const API_BASE = (process.env.API_BASE ?? "http://localhost:5000/api").replace(/\/$/, "");
+const API_BASE = (process.env.API_BASE ?? "http://localhost:8080/api").replace(/\/$/, "");
+const API_HEALTH_URL = API_BASE.endsWith("/api")
+  ? `${API_BASE}/healthz`
+  : `${API_BASE}/api/healthz`;
 const BRAND_COUNT = clampInt(process.env.BRANDS, 30, 1, 60);
 const FLAVOR_COUNT = clampInt(process.env.FLAVORS, 8, 1, 8);
 // Cap on parse calls; generous so the full 30×8 export never drops rows. The
@@ -211,6 +215,28 @@ function buildDataset(brandCount: number, flavorCount: number): Dataset {
 }
 
 // ── API client ───────────────────────────────────────────────────────────────
+
+async function assertApiReady(): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(API_HEALTH_URL, {
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `API readiness failure — cannot reach ${API_BASE} (${API_HEALTH_URL}). ` +
+        `No AI parse was attempted. ${detail}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `API readiness failure — ${API_HEALTH_URL} returned HTTP ${response.status}. ` +
+        "No AI parse was attempted.",
+    );
+  }
+}
 
 async function api(path: string, body: unknown, token?: string): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
@@ -347,6 +373,8 @@ function checkResult(dataset: Dataset, merged: ParsedSpecImport): string[] {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  await assertApiReady();
+  console.log(`API server ready at ${API_BASE}.`);
   console.log(`Dataset: ${BRAND_COUNT} brands × ${FLAVOR_COUNT} flavors`);
   const dataset = buildDataset(BRAND_COUNT, FLAVOR_COUNT);
   const { input } = dataset;
