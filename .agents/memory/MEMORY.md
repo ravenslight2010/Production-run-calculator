@@ -147,3 +147,4 @@
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — `REPLIT_ENVIRONMENT=production` can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
+- [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through `/sync/today`; generic dated writes are protected scheduling and must not trust client date claims.

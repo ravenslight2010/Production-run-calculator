@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db, dieTypesTable, type DieTypeRow } from "@workspace/db";
 import { SaveDieTypesBody, DeleteDieTypesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -49,7 +50,7 @@ router.get("/die-types", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/die-types", async (req: Request, res: Response) => {
+router.post("/die-types", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const parsed = SaveDieTypesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -75,7 +76,7 @@ router.post("/die-types", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/die-types/delete", async (req: Request, res: Response) => {
+router.post("/die-types/delete", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const parsed = DeleteDieTypesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

@@ -4,6 +4,8 @@ import { currentScope } from "../lib/requestScope";
 
 type CapabilityMiddleware = ReturnType<typeof requireCapabilities>;
 const requiredCapabilitiesByMiddleware = new WeakMap<CapabilityMiddleware, readonly Capability[]>();
+const liveScopeMiddlewares = new WeakSet<Function>();
+const managerRoleMiddlewares = new WeakSet<Function>();
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -34,6 +36,7 @@ export function requireLiveScope(req: Request, res: Response, next: NextFunction
   }
   next();
 }
+liveScopeMiddlewares.add(requireLiveScope);
 
 function requireCapabilities(capabilitiesRequired: readonly Capability[], match: "all" | "any") {
   return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -82,6 +85,28 @@ export function requireCapability(capability: Capability) {
 }
 
 /**
+ * Gate a route only when its request selects a protected variant.  This keeps
+ * current-shift collaboration auth-only while making an alternate target (for
+ * example a scheduled day) capability-controlled before its handler runs.
+ * The middleware is still tagged for route-inventory inspection.
+ */
+export function requireCapabilityWhen(
+  capability: Capability,
+  required: (req: Request) => boolean,
+) {
+  const capabilityMiddleware = requireCapabilities([capability], "all");
+  const middleware = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!required(req)) {
+      next();
+      return;
+    }
+    await capabilityMiddleware(req, res, next);
+  };
+  requiredCapabilitiesByMiddleware.set(middleware, [capability]);
+  return middleware;
+}
+
+/**
  * Test-only route ownership hook. Express keeps middleware functions on each
  * route layer, so authorization inventory checks can discover capability gates
  * without duplicating route declarations or invoking the middleware.
@@ -94,6 +119,10 @@ export function getRequiredCapabilities(
     : undefined;
 }
 
+export function isRequireLiveScope(middleware: unknown): boolean {
+  return typeof middleware === "function" && liveScopeMiddlewares.has(middleware);
+}
+
 /**
  * Apply after requireCapability when an action is a literal manager attestation,
  * not merely a permission that a custom or supervisory role may hold.
@@ -104,6 +133,11 @@ export function requireManagerRole(req: Request, res: Response, next: NextFuncti
     return;
   }
   next();
+}
+managerRoleMiddlewares.add(requireManagerRole);
+
+export function isRequireManagerRole(middleware: unknown): boolean {
+  return typeof middleware === "function" && managerRoleMiddlewares.has(middleware);
 }
 
 /** Gate a shared operational read surface that is valid for either role. */

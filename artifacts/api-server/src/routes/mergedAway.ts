@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db, mergedAwayTable } from "@workspace/db";
 import { SaveMergedAwayBody, DeleteMergedAwayBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -45,7 +46,7 @@ router.get("/merged-away", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/merged-away", async (req: Request, res: Response) => {
+router.post("/merged-away", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveMergedAwayBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -83,7 +84,7 @@ router.post("/merged-away", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/merged-away", async (req: Request, res: Response) => {
+router.delete("/merged-away", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = DeleteMergedAwayBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, importAliasesTable, type ImportAlias } from "@workspace/db";
 import { SaveImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -54,7 +55,7 @@ router.get("/import-aliases", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/import-aliases", async (req: Request, res: Response) => {
+router.post("/import-aliases", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveImportAliasesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

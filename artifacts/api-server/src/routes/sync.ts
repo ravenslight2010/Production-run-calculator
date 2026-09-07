@@ -921,7 +921,14 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.json(data);
 });
 
-router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
+// Generic dated PUT is the scheduling surface.  It always needs the existing
+// factory-settings capability: the client-controlled `?today` parameter must
+// never turn a scheduled write into an operator write.  Floor collaboration is
+// deliberately limited to the explicit auth-only /sync/today endpoint.
+router.put(
+  "/sync/:date",
+  requireCapability("manage-factory-settings"),
+  async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload, snapshotId: requestedId, syncMeta } = req.body as {
@@ -964,8 +971,9 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
     partialFallback: result.partialFallback,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
-  res.json(responseBody);
-});
+    res.json(responseBody);
+  },
+);
 
 router.delete("/sync/:date", requireCapability("manage-factory-settings"), async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;

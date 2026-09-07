@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
 import { SaveSpecImportAliasesBody, DeleteSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, isCrossFamilyMixCheesePair, type SpecAliasKind } from "@workspace/spec-import";
 import {
   matchesSpecImportAliasDeletion,
@@ -57,7 +58,7 @@ router.get("/spec-import-aliases", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/spec-import-aliases", async (req: Request, res: Response) => {
+router.post("/spec-import-aliases", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveSpecImportAliasesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -158,7 +159,7 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
 // changes that to an exact null match. A provided context always matches only
 // that context case-insensitively. This is deliberately NOT a broad sweep —
 // only rows whose full mapping is named get deleted.
-router.post("/spec-import-aliases/delete", async (req: Request, res: Response) => {
+router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = DeleteSpecImportAliasesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

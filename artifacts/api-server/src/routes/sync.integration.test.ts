@@ -730,7 +730,7 @@ describe("/sync snapshot conditionals", () => {
 
     const changed = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
       method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({
         senderId: "c1",
         snapshotId: firstBody.snapshotId,
@@ -1313,7 +1313,7 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     const futureDate = "2030-07-15";
     const res = await fetch(`${baseUrl}/api/sync/${futureDate}?today=${DATE}`, {
       method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({
         senderId: "c1",
         payload: { ...meta, runValues: { r1: { casesNeeded: 77 } }, runValuesUpdatedAt: { r1: 1 } },
@@ -1644,7 +1644,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const putFuture = (payload: unknown) =>
       fetch(`${baseUrl}/api/sync/${future}?today=${DATE}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({ senderId: "schedule-device", payload }),
       });
 
@@ -1710,7 +1710,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const putScheduled = ({ id, casesNeeded }: (typeof writes)[number]) =>
       fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${clientToday}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({
           senderId: id,
           payload: {
@@ -1958,7 +1958,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const putFuture = (payload: unknown) =>
       fetch(`${baseUrl}/api/sync/${future}?today=${DATE}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({ senderId: "schedule-editor", payload }),
       });
     await putFuture({
@@ -2099,7 +2099,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     await new Promise((r) => setTimeout(r, 400));
     await fetch(`${baseUrl}/api/sync/2030-04-01?today=2030-04-01`, {
       method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({ senderId: "importer", payload: { dayState: { runs: [], date: "2030-04-01" }, runValues: {} } }),
     });
     await new Promise((r) => setTimeout(r, 600));
@@ -2259,7 +2259,7 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
     const putScheduled = (date: string, runId: string, casesNeeded: number) =>
       fetch(`${baseUrl}/api/sync/${date}?today=2030-09-09`, {
         method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
         body: JSON.stringify({
           senderId: `scheduled-${runId}`,
           payload: {

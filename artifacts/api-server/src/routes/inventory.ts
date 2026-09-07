@@ -687,6 +687,7 @@ function registerCountObservationRoute(
 // integration proof and for any future explicitly enabled deployment.
 router.post(
   "/inventory/count-observations",
+  requireCapability("manage-inventory"),
   (_req, res) => {
     res.status(410).json({
       error: "Photo inventory counts are disabled. Use typed or barcode inventory controls.",

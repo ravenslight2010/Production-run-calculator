@@ -30,11 +30,15 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
+import { signToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let seedRoles: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -68,11 +72,15 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
-  const requestScopeMod = await import("../lib/requestScope");
   const routerMod = await import("./savedSpecSheets");
   db = dbMod.db;
   pool = dbMod.pool;
   savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
+  const { requireAuth } = await import("../middlewares/requireAuth");
+  const { requireCapability } = await import("../middlewares/requireCapability");
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -81,14 +89,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  // Run each request inside the scope named by the x-test-scope header so
-  // currentScope() inside the router resolves to the caller's scope.
-  app.use((req, _res, next) => {
-    const raw = req.header("x-test-scope");
-    const scope = raw === "sandbox" ? "sandbox" : "live";
-    requestScopeMod.runWithScope(scope, () => next());
-  });
-  app.use("/api", routerMod.default);
+  app.use("/api", requireAuth, requireCapability("manage-profiles"), routerMod.default);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -110,7 +111,16 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${savedSpecSheetsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await seedRoles();
+  await db.insert(usersTable).values([
+    { id: "profile-live", username: "profile-live", passwordHash: "x" },
+    { id: "profile-sandbox", username: "profile-sandbox", passwordHash: "x", sandbox: true },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: "profile-live", role: "manager" },
+    { userId: "profile-sandbox", role: "manager" },
+  ]);
 });
 
 type ApiSpecSheet = {
@@ -124,7 +134,10 @@ type ApiSpecSheet = {
 type TestScope = "live" | "sandbox";
 
 function headers(scope: TestScope): Record<string, string> {
-  return { "Content-Type": "application/json", "x-test-scope": scope };
+  return {
+    "Content-Type": "application/json",
+    authorization: `Bearer ${signToken(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
+  };
 }
 
 async function list(scope: TestScope = "live"): Promise<ApiSpecSheet[]> {

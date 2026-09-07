@@ -111,6 +111,7 @@ const QC_OPERATOR = "qc-operator-1";
 const QC_MANAGER = "qc-manager-1";
 const WAREHOUSE = "warehouse-1";
 const INVENTORY = "inventory-1";
+const SANDBOX = "sandbox-1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -223,6 +224,7 @@ async function resetRoleFixture(): Promise<void> {
     { id: QC_MANAGER, username: "qc-manager", passwordHash: "x" },
     { id: WAREHOUSE, username: "warehouse", passwordHash: "x" },
     { id: INVENTORY, username: "inventory", passwordHash: "x" },
+    { id: SANDBOX, username: "sandbox", passwordHash: "x", sandbox: true },
   ]);
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
@@ -232,6 +234,7 @@ async function resetRoleFixture(): Promise<void> {
     { userId: QC_MANAGER, role: "qc-manager" },
     { userId: WAREHOUSE, role: "warehouse" },
     { userId: INVENTORY, role: "inventory" },
+    { userId: SANDBOX, role: "operator" },
   ]);
 }
 
@@ -403,6 +406,56 @@ const ROUTES: GatedRoute[] = [
     method: "POST",
     path: () => "/api/freezer-pull-items",
     body: { items: [] },
+    okStatus: 200,
+  },
+  // Shared learned/master records must be protected on the API, not merely
+  // hidden in the importer/setup UI.
+  {
+    name: "POST /import-aliases",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/import-aliases",
+    body: { aliases: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /fill-missing-values",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/fill-missing-values",
+    body: { values: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /ingredient-batch-weights",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/ingredient-batch-weights",
+    body: { weights: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /photo-aliases",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/photo-aliases",
+    body: { aliases: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /spec-import-aliases",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/spec-import-aliases",
+    body: { aliases: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /die-types",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/die-types",
+    body: { names: [] },
     okStatus: 200,
   },
   {
@@ -901,12 +954,56 @@ describe("capability-based access control", () => {
     ]);
   });
 
+  it("keeps every registered application write in the mutation authorization matrix", async () => {
+    const {
+      mutationAuthorizationInventory,
+      mutationAuthorizationRouters,
+      validateMutationAuthorizationInventory,
+    } = await import("./index");
+    // This is intentionally route-stack based, not a list of test requests:
+    // every mounted API router (including public auth endpoints) is checked, so
+    // a new write fails unless it is classified and its gate precedes its handler.
+    validateMutationAuthorizationInventory(mutationAuthorizationRouters);
+    expect(mutationAuthorizationInventory).toContainEqual({
+      method: "POST",
+      path: "/auth/change-password",
+      ownership: "per-user",
+      scope: "per-user",
+      sandbox: "allowed",
+    });
+  });
+
+  it("allows sandbox users to reach their own password-change validation", async () => {
+    const res = await req(SANDBOX, "POST", "/api/auth/change-password", {});
+    // Invalid input proves direct requireAuth and sandbox scope both passed; a
+    // live-only regression would return the safe sandbox denial (403) instead.
+    expect(res.status).toBe(400);
+  });
+
   it("rejects every protected route with 401 when signed out", async () => {
     const itemId = await makeItem("ingredient:Target:lbs");
     for (const route of ROUTES) {
       const res = await req(null, route.method, route.path({ itemId }), route.body);
       expect(res.status, `${route.name} signed-out status`).toBe(401);
     }
+  });
+
+  it("limits operators to explicit current-day sync and rejects dated scheduling bypasses", async () => {
+    const body = { senderId: "coverage", payload: {} };
+    const anonymous = await req(null, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
+    expect(anonymous.status).toBe(401);
+
+    const futureDenied = await req(OPERATOR, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
+    expect(futureDenied.status).toBe(403);
+
+    const forgedTodayDenied = await req(OPERATOR, "PUT", "/api/sync/2099-01-01?today=2099-01-01", body);
+    expect(forgedTodayDenied.status).toBe(403);
+
+    const currentAllowed = await req(OPERATOR, "PUT", "/api/sync/today?today=2025-01-01", body);
+    expect(currentAllowed.status).toBe(200);
+
+    const scheduledAllowed = await req(MANAGER, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
+    expect(scheduledAllowed.status).toBe(200);
   });
 
   it("resolves the expected capabilities for every seeded role", async () => {

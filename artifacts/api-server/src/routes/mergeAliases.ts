@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db, mergeAliasesTable, type MergeAlias as MergeAliasRow } from "@workspace/db";
 import { SaveMergeAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 import { mergeAliasKey, type MergeSuggestCategory } from "@workspace/merge-suggest";
 
 const router: IRouter = Router();
@@ -94,7 +95,7 @@ router.get("/merge-aliases", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/merge-aliases", async (req: Request, res: Response) => {
+router.post("/merge-aliases", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveMergeAliasesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

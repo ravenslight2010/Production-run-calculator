@@ -1479,10 +1479,15 @@ export default function SetupProfileEditor({
               <Button type="button" variant="outline" onClick={onClose}>
                 <X className="w-4 h-4 mr-1.5" /> Close
               </Button>
-              <Button type="button" onClick={handleSave} disabled={!brand.trim() || !flavor.trim()}>
+              <Button type="button" onClick={handleSave} disabled={!canManageProfiles || !brand.trim() || !flavor.trim()}>
                 <Save className="w-4 h-4 mr-1.5" /> Save Setup
               </Button>
             </div>
+            {!canManageProfiles && (
+              <p className="text-right text-xs text-muted-foreground">
+                Saving setup profiles requires profile management access.
+              </p>
+            )}
           </div>
         )}
         </Form>

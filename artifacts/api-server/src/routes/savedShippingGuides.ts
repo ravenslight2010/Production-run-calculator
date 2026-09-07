@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, savedShippingGuidesTable, type SavedShippingGuideRow } from "@workspace/db";
 import { SaveShippingGuideBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -59,7 +60,7 @@ router.get("/shipping-guides", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/shipping-guides", async (req: Request, res: Response) => {
+router.post("/shipping-guides", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveShippingGuideBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -112,7 +113,7 @@ router.post("/shipping-guides", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/shipping-guides/:id", async (req: Request, res: Response) => {
+router.delete("/shipping-guides/:id", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });

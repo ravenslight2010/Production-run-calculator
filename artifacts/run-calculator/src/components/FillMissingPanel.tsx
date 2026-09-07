@@ -84,7 +84,8 @@ export default function FillMissingPanel({
   onCommit: (key: string, value: string | number) => void;
 }) {
   const { hasCapability } = useMe();
-  const isManager = hasCapability("use-ai-tools");
+  const canUseAiTools = hasCapability("use-ai-tools");
+  const canManageProfiles = hasCapability("manage-profiles");
   const [proposals, setProposals] = useState<ReviewedProposal[] | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [aiLoading, setAiLoading] = useState(false);
@@ -169,7 +170,7 @@ export default function FillMissingPanel({
     // Remember this confirmed value factory-wide so future scans of the same
     // product propose it as a "learned" source. Needs a product key (brand +
     // flavor); best-effort, so failures are swallowed.
-    if (brand.trim() && flavor.trim()) {
+    if (canManageProfiles && brand.trim() && flavor.trim()) {
       const learnedRow: LearnedValueRow = {
         brand: brand.trim(),
         flavor: flavor.trim(),
@@ -223,7 +224,7 @@ export default function FillMissingPanel({
             <ClipboardList className="w-4 h-4" />
             {proposals ? "Re-scan" : "Scan for missing data"}
           </Button>
-          {proposals && hasAiCandidates && isManager && (
+          {proposals && hasAiCandidates && canUseAiTools && (
             <Button
               onClick={getAiSuggestions}
               size="sm"
@@ -235,9 +236,9 @@ export default function FillMissingPanel({
               {aiLoading ? "Asking AI…" : "Get AI suggestions"}
             </Button>
           )}
-          {proposals && hasAiCandidates && !isManager && (
+          {proposals && hasAiCandidates && !canUseAiTools && (
             <span className="text-[11px] text-muted-foreground">
-              AI suggestions require a manager.
+              AI suggestions require AI tools access.
             </span>
           )}
         </div>
@@ -349,6 +350,11 @@ export default function FillMissingPanel({
                             <SkipForward className="h-3.5 w-3.5" /> Skip
                           </Button>
                         </div>
+                      )}
+                      {!canManageProfiles && p.fillable && (
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Applying to this run does not save a remembered profile value without profile management access.
+                        </p>
                       )}
                     </div>
                   );

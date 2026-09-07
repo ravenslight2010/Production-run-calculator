@@ -8,6 +8,7 @@ import {
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
 import { getFreezerSurplusRemainingMs } from "../freezerSurplus";
+import { useMe } from "../useRole";
 
 export function FreezerSurplusPanel({
   mode,
@@ -36,6 +37,8 @@ export function FreezerSurplusPanel({
   onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
   onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
 }) {
+  const { hasCapability } = useMe();
+  const canManageInventory = hasCapability("manage-inventory");
   const [cases, setCases] = useState("");
   const [productionDate, setProductionDate] = useState(todayStr());
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -45,6 +48,7 @@ export function FreezerSurplusPanel({
   const runs = pendingRuns ?? [];
 
   async function confirmLot() {
+    if (!canManageInventory) return;
     const count = Number(cases);
     if (!completedRun || !Number.isSafeInteger(count) || count <= 0) {
       setLocalMessage("Enter a positive whole number of excess cases.");
@@ -65,6 +69,7 @@ export function FreezerSurplusPanel({
   }
 
   async function saveSelection(run: RunMeta) {
+    if (!canManageInventory) return;
     const byLot = selections[run.id] ?? {};
     const allocations = Object.entries(byLot)
       .filter(([, count]) => count > 0)
@@ -102,6 +107,7 @@ export function FreezerSurplusPanel({
             <p className="mt-2 text-sm font-semibold">
               {completedRun.brand}{completedRun.flavor ? ` — ${completedRun.flavor}` : ""}
             </p>
+            {canManageInventory ? (
             <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[8rem_10rem_auto]">
               <label className="text-xs font-semibold text-muted-foreground">
                 Excess cases
@@ -135,6 +141,11 @@ export function FreezerSurplusPanel({
                 {busy ? "Saving…" : "Confirm surplus"}
               </button>
             </div>
+            ) : (
+              <p className="mt-3 text-xs font-medium text-muted-foreground">
+                Recording freezer surplus requires inventory management access.
+              </p>
+            )}
             {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
             {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
           </div>
@@ -188,15 +199,17 @@ export function FreezerSurplusPanel({
                         {" · "}Still to produce <strong className="text-foreground">{summary.productionCases}</strong>
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedRunId(isEditing ? null : run.id)}
-                      className="rounded-md border border-sky-500/40 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/10"
-                    >
-                      {isEditing ? "Close pull" : summary.carriedInCases > 0 ? "Revise pull" : "Choose pull"}
-                    </button>
+                     {canManageInventory && (
+                       <button
+                         type="button"
+                         onClick={() => setSelectedRunId(isEditing ? null : run.id)}
+                         className="rounded-md border border-sky-500/40 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/10"
+                       >
+                         {isEditing ? "Close pull" : summary.carriedInCases > 0 ? "Revise pull" : "Choose pull"}
+                       </button>
+                     )}
                   </div>
-                  {isEditing && (
+                   {isEditing && canManageInventory && (
                     <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
                       {productLots.length === 0 ? (
                         <p className="text-xs italic text-muted-foreground">No available dated lot matches this brand and flavor.</p>
@@ -237,6 +250,11 @@ export function FreezerSurplusPanel({
               );
             })}
           </div>
+           {!canManageInventory && loaded && runs.length > 0 && (
+             <p className="mt-3 text-xs font-medium text-muted-foreground">
+               Choosing or changing freezer pulls requires inventory management access.
+             </p>
+           )}
           {localMessage && <p className="mt-2 text-xs font-medium text-sky-300" role="status">{localMessage}</p>}
         </div>
       </div>

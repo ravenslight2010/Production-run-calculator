@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, savedSpecSheetsTable, type SavedSpecSheetRow } from "@workspace/db";
 import { SaveSpecSheetBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -60,7 +61,7 @@ router.get("/spec-sheets", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/spec-sheets", async (req: Request, res: Response) => {
+router.post("/spec-sheets", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveSpecSheetBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -117,7 +118,7 @@ router.post("/spec-sheets", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/spec-sheets/:id", async (req: Request, res: Response) => {
+router.delete("/spec-sheets/:id", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });
