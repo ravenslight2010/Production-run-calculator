@@ -348,7 +348,7 @@ import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard
 import ManagerAttentionDialog, {
   buildManagerAttentionItems,
   managerAttentionCount,
-  type ManagerAttentionKind,
+  type ManagerAttentionItem,
 } from "../components/ManagerAttentionDialog";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
@@ -561,8 +561,8 @@ import {
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
 import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../sauceBarrelStore";
-import { usePendingResetCount } from "../hooks/usePendingResetCount";
-import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
+import { usePendingResetSummary } from "../hooks/usePendingResetCount";
+import { useUnreviewedIncidentSummary } from "../hooks/useUnreviewedIncidentCount";
 import { useProductionRules } from "../hooks/useProductionRules";
 import { usePrepPhase, mergePrepPhaseClient, getPrepPhase, FRESH_PREP_PHASE } from "../hooks/usePrepPhase";
 import {
@@ -4121,9 +4121,11 @@ export default function Home() {
     return () => window.clearInterval(interval);
   }, []);
   // Manager-only nav badge: pending password reset requests awaiting approval.
-  const pendingResetCount = usePendingResetCount();
+  const pendingResetSummary = usePendingResetSummary();
+  const pendingResetCount = pendingResetSummary.count;
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
-  const unreviewedIncidentCount = useUnreviewedIncidentCount();
+  const incidentAttentionSummary = useUnreviewedIncidentSummary();
+  const unreviewedIncidentCount = incidentAttentionSummary.count;
   // Factory-wide freezer-pull items (open to all signed-in users) — drives the
   // Warehouse "Pull Out Freezer" notices.
   const { items: freezerPullItems } = useFreezerPullItems(
@@ -5230,6 +5232,7 @@ export default function Home() {
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
   const [showManagerAttention, setShowManagerAttention] = useState(false);
+  const managerAttentionTriggerRef = useRef<HTMLButtonElement>(null);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
@@ -5398,7 +5401,16 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Schedule check failed (${response.status})`);
+        return response.json();
+      })
+      .then((data) => {
+        setScheduledDays(normalizeScheduledDays(data));
+        setScheduledAttentionState("ready");
+      })
+      .catch(() => setScheduledAttentionState("unavailable"));
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -7114,6 +7126,8 @@ export default function Home() {
 
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
   const [scheduledDays, setScheduledDays] = useState<ScheduledDay[]>([]);
+  const [scheduledAttentionState, setScheduledAttentionState] =
+    useState<"loading" | "ready" | "unavailable">("loading");
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
@@ -7992,6 +8006,7 @@ export default function Home() {
         canReviewIncidents,
         scheduledRecipeIssueCount: scheduledRecipeIssues.length,
         canManageProfiles,
+        nextScheduledRecipeIssue: scheduledRecipeIssues[0],
       }),
     [
       pendingResetCount,
@@ -7999,6 +8014,7 @@ export default function Home() {
       unreviewedIncidentCount,
       canReviewIncidents,
       scheduledRecipeIssues.length,
+      scheduledRecipeIssues,
       canManageProfiles,
     ],
   );
@@ -8006,19 +8022,20 @@ export default function Home() {
   const canViewManagerAttention =
     isManager || canApproveResets || canReviewIncidents || canManageProfiles;
 
-  function resolveManagerAttention(kind: ManagerAttentionKind) {
+  function resolveManagerAttention(item: ManagerAttentionItem) {
     setShowManagerAttention(false);
-    if (kind === "password-resets") {
+    if (item.kind === "password-resets") {
       setActiveTab("staff");
       return;
     }
-    if (kind === "incidents") {
+    if (item.kind === "incidents") {
       setActiveTab("incidents");
       return;
     }
-    if (kind === "recipe-setup") {
-      const next = scheduledRecipeIssues[0];
-      if (next) openSetupEditor(next.brand, next.flavor);
+    if (item.kind === "recipe-setup") {
+      if (item.destination?.brand) {
+        openSetupEditor(item.destination.brand, item.destination.flavor);
+      }
       return;
     }
   }
@@ -14939,7 +14956,29 @@ export default function Home() {
         onOpenChange={setShowManagerAttention}
         items={managerAttentionItems}
         onResolve={resolveManagerAttention}
+        onOpenQueue={isManager ? () => {
+          setShowManagerAttention(false);
+          setActiveTab("summary");
+        } : undefined}
         authorized={canViewManagerAttention}
+        sourceStates={[
+          ...(canApproveResets
+            ? [pendingResetSummary.isUnavailable
+                ? "unavailable" as const
+                : pendingResetSummary.isLoading
+                  ? "loading" as const
+                  : pendingResetSummary.isStale ? "stale" as const : "ready" as const]
+            : []),
+          ...(canReviewIncidents
+            ? [incidentAttentionSummary.isUnavailable
+                ? "unavailable" as const
+                : incidentAttentionSummary.isLoading
+                  ? "loading" as const
+                  : incidentAttentionSummary.isStale ? "stale" as const : "ready" as const]
+            : []),
+          ...(canManageProfiles ? [scheduledAttentionState] : []),
+        ]}
+        returnFocusRef={managerAttentionTriggerRef}
       />
 
       {/* ── Floor Mode overlay ──────────────────────────────────────────── */}
@@ -16542,6 +16581,7 @@ export default function Home() {
             >
               <DropdownMenuTrigger asChild>
                 <button
+                  ref={managerAttentionTriggerRef}
                   type="button"
                   title="More"
                   aria-label={
@@ -16564,10 +16604,16 @@ export default function Home() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {canViewManagerAttention && (
-                  <DropdownMenuItem onClick={() => setShowManagerAttention(true)}>
+                  <DropdownMenuItem
+                    aria-label="Manager attention"
+                    onClick={() => setShowManagerAttention(true)}
+                  >
                     <AlertTriangle className="w-4 h-4 mr-2" /> Manager attention
                     {managerAttentionTotal > 0 && (
-                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                      <span
+                        aria-hidden="true"
+                        className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+                      >
                         {managerAttentionTotal}
                       </span>
                     )}

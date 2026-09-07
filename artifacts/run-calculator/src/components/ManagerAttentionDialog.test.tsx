@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import ManagerAttentionDialog, {
   buildManagerAttentionItems,
   type ManagerAttentionKind,
@@ -60,10 +60,83 @@ describe("ManagerAttentionDialog", () => {
       await userEvent.click(screen.getByTestId(`manager-attention-action-${kind}`));
     }
     expect(onResolve.mock.calls).toEqual([
-      ["password-resets"],
-      ["incidents"],
-      ["recipe-setup"],
+      [expect.objectContaining({ kind: "password-resets" })],
+      [expect.objectContaining({ kind: "incidents" })],
+      [expect.objectContaining({ kind: "recipe-setup" })],
     ]);
+  });
+
+  it("shows recipe timing, impact, and the exact setup destination", () => {
+    const [item] = buildManagerAttentionItems({
+      ...fullInput,
+      pendingResetCount: 0,
+      unreviewedIncidentCount: 0,
+      nextScheduledRecipeIssue: {
+        brand: "Northstar",
+        flavor: "Pepperoni",
+        dates: ["2026-09-09"],
+        totalCases: 240,
+        reason: "missing",
+      },
+    });
+    expect(item.destination).toEqual({
+      brand: "Northstar",
+      flavor: "Pepperoni",
+      date: "2026-09-09",
+    });
+    render(
+      <ManagerAttentionDialog open onOpenChange={() => {}} items={[item]} onResolve={() => {}} />,
+    );
+    expect(screen.getByText("Northstar — Pepperoni")).toBeTruthy();
+    expect(screen.getByText(/240 cases cannot be planned reliably/i)).toBeTruthy();
+    expect(screen.getByText(/Next run Sep 9/i)).toBeTruthy();
+  });
+
+  it("distinguishes loading and unavailable checks from an authoritative empty result", () => {
+    const { rerender } = render(
+      <ManagerAttentionDialog
+        open
+        onOpenChange={() => {}}
+        items={[]}
+        onResolve={() => {}}
+        sourceStates={["loading", "unavailable"]}
+      />,
+    );
+    expect(screen.getByTestId("manager-attention-loading")).toBeTruthy();
+    expect(screen.getByText(/could not be checked/i)).toBeTruthy();
+    rerender(
+      <ManagerAttentionDialog open onOpenChange={() => {}} items={[]} onResolve={() => {}} sourceStates={["ready"]} />,
+    );
+    expect(screen.getByTestId("manager-attention-empty")).toBeTruthy();
+  });
+
+  it("opens the full queue and restores focus to the caller after a normal close", async () => {
+    const onOpenQueue = vi.fn();
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      const trigger = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <button ref={trigger} onClick={() => setOpen(true)}>Open attention</button>
+          <ManagerAttentionDialog
+            open={open}
+            onOpenChange={setOpen}
+            items={buildManagerAttentionItems(fullInput)}
+            onResolve={() => {}}
+            onOpenQueue={onOpenQueue}
+            returnFocusRef={trigger}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open attention" })),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Open attention" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open full manager queue" }));
+    expect(onOpenQueue).toHaveBeenCalledOnce();
   });
 
   it("can be repeatedly closed and reopened without trapping dialog state", async () => {
