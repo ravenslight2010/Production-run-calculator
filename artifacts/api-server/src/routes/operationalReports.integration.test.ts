@@ -1,6 +1,7 @@
 // End-to-end coverage for the server-derived operational reads. Keep db-backed
 // imports dynamic: @workspace/db captures DATABASE_URL when it is imported.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
@@ -1068,5 +1069,110 @@ describe("operational report endpoints", () => {
         message: "The finalized report failed integrity verification and cannot be exported.",
       },
     });
+  });
+
+  it("authenticates every canonical download and binds format bytes to archive identity and hash", async () => {
+    const id = "30000000-0000-4000-8000-000000000001";
+    const finalizedAt = new Date("2026-09-07T05:30:00.000-07:00");
+    const payload = {
+      scope: "day",
+      date: "2026-09-06",
+      periodStart: "2026-09-06",
+      periodEnd: "2026-09-06",
+      generatedAt: "2026-09-07T05:29:59.000-07:00",
+      attribution: { generatedBy: MANAGER, source: "canonical-server" },
+      production: {
+        casesPlanned: 2, casesProduced: 1, attainmentPct: 50,
+        totalDowntimeMinutes: 7, totalStoppages: 1, runsFinished: 0,
+        runsPlanned: 1, unfinishedRuns: ["Café 栗🌶️"],
+      },
+      productionRows: [{
+        id: "download-run-1", date: "2026-09-06", run: "Café 栗🌶️",
+        status: "unfinished", casesPlanned: 2, casesProduced: 1,
+        attainmentPct: 50, downtimeMinutes: 7, stoppages: 1,
+      }],
+      quality: {
+        availability: "available",
+        value: {
+          rows: [{
+            id: "download-quality-1",
+            occurredAt: "2026-09-06T23:59:59-07:00",
+            product: "Crème brûlée", status: "open", issues: 1,
+            summary: "=HYPERLINK(\"https://example.test\",\"unsafe\")",
+          }],
+        },
+      },
+      incidents: {
+        availability: "available",
+        value: {
+          rows: [{
+            id: "download-incident-1",
+            occurredAt: "2026-09-06T23:59:58-07:00",
+            status: "open", priority: "high", reporter: "@night-shift",
+            summary: "Temperature + humidity review",
+          }],
+        },
+      },
+      inventory: {
+        availability: "available",
+        value: {
+          rows: [{
+            id: "download-inventory-1", item: "-reorder-me", state: "low",
+            onHand: 1, unit: "kg", reorderThreshold: 2,
+          }],
+        },
+      },
+      unresolvedActions: {
+        availability: "available",
+        value: {
+          rows: [{
+            id: "download-action-1", priority: "high", source: "quality",
+            action: "Review", detail: "Café 栗🌶️",
+          }],
+        },
+      },
+    };
+    const contentHash = createHash("sha256").update(canonicalJson(payload)).digest("hex");
+    await db.insert(finalizedOperationalReportsTable).values({
+      id,
+      scope: "live",
+      reportScope: "day",
+      periodStart: "2026-09-06",
+      periodEnd: "2026-09-06",
+      generatedAt: finalizedAt,
+      generatedBy: MANAGER,
+      finalizedAt,
+      finalizedBy: MANAGER,
+      contentHash,
+      hashContract: "canonical-json-v2",
+      payload,
+    });
+
+    expect((await req(null, "GET", `/api/reports/operational/finalized/${id}/export?format=csv`)).status).toBe(401);
+    expect((await req(OPERATOR, "GET", `/api/reports/operational/finalized/${id}/export?format=csv`)).status).toBe(403);
+    expect((await req(SANDBOX_MANAGER, "GET", `/api/reports/operational/finalized/${id}/export?format=csv`)).status).toBe(404);
+
+    for (const format of ["csv", "xlsx", "print"] as const) {
+      const response = await req(MANAGER, "GET", `/api/reports/operational/finalized/${id}/export?format=${format}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-canonical-snapshot-id")).toBe(`finalized:${id}:${contentHash}`);
+      expect(response.headers.get("x-canonical-content-hash")).toBe(contentHash);
+      expect(response.headers.get("content-disposition")).toContain(`canonical-operational-day-2026-09-06-`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      expect(bytes.length).toBeGreaterThan(0);
+      if (format === "csv") {
+        const text = bytes.toString("utf8");
+        expect(text).toContain(`finalized:${id}:${contentHash}`);
+        expect(text).toContain("Café 栗🌶️");
+        expect(text).toContain("'=HYPERLINK");
+      } else if (format === "xlsx") {
+        expect([...bytes.subarray(0, 4)]).toEqual([80, 75, 3, 4]);
+      } else {
+        const text = bytes.toString("utf8");
+        expect(text).toContain(`finalized:${id}:${contentHash}`);
+        expect(text).toContain("Café 栗🌶️");
+        expect(text).toContain("@media print");
+      }
+    }
   });
 });
