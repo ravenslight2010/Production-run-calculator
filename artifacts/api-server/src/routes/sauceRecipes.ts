@@ -6,6 +6,7 @@ import { normalizeNamedRecipe, type NamedRecipe } from "@workspace/named-recipes
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
+import { broadcastMasterDataChanged } from "./sync";
 
 // Manager-defined, factory-wide SAUCE (frontline) recipes (a name plus a list of
 // {ingredient, lbs} components). Rebuilt to work like Mixes / Cheese Recipes:
@@ -108,6 +109,7 @@ router.post(
         }
       });
       invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "");
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -144,6 +146,7 @@ router.delete(
           );
       }
       invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "");
       const items = await listAll();
       res.json({ items });
     } catch (err) {

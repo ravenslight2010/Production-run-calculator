@@ -5,9 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { createElement } from "react";
 import {
   fetchMasterDataBootstrap,
+  invalidateMasterDataBootstrap,
   MasterDataPolling,
   resetMasterDataTransportCache,
   setMasterDataSlice,
+  shouldRefreshMasterData,
   MASTER_DATA_QUERY_KEY,
 } from "./masterData";
 import { useIngredients } from "./hooks/useIngredients";
@@ -245,6 +247,45 @@ describe("master-data bootstrap loading", () => {
     await expect(fetchMasterDataBootstrap()).resolves.toMatchObject({
       mixes: [savedMix],
     });
+  });
+
+  it("invalidates the canonical bootstrap after a foreign master-data nudge", async () => {
+    const responseHeaders = new Headers({ etag: '"master-data-before-edit"' });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: responseHeaders,
+      json: () => Promise.resolve(bootstrapBody),
+    } as unknown as Response);
+    await fetchMasterDataBootstrap();
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(MASTER_DATA_QUERY_KEY, bootstrapBody);
+
+    expect(shouldRefreshMasterData("foreign-client", "local-client")).toBe(true);
+    expect(shouldRefreshMasterData("local-client", "local-client")).toBe(false);
+
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: '"master-data-after-edit"' }),
+      json: () => Promise.resolve({
+        ...bootstrapBody,
+        mixes: [{ id: "m2", name: "Foreign Mix", components: [], enabled: true }],
+      }),
+    } as unknown as Response);
+    await invalidateMasterDataBootstrap(queryClient);
+
+    const refreshed = await fetchMasterDataBootstrap();
+    expect(refreshed.mixes[0]?.name).toBe("Foreign Mix");
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({
+      headers: { "x-client-id": expect.any(String) },
+    });
+    expect((fetchSpy.mock.calls[1]?.[1] as RequestInit).headers).not.toHaveProperty(
+      "if-none-match",
+    );
   });
 
   it("does not carry a validator or snapshot across an auth transition", async () => {

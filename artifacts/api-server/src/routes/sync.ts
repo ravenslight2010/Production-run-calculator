@@ -202,6 +202,23 @@ function broadcast(data: unknown, senderId: string, scope: Scope, date: string):
   }
 }
 
+// Master data is facility-wide rather than date-scoped. Reuse the authenticated
+// sync stream, but send a bounded nudge instead of the recipe payload. The
+// sender is excluded so its optimistic mutation result is not immediately
+// invalidated by its own echo.
+export function broadcastMasterDataChanged(senderId: string, scope: Scope = currentScope()): void {
+  const msg = `data: ${JSON.stringify({
+    type: "master-data",
+    masterDataChanged: true,
+    senderId,
+  })}\n\n`;
+  for (const client of clients) {
+    if (client.scope === scope && client.clientId !== senderId) {
+      try { client.res.write(msg); } catch {}
+    }
+  }
+}
+
 // Push a "data was reset" frame to EVERY open client in the scope, regardless of
 // which calendar day they are watching (a reset clears all dates). Clients that
 // see a resetEpoch newer than the one they last honored wipe their local copy and

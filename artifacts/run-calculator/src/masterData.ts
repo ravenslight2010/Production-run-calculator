@@ -276,3 +276,20 @@ export async function invalidateMasterDataSlice(
     queryClient.invalidateQueries({ queryKey: LEGACY_QUERY_KEYS[slice] }),
   ]);
 }
+
+export async function invalidateMasterDataBootstrap(
+  queryClient: QueryClient,
+): Promise<void> {
+  // The server nudge only says that the shared representation changed. Drop the
+  // validator before invalidating so a 304 cannot re-use the old in-module
+  // snapshot and hide the foreign client's edit.
+  masterDataEtag = null;
+  await queryClient.invalidateQueries({ queryKey: MASTER_DATA_QUERY_KEY });
+}
+
+export function shouldRefreshMasterData(
+  senderId: string | null | undefined,
+  localClientId: string,
+): boolean {
+  return senderId !== localClientId;
+}

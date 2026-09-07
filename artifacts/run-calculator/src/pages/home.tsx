@@ -376,8 +376,10 @@ import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
 import { useIngredients } from "../hooks/useIngredients";
 import {
+  invalidateMasterDataBootstrap,
   invalidateMasterDataSlice,
   setMasterDataSlice,
+  shouldRefreshMasterData,
 } from "../masterData";
 import {
   saveIngredients as saveIngredientsRemote,
@@ -8820,6 +8822,8 @@ export default function Home() {
           initial?: boolean;
           serverCalc?: { runId: string; calc: Calc } | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
+          masterDataChanged?: boolean;
+          senderId?: string | null;
         };
         if (msg.serverCalc) {
           serverCalcRef.current = msg.serverCalc;
@@ -8830,6 +8834,12 @@ export default function Home() {
           setServerCalc(null);
           serverCalcReceiptRef.current = null;
           setServerCalcReceipt(null);
+        }
+        if (
+          msg.masterDataChanged &&
+          shouldRefreshMasterData(msg.senderId, clientId.current)
+        ) {
+          void invalidateMasterDataBootstrap(cycleCountQc);
         }
         if (msg.autoTrackSchedule) {
           autoTrackScheduleRef.current = msg.autoTrackSchedule;
