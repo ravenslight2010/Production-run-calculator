@@ -55,3 +55,15 @@ setup file.
 **How to apply:** When adding component coverage, keep assertions compatible
 with the existing Vitest environment or add matcher setup as a deliberate,
 repo-wide harness change.
+
+## Dense review surfaces
+
+Entity names can repeat across cards, warnings, and change summaries in import
+reviews. Anchor browser assertions to the semantic card boundary before
+filtering by entity text.
+
+**Why:** Unscoped role or text locators can resolve several correct copies of
+the same name and fail strict-mode checks without detecting a product defect.
+
+**How to apply:** Select the review card collection by its stable semantic or
+test-ID boundary, then narrow to the named entity and assert within that card.
