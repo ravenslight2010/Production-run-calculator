@@ -15,6 +15,7 @@ classification, and bounded coverage gaps, see
 | `playwright.visual.config.ts` | isolated account, non-destructive | no global setup; the visual suite creates unique accounts and removes them in `afterAll` |
 | `playwright.management-performance.config.ts` | isolated account, non-destructive | authenticated startup and deferred staff-management budgets; created accounts are removed in `afterAll` |
 | `playwright.dough-correction.config.ts` | isolated manager account, non-destructive | responsive Dough correction, temporary pause, and resume; the spec owns today's sync-row cleanup and removes the account in `afterAll` |
+| `playwright.recipe-refresh.config.ts` | isolated manager account, disposable database | 390×844 linked-recipe refresh and Start snapshot boundary; owns unique recipe/profile/sync/account/role fixtures and removes them in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.pwa-morning.config.ts` | isolated account, disposable database | tablet-sized stale-day → one sign-in → mount-time rollover smoke; attaches request and browser-log evidence |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
@@ -93,6 +94,14 @@ explicitly approved test database:
 ```sh
 E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
   pnpm --filter @workspace/run-calculator run test:e2e:dough-correction
+```
+
+Run the linked-recipe refresh and Start-freeze regression with the same safety
+boundary:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:recipe-refresh
 ```
 
 Run the recurring cross-device smoke matrix before release checks. It is a

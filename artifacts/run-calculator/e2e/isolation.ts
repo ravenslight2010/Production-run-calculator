@@ -49,6 +49,24 @@ export interface TodaySyncFixture {
 export interface AuthorizedFixtureCleanupOptions {
   profileKeys?: Iterable<string>;
   syncDates?: Iterable<string>;
+  cheeseRecipeIds?: Iterable<string>;
+}
+
+export interface CheeseRecipeFixture {
+  id: string;
+  name: string;
+  brand?: string;
+  flavors?: string[];
+  shredderSetting?: string;
+  cellulose?: string;
+  notes?: string;
+  components?: Array<{
+    ingredient: string;
+    lbs: number;
+    ozPerPizza?: number;
+    sharePct?: number;
+  }>;
+  enabled?: boolean;
 }
 
 /**
@@ -133,6 +151,7 @@ export class AuthorizedBrowserFixtures {
   private readonly roleNames = new Set<string>();
   private readonly profileKeys = new Set<string>();
   private readonly syncDates = new Set<string>();
+  private readonly cheeseRecipeIds = new Set<string>();
   private lockClient: Client | undefined;
   private startPromise: Promise<void> | undefined;
 
@@ -318,6 +337,33 @@ export class AuthorizedBrowserFixtures {
     return date;
   }
 
+  async seedCheeseRecipe(
+    account: Pick<AuthorizedTestAccount, "token">,
+    recipe: CheeseRecipeFixture,
+  ): Promise<string> {
+    await this.start();
+    const response = await this.request.post(`${this.apiBase}/api/cheese-recipes`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      data: {
+        items: [{
+          brand: "",
+          flavors: [],
+          shredderSetting: "",
+          cellulose: "",
+          notes: "",
+          components: [],
+          enabled: true,
+          ...recipe,
+        }],
+      },
+    });
+    if (!response.ok()) {
+      throw new Error(`Fixture cheese recipe seed failed: ${await responseFailure(response)}`);
+    }
+    this.cheeseRecipeIds.add(recipe.id);
+    return recipe.id;
+  }
+
   async removeBrandProfiles(
     keys: Iterable<string> = this.profileKeys,
     scope = "live",
@@ -348,12 +394,26 @@ export class AuthorizedBrowserFixtures {
     selected.forEach((date) => this.syncDates.delete(date));
   }
 
+  async removeCheeseRecipes(ids: Iterable<string> = this.cheeseRecipeIds): Promise<void> {
+    const selected = [...ids];
+    if (selected.length === 0) return;
+    await this.withDatabase("remove browser fixture cheese recipes", async (db) => {
+      await db.query(
+        "DELETE FROM cheese_recipes WHERE id = ANY($1::text[])",
+        [selected],
+      );
+    });
+    selected.forEach((id) => this.cheeseRecipeIds.delete(id));
+  }
+
   async cleanup(options: AuthorizedFixtureCleanupOptions = {}): Promise<void> {
     for (const key of options.profileKeys ?? []) this.profileKeys.add(key);
     for (const date of options.syncDates ?? []) this.syncDates.add(date);
+    for (const id of options.cheeseRecipeIds ?? []) this.cheeseRecipeIds.add(id);
     const errors: unknown[] = [];
     await this.removeBrandProfiles().catch((error) => errors.push(error));
     await this.removeTodaySync().catch((error) => errors.push(error));
+    await this.removeCheeseRecipes().catch((error) => errors.push(error));
     await this.withDatabase("cleanup authorized browser fixtures", async (db) => {
       await cleanupTestUsers(db, this.usernames);
       if (this.roleNames.size > 0) {

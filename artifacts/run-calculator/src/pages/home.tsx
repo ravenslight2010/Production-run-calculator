@@ -4801,14 +4801,19 @@ export default function Home() {
 
       await Promise.allSettled(propagations);
 
-      // Update the open form if it references any of the updated recipes.
-      const cv = form.getValues() as unknown as Record<string, unknown>;
-      for (const { nameField, rowsField } of cheeseSlots) {
-        const recipeName = ((cv[nameField] as string) ?? "").trim();
-        if (!recipeName) continue;
-        const freshRows = recipeByName.get(recipeName.toLowerCase());
-        if (!freshRows) continue;
-        form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
+      // Start is the immutable recipe snapshot boundary. Profiles and future
+      // work still receive the shared edit, but an active/finished open form
+      // must retain the rows it started with.
+      const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+      if (isRunRecipeRefreshEligible(liveRun)) {
+        const cv = form.getValues() as unknown as Record<string, unknown>;
+        for (const { nameField, rowsField } of cheeseSlots) {
+          const recipeName = ((cv[nameField] as string) ?? "").trim();
+          if (!recipeName) continue;
+          const freshRows = recipeByName.get(recipeName.toLowerCase());
+          if (!freshRows) continue;
+          form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
+        }
       }
 
       if (updatedCount > 0) {
@@ -23688,25 +23693,28 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                       : 0;
                     const doughName = (vals.doughRecipeName ?? "").trim() || "Dough";
 
+                    const summaryFrontlineRows = deriveFrontlineNeedRows(vals, s);
                     const frontlineItems: { label: string; value: string }[] = [];
                     // Dough row first
                     if (doughBatches > 0) {
                       frontlineItems.push({ label: `Dough — ${doughName}`, value: `${fmtNum(doughBatches, 2)} batches` });
                     }
-                    if (s.sauceBatches > 0) {
-                      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                      frontlineItems.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+                    for (const row of summaryFrontlineRows) {
+                      if (row.station === "sauce" && row.unit === "batches") {
+                        const bd = sauceBarrelBreakdown(row.amount, s.sauceEffBarrel);
+                        frontlineItems.push({
+                          label: row.label,
+                          value: bd
+                            ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
+                            : `${fmtNum(row.amount, 2)} batches`,
+                        });
+                      } else {
+                        frontlineItems.push({
+                          label: row.label,
+                          value: `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`,
+                        });
+                      }
                     }
-                    if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
-                    if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
-                    // Pep applicators sit between App 2 and App 3 (physical line order).
-                    const pepCombinedLbl = vals.pep1Combined === true ? "1 & 2" : "1";
-                    if (s.pep1Type) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-                    if (s.pep1TypeB) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep1TypeB) ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
-                    if (vals.pep1Combined !== true && s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
-                    if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
-                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
-                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
 
                     // ── Packaging for the detail modal ──
 
@@ -23717,6 +23725,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     return (
 
                       <Card
+                        data-testid={`run-summary-${run.id}`}
                         className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"}`}
                         onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
                       >
