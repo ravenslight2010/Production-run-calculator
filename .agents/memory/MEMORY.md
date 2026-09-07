@@ -122,6 +122,8 @@
 - [Source-audit reports](large-source-audit-captures.md) + [versions](source-audit-report-versions.md) — keep hashed source captures shard-safe and dispatch persisted comparisons by supported read version.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
+- [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
+- [Validation roots](skill-catalog-ci-roots.md) + [Shell lint](shell-lint-inventory.md) — missing platform roots warn; editable skills and maintained scripts shell utilities remain covered.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Live performance traces](live-performance-trace.md) — run real-time browser traces in the background when their observation window exceeds the foreground shell timeout.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
@@ -129,31 +131,30 @@
 - [Multi-day import auth](schedule-import-401.md) — raw-fetch write loops must stop on 401 and trigger the normal unauthorized path instead of reporting misleading per-day failures.
 - [Dependency override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
 - [Startup failure evidence](startup-failure-evidence.md) — preserve the first categorized startup record separately from rolling logs during repeated readiness probes.
-- [Field verification boundary](field-verification.md) — passive field evidence must stay best-effort and advisory, never become a second source of truth for production state.
-- [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
+- [Repair evidence boundaries](field-verification.md) + [Data Health undo](data-health-undo-coverage.md) + [String-reference purge](string-reference-purge-safety.md) — repair evidence stays advisory; undo needs future-run snapshots; purge scans all text refs.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake sync claim fence](wake-sync-claim-fence.md) — monotonic wake acknowledgment fences stale claims without deadlocking same-tick dough claim requests.
-- [Offline operational intents](offline-operational-intents.md) — reset-fenced, per-ID commands reconcile by occurrence time; End stays local until lifecycle and inventory finalize atomically.
-- [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
+- [Operational intent boundaries](offline-operational-intents.md) + [Warehouse and Inventory](warehouse-inventory-boundary.md) — reset-fenced per-ID commands reconcile by occurrence time; preparation and stock destinations stay separate.
 - [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
-- [Retained AI cache boundary](retained-ai-cache-boundary.md) — cache only unresolved model suggestions; recompute and merge deterministic matches per request.
-- [Retired AI data retention](retired-ai-data-retention.md) — stop writers first; delete generated pools by allowlist, redact sensitive payloads, and preserve operational rows and correction memory.
+- [AI cache and retention](retained-ai-cache-boundary.md) + [Retired AI data](retired-ai-data-retention.md) — cache unresolved suggestions only; stop writers before allowlisted deletion/redaction, preserving operational rows and corrections.
 - [Operations API compatibility window](operations-api-compatibility-window.md) — deterministic contracts stay provider-neutral while retired names remain temporary aliases for older clients.
 - [Operational read-model integrity](operational-read-model-integrity.md) — canonical reports fail closed on rejected snapshot facts; offline exports must preserve non-authoritative provenance.
 - [Import lifecycle row identity](import-lifecycle-row-identity.md) — compare repeated ingredient rows by totals, but preserve structure; ambiguous manager fields stay review-only.
 - [Scoped offline master-data queues](scoped-offline-master-data-queues.md) — partition caches/outboxes by auth scope, fence async handoffs, and reserve revision zero for non-overwriting legacy seeds.
 - [Historical repair compatibility](historical-repair-compatibility.md) — preserve released marker-first transactions; validate stored nested results with bounded recursive telemetry.
+- [Bundle boundary manifests](bundle-boundary-manifests.md) — Vite’s standard manifest omits same-chunk module membership; dependency guards need Rollup chunk.modules.
 - [Tailwind source scanning and Playwright](tailwind-playwright-visible-selectors.md) — Playwright `:visible` locator strings can become invalid production CSS; use locator visibility filters.
 - [Completed history durability](completed-history-durability.md) — immutable run completions use scope-bound caches/outboxes; normal resets and undo must preserve pending uploads.
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — `REPLIT_ENVIRONMENT=production` can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
 - [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through `/sync/today`; generic dated writes are protected scheduling and must not trust client date claims.
-- [Bounded archive range reads](bounded-archive-range-reads.md) — cap date spans and results, align the index, and split exact/range endpoints when OpenAPI cannot type query unions.
-- [Finalized report authenticity](finalized-report-authenticity.md) — sign canonical payload+audit envelopes with a dedicated retained-key keyring; verify persisted rows and classify unsigned legacy records.
-- [Shared recipe freeze coverage](shared-recipe-freeze-coverage.md) — use Ingredient Detail snapshots; mix aggregate pounds can stay constant while component proportions change.
-- [Profile import precedence](profile-import-precedence.md) — explicit product-level metadata must fence every later shared-recipe and pool hydration path, including force mode.
+- [Archive and report boundaries](bounded-archive-range-reads.md) + [Finalized report authenticity](finalized-report-authenticity.md) — cap archive reads; sign canonical report envelopes and classify unsigned legacy records.
+- [Recipe/profile precedence](shared-recipe-freeze-coverage.md) + [Profile import precedence](profile-import-precedence.md) — freeze Ingredient Detail snapshots; explicit product metadata fences later recipe/pool hydration, including force mode.
 - [Recipe row unit provenance](recipe-row-unit-provenance.md) — unit labels describe raw values only and must follow the selected row set through merges.
 - [Shared master-data refresh](shared-master-data-refresh.md) — facility-wide recipe edits use date-independent SSE nudges; receivers invalidate the canonical bootstrap, not payloads.
+- [Dedicated E2E databases](dedicated-e2e-database.md) — destructive browser suites require a database explicitly marked e2e/test/tmp/temporary; approval flags alone do not make a shared DB safe.
 - [Capability-gated controlled dialogs](capability-gated-controlled-dialogs.md) — revoke access with an immediate effective close plus one controlled-state close request; never unmount an open portal abruptly.
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
+- [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
+- [Validation roots](skill-catalog-ci-roots.md) + [Shell lint](shell-lint-inventory.md) — missing platform roots warn; editable skills and maintained scripts shell utilities remain covered.
