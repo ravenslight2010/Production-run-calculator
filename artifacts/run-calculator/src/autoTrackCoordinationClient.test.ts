@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_TRACK_SCHEDULE_EVENT,
-  autoTrackScheduleToCoordination,
   publishAutoTrackSchedule,
 } from "./autoTrackCoordinationClient";
 import type { AutoTrackSchedule } from "@workspace/live-calc";
@@ -52,92 +51,5 @@ describe("publishAutoTrackSchedule", () => {
 
     expect(listener).not.toHaveBeenCalled();
     window.removeEventListener(AUTO_TRACK_SCHEDULE_EVENT, listener);
-  });
-});
-
-describe("autoTrackScheduleToCoordination", () => {
-  const schedule: AutoTrackSchedule = {
-    runId: "run-1",
-    generation: "run-1:42",
-    atMs: 1_234,
-    entries: [
-      {
-        channel: "case",
-        dueAt: 4_000,
-        nextDueAt: 4_000,
-        dueNow: true,
-        canonical: true,
-        sequence: 4,
-      },
-      {
-        channel: "sauce-barrel",
-        dueAt: 800,
-        nextDueAt: 1_000,
-        dueNow: false,
-        canonical: false,
-      },
-    ],
-  };
-
-  it("maps schedule entries to the coordination shape useAutoTrack adopts", () => {
-    const coordination = autoTrackScheduleToCoordination(schedule);
-    const run = coordination.autoTrackCoordination!.runs["run-1"];
-    expect(run.case).toEqual({
-      generation: "run-1:42",
-      sequence: 4,
-      nextDueAt: 4_000,
-      dueNow: true,
-      canonical: true,
-      updatedAt: 1_234,
-    });
-    expect(run["sauce-barrel"]).toEqual({
-      generation: "run-1:42",
-      sequence: 0,
-      nextDueAt: 1_000,
-      dueNow: false,
-      canonical: false,
-      updatedAt: 1_234,
-    });
-  });
-
-  it("keeps the client sequence out of the way when the entry is derived", () => {
-    const coordination = autoTrackScheduleToCoordination({
-      ...schedule,
-      entries: [{
-        channel: "sauce-barrel",
-        dueAt: 800,
-        nextDueAt: 1_000,
-        dueNow: false,
-        canonical: false,
-      }],
-    });
-    expect(
-      coordination.autoTrackCoordination!.runs["run-1"]["sauce-barrel"]!.sequence,
-    ).toBe(0);
-  });
-
-  it("carries each entry's server due-now verdict into the adopted state", () => {
-    const coordination = autoTrackScheduleToCoordination({
-      ...schedule,
-      entries: [
-        {
-          channel: "sauce-barrel",
-          dueAt: 800,
-          nextDueAt: 1_000,
-          dueNow: false,
-          canonical: false,
-        },
-        {
-          channel: "app3-batch",
-          dueAt: 900,
-          nextDueAt: 1_100,
-          dueNow: true,
-          canonical: false,
-        },
-      ],
-    });
-    const run = coordination.autoTrackCoordination!.runs["run-1"];
-    expect(run["sauce-barrel"]!.dueNow).toBe(false);
-    expect(run["app3-batch"]!.dueNow).toBe(true);
   });
 });

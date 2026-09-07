@@ -1,5 +1,3 @@
-import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
-
 import {
   caseBasedProductionNeedsAvailable,
   computeCasesInFreezer,
@@ -17,7 +15,6 @@ export interface CalcStoppage {
 }
 export interface CalcRunMeta {
   id?: string;
-  metaUpdatedAt?: number;
   startedAt?: number;
   endedAt?: number;
   pausedAt?: number;
@@ -144,7 +141,7 @@ export function computeEffectiveLineSpeed(input: EffectiveLineSpeedInput): numbe
     return ppm > 0 ? Math.round(ppm * 100) / 100 : 0;
   }
   const adjustment = input.speedAdjustment == null || !Number.isFinite(input.speedAdjustment)
-    ? FACTORY_SPEED_ADJUSTMENT_BASELINE
+    ? 1
     : Number(input.speedAdjustment);
   const ppm = finiteOrZero(input.crustsPerCycle) * finiteOrZero(input.cycleSpeed) * adjustment;
   return ppm > 0 ? Math.round(ppm * 100) / 100 : 0;
@@ -308,7 +305,7 @@ export function computeServerCalc(
   const raw = payload.runValues?.[run.id];
   if (!raw || typeof raw !== "object") return null;
   const base = {
-    approxLineSpeed: 0, speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE, freezerTime: 0,
+    approxLineSpeed: 0, speedAdjustment: 1, freezerTime: 0,
     crustsPerCycle: 0, cycleSpeed: 0, pizzasPerCase: 0, casesPerSkid: 0,
     casesPerLayer: 0, doughballsPerTray: 0, crustsPerStack: 0,
     doughBatchYield: 0, crustsPerCase: 0, casesNeeded: 0,
@@ -344,4 +341,3 @@ export * from "./autoTrackSchedule";
 export * from "./wallClockEngine";
 export * from "./linePhases";
 export * from "./operationalRunView";
-export * from "./operationalProjection";

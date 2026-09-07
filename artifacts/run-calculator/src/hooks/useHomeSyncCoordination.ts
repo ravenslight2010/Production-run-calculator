@@ -1,156 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createSyncBaselineGate } from "../domain/runSyncPolicy";
 import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
-import { SingleFlightSyncQueue } from "../syncPushQueue";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
-import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
-import { fetchWithTimeout } from "../fetchWithTimeout";
-import type { SyncPayload } from "../types";
-import type { SyncMeasurementTrigger } from "../syncDiagnostics";
-import { todayStr } from "../utils";
-
-type SyncWork = {
-  payload: SyncPayload;
-  sig?: string;
-  queuedAtPerf?: number;
-  queuedAtEpoch?: number;
-  trigger?: SyncMeasurementTrigger;
-};
-
-type SseConnection = {
-  clientId: string;
-  getSnapshot: () => string;
-  onOpen: () => void;
-  /**
-   * Returns true only after an initial frame has established Home's canonical
-   * baseline. Reset/rollover frames and failed handlers must return false.
-   */
-  onMessage: (event: MessageEvent, clientDate: string) => boolean | Promise<boolean>;
-  onError: () => void;
-  onInitialBaseline: (shouldPush: boolean) => void;
-  onClose: () => void;
-};
-
-type TodayWrite = {
-  payload: SyncPayload;
-  clientId: string;
-  snapshotId: string;
-  epoch: number;
-  signal?: AbortSignal;
-  queuedAtEpoch?: number;
-};
-
-type ForegroundScheduler = {
-  register: (task: {
-    id: string;
-    runOnForeground: boolean;
-    order: number;
-    run: () => Promise<boolean>;
-  }) => () => void;
-};
-
-export function createForegroundSyncTodayRequest(
-  snapshot: string | undefined,
-  clientDate: string = todayStr(),
-): { url: string; init: RequestInit } {
-  const syncTodayUrl = `/api/sync/today?today=${clientDate}`;
-  return {
-    url: snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
-    init: { cache: "no-store" },
-  };
-}
-
-type ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory> = {
-  payload: TPayload;
-  prepareLifecycle: () => { value: TLifecycle; adopted: boolean };
-  persistLifecycle: (value: TLifecycle) => void;
-  applyGeneralMerge: (payload: TPayload) => void;
-  reconcileProfiles: () => Promise<TProfile>;
-  applyProfiles: (result: TProfile) => void;
-  fetchFactory: () => Promise<TFactory>;
-  applyFactory: (result: TFactory) => Promise<void> | void;
-  isCurrent: () => boolean;
-};
 
 /**
- * Coordinates the canonical wake adoption transaction. Lifecycle state must be
- * durable before the general merge can observe it; independent master-data
- * refreshes begin afterward and retain their profile-before-factory ordering.
- */
-export function coordinateForegroundAdoption<TPayload, TLifecycle, TProfile, TFactory>({
-  payload,
-  prepareLifecycle,
-  persistLifecycle,
-  applyGeneralMerge,
-  reconcileProfiles,
-  applyProfiles,
-  fetchFactory,
-  applyFactory,
-  isCurrent,
-}: ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory>): {
-  lifecycleAdopted: boolean;
-  masterDataRefresh: Promise<void>;
-} {
-  const lifecycle = prepareLifecycle();
-  if (lifecycle.adopted) persistLifecycle(lifecycle.value);
-  if (!isCurrent()) {
-    return { lifecycleAdopted: lifecycle.adopted, masterDataRefresh: Promise.resolve() };
-  }
-  applyGeneralMerge(payload);
-
-  const masterDataRefresh = (async () => {
-    try {
-      const profileResult = await reconcileProfiles();
-      if (isCurrent()) applyProfiles(profileResult);
-    } catch {
-      // Profile recovery is independent; retain local data and continue.
-    }
-    try {
-      const factoryResult = await fetchFactory();
-      if (!isCurrent()) return;
-      await applyFactory(factoryResult);
-    } catch {
-      // Factory recovery is independent; retain local data and queued writes.
-    }
-  })();
-
-  return { lifecycleAdopted: lifecycle.adopted, masterDataRefresh };
-}
-
-type ForegroundReleaseOptions = {
-  releaseFence: () => void;
-  acknowledgeRelease: () => void;
-  takeQueuedWrite: () => boolean;
-  replayQueuedWrite: () => void;
-};
-
-/** Releases the wake fence before any queued write is allowed to replay. */
-export function releaseForegroundRecovery({
-  releaseFence,
-  acknowledgeRelease,
-  takeQueuedWrite,
-  replayQueuedWrite,
-}: ForegroundReleaseOptions): void {
-  releaseFence();
-  acknowledgeRelease();
-  if (takeQueuedWrite()) replayQueuedWrite();
-}
-
-type CancelledForegroundReleaseOptions = {
-  releaseFence: () => void;
-  discardQueuedWrite: () => void;
-};
-/** Only a reset marker newer than local durable state may interrupt baseline adoption. */
-export function initialResetRequiresReload(messageEpoch: number, storedEpoch: number): boolean {
-  return messageEpoch > storedEpoch;
-}
-
-/**
- * Owns Home's narrow sync transport coordination boundary. Home supplies
- * canonical state/form merge callbacks; this hook owns mutable coordination,
- * queue lifetime, and EventSource baseline/reconnect fencing. Keeping the
- * protocol callbacks injected makes the ownership boundary explicit without
- * changing any sync timing or merge policy.
+ * The refs which coordinate Home's receive, reset and foreground-wake paths.
+ * This is deliberately ref/state-only: Home retains protocol construction and
+ * canonical day/form ownership, so extracting this boundary cannot alter the
+ * sync transport or timing formulas.
  */
 export function useHomeSyncCoordination() {
   const synchronizationStateMachineRef = useRef(new SynchronizationStateMachine<any>());
@@ -163,17 +20,8 @@ export function useHomeSyncCoordination() {
   const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
   const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundRecoveryOwnerRef = useRef(0);
-  // SSE reconnects and browser foreground signals share the same recovery
-  // owner. Keep a pending reconnect signal so an early EventSource error
-  // cannot be lost before Home has registered its recovery callback.
-  const foregroundRecoveryRequestRef = useRef<(() => Promise<boolean>) | null>(null);
-  const foregroundRecoveryRequestPendingRef = useRef(false);
   const syncPushGenerationRef = useRef(0);
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
-  const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncPushQueueRef = useRef(
-    new SingleFlightSyncQueue<SyncWork>(synchronizationStateMachineRef.current),
-  );
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
   const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
   const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
@@ -183,142 +31,7 @@ export function useHomeSyncCoordination() {
     message: string;
   } | null>(null);
 
-  const connectSse = useCallback((connection: SseConnection) => {
-    let closed = false;
-    let streamDate = todayStr();
-    let source: EventSource | null = null;
-    let messageChain = Promise.resolve();
-
-    const open = (clientDate: string) => {
-      if (closed) return;
-      streamDate = clientDate;
-      syncBaselineGateRef.current.beginConnection();
-      const snapshot = connection.getSnapshot();
-      const url = snapshot
-        ? `/api/sync/events?clientId=${connection.clientId}&today=${clientDate}&snapshot=${snapshot}`
-        : `/api/sync/events?clientId=${connection.clientId}&today=${clientDate}`;
-      const nextSource = new EventSource(url);
-      source = nextSource;
-      nextSource.onopen = () => {
-        if (closed || source !== nextSource || streamDate !== todayStr()) return;
-        connection.onOpen();
-      };
-      nextSource.onmessage = (event) => {
-        // EventSource can deliver a queued callback after close(). Do not let
-        // that old-date frame enter Home while the new stream is connecting.
-        if (closed || source !== nextSource || clientDate !== todayStr()) return;
-        messageChain = messageChain.then(async () => {
-          if (closed || source !== nextSource || clientDate !== todayStr()) return;
-          const baselineAccepted = await connection.onMessage(event, clientDate);
-          if (closed || source !== nextSource || clientDate !== todayStr()) return;
-          try {
-            if (
-              baselineAccepted &&
-              (JSON.parse(event.data as string) as { initial?: boolean }).initial
-            ) {
-              connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
-            }
-          } catch {
-            // Home's callback preserves its existing malformed-frame tolerance.
-          }
-        });
-      };
-      nextSource.onerror = () => {
-        if (closed || source !== nextSource) return;
-        syncBaselineGateRef.current.beginConnection();
-        connection.onError();
-        const request = foregroundRecoveryRequestRef.current;
-        if (request) void request();
-        else foregroundRecoveryRequestPendingRef.current = true;
-      };
-    };
-
-    const reconnectForDateChange = () => {
-      const nextDate = todayStr();
-      if (closed || nextDate === streamDate) return;
-      const previousSource = source;
-      source = null;
-      previousSource?.close();
-      open(nextDate);
-    };
-
-    open(streamDate);
-    const dateCheck = setInterval(reconnectForDateChange, 60_000);
-    return () => {
-      closed = true;
-      clearInterval(dateCheck);
-      source?.close();
-      source = null;
-      connection.onClose();
-    };
-  }, []);
-
-  // The write construction lives beside queue ownership so every Home caller
-  // uses the same epoch, snapshot and optional queue-age envelope.
-  const writeToday = useCallback(
-    ({ payload, clientId, snapshotId, epoch, signal, queuedAtEpoch }: TodayWrite) =>
-      fetchWithTimeout(
-        `/api/sync/today?today=${todayStr()}&epoch=${epoch}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId,
-            payload,
-            snapshotId: snapshotId || undefined,
-            ...(queuedAtEpoch ? { syncMeta: { queuedAt: queuedAtEpoch } } : {}),
-          }),
-          signal,
-        },
-        10_000,
-      ),
-    [],
-  );
-
-  const requestBaselinePush = useCallback(
-    () => syncBaselineGateRef.current.requestPush(),
-    [],
-  );
-
-  // The manager owns wake guard and online/listener lifetime. The injected
-  // recovery callback deliberately leaves canonical day/form adoption in Home.
-  const registerForegroundRecovery = useCallback((
-    scheduler: ForegroundScheduler,
-    recover: () => Promise<boolean>,
-  ) => {
-    const reconcile = createForegroundSyncWakeGuard(recover);
-    foregroundRecoveryRequestRef.current = reconcile;
-    if (foregroundRecoveryRequestPendingRef.current) {
-      foregroundRecoveryRequestPendingRef.current = false;
-      void reconcile();
-    }
-    const onOnline = () => {
-      // `online` is the recovery signal when a failed pull was left pending
-      // by a browser transport. Do not discard it because the page still
-      // reports hidden: WebKit can deliver the reconnect event before it
-      // updates visibility, and the wake guard keeps the retry bounded.
-      void reconcile();
-    };
-    window.addEventListener("online", onOnline);
-    const unregister = scheduler.register({
-      id: "foreground-reconcile",
-      runOnForeground: true,
-      order: 0,
-      run: reconcile,
-    });
-    return {
-      reconcile,
-      dispose: () => {
-        if (foregroundRecoveryRequestRef.current === reconcile) {
-          foregroundRecoveryRequestRef.current = null;
-        }
-        window.removeEventListener("online", onOnline);
-        unregister();
-      },
-    };
-  }, []);
-
-  return useMemo(() => ({
+  return {
     syncBaselineGateRef,
     synchronizationStateMachineRef,
     isSyncApplyingRef,
@@ -331,12 +44,6 @@ export function useHomeSyncCoordination() {
     foregroundRecoveryOwnerRef,
     syncPushGenerationRef,
     syncPushAbortControllersRef,
-    syncRetryTimerRef,
-    syncPushQueueRef,
-    connectSse,
-    writeToday,
-    requestBaselinePush,
-    registerForegroundRecovery,
     autoTrackBlocked,
     setAutoTrackBlocked,
     autoTrackRebaseAfterBlock,
@@ -347,28 +54,5 @@ export function useHomeSyncCoordination() {
     setForegroundSyncAcknowledgement,
     foregroundRecoveryNotice,
     setForegroundRecoveryNotice,
-  }), [
-    autoTrackBlocked,
-    autoTrackRebaseAfterBlock,
-    connectSse,
-    foregroundRecoveryNotice,
-    foregroundSyncAcknowledgement,
-    pendingForegroundStopRunId,
-    registerForegroundRecovery,
-    requestBaselinePush,
-    writeToday,
-  ]);
-}
-
-/**
- * A cancelled recovery has no mounted owner that can safely replay work.
- * Discard its queued write before releasing the fence so the next owner cannot
- * observe and publish a stale pre-wake mutation.
- */
-export function releaseCancelledForegroundRecovery({
-  releaseFence,
-  discardQueuedWrite,
-}: CancelledForegroundReleaseOptions): void {
-  discardQueuedWrite();
-  releaseFence();
+  };
 }

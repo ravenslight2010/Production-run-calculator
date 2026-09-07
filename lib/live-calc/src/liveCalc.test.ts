@@ -23,7 +23,7 @@ describe("shared live calculation boundary", () => {
       mode: "dough",
       crustsPerCycle: 4,
       cycleSpeed: 20,
-    })).toBe(73.6);
+    })).toBe(80);
   });
 
   it("preserves the one-second client cadence floor", () => {

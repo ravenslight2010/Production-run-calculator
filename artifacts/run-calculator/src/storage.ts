@@ -64,10 +64,7 @@ import { MIX_SEED } from "./mixSeed";
 import {
   canonicalProfileKey,
   markProfileEdited,
-  markProfileForceEdited,
   markProfileDeleted,
-  flushProfileQueueStrict,
-  hasPendingProfileWrite,
 } from "./profileServerSync";
 import { localRunTemplates, replaceRunTemplates } from "./runTemplatesRepository";
 import {
@@ -151,88 +148,6 @@ import {
   getStoredResetEpoch as readBrowserResetEpoch,
 } from "./adapters/browserResetPersistence";
 import { browserStorage as localStorage } from "./adapters/browserRecordStore";
-import {
-  cachedProfileKeys,
-  deleteCachedProfile,
-  profileCacheIsActive,
-  readCachedProfileBlobs,
-  writeCachedProfileBlobs,
-} from "./profileCache";
-
-type ProfileBlobEntry = {
-  key: string;
-  kind: "dough" | "crust";
-  raw: string;
-};
-
-function profileBlobEntries(): ProfileBlobEntry[] {
-  if (profileCacheIsActive()) {
-    return cachedProfileKeys().flatMap((key) => {
-      const blobs = readCachedProfileBlobs(key);
-      return [
-        blobs.dough === null ? null : { key, kind: "dough" as const, raw: blobs.dough },
-        blobs.crust === null ? null : { key, kind: "crust" as const, raw: blobs.crust },
-      ].filter((entry): entry is ProfileBlobEntry => entry !== null);
-    });
-  }
-  const entries: ProfileBlobEntry[] = [];
-  for (let index = 0; index < localStorage.length; index++) {
-    const storageKey = localStorage.key(index);
-    if (!storageKey) continue;
-    const doughPrefix = "run-calc-profile-";
-    const crustPrefix = "run-calc-crust-profile-";
-    const kind = storageKey.startsWith(doughPrefix)
-      ? "dough"
-      : storageKey.startsWith(crustPrefix)
-        ? "crust"
-        : null;
-    if (!kind) continue;
-    const key = storageKey.slice(kind === "dough" ? doughPrefix.length : crustPrefix.length);
-    if (!key.includes("__")) continue;
-    const raw = localStorage.getItem(storageKey);
-    if (raw !== null) entries.push({ key, kind, raw });
-  }
-  return entries;
-}
-
-function writeProfileBlobEntry(entry: ProfileBlobEntry, raw: string): void {
-  writeCachedProfileBlobs(entry.key, { [entry.kind]: raw });
-  if (profileCacheIsActive()) return;
-  const prefix = entry.kind === "dough" ? "run-calc-profile-" : "run-calc-crust-profile-";
-  localStorage.setItem(`${prefix}${entry.key}`, raw);
-}
-
-function rewriteProfileBlobEntries(
-  rewrite: (value: Record<string, unknown>) => boolean,
-): void {
-  for (const entry of profileBlobEntries()) {
-    try {
-      const value = JSON.parse(entry.raw) as Record<string, unknown> | null;
-      if (!value || !rewrite(value)) continue;
-      writeProfileBlobEntry(entry, JSON.stringify(value));
-      markProfileEdited(entry.key);
-    } catch {
-      // One malformed legacy blob must not block the remaining profiles.
-    }
-  }
-}
-
-function readProfileBlob(key: string, kind: "dough" | "crust"): string | null {
-  if (profileCacheIsActive()) return readCachedProfileBlobs(key)[kind];
-  const split = key.split("__");
-  const brand = split[0] ?? "";
-  const flavor = split.slice(1).join("__");
-  return localStorage.getItem(kind === "dough" ? PROFILE_KEY(brand, flavor) : CRUST_PROFILE_KEY(brand, flavor));
-}
-
-function writeProfileBlob(key: string, kind: "dough" | "crust", raw: string): void {
-  writeCachedProfileBlobs(key, { [kind]: raw });
-  if (profileCacheIsActive()) return;
-  const split = key.split("__");
-  const brand = split[0] ?? "";
-  const flavor = split.slice(1).join("__");
-  localStorage.setItem(kind === "dough" ? PROFILE_KEY(brand, flavor) : CRUST_PROFILE_KEY(brand, flavor), raw);
-}
 
 export function loadList(key: string, fallback: string[]): string[] {
   try {
@@ -557,9 +472,10 @@ export function applyMachineTimeDefaultsHealIfNeeded(): string[] {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k?.startsWith("run-calc-run-")) keys.push(k);
+      // Machine times live in the main (dough) profile blob and per-run value
+      // blobs; crust profiles never carry them.
+      if (k && (k.startsWith("run-calc-profile-") || k.startsWith("run-calc-run-"))) keys.push(k);
     }
-    rewriteProfileBlobEntries(foldMachineTimeZeros);
     for (const k of keys) {
       try {
         const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
@@ -639,13 +555,12 @@ function normalizeIngredientFields(o: Record<string, unknown>): void {
 
 export function loadProfile(brand: string, flavor: string): FormValues | null {
   try {
-    const key = canonicalProfileKey(brand, flavor);
-    const raw = readProfileBlob(key, "dough");
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
     if (!raw) return null;
     const doughVals: Partial<FormValues> = JSON.parse(raw);
     let crustVals: Partial<FormValues> = {};
     try {
-      const crustRaw = readProfileBlob(key, "crust");
+      const crustRaw = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
       if (crustRaw) crustVals = JSON.parse(crustRaw);
     } catch {}
     const result = { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
@@ -680,13 +595,12 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
  */
 export function loadRawProfile(brand: string, flavor: string): Record<string, unknown> | null {
   try {
-    const key = canonicalProfileKey(brand, flavor);
-    const raw = readProfileBlob(key, "dough");
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
     if (!raw) return null;
     const dough = JSON.parse(raw) as Record<string, unknown>;
     let crust: Record<string, unknown> = {};
     try {
-      const crustRaw = readProfileBlob(key, "crust");
+      const crustRaw = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
       if (crustRaw) crust = JSON.parse(crustRaw) as Record<string, unknown>;
     } catch {}
     return { ...dough, ...crust };
@@ -814,7 +728,7 @@ export function backfillFromProfile(
 /** True when the stored profile for brand+flavor has real recipe/applicator data. */
 export function profileHasRealData(brand: string, flavor: string): boolean {
   try {
-    const raw = readProfileBlob(canonicalProfileKey(brand, flavor), "dough");
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
     if (!raw) return false;
     return profileObjHasRealData(JSON.parse(raw) as Record<string, unknown>);
   } catch {
@@ -910,16 +824,7 @@ export function profileWritesEnabled(): boolean {
   return profileWritesAllowed;
 }
 
-export type SaveProfileOptions = {
-  authoritative?: boolean;
-};
-
-export function saveProfile(
-  brand: string,
-  flavor: string,
-  values: FormValues,
-  options: SaveProfileOptions = {},
-): boolean {
+export function saveProfile(brand: string, flavor: string, values: FormValues): boolean {
   if (!profileWritesAllowed) return false;
   if (!brand && !flavor) return false;
   // Never persist a blank/default form as a brand+flavor profile. A profile only
@@ -938,7 +843,7 @@ export function saveProfile(
   // would erase _subTab from the blob, removing the cross-tablet sync anchor.
   let dough = rawDough;
   try {
-    const existingRaw = readProfileBlob(key, "dough");
+    const existingRaw = localStorage.getItem(PROFILE_KEY(brand, flavor));
     if (existingRaw) {
       const existing = JSON.parse(existingRaw) as Record<string, unknown>;
       const subTab = existing._subTab;
@@ -958,8 +863,8 @@ export function saveProfile(
   //      moved on (newer server copy adopted) → the open form is stale, don't
   //      republish it over the fresher data.
   try {
-    const storedDough = readProfileBlob(key, "dough");
-    const storedCrust = readProfileBlob(key, "crust");
+    const storedDough = localStorage.getItem(PROFILE_KEY(brand, flavor));
+    const storedCrust = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
     if (storedDough === dough && storedCrust === crust) return false;
     // A wake pull deleted this profile remotely. An old open form still holds
     // the exact blob loadProfile previously handed it, so treating that as a
@@ -989,35 +894,13 @@ export function saveProfile(
       return false;
     }
   } catch {}
-  try { writeProfileBlob(key, "dough", dough); } catch {}
-  try { writeProfileBlob(key, "crust", crust); } catch {}
+  try { localStorage.setItem(PROFILE_KEY(brand, flavor), dough); } catch {}
+  try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), crust); } catch {}
   const remotelyDeleted = loadRemotelyDeletedProfiles();
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
-  if (options.authoritative) markProfileForceEdited(key);
-  else markProfileEdited(key);
+  markProfileEdited(key);
   return true;
-}
-
-/**
- * Persist a deliberate manager edit and wait for the server to echo the exact
- * submitted profile values. A failed acknowledgement leaves the persisted
- * operation queued, so the editor can safely retry the same values.
- */
-export async function saveProfileAndWaitForServer(
-  brand: string,
-  flavor: string,
-  values: FormValues,
-): Promise<"saved" | "unchanged"> {
-  const key = canonicalProfileKey(brand, flavor);
-  const changed = saveProfile(brand, flavor, values, { authoritative: true });
-  // If a previous attempt failed after writing the same local values, promote
-  // its pending plain operation to an authoritative manager write so Retry
-  // does not get mistaken for an unchanged form.
-  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key);
-  if (!changed && !hasPendingProfileWrite(key)) return "unchanged";
-  await flushProfileQueueStrict();
-  return "saved";
 }
 
 /**
@@ -1039,17 +922,17 @@ export function saveProfileSubTab(
   if (!profileWritesAllowed) return;
   if (!brand && !flavor) return;
   const profileKey = canonicalProfileKey(brand, flavor);
-  // Embed in the dough profile blob so the server-pool sync distributes it.
-  // The old unscoped :subtab key is migration-only once the cache is active.
-  if (!profileCacheIsActive()) {
-    try { localStorage.setItem(profileKey + ":subtab", subTab); } catch {}
-  }
+  const subtabStorageKey = profileKey + ":subtab";
+  // 1. Fast-access local key for synchronous reads within this session.
+  try { localStorage.setItem(subtabStorageKey, subTab); } catch {}
+  // 2. Embed in the dough profile blob so the server-pool sync distributes it.
   try {
-    const raw = readProfileBlob(profileKey, "dough");
+    const doughKey = PROFILE_KEY(brand, flavor);
+    const raw = localStorage.getItem(doughKey);
     const blob: Record<string, unknown> = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
     if (blob._subTab !== subTab) {
       blob._subTab = subTab;
-      writeProfileBlob(profileKey, "dough", JSON.stringify(blob));
+      localStorage.setItem(doughKey, JSON.stringify(blob));
       // Trigger a server-pool push so other tablets receive the update.
       markProfileEdited(profileKey);
     }
@@ -1068,25 +951,21 @@ export function loadProfileSubTab(
   brand: string,
   flavor: string,
 ): "dough" | "crusts" | null {
-  const profileKey = canonicalProfileKey(brand, flavor);
-  if (!profileCacheIsActive()) {
-    try {
-      const v = localStorage.getItem(profileKey + ":subtab");
-      if (v === "dough" || v === "crusts") return v;
-    } catch { return null; }
-  }
+  const subtabStorageKey = canonicalProfileKey(brand, flavor) + ":subtab";
+  try {
+    const v = localStorage.getItem(subtabStorageKey);
+    if (v === "dough" || v === "crusts") return v;
+  } catch { return null; }
   // Fallback: read _subTab from the dough profile blob (set by server reconcile
   // on tablets that haven't toggled locally yet).
   try {
-    const raw = readProfileBlob(profileKey, "dough");
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
     if (raw) {
       const blob = JSON.parse(raw) as Record<string, unknown>;
       const embedded = blob._subTab;
       if (embedded === "dough" || embedded === "crusts") {
         // Seed the fast-access key so subsequent calls don't need to parse.
-        if (!profileCacheIsActive()) {
-          try { localStorage.setItem(profileKey + ":subtab", embedded); } catch {}
-        }
+        try { localStorage.setItem(subtabStorageKey, embedded); } catch {}
         return embedded;
       }
     }
@@ -1114,11 +993,11 @@ export function applyPackagingPatchToProfile(
   try {
     let existing: Record<string, unknown> = {};
     try {
-      const raw = readProfileBlob(canonicalProfileKey(brand, flavor), "dough");
+      const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
       if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
     } catch {}
     for (const k of keys) existing[k] = patch[k];
-    writeProfileBlob(canonicalProfileKey(brand, flavor), "dough", JSON.stringify(existing));
+    localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(existing));
     markProfileEdited(canonicalProfileKey(brand, flavor));
   } catch {}
 }
@@ -1282,10 +1161,16 @@ export function refreshProfilesFromNamedRecipes(
   if (byName.size === 0) return [];
   const nameField = kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
   const rowsField = kind === "dough" ? "doughRecipe" : "frontlineRecipe";
+  const prefix = "run-calc-profile-";
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(prefix)) keys.push(k);
+  }
   const touched: { brand: string; flavor: string }[] = [];
-  for (const entry of profileBlobEntries().filter((candidate) => candidate.kind === "dough")) {
+  for (const k of keys) {
     try {
-      const obj = JSON.parse(entry.raw) as
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as
         | Record<string, unknown>
         | null;
       if (!obj || typeof obj !== "object") continue;
@@ -1308,7 +1193,7 @@ export function refreshProfilesFromNamedRecipes(
       //     weights written before customer assignments were imported).
       //   Generic pool weight: backfill-only — fill a blank profile, never
       //     overwrite a value the operator or a prior import set.
-      const rest = entry.key;
+      const rest = k.slice(prefix.length);
       const sep = rest.indexOf("__");
       const profileBrand = sep >= 0 ? rest.slice(0, sep) : rest;
       const profileFlavor = sep >= 0 ? rest.slice(sep + 2) : "";
@@ -1335,8 +1220,8 @@ export function refreshProfilesFromNamedRecipes(
       if (rowsDiffer) obj[rowsField] = patch.rows.map((r) => ({ ...r }));
       if (weightDiffers) obj.targetDoughballWeight = effectiveWeight;
       if (trayDiffers) obj.doughballsPerTray = wantTray;
-      writeProfileBlobEntry(entry, JSON.stringify(obj));
-      markProfileEdited(entry.key);
+      localStorage.setItem(k, JSON.stringify(obj));
+      markProfileEdited(k.slice(prefix.length));
       touched.push({ brand: profileBrand, flavor: profileFlavor });
     } catch {
       // Skip an unreadable profile — never let one bad row block the fan-out.
@@ -1366,10 +1251,16 @@ export function refreshCheeseOrMixProfileRows(
   if (!profileWritesAllowed) return [];
   if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return [];
   const nameLc = targetName.trim().toLowerCase();
+  const prefixes = ["run-calc-profile-", "run-calc-crust-profile-"];
+  const keys: string[] = [];
   const touched: { brand: string; flavor: string }[] = [];
-  for (const entry of profileBlobEntries()) {
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && prefixes.some((p) => k.startsWith(p))) keys.push(k);
+  }
+  for (const k of keys) {
     try {
-      const obj = JSON.parse(entry.raw) as Record<string, unknown> | null;
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
       if (!obj || typeof obj !== "object") continue;
       let changed = false;
       for (const slot of [1, 2, 3, 4] as const) {
@@ -1394,12 +1285,14 @@ export function refreshCheeseOrMixProfileRows(
         changed = true;
       }
       if (changed) {
-        writeProfileBlobEntry(entry, JSON.stringify(obj));
-        markProfileEdited(entry.key);
-        const sep = entry.key.indexOf("__");
+        localStorage.setItem(k, JSON.stringify(obj));
+        const profilePrefix = prefixes.find((p) => k.startsWith(p)) ?? prefixes[0];
+        const profileKey = k.slice(profilePrefix.length);
+        markProfileEdited(profileKey);
+        const sep = profileKey.indexOf("__");
         touched.push({
-          brand: sep >= 0 ? entry.key.slice(0, sep) : entry.key,
-          flavor: sep >= 0 ? entry.key.slice(sep + 2) : "",
+          brand: sep >= 0 ? profileKey.slice(0, sep) : profileKey,
+          flavor: sep >= 0 ? profileKey.slice(sep + 2) : "",
         });
       }
     } catch {
@@ -1883,7 +1776,11 @@ export function applyIngredientMerge(map: MergeMap): void {
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (!k) continue;
-    if (k.startsWith(runPrefix)) {
+    if (
+      k.startsWith(runPrefix) ||
+      k.startsWith("run-calc-profile-") ||
+      k.startsWith("run-calc-crust-profile-")
+    ) {
       keysToRewrite.push(k);
     }
   }
@@ -1895,13 +1792,6 @@ export function applyIngredientMerge(map: MergeMap): void {
       }
     } catch {}
   }
-  rewriteProfileBlobEntries((obj) => {
-    const next = mergeSettingsObject(obj, map);
-    if (deepEqual(next, obj)) return false;
-    for (const key of Object.keys(obj)) delete obj[key];
-    Object.assign(obj, next);
-    return true;
-  });
 }
 
 // Per-category storage wiring for a RECIPE-NAME merge (see ./mergeRecipeNames).
@@ -1996,7 +1886,11 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (!k) continue;
-    if (k.startsWith(runPrefix)) {
+    if (
+      k.startsWith(runPrefix) ||
+      k.startsWith("run-calc-profile-") ||
+      k.startsWith("run-calc-crust-profile-")
+    ) {
       keysToRewrite.push(k);
     }
   }
@@ -2016,13 +1910,6 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
       }
     } catch {}
   }
-  rewriteProfileBlobEntries((obj) => {
-    const next = rewrite(obj);
-    if (next === obj) return false;
-    for (const key of Object.keys(obj)) delete obj[key];
-    Object.assign(obj, next);
-    return true;
-  });
   return affectedRunIds;
 }
 
@@ -2073,7 +1960,11 @@ export function clearRecipeNameSelections(
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (!k) continue;
-    if (k.startsWith(runPrefix)) {
+    if (
+      k.startsWith(runPrefix) ||
+      k.startsWith("run-calc-profile-") ||
+      k.startsWith("run-calc-crust-profile-")
+    ) {
       keysToRewrite.push(k);
     }
   }
@@ -2093,13 +1984,6 @@ export function clearRecipeNameSelections(
       }
     } catch {}
   }
-  rewriteProfileBlobEntries((obj) => {
-    const next = clear(obj);
-    if (next === obj) return false;
-    for (const key of Object.keys(obj)) delete obj[key];
-    Object.assign(obj, next);
-    return true;
-  });
   return affectedRunIds;
 }
 
@@ -2492,9 +2376,8 @@ export function applyMixSlotRecategorizeIfNeeded(): void {
         // crust fields, so saveProfile would overwrite the crust profile with
         // an empty extract). Mirrors applyPackagingPatchToProfile.
         try {
-          const key = canonicalProfileKey(brand, flavor);
-          writeProfileBlob(key, "dough", JSON.stringify(rec));
-          markProfileEdited(key);
+          localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(rec));
+          markProfileEdited(canonicalProfileKey(brand, flavor));
         } catch {}
       }
     }
@@ -2585,9 +2468,8 @@ export function applyPoolAwareSlotHealIfNeeded(
         // Targeted dough-blob write (NOT saveProfile — the loaded blob has no
         // crust fields, so saveProfile would clobber the crust profile).
         try {
-          const key = canonicalProfileKey(brand, flavor);
-          writeProfileBlob(key, "dough", JSON.stringify(values));
-          markProfileEdited(key);
+          localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(values));
+          markProfileEdited(canonicalProfileKey(brand, flavor));
         } catch {}
       }
     }
@@ -2670,9 +2552,8 @@ export function relinkCheeseSlotsToMixInProfiles(recipeName: string): number {
         }
         if (!changed) continue;
         try {
-          const key = canonicalProfileKey(brand, flavor);
-          writeProfileBlob(key, "dough", JSON.stringify(vals));
-          markProfileEdited(key);
+          localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(vals));
+          markProfileEdited(canonicalProfileKey(brand, flavor));
           relinked++;
         } catch {}
       }
@@ -2755,15 +2636,19 @@ export function deleteProfilesForBrand(brand: string): void {
   if (typeof localStorage === "undefined") return;
   const brandLc = brand.toLowerCase().trim();
   if (!brandLc) return;
-  const deletedKeys = new Set(
-    profileBlobEntries()
-      .map((entry) => entry.key)
-      .filter((key) => key.startsWith(`${brandLc}__`)),
-  );
-  for (const key of deletedKeys) {
-    deleteCachedProfile(key);
-    localStorage.removeItem(`run-calc-profile-${key}`);
-    localStorage.removeItem(`run-calc-crust-profile-${key}`);
+  const doughPrefix = `run-calc-profile-${brandLc}__`;
+  const crustPrefix = `run-calc-crust-profile-${brandLc}__`;
+  const toRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (k.startsWith(doughPrefix) || k.startsWith(crustPrefix)) toRemove.push(k);
+  }
+  const deletedKeys = new Set<string>();
+  for (const k of toRemove) {
+    try { localStorage.removeItem(k); } catch {}
+    if (k.startsWith(doughPrefix)) deletedKeys.add(k.slice("run-calc-profile-".length));
+    else deletedKeys.add(k.slice("run-calc-crust-profile-".length));
   }
   // Propagate to the factory-wide server pool so the deleted brand's profiles
   // disappear everywhere (and can't be re-adopted on the next reconcile).
@@ -2783,11 +2668,25 @@ export function rewriteDieTypeInProfiles(oldName: string, newName: string): void
   const from = oldName.trim();
   const to = newName.trim();
   if (!from || !to || from === to) return;
-  rewriteProfileBlobEntries((obj) => {
-    if (typeof obj.dieType !== "string" || obj.dieType.trim() !== from) return false;
-    obj.dieType = to;
-    return true;
-  });
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (obj && typeof obj.dieType === "string" && obj.dieType.trim() === from) {
+        obj.dieType = to;
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
+    }
+  }
 }
 
 /**
@@ -2802,16 +2701,32 @@ export function rewritePepTypeInProfiles(oldName: string, newName: string): void
   const to = newName.trim();
   if (!from || !to || from === to) return;
   const pepFields = ["pep1Type", "pep1TypeB", "pep2Type", "pep2TypeB"] as const;
-  rewriteProfileBlobEntries((obj) => {
-    let changed = false;
-    for (const field of pepFields) {
-      if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
-        obj[field] = to;
-        changed = true;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj) continue;
+      let changed = false;
+      for (const field of pepFields) {
+        if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
+          obj[field] = to;
+          changed = true;
+        }
       }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
     }
-    return changed;
-  });
+  }
 }
 
 /**
@@ -2826,16 +2741,32 @@ export function rewriteAppTypeInProfiles(oldName: string, newName: string): void
   const to = newName.trim();
   if (!from || !to || from === to) return;
   const appFields = ["app1Type", "app2Type", "app3Type", "app4Type"] as const;
-  rewriteProfileBlobEntries((obj) => {
-    let changed = false;
-    for (const field of appFields) {
-      if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
-        obj[field] = to;
-        changed = true;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj) continue;
+      let changed = false;
+      for (const field of appFields) {
+        if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
+          obj[field] = to;
+          changed = true;
+        }
       }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
     }
-    return changed;
-  });
+  }
 }
 
 /**
@@ -2866,16 +2797,32 @@ export function rewriteRecipeNameInProfiles(
       : kind === "sauce"
         ? ["frontlineRecipeName"]
         : ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"];
-  rewriteProfileBlobEntries((obj) => {
-    let changed = false;
-    for (const field of fields) {
-      if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
-        obj[field] = to;
-        changed = true;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj) continue;
+      let changed = false;
+      for (const field of fields) {
+        if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
+          obj[field] = to;
+          changed = true;
+        }
       }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
     }
-    return changed;
-  });
+  }
 }
 
 /**
@@ -2888,7 +2835,6 @@ export function deleteProfileEntry(brand: string, flavor: string): void {
   if (typeof localStorage === "undefined") return;
   try { localStorage.removeItem(PROFILE_KEY(brand, flavor)); } catch {}
   try { localStorage.removeItem(CRUST_PROFILE_KEY(brand, flavor)); } catch {}
-  deleteCachedProfile(canonicalProfileKey(brand, flavor));
   markProfileDeleted(canonicalProfileKey(brand, flavor));
 }
 
@@ -2912,19 +2858,26 @@ export function purgeOrphanedProfilesIfNeeded(): void {
     const brands = loadList(BRANDS_KEY, []);
     if (brands.length === 0) return; // defer until brands are seeded/loaded
     const known = new Set(brands.map((b) => b.toLowerCase().trim()));
-    const orphans = new Set<string>();
-    for (const entry of profileBlobEntries()) {
-      const sep = entry.key.indexOf("__");
+    const orphans: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      let rest: string | null = null;
+      if (k.startsWith("run-calc-profile-")) rest = k.slice("run-calc-profile-".length);
+      else if (k.startsWith("run-calc-crust-profile-")) rest = k.slice("run-calc-crust-profile-".length);
+      if (rest === null) continue;
+      const sep = rest.indexOf("__");
       if (sep < 0) continue;
-      const brandLc = entry.key.slice(0, sep);
-      if (!known.has(brandLc)) orphans.add(entry.key);
+      const brandLc = rest.slice(0, sep);
+      if (!known.has(brandLc)) orphans.push(k);
     }
-    for (const key of orphans) {
-      deleteCachedProfile(key);
-      localStorage.removeItem(`run-calc-profile-${key}`);
-      localStorage.removeItem(`run-calc-crust-profile-${key}`);
+    const deletedKeys = new Set<string>();
+    for (const k of orphans) {
+      try { localStorage.removeItem(k); } catch {}
+      if (k.startsWith("run-calc-crust-profile-")) deletedKeys.add(k.slice("run-calc-crust-profile-".length));
+      else deletedKeys.add(k.slice("run-calc-profile-".length));
     }
-    for (const key of orphans) markProfileDeleted(key);
+    for (const key of deletedKeys) markProfileDeleted(key);
     localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
   } catch {}
 }
@@ -3183,12 +3136,15 @@ export function existingDieTypesForImport(): string[] {
 export function scanProfileDieTypes(): string[] {
   const raw: string[] = [];
   try {
-    for (const entry of profileBlobEntries()) {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
       // dieType normally lives in the main profile object (run-calc-profile-*),
       // but scan crust profiles (run-calc-crust-profile-*) too so legacy/mixed
       // saves are still recovered.
+      if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+        continue;
       try {
-        const obj = JSON.parse(entry.raw) as Record<string, unknown> | null;
+        const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
         const dt = obj && typeof obj.dieType === "string" ? obj.dieType.trim() : "";
         if (dt) raw.push(dt);
       } catch {
@@ -3255,9 +3211,12 @@ export function healPackagingFromProfiles(
     if (t) raw.push(t);
   }
   try {
-    for (const entry of profileBlobEntries()) {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+        continue;
       try {
-        const obj = JSON.parse(entry.raw) as Record<string, unknown> | null;
+        const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
         const val = obj && typeof obj[field] === "string" ? (obj[field] as string).trim() : "";
         if (val) raw.push(val);
       } catch {

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-# Read-only validation of GitHub's native main-branch protection rule and
-# applicable main-branch rulesets.
+# Read-only validation of GitHub's native main-branch protection rule.
 # Authentication is delegated to the GitHub CLI; this script never reads,
 # stores, or prints credentials.
 
@@ -21,432 +20,8 @@ fail() {
   exit 1
 }
 
-workspace_root="${CHECK_REPOSITORY_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-policy_file="$workspace_root/.github/repository-policy.md"
-ci_workflow="$workspace_root/.github/workflows/ci.yml"
-
-check_required_workflow_contract() {
-  local required_check
-  local job_name
-  local policy_check_count
-  local ci_job_count
-  local policy_checks_output
-  local ci_job_names_output
-
-  [[ -f "$policy_file" ]] || fail \
-    "required-check contract file is missing: ${policy_file}"
-  [[ -f "$ci_workflow" ]] || fail \
-    "CI workflow for required-check contract is missing: ${ci_workflow}"
-
-  policy_checks_output="$(
-    awk '
-      $0 == "The required GitHub Actions checks are:" {
-        in_required_checks = 1
-        next
-      }
-      in_required_checks && $0 ~ /^Each required check must be reported/ {
-        exit
-      }
-      in_required_checks && $0 ~ /^- `[^`]+`$/ {
-        check = $0
-        sub(/^- `/, "", check)
-        sub(/`$/, "", check)
-        print check
-      }
-    ' "$policy_file"
-  )"
-  mapfile -t required_checks < <(printf '%s\n' "$policy_checks_output" | sed '/^$/d')
-  policy_check_count="${#required_checks[@]}"
-  [[ "$policy_check_count" -eq 6 ]] || fail \
-    "required-check contract in ${policy_file} must list exactly six checks; found ${policy_check_count}"
-
-  declare -A policy_check_names=()
-  for required_check in "${required_checks[@]}"; do
-    [[ -z "${policy_check_names[$required_check]+x}" ]] || fail \
-      "required-check contract in ${policy_file} lists '${required_check}' more than once"
-    policy_check_names["$required_check"]=1
-  done
-
-  if ! ci_job_names_output="$(
-    awk '
-      # This is intentionally a bounded parser for the job/name shape used by
-      # this repository. It is not a general YAML parser. Any shape it cannot
-      # interpret is reported instead of being treated as a missing job.
-      function trim(value) {
-        sub(/^[[:space:]]+/, "", value)
-        sub(/[[:space:]]+$/, "", value)
-        return value
-      }
-
-      function strip_comment(value,    i, character, quote, escaped) {
-        quote = ""
-        escaped = 0
-        for (i = 1; i <= length(value); i++) {
-          character = substr(value, i, 1)
-          if (quote == "\"") {
-            if (escaped) {
-              escaped = 0
-            } else if (character == "\\") {
-              escaped = 1
-            } else if (character == "\"") {
-              quote = ""
-            }
-          } else if (quote == "\047") {
-            if (character == "\047" && substr(value, i + 1, 1) == "\047") {
-              i++
-            } else if (character == "\047") {
-              quote = ""
-            }
-          } else if (character == "\"" || character == "\047") {
-            quote = character
-          } else if (character == "#" &&
-                     (i == 1 || substr(value, i - 1, 1) ~ /[[:space:]]/)) {
-            return substr(value, 1, i - 1)
-          }
-        }
-        return value
-      }
-
-      # Sets parsed_key and parsed_value for a mapping line at the requested
-      # indentation. Quoted keys are decoded just enough to validate job IDs.
-      function parse_mapping(line, indentation,    rest, i, character,
-                             quote, escaped, colon, key, value) {
-        parsed_key = ""
-        parsed_value = ""
-        if (substr(line, 1, indentation) != sprintf("%" indentation "s", "")) {
-          return 0
-        }
-        rest = substr(line, indentation + 1)
-        quote = ""
-        escaped = 0
-        colon = 0
-        for (i = 1; i <= length(rest); i++) {
-          character = substr(rest, i, 1)
-          if (quote == "\"") {
-            if (escaped) {
-              escaped = 0
-            } else if (character == "\\") {
-              escaped = 1
-            } else if (character == "\"") {
-              quote = ""
-            }
-          } else if (quote == "\047") {
-            if (character == "\047" && substr(rest, i + 1, 1) == "\047") {
-              i++
-            } else if (character == "\047") {
-              quote = ""
-            }
-          } else if (character == "\"" || character == "\047") {
-            quote = character
-          } else if (character == ":") {
-            colon = i
-            break
-          }
-        }
-        if (colon == 0 || quote != "") {
-          return 0
-        }
-
-        key = trim(substr(rest, 1, colon - 1))
-        value = trim(substr(rest, colon + 1))
-        if (key ~ /^\047.*\047$/) {
-          if (key !~ /^\047([^\047]|\047\047)*\047$/) {
-            return 0
-          }
-          sub(/^\047/, "", key)
-          sub(/\047$/, "", key)
-          gsub(/\047\047/, "\047", key)
-        } else if (key ~ /^".*"$/) {
-          if (key !~ /^"([^"\\]|\\.)*"$/) {
-            return 0
-          }
-          sub(/^"/, "", key)
-          sub(/"$/, "", key)
-          gsub(/\\"/, "\"", key)
-          gsub(/\\\\/, "\\", key)
-        } else if (key !~ /^[[:alpha:]_][[:alnum:]_-]*$/) {
-          return 0
-        }
-        parsed_key = key
-        parsed_value = value
-        return 1
-      }
-
-      # Sets decoded_value for a scalar that is either plain or one-line
-      # quoted. Block scalars are rejected because this parser cannot safely
-      # associate their continuation lines with a job name.
-      function decode_scalar(value,    first, last) {
-        decoded_value = trim(value)
-        if (decoded_value == "" ||
-            decoded_value == ">" || decoded_value == "|" ||
-            decoded_value ~ /^>[+-]$/ || decoded_value ~ /^\|[+-]$/) {
-          return 0
-        }
-        first = substr(decoded_value, 1, 1)
-        last = substr(decoded_value, length(decoded_value), 1)
-        if (first == "\047" || first == "\"") {
-          if (last != first) {
-            return 0
-          }
-          if (first == "\047") {
-            if (decoded_value !~ /^\047([^\047]|\047\047)*\047$/) {
-              return 0
-            }
-            sub(/^\047/, "", decoded_value)
-            sub(/\047$/, "", decoded_value)
-            gsub(/\047\047/, "\047", decoded_value)
-          } else {
-            if (decoded_value !~ /^"([^"\\]|\\.)*"$/) {
-              return 0
-            }
-            sub(/^"/, "", decoded_value)
-            sub(/"$/, "", decoded_value)
-            gsub(/\\"/, "\"", decoded_value)
-            gsub(/\\\\/, "\\", decoded_value)
-          }
-        } else if (first ~ /[!&*{}\[\],]/) {
-          return 0
-        }
-        return decoded_value != ""
-      }
-
-      function unsupported(reason) {
-        printf "line %d: %s\n", NR, reason
-        parse_failed = 1
-        exit 2
-      }
-
-      function finish_job() {
-        if (current_job_name != "") {
-          print current_job_name
-        }
-        current_job_name = ""
-        current_job_name_seen = 0
-      }
-
-      {
-        line = $0
-        sub(/\r$/, "", line)
-        if (line ~ /^[\t]/) {
-          unsupported("tabs in indentation are not supported")
-        }
-        line = strip_comment(line)
-        if (line ~ /^[[:space:]]*$/) {
-          next
-        }
-
-        if (!in_jobs) {
-          if (parse_mapping(line, 0) && parsed_key == "jobs") {
-            if (parsed_value != "") {
-              unsupported("the top-level jobs mapping must not have an inline value")
-            }
-            in_jobs = 1
-            next
-          }
-          next
-        }
-
-        if (line !~ /^[[:space:]]/) {
-          finish_job()
-          in_jobs = 0
-          next
-        }
-        if (line ~ /^  [^[:space:]]/) {
-          if (!parse_mapping(line, 2) || parsed_value != "") {
-            unsupported("job entries must use an unquoted or quoted job ID followed by an empty mapping value")
-          }
-          finish_job()
-          current_job = parsed_key
-          next
-        }
-        if (line ~ /^ [^[:space:]]/) {
-          unsupported("job entries must be indented by exactly two spaces")
-        }
-        if (line ~ /^    [^[:space:]]/ && parse_mapping(line, 4)) {
-          if (parsed_key == "name") {
-            if (current_job == "") {
-              unsupported("a job name was found before a job ID")
-            }
-            if (current_job_name_seen) {
-              unsupported("a job cannot define name more than once")
-            }
-            if (!decode_scalar(parsed_value)) {
-              unsupported("job name must be a one-line plain or quoted scalar")
-            }
-            current_job_name = decoded_value
-            current_job_name_seen = 1
-          }
-          next
-        }
-      }
-
-      END {
-        if (parse_failed) {
-          exit 2
-        }
-        if (!in_jobs) {
-          print "the workflow does not contain a top-level jobs mapping"
-          exit 2
-        }
-        finish_job()
-      }
-    ' "$ci_workflow"
-  )"; then
-    fail "unsupported CI workflow layout in ${ci_workflow}: ${ci_job_names_output}"
-  fi
-  mapfile -t ci_job_names < <(printf '%s\n' "$ci_job_names_output" | sed '/^$/d')
-  ci_job_count="${#ci_job_names[@]}"
-  (( ci_job_count > 0 )) || fail \
-    "required-check contract could not find any named jobs in ${ci_workflow}"
-
-  declare -A ci_job_name_counts=()
-  for job_name in "${ci_job_names[@]}"; do
-    ci_job_name_counts["$job_name"]=$(( ${ci_job_name_counts[$job_name]:-0} + 1 ))
-  done
-  for job_name in "${!ci_job_name_counts[@]}"; do
-    [[ "${ci_job_name_counts[$job_name]}" -eq 1 ]] || fail \
-      "required-check contract cannot map duplicate CI job name '${job_name}' in ${ci_workflow}"
-  done
-
-  mapfile -t sorted_required_checks < <(
-    printf '%s\n' "${required_checks[@]}" | LC_ALL=C sort
-  )
-  for required_check in "${sorted_required_checks[@]}"; do
-    [[ -n "${ci_job_name_counts[$required_check]+x}" ]] || fail \
-      "required check '${required_check}' from ${policy_file} has no matching named job in ${ci_workflow}; if the job was renamed, update the policy contract in the same change"
-  done
-}
-
-github_actions_app_id=15368
-expected_checks=()
-
-compare_required_checks() {
-  local source_label="$1"
-  local mismatch_prefix="$2"
-  local index
-
-  if [[ "${#actual_checks[@]}" -ne "${#expected_checks[@]}" ]]; then
-    fail "${mismatch_prefix}: expected exactly ${#expected_checks[@]} GitHub Actions checks, got ${#actual_checks[@]}"
-  fi
-  for index in "${!expected_checks[@]}"; do
-    if [[ "${actual_checks[$index]}" != "${expected_checks[$index]}" ]]; then
-      if [[ "$source_label" == "classic protection" ]]; then
-        fail "${mismatch_prefix}[${index}]: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
-      fi
-      fail "${source_label} required check ${index}: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
-    fi
-  done
-}
-
 protection_endpoint() {
   printf 'repos/%s/branches/main/protection\n' "$repo"
-}
-
-rulesets_endpoint() {
-  printf 'repos/%s/rulesets?includes_parents=true&per_page=100\n' "$repo"
-}
-
-check_main_rulesets() {
-  local rulesets_response
-  local applicable_rulesets
-  local applicable_count
-  local ruleset_check_rule_count
-  local ruleset_check_count
-  local ruleset_checks_output
-  local ruleset_index
-  local ruleset_check
-  local check_name
-  local check_app_id
-
-  if ! rulesets_response=$(gh api \
-    --method GET \
-    --header 'Accept: application/vnd.github+json' \
-    --header 'X-GitHub-Api-Version: 2022-11-28' \
-    --paginate \
-    --slurp \
-    "$(rulesets_endpoint)" 2>/dev/null); then
-    fail "Ruleset verification unavailable for ${repo}:main; check GitHub CLI authentication and repository access"
-  fi
-
-  if ! applicable_rulesets=$(jq -c '
-    def is_main_ref:
-      . == "main"
-      or . == "refs/heads/main"
-      or . == "~DEFAULT_BRANCH"
-      or . == "~ALL"
-      or . == "*";
-    def applies_to_main:
-      (.conditions.ref_name // {}) as $ref
-      | ($ref.include // []) as $include
-      | ($ref.exclude // []) as $exclude
-      | (($include | length) == 0 or any($include[]; is_main_ref))
-      and (any($exclude[]; is_main_ref) | not);
-    if type == "array" and length > 0 and (.[0] | type == "array")
-    then add
-    else .
-    end
-    | [
-        .[]?
-        | select((.target // "") == "branch")
-        | select((.enforcement // "") == "active")
-        | select(applies_to_main)
-      ]
-  ' <<< "$rulesets_response"); then
-    fail "Ruleset verification unavailable for ${repo}:main; GitHub returned an unreadable ruleset result"
-  fi
-
-  applicable_count=$(jq 'length' <<< "$applicable_rulesets")
-  if [[ "$applicable_count" -eq 0 ]]; then
-    printf 'Ruleset verification: no active main-branch ruleset is configured for %s:main.\n' "$repo"
-    return
-  fi
-
-  ruleset_check_rule_count=$(jq '
-    [
-      .[] | .rules[]?
-      | select((.type // "") == "required_status_checks")
-    ] | length
-  ' <<< "$applicable_rulesets")
-  if [[ "$ruleset_check_rule_count" -eq 0 ]]; then
-    printf 'Ruleset verification: %s active main-branch ruleset(s) found; none contains required status checks.\n' \
-      "$applicable_count"
-    return
-  fi
-
-  ruleset_checks_output=$(jq -r '
-    [
-      .[] | .rules[]?
-      | select((.type // "") == "required_status_checks")
-      | .parameters.required_status_checks[]?
-      | [(.context // ""), ((.integration_id // "null") | tostring)]
-    ]
-    | unique
-    | sort_by(.[0], .[1])
-    | .[]
-    | @tsv
-  ' <<< "$applicable_rulesets")
-  mapfile -t ruleset_checks < <(printf '%s\n' "$ruleset_checks_output" | sed '/^$/d')
-  actual_checks=("${ruleset_checks[@]}")
-  ruleset_check_count="${#actual_checks[@]}"
-  [[ "$ruleset_check_count" -gt 0 ]] || \
-    fail "Ruleset verification failed for ${repo}:main; a required status-check rule has no checks"
-
-  compare_required_checks \
-    "ruleset" \
-    "main ruleset field required_status_checks.checks"
-
-  for ruleset_index in "${!actual_checks[@]}"; do
-    ruleset_check="${actual_checks[$ruleset_index]}"
-    check_name="${ruleset_check%%$'\t'*}"
-    check_app_id="${ruleset_check#*$'\t'}"
-    [[ -n "$check_name" ]] || \
-      fail "main ruleset field required_status_checks.checks[${ruleset_index}]: required check name is empty"
-    [[ "$check_app_id" == "$github_actions_app_id" ]] || \
-      fail "main ruleset field required_status_checks.checks[${ruleset_index}]: expected GitHub Actions app ${github_actions_app_id}, got ${check_app_id}"
-  done
-
-  printf 'Ruleset verification: verified %s active main-branch ruleset(s) with the six-check GitHub Actions contract.\n' \
-    "$applicable_count"
 }
 
 repo="${GITHUB_REPOSITORY:-}"
@@ -477,10 +52,6 @@ done
 
 [[ "$repo" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] \
   || fail "supply a repository as OWNER/REPOSITORY with --repo or GITHUB_REPOSITORY"
-check_required_workflow_contract
-for required_check in "${sorted_required_checks[@]}"; do
-  expected_checks+=("${required_check}"$'\t'"${github_actions_app_id}")
-done
 command -v gh >/dev/null 2>&1 \
   || fail "the GitHub CLI (gh) is required; authenticate it without putting credentials in the repository"
 
@@ -491,7 +62,7 @@ if ! enabled=$(gh api \
   --header 'X-GitHub-Api-Version: 2022-11-28' \
   --jq '.enabled // false' \
   "repos/${repo}/branches/main/protection/required_signatures" 2>/dev/null); then
-  fail "Classic branch protection verification unavailable for ${repo}:main; could not read required-signatures protection; check GitHub CLI authentication and repository access"
+  fail "could not read required-signatures protection for ${repo}:main; check GitHub CLI authentication and repository access"
 fi
 
 [[ "$enabled" == "true" ]] \
@@ -509,8 +80,8 @@ if ! protection_values=$(gh api \
       ["required_pull_request_reviews.dismiss_stale_reviews", ((.required_pull_request_reviews.dismiss_stale_reviews // false) | tostring)],
       ["enforce_admins.enabled", ((.enforce_admins.enabled // false) | tostring)],
       ["required_conversation_resolution.enabled", ((.required_conversation_resolution.enabled // false) | tostring)],
-      ["allow_force_pushes", ((.allow_force_pushes.enabled // false) | tostring)],
-      ["allow_deletions", ((.allow_deletions.enabled // false) | tostring)]
+      ["allow_force_pushes", ((.allow_force_pushes // false) | tostring)],
+      ["allow_deletions", ((.allow_deletions // false) | tostring)]
     ]
     + (
       (.required_status_checks.checks // [])
@@ -521,7 +92,7 @@ if ! protection_values=$(gh api \
     | @tsv
   ' \
   "$(protection_endpoint)" 2>/dev/null); then
-  fail "Classic branch protection verification unavailable for ${repo}:main; could not read branch protection; check GitHub CLI authentication and repository access"
+  fail "could not read branch protection for ${repo}:main; check GitHub CLI authentication and repository access"
 fi
 
 declare -A actual_values=()
@@ -539,8 +110,8 @@ expected_fields=(
   'required_status_checks.strict=true'
   'required_pull_request_reviews.required_approving_review_count=1'
   'required_pull_request_reviews.dismiss_stale_reviews=true'
-  'enforce_admins.enabled=false'
-   'required_conversation_resolution.enabled=false'
+  'enforce_admins.enabled=true'
+  'required_conversation_resolution.enabled=true'
   'allow_force_pushes=false'
   'allow_deletions=false'
 )
@@ -552,10 +123,22 @@ for expected_field in "${expected_fields[@]}"; do
     fail "main protection field ${field}: expected ${expected}, got ${actual}"
 done
 
-compare_required_checks \
-  "classic protection" \
-  "main protection field required_status_checks.checks"
+expected_checks=(
+  $'API tests (Postgres)\t15368'
+  $'Build (web + API)\t15368'
+  $'Desktop and phone department journey\t15368'
+  $'Docker image\t15368'
+  $'Informational security audit (high severity; registry best-effort)\t15368'
+  $'Release gates and retained standard evidence\t15368'
+  $'Typecheck\t15368'
+  $'Unit tests (web + libs)\t15368'
+)
+if [[ "${#actual_checks[@]}" -ne "${#expected_checks[@]}" ]]; then
+  fail "main protection field required_status_checks.checks: expected exactly ${#expected_checks[@]} GitHub Actions checks, got ${#actual_checks[@]}"
+fi
+for index in "${!expected_checks[@]}"; do
+  [[ "${actual_checks[$index]}" == "${expected_checks[$index]}" ]] || \
+    fail "main protection field required_status_checks.checks[${index}]: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
+done
 
-printf 'Classic branch protection: verified for %s:main.\n' "$repo"
-check_main_rulesets
-printf 'GitHub policy active: %s:main requires signed commits, pull-request review, and six required checks.\n' "$repo"
+printf 'GitHub policy active: %s:main requires signed commits and complete branch protection.\n' "$repo"

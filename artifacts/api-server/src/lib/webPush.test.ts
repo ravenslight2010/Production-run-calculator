@@ -6,6 +6,14 @@ const mocks = vi.hoisted(() => ({
   elapsed: vi.fn(),
 }));
 
+const {
+  alertCandidates,
+  deferredCandidate,
+  freezerCandidates,
+  pendingFreezerArms,
+  scheduledEvaluationIdempotencyKey,
+} = await import("./webPush");
+
 vi.mock("@workspace/db", () => ({
   db: {},
   dailySyncTable: {}, usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
@@ -56,7 +64,10 @@ describe("server web-push alert candidates", () => {
 
   it("uses bounded opaque stable ids for canonical timing milestones", () => {
     mocks.calc.mockReturnValue({ runId: "customer-visible-label", calc: { ppm: 20, adjustedTimeSec: 900, pressDone: true, timePerBatchSec: 0, pressCasesLeft: 0 } });
-    const data = { dayState: { currentIndex: 0, runs: [{ id: "customer-visible-label", startedAt: 1 }] }, runValues: { "customer-visible-label": { freezerTime: 0 } } };
+    const data = {
+      dayState: { currentIndex: 1, runs: [{ id: "old", startedAt: 100, endedAt: 1_000 }, { id: "current", startedAt: 2_000 }] },
+      runValues: { old: { freezerTime: 1 }, current: { freezerTime: 0 } },
+    };
     const alerts = alertCandidates(data, "2026-01-01", 100_000);
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ kind: "fifteenMin" });
@@ -67,7 +78,7 @@ describe("server web-push alert candidates", () => {
   it("uses pause-aware shared elapsed time for batches and changes identity for a replacement run", () => {
     mocks.elapsed.mockReturnValue(2_000);
     mocks.calc.mockReturnValue({ runId: "first", calc: { ppm: 20, adjustedTimeSec: 2_000, pressDone: false, timePerBatchSec: 1, pressCasesLeft: 99 } });
-    const first = { dayState: { currentIndex: 0, runs: [{ id: "first", startedAt: 1 }] }, runValues: { first: { freezerTime: 0 } } };
+    const first = scheduledEvaluationIdempotencyKey("2026-01-01", 120_001, 60_000);
     expect(alertCandidates(first, "2026-01-01", 100_000).some((a) => a.kind === "batchDue")).toBe(true);
     expect(mocks.elapsed).toHaveBeenCalled();
     expect(alertCandidates({ ...first, dayState: { currentIndex: 0, runs: [{ id: "first", startedAt: 1, pausedAt: 50_000 }] } }, "2026-01-01", 100_000)).toEqual([]);
@@ -78,7 +89,7 @@ describe("server web-push alert candidates", () => {
 
   it("finds a freezer-empty milestone for an ended non-current run", () => {
     const data = {
-      dayState: { currentIndex: 1, runs: [{ id: "old", endedAt: 1_000 }, { id: "current", startedAt: 2_000 }] },
+      dayState: { currentIndex: 1, runs: [{ id: "old", startedAt: 100, endedAt: 1_000 }, { id: "current", startedAt: 2_000 }] },
       runValues: { old: { freezerTime: 1 }, current: { freezerTime: 0 } },
     };
     expect(freezerCandidates(data, "2026-01-01", 62_000)).toEqual([

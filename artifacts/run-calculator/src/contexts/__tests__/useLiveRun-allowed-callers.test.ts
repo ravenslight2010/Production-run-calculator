@@ -152,7 +152,7 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
       "../../../src/pages/home.tsx",
     );
 
-    const lines = readFileSync(homePath, "utf8").split("\n");
+        const lines = content.split("\n");
 
     // Regex to detect a top-level function declaration in two forms:
     //   1. `function FunctionName(` or `function FunctionName<`
@@ -164,10 +164,10 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     const MEMO_FUNC_RE = /^const \w+ = \w+\(function ([A-Z][A-Za-z0-9]*)[\s<(]/;
 
     let currentFunction: string | null = null;
-    const violations: { line: number; fn: string }[] = [];
+      const violations: { file: string; lines: number[] }[] = [];
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
 
       // Track the current enclosing function (plain decl or memo-wrapped).
       const funcMatch = line.match(FUNC_DECL_RE) ?? line.match(MEMO_FUNC_RE);
@@ -188,12 +188,12 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     }
 
     if (violations.length > 0) {
-      const detail = violations
-        .map(
-          ({ line, fn }) =>
-            `  Line ${line}: useLiveRun() called inside "${fn}" — add it to ALLOWED_CALLERS if intentional`,
-        )
-        .join("\n");
+        const detail = violations
+          .map(
+            ({ file, lines }) =>
+              `  src/${file}  (line${lines.length > 1 ? "s" : ""} ${lines.join(", ")})`,
+          )
+          .join("\n");
 
       expect.fail(
         `Found ${violations.length} unexpected useLiveRun() call(s) in home.tsx:\n${detail}\n\n` +

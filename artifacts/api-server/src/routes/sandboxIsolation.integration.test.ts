@@ -150,6 +150,9 @@ beforeAll(async () => {
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);
@@ -587,7 +590,7 @@ describe("ISOLATION MATRIX — live ↔ sandbox data families", () => {
       ["/api/spec-sheets", "GET"],
     ] as const;
     for (const [pathName, method] of operatorReads) {
-      const response = await req(LIVE_OPERATOR, method, pathName);
+      const response = await req(LIVE_OPERATOR, "POST", pathName, body);
       expect(response.status, `operator read ${pathName} stays in live boundary`).toBe(200);
       const body = await response.text();
       expect(body, `operator read ${pathName} cannot infer sandbox`).not.toContain("sandbox-");

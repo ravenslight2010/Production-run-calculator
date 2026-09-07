@@ -9,7 +9,6 @@ import {
 } from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
-  computeAppSlotInfo,
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
   getAutoTrackTiming,
@@ -226,16 +225,6 @@ interface AutoTrackParams {
    */
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
-  /**
-   * The server is the sole automatic writer for synchronized clients. In this
-   * mode the hook still computes suggestions and countdowns, but never submits
-   * or locally applies an automatic counter mutation. Canonical sync/SSE values
-   * remain the only source for displayed progress. Offline operation is
-   * deliberately read-only so reconnect cannot replay duplicate production.
-   */
-  authoritativeServerAutoTrack?: boolean;
-  /** Canonical server-owned enable state for the selected run. */
-  autoTrackProgressEnabled?: boolean;
   /** Stop sauce completion once dough hands off to the next unstarted run. */
   nextRunPrepActive?: boolean;
 }
@@ -341,19 +330,10 @@ export function useAutoTrack({
   autoTrackRebaseAfterBlock = true,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
-  authoritativeServerAutoTrack = false,
-  autoTrackProgressEnabled,
   nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
   const productionNeedsAvailable = caseBasedProductionNeedsAvailable(v);
-  const [autoTrackProgress, setAutoTrackProgress] = useState(
-    autoTrackProgressEnabled ?? true,
-  );
-  useEffect(() => {
-    if (typeof autoTrackProgressEnabled === "boolean") {
-      setAutoTrackProgress(autoTrackProgressEnabled);
-    }
-  }, [autoTrackProgressEnabled]);
+  const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
   // When set, tray/batch production and consumption ticks are suppressed
   // without affecting cases/skids or the global auto-track toggle.
@@ -460,17 +440,14 @@ export function useAutoTrack({
   // writes. The lease intentionally expires so disconnected/stale clients
   // retain the established local fallback.
   const serverScheduleAtRef = useRef(0);
-  const serverOwnedChannelsRef = useRef<Partial<Record<AutoTrackChannel, boolean>>>({});
+  const serverOwnedNetChannelsRef = useRef<Partial<Record<AutoTrackChannel, boolean>>>({});
   const coordinationIdentity =
     `${runId}:${runGeneration ?? `${runStatus}:${endedAt ?? 0}`}`.slice(0, 160);
   const coordinationIdentityRef = useRef(coordinationIdentity);
   coordinationIdentityRef.current = coordinationIdentity;
-  const serverOwnsChannel = (channel: AutoTrackChannel): boolean => {
-    const ageMs = Date.now() - serverScheduleAtRef.current;
-    return serverOwnedChannelsRef.current[channel] === true
-      && ageMs >= 0
-      && ageMs <= 30_000;
-  };
+  const serverOwnsNetChannel = (channel: AutoTrackChannel): boolean =>
+    serverOwnedNetChannelsRef.current[channel] === true
+    && Date.now() - serverScheduleAtRef.current <= 30_000;
   const dueRefForChannel = (channel: AutoTrackChannel) => {
     if (channel === "case") return caseNextDueMsRef;
     if (channel === "tray-consume") return trayNextDueMsRef;
@@ -532,12 +509,6 @@ useEffect(() => {
         || schedule.generation !== coordinationIdentityRef.current
         || !Array.isArray(schedule.entries)
       ) return;
-      const scheduleAt = typeof schedule.atMs === "number" && Number.isFinite(schedule.atMs)
-        ? schedule.atMs
-        : Date.now();
-      // Ignore reordered frames and timestamps too far ahead of this client.
-      // Either could otherwise extend a not-due lease indefinitely.
-      if (scheduleAt < serverScheduleAtRef.current || scheduleAt > Date.now() + 5_000) return;
       const owned: Partial<Record<AutoTrackChannel, boolean>> = {};
       for (const entry of schedule.entries) {
         // A schedule is ownership only when it is canonical and explicitly
@@ -548,17 +519,12 @@ useEffect(() => {
           owned[entry.channel] = true;
         }
       }
-      serverOwnedChannelsRef.current = owned;
-      serverScheduleAtRef.current = scheduleAt;
+      serverOwnedNetChannelsRef.current = owned;
+      serverScheduleAtRef.current = typeof schedule.atMs === "number" ? schedule.atMs : Date.now();
     };
     window.addEventListener(AUTO_TRACK_SCHEDULE_EVENT, adopt);
     return () => window.removeEventListener(AUTO_TRACK_SCHEDULE_EVENT, adopt);
   }, [runId]);
-
-  const clearServerSchedule = useCallback(() => {
-    serverOwnedChannelsRef.current = {};
-    serverScheduleAtRef.current = 0;
-  }, []);
 
   // Freezer-drain window: after End Run, packaging keeps casing product for as
   // long as the tunnel takes to empty. Case/skid auto-track keeps ticking
@@ -626,7 +592,8 @@ useEffect(() => {
     appNextDueNetSecRefs.app4.current = 0;
     // Schedule leases are run-scoped. Never let an ended/switched run's
     // server verdict suppress the next run before it receives its own frame.
-    clearServerSchedule();
+    serverOwnedNetChannelsRef.current = {};
+    serverScheduleAtRef.current = 0;
     setCoordinationPendingCount(0);
     setCoordinationDelayed(false);
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
@@ -634,10 +601,9 @@ useEffect(() => {
     doughTimerResumeAtRef.current = 0;
     doughAutoSuppressUntilRef.current = 0;
     setIsDoughTimerPaused(false);
-  }, [clearServerSchedule, doughAutoSuppressUntilRef]);
+  }, [doughAutoSuppressUntilRef]);
 
   const rearmCaseTimer = useCallback((nowMs: number) => {
-    clearServerSchedule();
     const timing = getAutoTrackTiming(
       calc.ppm,
       v.pizzasPerCase,
@@ -646,10 +612,9 @@ useEffect(() => {
       machine,
     );
     caseNextDueMsRef.current = timing.caseMs > 0 ? nowMs + timing.caseMs : 0;
-  }, [calc.perBatch, calc.perTray, calc.ppm, clearServerSchedule, machine, v.pizzasPerCase]);
+  }, [calc.perBatch, calc.perTray, calc.ppm, machine, v.pizzasPerCase]);
 
   const rearmDoughTimers = useCallback((nowMs: number) => {
-    clearServerSchedule();
     const timing = getAutoTrackTiming(
       calc.ppm,
       v.pizzasPerCase,
@@ -670,7 +635,7 @@ useEffect(() => {
     trayLastMsRef.current = 0;
     batchNextDueMsRef.current = timing.batchConsumptionMs > 0 ? nowMs + timing.batchConsumptionMs : 0;
     batchLastMsRef.current = 0;
-  }, [calc.perBatch, calc.perTray, calc.ppm, clearServerSchedule, machine, v.pizzasPerCase]);
+  }, [calc.perBatch, calc.perTray, calc.ppm, machine, v.pizzasPerCase]);
 
   // Restart the selected timer from its full duration. Unlike
   // resetBookkeeping this keeps the case-progress baseline and completed work
@@ -724,14 +689,6 @@ useEffect(() => {
       });
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
-    if (authoritativeServerAutoTrack) {
-      // Do not queue a browser claim or apply its optimistic mutation. The
-      // server tick engine applies the canonical row under lock and SSE/sync
-      // adoption updates every display. This also defines the offline policy:
-      // counters stay at their last canonical value instead of accumulating a
-      // replayable local delta that could duplicate work after reconnect.
-      return;
-    }
     if (!claimAutoTrackEvent) {
       applyValues(localValues);
       return;
@@ -843,7 +800,6 @@ useEffect(() => {
       });
     coordinationClaimQueueRef.current = queuedClaim.then(() => {}, () => {});
   }, [
-    authoritativeServerAutoTrack,
     claimAutoTrackEvent,
     coordinationIdentity,
     endedAt,
@@ -1240,7 +1196,7 @@ useEffect(() => {
       runStatus !== "running" ||
       calc.pressDone ||
       nextRunPrepActive
-      || serverOwnsChannel("sauce-barrel")
+      || serverOwnsNetChannel("sauce-barrel")
     ) return;
     const cadence = Number(calc.sauceDepletionSec) || 0;
     if (!Number.isFinite(cadence) || cadence <= 0 || !Number.isFinite(elapsedBatchSec)) return;
@@ -1327,24 +1283,23 @@ useEffect(() => {
     const formValues = v as FormValues;
     const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
       const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const info = computeAppSlotInfo({
-        type: String(formValues[`${slot}Type` as keyof FormValues] ?? ""),
-        recipe,
-        batchLbs: Number(formValues[`${slot}BatchLbs` as keyof FormValues]) || 0,
-        ozPerPizza: Number(formValues[`${slot}OzPerPizza` as keyof FormValues]) || 0,
-        casesNeeded: Number(v.casesNeeded) || 0,
-        pizzasPerCase: Number(v.pizzasPerCase) || 0,
-        ppm: calc.ppm,
-      });
+      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
+      const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : Number(formValues[`${slot}BatchLbs` as keyof FormValues]);
+      const ouncesPerPizza = Number(formValues[`${slot}OzPerPizza` as keyof FormValues]);
+      const required = Number(calc[`${slot}Batches`]);
       return {
         slot,
         channel: `${slot}-batch` as AutoTrackChannel,
         madeField: `${slot}BatchesMade` as keyof FormValues,
         anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
         correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
-        valid: info.validForClaim,
-        cadence: info.cadence,
-        required: info.required,
+        valid: !!String(formValues[`${slot}Type` as keyof FormValues]).trim() &&
+          !String(formValues[`${slot}Type` as keyof FormValues]).trim().toLowerCase().includes("mix") &&
+          effectiveBatchLbs > 0 && ouncesPerPizza > 0 && required > 0 && calc.ppm > 0,
+        cadence: effectiveBatchLbs > 0 && ouncesPerPizza > 0 && calc.ppm > 0
+          ? (effectiveBatchLbs * 16 / ouncesPerPizza / calc.ppm) * 60
+          : 0,
+        required,
       };
     });
     for (const slot of slots) {
@@ -1359,7 +1314,7 @@ useEffect(() => {
       if (
         elapsedBatchSec < dueAt
         || made >= Math.ceil(slot.required)
-        || serverOwnsChannel(slot.channel)
+        || serverOwnsNetChannel(slot.channel)
       ) continue;
       dueRefForChannel(slot.channel).current = dueAt;
       commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
@@ -1411,6 +1366,9 @@ useEffect(() => {
     const doughSuppressed =
       Date.now() < doughAutoSuppressUntilRef.current
       || Date.now() < autoSuppressUntilRef.current;
+    const serverOwnsWallClock = (channel: AutoTrackChannel): boolean =>
+      serverOwnsNetChannel(channel);
+
     // ── Cases (and skids, derived from the same total): tick once per case. ──
     if (
       caseTrackingActive
@@ -1442,7 +1400,7 @@ useEffect(() => {
       const prevFreezer = drainFreezerRef.current;
       drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
 
-      if (!caseSuppressed && !serverOwnsChannel("case")) {
+      if (!caseSuppressed && !serverOwnsWallClock("case")) {
         const cps = v.casesPerSkid;
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
@@ -1491,9 +1449,7 @@ useEffect(() => {
         hopperProdNextDueMsRef.current = nowMs + hopperMs;
       } else if (nowMs >= hopperProdNextDueMsRef.current) {
         hopperProdNextDueMsRef.current = nowMs + hopperMs;
-        if (!serverOwnsChannel("hopper")) {
-          commitAutomatic("hopper", nowMs, hopperProdNextDueMsRef.current, []);
-        }
+        commitAutomatic("hopper", nowMs, hopperProdNextDueMsRef.current, []);
       }
     }
 
@@ -1545,7 +1501,7 @@ useEffect(() => {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
       } else if (nowMs >= trayProdNextDueMsRef.current) {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
-        if (!doughSuppressed && !serverOwnsChannel("tray-produce") && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
+        if (!doughSuppressed && !serverOwnsWallClock("tray-produce") && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
           delta += 1;
         }
       }
@@ -1561,7 +1517,7 @@ useEffect(() => {
           : trayPeriodMs / 60000;
         trayNextDueMsRef.current = nowMs + trayPeriodMs;
         trayLastMsRef.current = nowMs;
-        if (!doughSuppressed && !serverOwnsChannel("tray-consume") && !doughFeedComplete) {
+        if (!doughSuppressed && !serverOwnsWallClock("tray-consume") && !doughFeedComplete) {
           // First tray tick of a run where the operator never entered staged
           // dough (counter still 0): seed the suggested staging (the same number
           // the "Suggest" button applies) so the counter has real stock to track
@@ -1571,10 +1527,9 @@ useEffect(() => {
           if (!traySeededRef.current) {
             traySeededRef.current = true;
             const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
-            const current = Math.max(0, Number(form.getValues("traysOnLine")) || 0);
-            if (current === 0 && seed !== null) {
+            if (v.traysOnLine === 0 && seed !== null) {
               commitAutomatic("tray-consume", nowMs, trayNextDueMsRef.current, [
-                { field: "traysOnLine", from: current, to: seed },
+                { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: seed },
               ]);
               traySeededThisTick = true;
               traysSeededAmount = seed;
@@ -1593,13 +1548,12 @@ useEffect(() => {
         // traysOnLine is the aggregate across all physical tray sections.
         // Section capacity is advisory in the UI, so production must not stop
         // or rewrite this count at an arbitrary display threshold.
-        const current = Math.max(0, Number(form.getValues("traysOnLine")) || 0);
-        const next = Math.max(0, current + delta);
-        if (next !== current) {
+        const next = Math.max(0, v.traysOnLine + delta);
+        if (next !== v.traysOnLine) {
           commitAutomatic(delta > 0 ? "tray-produce" : "tray-consume", nowMs, delta > 0
             ? trayProdNextDueMsRef.current
             : trayNextDueMsRef.current, [
-            { field: "traysOnLine", from: current, to: next },
+            { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: next },
           ]);
         }
       }
@@ -1625,7 +1579,7 @@ useEffect(() => {
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
       } else if (nowMs >= batchProdNextDueMsRef.current) {
         batchProdNextDueMsRef.current = nowMs + fullBatchMs;
-        if (!doughSuppressed && !serverOwnsChannel("batch-produce") && !doughFeedComplete && calc.batchesNeeded > 0) {
+        if (!doughSuppressed && !serverOwnsWallClock("batch-produce") && !doughFeedComplete && calc.batchesNeeded > 0) {
           delta += 1;
         }
       }
@@ -1638,7 +1592,7 @@ useEffect(() => {
           : batchPeriodMs / 60000;
         batchNextDueMsRef.current = nowMs + batchPeriodMs;
         batchLastMsRef.current = nowMs;
-        if (!doughSuppressed && !serverOwnsChannel("batch-consume") && !doughFeedComplete) {
+        if (!doughSuppressed && !serverOwnsWallClock("batch-consume") && !doughFeedComplete) {
           // Same one-shot seed as trays: an untouched 0 counter gets the
           // suggested staging on its first tick so it has stock to track.
           if (!batchSeededRef.current) {
@@ -1652,10 +1606,9 @@ useEffect(() => {
             const seed = remainingBatchesNeeded > 0
               ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded))))
               : null;
-            const current = Math.max(0, Number(form.getValues("batchesReady")) || 0);
-            if (current === 0 && seed !== null) {
+            if (v.batchesReady === 0 && seed !== null) {
               commitAutomatic("batch-consume", nowMs, batchNextDueMsRef.current, [
-                { field: "batchesReady", from: current, to: seed },
+                { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: seed },
               ]);
               batchSeededThisTick = true;
             }
@@ -1675,15 +1628,14 @@ useEffect(() => {
         // Production never pushes past the stepper max (3) — but must never
         // clamp an already-higher value DOWN either. Rounded to 2 decimals so
         // the fractional drain shows cleanly (e.g. 1.75, 1.5).
-        const current = Math.max(0, Number(form.getValues("batchesReady")) || 0);
-        let next = current + delta;
-        if (delta > 0) next = Math.min(next, Math.max(current, 3));
+        let next = v.batchesReady + delta;
+        if (delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
         next = Math.max(0, Math.round(next * 100) / 100);
-        if (next !== current) {
+        if (next !== v.batchesReady) {
           commitAutomatic(delta > 0 ? "batch-produce" : "batch-consume", nowMs, delta > 0
             ? batchProdNextDueMsRef.current
             : batchNextDueMsRef.current, [
-            { field: "batchesReady", from: current, to: next },
+            { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: next },
           ]);
         }
       }
@@ -1710,8 +1662,6 @@ useEffect(() => {
     resumeDoughTimers,
     coordinationStatus: coordinationDelayed
       ? "delayed"
-      : authoritativeServerAutoTrack && typeof navigator !== "undefined" && !navigator.onLine
-        ? "delayed"
       : coordinationPendingCount > 0
         ? "waiting"
         : "ready",

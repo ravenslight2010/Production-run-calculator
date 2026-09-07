@@ -81,13 +81,13 @@ async function listAll(category: MergeSuggestCategory, brand: string | null): Pr
 }
 
 router.get("/merge-aliases", async (req: Request, res: Response) => {
-  const category = parseCategoryStrict(req.query.category);
+  const category = parseCategory(parsed.data.category);
   if (category === null) {
     res.status(400).json({ error: "Invalid category" });
     return;
   }
   try {
-    const brand = parseBrand(category, req.query.brand);
+  const brand = parseBrand(category, parsed.data.brand);
     const aliases = await listAll(category, brand);
     res.json({ aliases });
   } catch (err) {

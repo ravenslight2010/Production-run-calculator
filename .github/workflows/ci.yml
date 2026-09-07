@@ -218,7 +218,7 @@ jobs:
 
 
   security-audit:
-    name: Security audit (prod deps)
+    name: Informational security audit (high severity; registry best-effort)
     runs-on: ubuntu-latest
     # Includes dependency installation and a network-bound audit with a
     # bounded cap so registry stalls cannot hold a runner indefinitely.

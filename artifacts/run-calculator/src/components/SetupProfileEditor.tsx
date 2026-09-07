@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import { useForm, useFieldArray } from "react-hook-form";
-import type { Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   formSchema,
@@ -10,9 +9,8 @@ import {
   DEFAULT_VALUES,
   PACKAGING_TYPE_OPTIONS,
   LABEL_POSITION_OPTIONS,
-  CARTON_SIZE_OPTIONS,
 } from "../types";
-import { loadProfile, saveProfileAndWaitForServer } from "../storage";
+import { loadProfile, saveProfile } from "../storage";
 import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { brandTagLabels } from "@workspace/name-match";
@@ -37,6 +35,7 @@ import {
   FrontlineRecipeCard,
   TypeDropdown,
 } from "../pages/home";
+import { NumField } from "./NumField";
 import { useMixes } from "../hooks/useMixes";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
@@ -49,9 +48,6 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle } from "lucide-react";
 import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
-import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
-import { NumField } from "./NumField";
-import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -200,7 +196,7 @@ export interface SetupProfileEditorProps {
    * live-refresh an open run form that uses the same brand+flavor (the
    * "unified setup editing" flow — edit once, updates everywhere).
    */
-  onSaved?: (brand: string, flavor: string, values: FormValues) => void | Promise<void>;
+  onSaved?: (brand: string, flavor: string) => void;
   initialBrand?: string;
   initialFlavor?: string;
   isSupervisor: boolean;
@@ -312,11 +308,6 @@ export default function SetupProfileEditor({
   onRemoveFrontlineRecipeName,
   ingredientUniverse,
 }: SetupProfileEditorProps) {
-  const profileCacheVersion = useSyncExternalStore(
-    subscribeProfileCache,
-    getProfileCacheVersion,
-    getProfileCacheVersion,
-  );
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [brand, setBrand] = useState(initialBrand ?? "");
   const [flavor, setFlavor] = useState(initialFlavor ?? "");
@@ -331,8 +322,6 @@ export default function SetupProfileEditor({
   } | null>(null);
   const [autofillBusy, setAutofillBusy] = useState(false);
   const [autofillError, setAutofillError] = useState("");
-  const [saveBusy, setSaveBusy] = useState(false);
-  const [saveError, setSaveError] = useState("");
   // Conflict fields the user has already resolved (picked a value or kept the
   // current one) — hidden from the pending-conflicts list. Keyed by field.
   const [resolvedConflicts, setResolvedConflicts] = useState<Set<string>>(new Set());
@@ -342,14 +331,10 @@ export default function SetupProfileEditor({
   const [doughVariantPick, setDoughVariantPick] = useState<{ recipeName: string; variants: DoughballVariant[] } | null>(null);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema) as Resolver<FormValues>,
+    resolver: zodResolver(formSchema),
     defaultValues: DEFAULT_VALUES,
   });
   const v = form.watch();
-  const caseBasedDraftReady = caseBasedProductionNeedsAvailable({
-    casesNeeded: 1,
-    pizzasPerCase: v.pizzasPerCase,
-  });
   const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
   const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
@@ -525,7 +510,7 @@ export default function SetupProfileEditor({
     setAutofill(null);
     setAutofillError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, brand, flavor, profileCacheVersion]);
+  }, [open, brand, flavor]);
 
   useEffect(() => {
     if (open) {
@@ -537,7 +522,7 @@ export default function SetupProfileEditor({
 
   const flavorOptions = brandFlavors[brand] ?? [];
 
-  async function handleSave() {
+  function handleSave() {
     if (!canManageProfiles) {
       toast({
         title: "Only managers can save profile changes",
@@ -553,30 +538,9 @@ export default function SetupProfileEditor({
       return;
     }
     const values = form.getValues();
-    setSaveBusy(true);
-    setSaveError("");
-    try {
-      const result = await saveProfileAndWaitForServer(b, f, values);
-      if (result === "unchanged") {
-        toast({ title: `No changes to save for ${b} — ${f}` });
-        return;
-      }
-      toast({ title: `Saved setup for ${b} — ${f}` });
-      await onSaved?.(b, f, values);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "The server did not acknowledge this setup.";
-      const retryMessage = /retry the save/i.test(message)
-        ? message
-        : "The setup could not be saved on the server. Check your connection and retry.";
-      setSaveError(retryMessage);
-      toast({
-        title: "Setup was not saved",
-        description: retryMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setSaveBusy(false);
-    }
+    saveProfile(b, f, values);
+    toast({ title: `Saved setup for ${b} — ${f}` });
+    onSaved?.(b, f);
   }
 
   /**
@@ -807,7 +771,7 @@ export default function SetupProfileEditor({
   if (!open) return null;
   return (
     <div
-      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <div
@@ -815,7 +779,7 @@ export default function SetupProfileEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-profile-dialog-title"
-        className="responsive-dialog-card my-auto bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col"
+        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -828,7 +792,7 @@ export default function SetupProfileEditor({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         <Form {...form}>
         {!isSupervisor ? (
           <p className="text-sm text-muted-foreground py-6 text-center">
@@ -836,7 +800,7 @@ export default function SetupProfileEditor({
           </p>
         ) : (
           <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Brand</label>
                 <IngredientSelect
@@ -1062,23 +1026,8 @@ export default function SetupProfileEditor({
                       <NumField control={form.control} name="freezerTime" label="Freeze Tunnel Time (min)" />
                     </div>
                     <Separator className="opacity-30" />
-                    {!caseBasedDraftReady && (
-                      <div
-                        className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2"
-                        data-testid="setup-profile-case-pack-readiness"
-                      >
-                        <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">
-                          Draft setup — not ready for case-based runs
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          Enter a positive Pizzas Per Case value below before scheduling or starting runs that request cases. You can still save this setup as a draft.
-                        </p>
-                      </div>
-                    )}
                     <div className="grid grid-cols-2 gap-3">
-                      <div id="setup-profile-pizzas-per-case">
-                        <NumField control={form.control} name="pizzasPerCase" label="Pizzas Per Case" step="1" />
-                      </div>
+                      <NumField control={form.control} name="pizzasPerCase" label="Pizzas Per Case" step="1" />
                       <NumField control={form.control} name="casesPerSkid" label="Cases Per Skid" step="1" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -1127,18 +1076,7 @@ export default function SetupProfileEditor({
                       const typeVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
                       const posVal = ((v.labelPosition as string) ?? "").trim().toLowerCase();
                       if (typeVal === "cartoned" || typeVal === "yes") {
-                        return (
-                          <div className="space-y-2">
-                            <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />
-                            <FixedChipSelect
-                              label="Carton Size"
-                              options={CARTON_SIZE_OPTIONS}
-                              value={String((v.cartonSize as number) ?? 1)}
-                              onSelect={(val: string) => form.setValue("cartonSize", Number(val), { shouldDirty: true })}
-                              allowClear={false}
-                            />
-                          </div>
-                        );
+                        return <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />;
                       }
                       if (typeVal === "labeled" && (posVal === "top" || posVal === "bottom")) {
                         return <NumField control={form.control} name="labelsPerRoll" label="Labels Per Roll" step="1" />;
@@ -1542,16 +1480,11 @@ export default function SetupProfileEditor({
                 <X className="w-4 h-4 mr-1.5" /> Close
               </Button>
               {canManageProfiles && (
-                <Button type="button" onClick={handleSave} disabled={!brand.trim() || !flavor.trim() || saveBusy}>
+                <Button type="button" onClick={handleSave} disabled={!brand.trim() || !flavor.trim()}>
                   <Save className="w-4 h-4 mr-1.5" /> Save Setup
                 </Button>
               )}
             </div>
-            {saveError && (
-              <p className="text-xs text-destructive" role="alert" data-testid="setup-profile-save-error">
-                {saveError}
-              </p>
-            )}
             {!canManageProfiles && (
               <div
                 className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-right"

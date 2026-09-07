@@ -85,30 +85,19 @@ export function computeAppSlotInfo(input: {
   recipe: Array<{ lbs: number }> | undefined;
   batchLbs: number;
   ozPerPizza: number;
-  casesNeeded: number;
-  pizzasPerCase: number;
+  required: number;
   ppm: number;
 }) {
   const recipeLbs = (input.recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
   const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : input.batchLbs;
   const type = String(input.type).trim();
-  const productionPizzas = input.casesNeeded > 0 && input.pizzasPerCase > 0
-    ? input.casesNeeded * input.pizzasPerCase
-    : 0;
-  // Auto-track completion is a lifetime run cap. The normal calculator's
-  // applicator requirement is intentionally a remaining-work value and shrinks
-  // as Packaging advances, so it cannot safely cap a cumulative "made" count.
-  const required = effectiveBatchLbs > 0 && input.ozPerPizza > 0 && productionPizzas > 0
-    ? (productionPizzas * input.ozPerPizza / 16 + 20) / effectiveBatchLbs
-    : 0;
   return {
     recipeLbs,
     effectiveBatchLbs,
-    required,
     cadence: effectiveBatchLbs > 0 && input.ozPerPizza > 0 && input.ppm > 0
       ? effectiveBatchLbs * 16 / input.ozPerPizza / input.ppm * 60 : 0,
     validForClaim: !!type && !type.toLowerCase().includes("mix") &&
-      effectiveBatchLbs > 0 && input.ozPerPizza > 0 && required > 0 && input.ppm > 0,
+      effectiveBatchLbs > 0 && input.ozPerPizza > 0 && input.required > 0 && input.ppm > 0,
   };
 }
 export function computeNetSecondDue(input: { currentDue: number; anchor: number; cadence: number }): number {
@@ -126,59 +115,6 @@ export function buildCaseClaimMutations(input: {
   return [
     { field: "skidsCompleted", from: input.skidsFrom, to: input.skidsTo },
     { field: "casesOnCurrentSkid", from: input.casesFrom, to: input.casesTo },
-  ];
-}
-
-export type SauceClaimMutation = {
-  field: "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration";
-  from: number;
-  to: number;
-};
-
-export function buildSauceClaimMutations(input: {
-  countFrom: number;
-  countTo: number;
-  anchorFrom: number;
-  anchorTo: number;
-  correctionGeneration: number;
-}): SauceClaimMutation[] {
-  return [
-    { field: "sauceBarrelsMade", from: input.countFrom, to: input.countTo },
-    { field: "sauceBarrelAnchorNetSec", from: input.anchorFrom, to: input.anchorTo },
-    {
-      field: "sauceBarrelCorrectionGeneration",
-      from: input.correctionGeneration,
-      to: input.correctionGeneration,
-    },
-  ];
-}
-
-export type AppSlotClaimMutation = {
-  field:
-    | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
-    | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
-    | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
-    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration";
-  from: number;
-  to: number;
-};
-
-export function buildAppSlotClaimMutations(input: {
-  slot: AppSlotKey;
-  madeFrom: number;
-  madeTo: number;
-  anchorFrom: number;
-  anchorTo: number;
-  correctionGeneration: number;
-}): AppSlotClaimMutation[] {
-  return [
-    { field: `${input.slot}BatchesMade`, from: input.madeFrom, to: input.madeTo },
-    { field: `${input.slot}BatchAnchorNetSec`, from: input.anchorFrom, to: input.anchorTo },
-    {
-      field: `${input.slot}BatchCorrectionGeneration`,
-      from: input.correctionGeneration,
-      to: input.correctionGeneration,
-    },
   ];
 }
 export type CaseTickWriteDecision =
@@ -263,7 +199,6 @@ export type TrayTickResult = {
 export function computeTrayTick(input: {
   nowMs: number; prodDueMs: number; consDueMs: number; lastMs: number; periodMs: number;
   suppressed: boolean; feedComplete: boolean; deficitOpen: boolean; seeded: boolean;
-  productionSuppressed?: boolean; consumptionSuppressed?: boolean;
   current: number; seed: number | null; ppm: number; perTray: number; remainder: number;
 }): TrayTickResult {
   let prodDueMsNew = input.prodDueMs;
@@ -277,7 +212,7 @@ export function computeTrayTick(input: {
     prodDueMsNew = input.nowMs + input.periodMs / 2;
   } else if (input.nowMs >= prodDueMsNew) {
     prodDueMsNew = input.nowMs + input.periodMs;
-    if (!input.suppressed && !input.productionSuppressed && !input.feedComplete && input.deficitOpen) delta += 1;
+    if (!input.suppressed && !input.feedComplete && input.deficitOpen) delta += 1;
   }
   if (input.nowMs >= consDueMsNew) {
     const durationMin = lastMsNew > 0
@@ -285,7 +220,7 @@ export function computeTrayTick(input: {
       : input.periodMs / 60000;
     consDueMsNew = input.nowMs + input.periodMs;
     lastMsNew = input.nowMs;
-    if (!input.suppressed && !input.consumptionSuppressed && !input.feedComplete) {
+    if (!input.suppressed && !input.feedComplete) {
       if (!seededNew) {
         seededNew = true;
         if (input.current === 0 && input.seed !== null) seed = { from: input.current, to: input.seed };
@@ -308,7 +243,6 @@ export type BatchTickResult = {
 export function computeBatchTick(input: {
   nowMs: number; prodDueMs: number; consDueMs: number; lastMs: number; periodMs: number;
   fullBatchMs: number; effDrainMs: number; suppressed: boolean; feedComplete: boolean;
-  productionSuppressed?: boolean; consumptionSuppressed?: boolean;
   deficitOpen: boolean; seeded: boolean; current: number; traysSeededAmount: number;
   traysNeeded: number; batchesNeeded: number;
 }): BatchTickResult {
@@ -322,7 +256,7 @@ export function computeBatchTick(input: {
     prodDueMsNew = input.nowMs + input.fullBatchMs;
   } else if (input.nowMs >= prodDueMsNew) {
     prodDueMsNew = input.nowMs + input.fullBatchMs;
-    if (!input.suppressed && !input.productionSuppressed && !input.feedComplete && input.deficitOpen) delta += 1;
+    if (!input.suppressed && !input.feedComplete && input.deficitOpen) delta += 1;
   }
   if (input.nowMs >= consDueMsNew) {
     const durationMin = lastMsNew > 0
@@ -330,7 +264,7 @@ export function computeBatchTick(input: {
       : input.periodMs / 60000;
     consDueMsNew = input.nowMs + input.periodMs;
     lastMsNew = input.nowMs;
-    if (!input.suppressed && !input.consumptionSuppressed && !input.feedComplete) {
+    if (!input.suppressed && !input.feedComplete) {
       if (!seededNew) {
         seededNew = true;
         const remainingBatchesNeeded = input.traysSeededAmount > 0 && input.traysNeeded > 0

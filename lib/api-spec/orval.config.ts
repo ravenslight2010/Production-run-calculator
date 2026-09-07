@@ -3,9 +3,6 @@ import path from "path";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 
 const root = path.resolve(__dirname, "..", "..");
-// TypeDoc is part of Orval's dependency graph. Keep the explicit TypeScript 6
-// compatibility dependency in this package so a future root TypeScript 7
-// switch cannot silently satisfy TypeDoc with an unsupported compiler.
 // The freshness check sets this to a unique temporary directory so Orval
 // never cleans or rewrites the checked-in generated output. Normal generation
 // deliberately keeps using the source directories.
@@ -17,9 +14,7 @@ const apiZodSrc = outputRoot
   ? path.resolve(outputRoot, "api-zod")
   : path.resolve(root, "lib", "api-zod", "src");
 
-async function trimGeneratedTrailingBlankLines(
-  directory: string,
-): Promise<void> {
+async function trimGeneratedTrailingBlankLines(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const entryPath = path.resolve(directory, entry.name);
     if (entry.isDirectory()) {
@@ -57,9 +52,6 @@ export default defineConfig({
       clean: true,
       prettier: true,
       override: {
-        query: {
-          version: 5,
-        },
         fetch: {
           includeHttpResponseReturnType: false,
         },
@@ -87,7 +79,7 @@ export default defineConfig({
       prettier: true,
       override: {
         zod: {
-          version: 4,
+          version: 3,
           coerce: {
             query: ["boolean", "number", "string"],
             param: ["boolean", "number", "string"],
@@ -111,9 +103,7 @@ export default defineConfig({
           ].join("\n"),
         );
         await Promise.all([
-          trimGeneratedTrailingBlankLines(
-            path.resolve(apiClientReactSrc, "generated"),
-          ),
+          trimGeneratedTrailingBlankLines(path.resolve(apiClientReactSrc, "generated")),
           trimGeneratedTrailingBlankLines(path.resolve(apiZodSrc, "generated")),
         ]);
       },

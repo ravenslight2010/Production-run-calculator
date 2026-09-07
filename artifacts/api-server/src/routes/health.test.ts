@@ -1,15 +1,7 @@
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CACHE_MAINTENANCE_FAILURE_THRESHOLD,
   clearCacheMaintenanceDiagnosticsForTests,
@@ -20,11 +12,6 @@ import {
   markStartupFailed,
   resetStartupHealthForTests,
 } from "../lib/startupHealth";
-import {
-  BACKGROUND_OPERATION_FAILURE_THRESHOLD,
-  clearBackgroundOperationDiagnosticsForTests,
-  runBackgroundOperation,
-} from "../lib/backgroundOperations";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(async () => []),
@@ -54,8 +41,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (server)
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   if (previousOpenAiKey === undefined) {
     delete process.env.OPENAI_API_KEY;
   } else {
@@ -65,7 +51,6 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearCacheMaintenanceDiagnosticsForTests();
-  await clearBackgroundOperationDiagnosticsForTests();
   resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
@@ -78,18 +63,13 @@ describe("GET /healthz cache maintenance diagnostics", () => {
     const maintenanceLog = { info: vi.fn(), warn: vi.fn() };
     for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_THRESHOLD; i += 1) {
       await recordCacheMaintenance(
-        {
-          scope: "live",
-          operation: "prune",
-          waitDurationMs: 10,
-          outcome: "error",
-        },
+        { scope: "live", operation: "prune", waitDurationMs: 10, outcome: "error" },
         maintenanceLog,
       );
     }
 
     const response = await fetch(`${baseUrl}/healthz`);
-    const body = (await response.json()) as {
+    const body = await response.json() as {
       status: string;
       diagnostics: {
         cacheMaintenance: {
@@ -109,40 +89,7 @@ describe("GET /healthz cache maintenance diagnostics", () => {
       status: "ok",
       recentErrorCount: 0,
     });
-    expect(JSON.stringify(body.diagnostics)).not.toMatch(
-      /prompt|result|cache.?key/i,
-    );
-  });
-});
-
-describe("GET /healthz background operation diagnostics", () => {
-  it("returns 503 after sustained failures and recovers after a successful pass", async () => {
-    for (let i = 0; i < BACKGROUND_OPERATION_FAILURE_THRESHOLD; i += 1) {
-      await expect(runBackgroundOperation("daily-rollover", async () => {
-        throw Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
-      }, { delay: async () => {} })).rejects.toBeTruthy();
-    }
-
-    let response = await fetch(`${baseUrl}/readyz`);
-    let body = (await response.json()) as {
-      checks: Record<string, string>;
-      diagnostics: { backgroundOperations: Record<string, { status: string; recentFailureCount: number }> };
-    };
-    expect(response.status).toBe(503);
-    expect(body.checks.backgroundWorkers).toBe("error");
-    expect(body.diagnostics.backgroundOperations["daily-rollover"]).toMatchObject({
-      status: "warning",
-      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
-    });
-
-    vi.useFakeTimers();
-    vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1);
-    await runBackgroundOperation("daily-rollover", async () => "ok");
-    response = await fetch(`${baseUrl}/readyz`);
-    body = await response.json() as typeof body;
-    expect(response.status).toBe(200);
-    expect(body.checks.backgroundWorkers).toBe("ok");
-    vi.useRealTimers();
+    expect(JSON.stringify(body.diagnostics)).not.toMatch(/prompt|result|cache.?key/i);
   });
 });
 
@@ -162,49 +109,22 @@ describe("startup probes", () => {
   it("returns a bounded 503 while startup is in progress or failed", async () => {
     beginStartup(2_000);
     let response = await fetch(`${baseUrl}/readyz`);
-    let body = (await response.json()) as {
-      status: string;
-      checks: Record<string, string>;
-      startup: {
-        phase: string;
-        stage: string | null;
-        durationMs: number;
-        errorCode?: string;
-      };
-      correlationId: string;
-    };
+    let body = await response.json() as { status: string; checks: Record<string, string> };
     expect(response.status).toBe(503);
     expect(body).toMatchObject({
       status: "starting",
-      checks: {
-        startup: "error",
-        database: "pending",
-        dependencies: "pending",
-      },
-      startup: { phase: "starting", stage: null },
+      checks: { startup: "error", database: "pending", dependencies: "pending" },
     });
-    expect(body.correlationId).toBeTruthy();
 
     markStartupFailed("data_heals", "data_heals_failed", 2_500);
     response = await fetch(`${baseUrl}/healthz`);
-    body = (await response.json()) as typeof body;
+    body = await response.json() as { status: string; checks: Record<string, string> };
     expect(response.status).toBe(503);
     expect(body).toMatchObject({
       status: "degraded",
-      checks: {
-        startup: "error",
-        database: "pending",
-        dependencies: "pending",
-      },
-      startup: {
-        phase: "failed",
-        stage: "data_heals",
-        errorCode: "data_heals_failed",
-      },
+      checks: { startup: "error", database: "pending", dependencies: "pending" },
     });
-    expect(JSON.stringify(body)).not.toMatch(
-      /password|secret|database_url|stack/i,
-    );
+    expect(JSON.stringify(body)).not.toMatch(/password|secret|database_url|stack/i);
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

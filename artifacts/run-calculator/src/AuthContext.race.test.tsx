@@ -9,20 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import type { StaffMember } from "./inventoryShared";
-import {
-  getProfileCacheGeneration,
-  readCachedProfileBlobs,
-  resetProfileCacheForTests,
-  subscribeProfileCache,
-  writeCachedProfileBlobs,
-} from "./profileCache";
 
 const mocks = vi.hoisted(() => ({
   fetchMe: vi.fn(),
   signInRequest: vi.fn(),
-  signOutRequest: vi.fn(),
   setUnauthorizedHandler: vi.fn(),
   setAuthRequestEpoch: vi.fn(),
   resetMasterDataTransportCache: vi.fn(),
@@ -34,7 +26,6 @@ vi.mock("./inventoryShared", async (importOriginal) => {
     ...actual,
     fetchMe: mocks.fetchMe,
     signInRequest: mocks.signInRequest,
-    signOutRequest: mocks.signOutRequest,
     setUnauthorizedHandler: mocks.setUnauthorizedHandler,
     setAuthRequestEpoch: mocks.setAuthRequestEpoch,
   };
@@ -67,14 +58,6 @@ const manager: StaffMember = {
   sandboxStale: false,
 };
 
-const secondManager: StaffMember = {
-  ...manager,
-  userId: "manager-2",
-  name: "Second Manager",
-};
-
-const PROFILE_KEY = "acme__pepperoni";
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -105,30 +88,6 @@ function IdentityProbe() {
   );
 }
 
-function OpenProfileProbe() {
-  const { me, signIn, signOut } = useAuth();
-  const cacheVersion = useSyncExternalStore(
-    subscribeProfileCache,
-    () => readCachedProfileBlobs(PROFILE_KEY).dough,
-    () => null,
-  );
-  return (
-    <>
-      <output data-testid="profile-owner">{me?.userId ?? "signed-out"}</output>
-      <output data-testid="profile-value">{cacheVersion ?? "empty"}</output>
-      <button type="button" onClick={() => void signIn("manager", "password")}>
-        Sign in
-      </button>
-      <button type="button" onClick={() => void signIn("second-manager", "password")}>
-        Sign in as second manager
-      </button>
-      <button type="button" onClick={() => void signOut()}>
-        Sign out
-      </button>
-    </>
-  );
-}
-
 function renderAuth() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -147,12 +106,9 @@ afterEach(() => {
   cleanup();
   mocks.fetchMe.mockReset();
   mocks.signInRequest.mockReset();
-  mocks.signOutRequest.mockReset();
   mocks.setUnauthorizedHandler.mockReset();
   mocks.setAuthRequestEpoch.mockReset();
   mocks.resetMasterDataTransportCache.mockReset();
-  resetProfileCacheForTests();
-  localStorage.clear();
 });
 
 describe("AuthProvider session transition", () => {
@@ -182,44 +138,6 @@ describe("AuthProvider session transition", () => {
     expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let a cold probe for the prior account overwrite a switched account", async () => {
-    const initialProbe = deferred<StaffMember>();
-    const probeReturned = deferred<void>();
-    mocks.fetchMe.mockImplementationOnce(async () => {
-      const user = await initialProbe.promise;
-      probeReturned.resolve();
-      return user;
-    });
-    mocks.signInRequest.mockResolvedValue({ token: "ignored", user: secondManager });
-
-    renderAuth();
-    await waitFor(() => expect(mocks.fetchMe).toHaveBeenCalledTimes(1));
-
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    await screen.findByText("manager-2");
-    writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":20}' });
-    const secondManagerGeneration = getProfileCacheGeneration();
-
-    initialProbe.resolve(manager);
-    await probeReturned.promise;
-    await waitFor(() =>
-      expect(getProfileCacheGeneration()).toBe(secondManagerGeneration),
-    );
-    expect(screen.getByTestId("identity").textContent).not.toBe("manager-1");
-    expect(readCachedProfileBlobs(PROFILE_KEY).dough).toBe('{"lineSpeed":20}');
-  });
-
-  it("retries a transient startup probe and reaches the authenticated shell", async () => {
-    mocks.fetchMe
-      .mockRejectedValueOnce(new Error("temporary proxy failure"))
-      .mockResolvedValueOnce(manager);
-
-    renderAuth();
-
-    await screen.findByText("manager-1");
-    expect(mocks.fetchMe).toHaveBeenCalledTimes(2);
-  });
-
   it("marks a successful sign-in as fresh exactly once", async () => {
     mocks.fetchMe.mockResolvedValue(null);
     mocks.signInRequest.mockResolvedValue({ token: "ignored", user: manager });
@@ -245,88 +163,5 @@ describe("AuthProvider session transition", () => {
     );
 
     expect(screen.getByTestId("fresh-session").textContent).toBe("false");
-  });
-
-  it("clears an open profile consumer on logout and does not expose it after re-login", async () => {
-    mocks.fetchMe.mockResolvedValue(null);
-    mocks.signInRequest
-      .mockResolvedValueOnce({ token: "ignored", user: manager })
-      .mockResolvedValueOnce({ token: "ignored", user: secondManager });
-    mocks.signOutRequest.mockResolvedValue({});
-
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={qc}>
-        <AuthProvider>
-          <OpenProfileProbe />
-        </AuthProvider>
-      </QueryClientProvider>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("profile-owner").textContent).toBe("manager-1"),
-    );
-
-    qc.setQueryData(["inventory", "manager-1"], { rows: ["prior-account"] });
-    qc.setQueryData(["profile-data-health"], { account: "manager-1" });
-    writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":10}' });
-    await waitFor(() =>
-      expect(screen.getByTestId("profile-value").textContent).toBe('{"lineSpeed":10}'),
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("profile-owner").textContent).toBe("signed-out"),
-    );
-    expect(screen.getByTestId("profile-value").textContent).toBe("empty");
-    expect(qc.getQueryData(["inventory", "manager-1"])).toBeUndefined();
-    expect(qc.getQueryData(["profile-data-health"])).toBeUndefined();
-    expect(qc.getQueryData(["me"])).toBeNull();
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Sign in as second manager" }),
-    );
-    await waitFor(() =>
-      expect(screen.getByTestId("profile-owner").textContent).toBe("manager-2"),
-    );
-    expect(screen.getByTestId("profile-value").textContent).toBe("empty");
-    expect(qc.getQueryData(["inventory", "manager-1"])).toBeUndefined();
-    expect(qc.getQueryData(["profile-data-health"])).toBeUndefined();
-    expect(qc.getQueryData(["me"])).toEqual(secondManager);
-  });
-
-  it("replaces scoped query and profile state on a direct account switch", async () => {
-    mocks.fetchMe.mockResolvedValue(null);
-    mocks.signInRequest
-      .mockResolvedValueOnce({ token: "ignored", user: manager })
-      .mockResolvedValueOnce({ token: "ignored", user: secondManager });
-
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={qc}>
-        <AuthProvider>
-          <OpenProfileProbe />
-        </AuthProvider>
-      </QueryClientProvider>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    await screen.findByText("manager-1");
-    qc.setQueryData(["saved-spec-imports"], [{ label: "manager-1-import" }]);
-    writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":10}' });
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Sign in as second manager" }),
-    );
-    await screen.findByText("manager-2");
-
-    expect(qc.getQueryData(["saved-spec-imports"])).toBeUndefined();
-    expect(screen.getByTestId("profile-value").textContent).toBe("empty");
-    expect(qc.getQueryData(["me"])).toEqual(secondManager);
   });
 });

@@ -31,39 +31,10 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("server auto-track claim builders", () => {
-  it("honors the canonical per-run manual mode switch", () => {
-    const source = payload();
-    (source.dayState!.runs![0] as Record<string, unknown>).autoTrackDisabled = true;
-    expect(buildNetSecondServerClaims(source, NOW)).toEqual([]);
-    expect(buildWallClockServerClaims(source, NOW)).toBeNull();
-  });
-
   it("builds one advancing net-second claim per eligible due channel", () => {
     const claims = buildNetSecondServerClaims(payload(), NOW);
     expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "app1-batch"]);
     expect(claims.every((claim) => claim.mutations[0]!.to === claim.mutations[0]!.from + 1)).toBe(true);
-  });
-
-  it("restarts net-second sequencing after a pause/resume lifecycle generation", () => {
-    const source = payload();
-    (source.dayState.runs[0] as Record<string, unknown>).metaUpdatedAt = 2;
-    (source as Record<string, unknown>).autoTrackCoordination = {
-      runs: {
-        [RUN]: {
-          "app1-batch": {
-            generation: `${RUN}:1`,
-            sequence: 2,
-            acceptedEventId: "server:app1-batch:2",
-          },
-        },
-      },
-    };
-
-    const claim = buildNetSecondServerClaims(source, NOW)
-      .find((candidate) => candidate.channel === "app1-batch");
-    expect(claim?.generation).toBe(`${RUN}:2`);
-    expect(claim?.sequence).toBe(1);
-    expect(applyAutoTrackClaim(source as never, claim!, NOW).outcome).toBe("accepted");
   });
 
   it("does not build net-second claims for invalid rates or paused runs", () => {

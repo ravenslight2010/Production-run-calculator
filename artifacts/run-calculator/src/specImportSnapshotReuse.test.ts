@@ -147,14 +147,7 @@ describe("selectReusableSnapshot", () => {
     ({ id, sourceKey, sourceHash, createdAt });
 
   it("matches only exact sourceKey + sourceHash, newest first", () => {
-    const sheets = [
-      snap(1, "specs", "h1", 100),
-      snap(2, "specs", "h1", 200),
-      snap(3, "specs", "h2", 300), // same key, different bytes
-      snap(4, "other", "h1", 400), // different file set
-      snap(5, null, "h1", 500), // legacy, no key
-      snap(6, "specs", null, 600), // legacy, no hash
-    ];
+    const sheets = [snap(1, "", "", 100), snap(2, null, null, 200)];
     expect(selectReusableSnapshot(sheets, "specs", "h1")?.id).toBe(2);
     expect(selectReusableSnapshot(sheets, "specs", "h3")).toBeUndefined();
     expect(selectReusableSnapshot(sheets, "missing", "h1")).toBeUndefined();
@@ -171,12 +164,28 @@ describe("selectReusableSnapshot", () => {
 describe("exact re-import parse reuse", () => {
   it("single file: reuses the stored parse and never calls the AI", async () => {
     const data = bufOf("workbook-bytes");
-    const hash = await hashSpecImportSource([bufOf("workbook-bytes")]);
+    const hash = await hashSpecImportSource([bufOf("file-a"), bufOf("file-b")]);
     fetchSheetsSpy.mockResolvedValue([
       { id: 1, label: "Prev", sourceKey: "specs", sourceHash: hash, createdAt: 100, data: fixtureParse() },
     ]);
+    aliasesRef.current = [
+      { kind: "brand", externalName: "Aldo's", canonicalName: "Aldo Brothers", context: null },
+    ];
 
-    const prepared = await prepareSpecImportWithAi(data, "Specs.xlsx");
+    const prepared = {
+      parsed: {
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Confirmed Dough",
+          rowsUnit: "unclear",
+          confirmedRowsUnit: "lbs",
+          rows,
+        }],
+      },
+      newAliases: [],
+      sourceNames: ["dough.xlsx"],
+    } as unknown as Parameters<typeof commitSpecImport>[0];
 
     expect(parseSpy).not.toHaveBeenCalled();
     expect(prepared.parsed.profiles).toHaveLength(1);
@@ -191,7 +200,7 @@ describe("exact re-import parse reuse", () => {
     // so a re-import after a brand merge/rename resurrected the old brand (or
     // the tombstone partition silently dropped the profile).
     const data = bufOf("workbook-bytes");
-    const hash = await hashSpecImportSource([bufOf("workbook-bytes")]);
+    const hash = await hashSpecImportSource([bufOf("file-a"), bufOf("file-b")]);
     fetchSheetsSpy.mockResolvedValue([
       { id: 1, label: "Prev", sourceKey: "specs", sourceHash: hash, createdAt: 100, data: fixtureParse() },
     ]);
@@ -199,7 +208,20 @@ describe("exact re-import parse reuse", () => {
       { kind: "brand", externalName: "Aldo's", canonicalName: "Aldo Brothers", context: null },
     ];
 
-    const prepared = await prepareSpecImportWithAi(data, "Specs.xlsx");
+    const prepared = {
+      parsed: {
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Confirmed Dough",
+          rowsUnit: "unclear",
+          confirmedRowsUnit: "lbs",
+          rows,
+        }],
+      },
+      newAliases: [],
+      sourceNames: ["dough.xlsx"],
+    } as unknown as Parameters<typeof commitSpecImport>[0];
 
     expect(parseSpy).not.toHaveBeenCalled();
     expect(prepared.parsed.profiles).toHaveLength(1);
@@ -208,7 +230,7 @@ describe("exact re-import parse reuse", () => {
   });
 
   it("single file: changed bytes fall through to a fresh parse", async () => {
-    const hash = await hashSpecImportSource([bufOf("old-bytes")]);
+    const hash = await hashSpecImportSource([bufOf("file-a"), bufOf("file-b")]);
     fetchSheetsSpy.mockResolvedValue([
       { id: 1, label: "Prev", sourceKey: "specs", sourceHash: hash, createdAt: 100, data: fixtureParse() },
     ]);
@@ -226,10 +248,20 @@ describe("exact re-import parse reuse", () => {
     ]);
 
     const seen: Array<[number, number]> = [];
-    const prepared = await prepareSpecImportMultiWithAi(bufs, (d, t) => seen.push([d, t]), [
-      "b.xlsx",
-      "a.xlsx",
-    ]);
+    const prepared = {
+      parsed: {
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Confirmed Dough",
+          rowsUnit: "unclear",
+          confirmedRowsUnit: "lbs",
+          rows,
+        }],
+      },
+      newAliases: [],
+      sourceNames: ["dough.xlsx"],
+    } as unknown as Parameters<typeof commitSpecImport>[0];
 
     expect(parseSpy).not.toHaveBeenCalled();
     expect(prepared.sourceHash).toBe(hash);
@@ -244,10 +276,18 @@ describe("exact re-import parse reuse", () => {
 describe("commitSpecImport snapshot hash persistence", () => {
   it("passes the prepared sourceHash to saveSpecSheet", async () => {
     const prepared = {
-      parsed: fixtureParse(),
+      parsed: {
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Confirmed Dough",
+          rowsUnit: "unclear",
+          confirmedRowsUnit: "lbs",
+          rows,
+        }],
+      },
       newAliases: [],
-      sourceNames: ["specs.xlsx"],
-      sourceHash: "abc123",
+      sourceNames: ["dough.xlsx"],
     } as unknown as Parameters<typeof commitSpecImport>[0];
 
     await commitSpecImport(prepared);

@@ -7,19 +7,13 @@
  * Output is JSON only so the result can be retained by release automation.
  */
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  isRetryableReleasePreflightDatabaseError,
-  RELEASE_PREFLIGHT_DB_ATTEMPTS,
-  runReleasePreflightDatabaseRetry,
-} from "./release-preflight-db-retry.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
-export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v2";
+export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
 export const DEFAULT_FROM_DATE = "2026-08-26";
 export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;
 export type SourceLibraryEvidenceEnvironment = (typeof SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS)[number];
@@ -156,9 +150,7 @@ function ownedFields(proposal: Proposal): Record<string, unknown> {
   if (proposal.table === "dough_recipes") fields.push("doughballVariants", "doughballWeightOz", "doughballsPerTray");
   if (proposal.table === "cheese_recipes") fields.push("brand", "flavors", "shredderSetting", "cellulose", "notes");
   if (proposal.table === "mixes") {
-    // The heal initializes batchSize, but managers may legitimately edit it
-    // afterward. Post-heal verification owns only immutable source fields.
-    fields.push("brand", "flavor", "daysEarly");
+    fields.push("brand", "flavor", "daysEarly", "batchSize");
     // An omitted notes field means the heal must preserve the manager's note.
     if (Object.prototype.hasOwnProperty.call(after, "notes")) fields.push("notes");
   }
@@ -202,13 +194,7 @@ function buildMappings(report: Report): Mapping[] {
     const canonical = proposal.action === "link-source-identity"
       ? String(proposal.before.name)
       : String(proposal.after.name ?? proposal.before.name);
-    const old = String(proposal.after.sourceName ?? proposal.before.name);
-    // Component-only replacements intentionally retain their recipe identity.
-    // Treating old === canonical as a rename makes every legitimate profile and
-    // pending-run reference look stale even though no repoint was required.
-    if (normalizedName(old) !== normalizedName(canonical)) {
-      mappings.push({ old, canonical, table: proposal.table });
-    }
+    mappings.push({ old: String(proposal.after.sourceName ?? proposal.before.name), canonical, table: proposal.table });
   }
   for (const raw of report.findings.allZeroStubs) {
     const stub = raw as Stub;
@@ -497,10 +483,6 @@ function markerCheck(marker: Record<string, unknown> | undefined, report: Report
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
   environment: SourceLibraryEvidenceEnvironment;
-  revision: string;
-  capturedAt: string;
-  evidenceId: string;
-  healId: string;
   repairBoundary: { fromDate: string };
   report: { sha256: string; formatVersion: number; automaticProposals: number; stubs: number };
   marker: ReturnType<typeof markerCheck>;
@@ -515,592 +497,6 @@ export type VerificationOutput = {
   failures: Array<{ check: string; count: number }>;
 };
 
-export const SOURCE_LIBRARY_EVIDENCE_KEYS = [
-  "verifier",
-  "environment",
-  "revision",
-  "capturedAt",
-  "evidenceId",
-  "healId",
-  "repairBoundary",
-  "report",
-  "marker",
-  "pools",
-  "aliases",
-  "profiles",
-  "pendingRuns",
-  "protectedHistory",
-  "stubs",
-  "idempotencyFingerprint",
-  "ok",
-  "failures",
-] as const;
-
-const SOURCE_LIBRARY_EVIDENCE_MAX_COUNT = 1_000_000;
-
-function boundedEvidenceString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 128;
-}
-
-function boundedEvidenceCount(value: unknown): value is number {
-  return (
-    isFiniteNumber(value) &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= SOURCE_LIBRARY_EVIDENCE_MAX_COUNT
-  );
-}
-
-function assertBoundedSummary(
-  value: unknown,
-  keys: readonly string[],
-  name: string,
-): asserts value is Record<string, unknown> {
-  if (!isRecord(value) || !hasExactKeys(value, keys)) {
-    throw new Error(
-      `Source-library reconciliation evidence does not match the bounded allowlist (${name}).`,
-    );
-  }
-  for (const key of keys) {
-    if (!boundedEvidenceCount(value[key])) {
-      throw new Error(
-        `Source-library reconciliation evidence has an invalid bounded count (${name}.${key}).`,
-      );
-    }
-  }
-}
-
-/**
- * Enforce the exact shape retained as source-library release evidence.
- *
- * This is intentionally stricter than checking a few expected fields. It is
- * the privacy boundary between production source rows and retained evidence:
- * new row-shaped fields must be rejected until they are explicitly reviewed
- * and added to this summary-only contract.
- */
-export function assertBoundedSourceLibraryReconciliationEvidence(
-  value: unknown,
-): asserts value is VerificationOutput {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, SOURCE_LIBRARY_EVIDENCE_KEYS) ||
-    value.verifier !== "source-library-reconciliation" ||
-    (value.environment !== "development" && value.environment !== "release") ||
-    !boundedEvidenceString(value.revision) ||
-    !boundedEvidenceString(value.capturedAt) ||
-    !/^[a-f0-9]{64}$/u.test(String(value.evidenceId ?? "")) ||
-    !boundedEvidenceString(value.healId) ||
-    !isRecord(value.repairBoundary) ||
-    !hasExactKeys(value.repairBoundary, ["fromDate"]) ||
-    typeof value.repairBoundary.fromDate !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/u.test(value.repairBoundary.fromDate) ||
-    !isRecord(value.report) ||
-    !hasExactKeys(value.report, [
-      "sha256",
-      "formatVersion",
-      "automaticProposals",
-      "stubs",
-    ]) ||
-    !/^[a-f0-9]{64}$/u.test(String(value.report.sha256 ?? "")) ||
-    value.report.formatVersion !== 1 ||
-    !boundedEvidenceCount(value.report.automaticProposals) ||
-    !boundedEvidenceCount(value.report.stubs) ||
-    typeof value.ok !== "boolean" ||
-    !isRecord(value.marker) ||
-    !hasExactKeys(value.marker, [
-      "present",
-      "resultValid",
-      "resultWithinBounds",
-      "resultCounts",
-      "appliedAtPresent",
-    ]) ||
-    typeof value.marker.present !== "boolean" ||
-    typeof value.marker.resultValid !== "boolean" ||
-    typeof value.marker.resultWithinBounds !== "boolean" ||
-    typeof value.marker.appliedAtPresent !== "boolean" ||
-    !isRecord(value.marker.resultCounts) ||
-    !hasExactKeys(value.marker.resultCounts, [
-      "replacements",
-      "aliasesInserted",
-      "repointedProfiles",
-      "repointedRuns",
-      "deletedStubs",
-    ]) ||
-    !isRecord(value.protectedHistory) ||
-    !hasExactKeys(value.protectedHistory, ["references"]) ||
-    !boundedEvidenceCount(value.protectedHistory.references) ||
-    !isRecord(value.idempotencyFingerprint) ||
-    !hasExactKeys(value.idempotencyFingerprint, ["algorithm", "value"]) ||
-    value.idempotencyFingerprint.algorithm !== "sha256" ||
-    !/^[a-f0-9]{64}$/u.test(String(value.idempotencyFingerprint.value ?? "")) ||
-    !Array.isArray(value.failures) ||
-    value.failures.length > 20
-  ) {
-    throw new Error(
-      "Source-library reconciliation evidence does not match the bounded allowlist.",
-    );
-  }
-
-  assertBoundedSummary(value.pools, [
-    "expected",
-    "exactMatches",
-    "guardedRenames",
-    "missing",
-    "mismatches",
-  ], "pools");
-  assertBoundedSummary(value.aliases, [
-    "expected",
-    "exactMatches",
-    "missing",
-    "mismatches",
-  ], "aliases");
-  assertBoundedSummary(value.profiles, [
-    "inspected",
-    "canonical",
-    "stale",
-    "nonCanonical",
-  ], "profiles");
-  assertBoundedSummary(value.pendingRuns, [
-    "inspected",
-    "canonical",
-    "stale",
-    "nonCanonical",
-  ], "pendingRuns");
-  assertBoundedSummary(value.stubs, [
-    "expected",
-    "canonicalExact",
-    "canonicalMissing",
-    "canonicalMismatches",
-    "deletedExpected",
-    "remainingProtected",
-    "unexpectedlyDeleted",
-    "unexpectedlyRemaining",
-  ], "stubs");
-  for (const key of [
-    "replacements",
-    "aliasesInserted",
-    "repointedProfiles",
-    "repointedRuns",
-    "deletedStubs",
-  ]) {
-    if (!boundedEvidenceCount(value.marker.resultCounts[key])) {
-      throw new Error(
-        `Source-library reconciliation evidence has an invalid bounded count (marker.resultCounts.${key}).`,
-      );
-    }
-  }
-  for (const failure of value.failures) {
-    if (
-      !isRecord(failure) ||
-      !hasExactKeys(failure, ["check", "count"]) ||
-      typeof failure.check !== "string" ||
-      !/^[A-Za-z0-9_-]{1,80}$/u.test(failure.check) ||
-      !boundedEvidenceCount(failure.count)
-    ) {
-      throw new Error(
-        "Source-library reconciliation evidence contains an invalid failure summary.",
-      );
-    }
-  }
-}
-
-export type SourceLibraryPreflightOutput = {
-  verifier: "source-library-reconciliation-preflight";
-  environment: SourceLibraryEvidenceEnvironment;
-  revision: string;
-  capturedAt: string;
-  healId: string;
-  report: {
-    sha256: string;
-    formatVersion: number;
-    automaticProposals: number;
-    stubs: number;
-  };
-  database: "approved-matching" | "partial-fixture" | "unverified";
-  expected: { poolRows: number; aliases: number };
-  observed: {
-    poolRows: number;
-    aliasesExact: number;
-    aliasesMissing: number;
-    aliasesMismatched: number;
-    markerPresent: boolean;
-    markerValid: boolean;
-  };
-  failures: Array<{ check: string; count: number }>;
-  ok: boolean;
-};
-
-export const SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION = 1 as const;
-
-export type SourceLibraryPreflightDiagnostic = {
-  contractVersion: typeof SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION;
-  database: SourceLibraryPreflightOutput["database"];
-  expected: SourceLibraryPreflightOutput["expected"];
-  observed: SourceLibraryPreflightOutput["observed"];
-  failures: Array<{ check: string; count: number }>;
-  ok: boolean;
-};
-
-const PREFLIGHT_DIAGNOSTIC_MAX_COUNT = 1_000_000;
-const PREFLIGHT_DIAGNOSTIC_MAX_FAILURES = 20;
-const PREFLIGHT_OUTPUT_KEYS = [
-  "verifier",
-  "environment",
-  "revision",
-  "capturedAt",
-  "healId",
-  "report",
-  "database",
-  "expected",
-  "observed",
-  "failures",
-  "ok",
-] as const;
-const PREFLIGHT_DIAGNOSTIC_KEYS = [
-  "contractVersion",
-  "database",
-  "expected",
-  "observed",
-  "failures",
-  "ok",
-] as const;
-const LEGACY_PREFLIGHT_DIAGNOSTIC_KEYS = PREFLIGHT_DIAGNOSTIC_KEYS.slice(1);
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-): boolean {
-  const actual = Object.keys(value);
-  return actual.length === keys.length && keys.every((key) => actual.includes(key));
-}
-
-function boundedPreflightDiagnosticCount(value: unknown): value is number {
-  return (
-    isFiniteNumber(value) &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= PREFLIGHT_DIAGNOSTIC_MAX_COUNT
-  );
-}
-
-function parsePreflightFailures(
-  value: unknown,
-): Array<{ check: string; count: number }> | undefined {
-  if (!Array.isArray(value) || value.length > PREFLIGHT_DIAGNOSTIC_MAX_FAILURES) {
-    return undefined;
-  }
-  const failures = value.flatMap((failure) => {
-    if (
-      !isRecord(failure) ||
-      !hasExactKeys(failure, ["check", "count"]) ||
-      typeof failure.check !== "string" ||
-      !/^[A-Za-z0-9_-]{1,80}$/u.test(failure.check) ||
-      !boundedPreflightDiagnosticCount(failure.count)
-    ) {
-      return [];
-    }
-    return [{ check: failure.check, count: failure.count }];
-  });
-  return failures.length === value.length ? failures : undefined;
-}
-
-function parsePreflightDiagnosticFields(
-  value: Record<string, unknown>,
-): Omit<SourceLibraryPreflightDiagnostic, "contractVersion"> | undefined {
-  if (
-    (value.database !== "approved-matching" &&
-      value.database !== "partial-fixture" &&
-      value.database !== "unverified") ||
-    !isRecord(value.expected) ||
-    !hasExactKeys(value.expected, ["poolRows", "aliases"]) ||
-    !isRecord(value.observed) ||
-    !hasExactKeys(value.observed, [
-      "poolRows",
-      "aliasesExact",
-      "aliasesMissing",
-      "aliasesMismatched",
-      "markerPresent",
-      "markerValid",
-    ]) ||
-    typeof value.ok !== "boolean" ||
-    !boundedPreflightDiagnosticCount(value.expected.poolRows) ||
-    !boundedPreflightDiagnosticCount(value.expected.aliases) ||
-    !boundedPreflightDiagnosticCount(value.observed.poolRows) ||
-    !boundedPreflightDiagnosticCount(value.observed.aliasesExact) ||
-    !boundedPreflightDiagnosticCount(value.observed.aliasesMissing) ||
-    !boundedPreflightDiagnosticCount(value.observed.aliasesMismatched) ||
-    typeof value.observed.markerPresent !== "boolean" ||
-    typeof value.observed.markerValid !== "boolean"
-  ) {
-    return undefined;
-  }
-  const failures = parsePreflightFailures(value.failures);
-  if (failures === undefined) return undefined;
-  return {
-    database: value.database,
-    expected: {
-      poolRows: value.expected.poolRows,
-      aliases: value.expected.aliases,
-    },
-    observed: {
-      poolRows: value.observed.poolRows,
-      aliasesExact: value.observed.aliasesExact,
-      aliasesMissing: value.observed.aliasesMissing,
-      aliasesMismatched: value.observed.aliasesMismatched,
-      markerPresent: value.observed.markerPresent,
-      markerValid: value.observed.markerValid,
-    },
-    failures,
-    ok: value.ok,
-  };
-}
-
-/**
- * Validate the checkpoint-facing diagnostic contract.
- *
- * New writers emit v1. Readers also accept the exact unversioned shape
- * written by earlier release checks and normalize it to v1. Unknown keys,
- * unsupported versions, and any recipe/alias/source payload are rejected.
- */
-export function parseSourceLibraryPreflightDiagnostic(
-  value: unknown,
-): SourceLibraryPreflightDiagnostic | undefined {
-  if (!isRecord(value)) return undefined;
-  if (hasExactKeys(value, PREFLIGHT_DIAGNOSTIC_KEYS)) {
-    if (value.contractVersion !== SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION) {
-      return undefined;
-    }
-  } else if (!hasExactKeys(value, LEGACY_PREFLIGHT_DIAGNOSTIC_KEYS)) {
-    return undefined;
-  }
-  const fields = parsePreflightDiagnosticFields(value);
-  return fields === undefined
-    ? undefined
-    : { contractVersion: SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION, ...fields };
-}
-
-/**
- * Reduce preflight output to operator-safe diagnostics.
- *
- * Release checkpoints may outlive the process that produced them, so they
- * must not retain the verifier's JSON payload. Keep only the database-shape
- * classification, bounded counts, marker state, and bounded failure names.
- */
-export function summarizeSourceLibraryPreflight(
-  value: unknown,
-): SourceLibraryPreflightDiagnostic | undefined {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, PREFLIGHT_OUTPUT_KEYS) ||
-    value.verifier !== "source-library-reconciliation-preflight" ||
-    (value.environment !== "development" && value.environment !== "release") ||
-    typeof value.revision !== "string" ||
-    value.revision.length === 0 ||
-    value.revision.length > 128 ||
-    typeof value.capturedAt !== "string" ||
-    value.capturedAt.length === 0 ||
-    value.capturedAt.length > 128 ||
-    typeof value.healId !== "string" ||
-    value.healId.length === 0 ||
-    value.healId.length > 128 ||
-    !isRecord(value.report) ||
-    !hasExactKeys(value.report, [
-      "sha256",
-      "formatVersion",
-      "automaticProposals",
-      "stubs",
-    ]) ||
-    typeof value.report.sha256 !== "string" ||
-    !/^[a-f0-9]{64}$/u.test(value.report.sha256) ||
-    !boundedPreflightDiagnosticCount(value.report.formatVersion) ||
-    !boundedPreflightDiagnosticCount(value.report.automaticProposals) ||
-    !boundedPreflightDiagnosticCount(value.report.stubs) ||
-    (value.database !== "approved-matching" &&
-      value.database !== "partial-fixture" &&
-      value.database !== "unverified") ||
-    !isRecord(value.expected) ||
-    !isRecord(value.observed) ||
-    typeof value.ok !== "boolean" ||
-    !boundedPreflightDiagnosticCount(value.expected.poolRows) ||
-    !boundedPreflightDiagnosticCount(value.expected.aliases) ||
-    !boundedPreflightDiagnosticCount(value.observed.poolRows) ||
-    !boundedPreflightDiagnosticCount(value.observed.aliasesExact) ||
-    !boundedPreflightDiagnosticCount(value.observed.aliasesMissing) ||
-    !boundedPreflightDiagnosticCount(value.observed.aliasesMismatched) ||
-    typeof value.observed.markerPresent !== "boolean" ||
-    typeof value.observed.markerValid !== "boolean"
-  ) {
-    return undefined;
-  }
-
-  const fields = parsePreflightDiagnosticFields(value);
-  return fields === undefined
-    ? undefined
-    : { contractVersion: SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION, ...fields };
-}
-
-async function selectPoolIds(
-  query: ReadOnlyQuery,
-  table: RecipeTable,
-  ids: string[],
-): Promise<Array<Record<string, unknown>>> {
-  if (ids.length === 0) return [];
-  const result = await query(
-    `SELECT id FROM ${table} WHERE scope = 'live' AND id = ANY($1::text[])`,
-    [ids],
-  );
-  return result.rows;
-}
-
-function preflightMarkerIsValid(
-  marker: Record<string, unknown> | undefined,
-  report: Report,
-): { present: boolean; valid: boolean } {
-  const result = marker?.result;
-  const allowed = [
-    "replacements",
-    "aliasesInserted",
-    "repointedProfiles",
-    "repointedRuns",
-    "deletedStubs",
-  ];
-  const validResult =
-    isRecord(result) &&
-    Object.keys(result).sort().join(",") === allowed.slice().sort().join(",") &&
-    allowed.every((key) => boundedCount(result[key])) &&
-    Number(result.replacements) <=
-      report.proposals.filter(
-        (proposal) =>
-          (proposal as unknown as Proposal).action ===
-          "replace-components-from-approved-source",
-      ).length &&
-    Number(result.aliasesInserted) <=
-      report.proposals.filter(
-        (proposal) =>
-          (proposal as unknown as Proposal).action ===
-          "link-source-identity",
-      ).length + report.findings.allZeroStubs.length &&
-    Number(result.deletedStubs) <= report.findings.allZeroStubs.length;
-  return {
-    present: Boolean(marker),
-    valid:
-      validResult &&
-      (typeof marker?.appliedAt === "string" ||
-        marker?.appliedAt instanceof Date),
-  };
-}
-
-/**
- * Cheap, bounded identity check used before expensive release gates.
- *
- * This checks only live recipe IDs, alias identities, and the marker shape. It
- * does not inspect recipe payloads, references, or mutate the database. A
- * complete identity match is not a substitute for the full verifier below; it
- * only prevents a partial fixture database from allowing expensive release
- * work to start.
- */
-export async function preflightSourceLibraryReconciliation(
-  report: Report,
-  reportBytes: Buffer,
-  healId: string,
-  query: ReadOnlyQuery,
-  environment: SourceLibraryEvidenceEnvironment,
-  revision: string,
-): Promise<SourceLibraryPreflightOutput> {
-  const proposals = report.proposals as unknown as Proposal[];
-  const idsByTable = Object.fromEntries(
-    TABLES.map((table) => [
-      table,
-      [
-        ...new Set(
-          proposals
-            .filter((proposal) => proposal.table === table)
-            .map((proposal) => proposal.before.id),
-        ),
-      ],
-    ]),
-  ) as Record<RecipeTable, string[]>;
-  const poolRowsByTable = {} as Record<
-    RecipeTable,
-    Array<Record<string, unknown>>
-  >;
-  for (const table of TABLES) {
-    poolRowsByTable[table] = await selectPoolIds(
-      query,
-      table,
-      idsByTable[table],
-    );
-  }
-  const aliases = compareAliases(await selectAliases(query, report));
-  const markerResult = await query(
-    'SELECT applied_at AS "appliedAt", result FROM data_heals WHERE id = $1 LIMIT 1',
-    [healId],
-  );
-  const marker = preflightMarkerIsValid(markerResult.rows[0], report);
-  const expectedPoolRows = report.proposals.length;
-  const observedPoolRows = TABLES.reduce(
-    (total, table) => total + poolRowsByTable[table].length,
-    0,
-  );
-  const expectedAliases =
-    report.proposals.filter(
-      (proposal) =>
-        (proposal as unknown as Proposal).action === "link-source-identity",
-    ).length + report.findings.allZeroStubs.length;
-  const failureCandidates: Array<[string, number]> = [
-    ["databaseShape", expectedPoolRows - observedPoolRows],
-    ["aliases", aliases.counts.missing + aliases.counts.mismatches],
-    ["marker", Number(!marker.valid)],
-  ];
-  const failures = failureCandidates
-    .filter(([, count]) => count > 0)
-    .map(([check, count]) => ({ check, count }));
-  const database =
-    failures.length === 0
-      ? "approved-matching"
-      : failures.some(
-            (failure) =>
-              failure.check === "databaseShape" ||
-              failure.check === "aliases" ||
-              !marker.present,
-          )
-        ? "partial-fixture"
-        : "unverified";
-  return {
-    verifier: "source-library-reconciliation-preflight",
-    environment,
-    revision,
-    capturedAt: new Date().toISOString(),
-    healId,
-    report: {
-      sha256: sha256(reportBytes),
-      formatVersion: report.formatVersion,
-      automaticProposals: report.proposals.length,
-      stubs: report.findings.allZeroStubs.length,
-    },
-    database,
-    expected: { poolRows: expectedPoolRows, aliases: expectedAliases },
-    observed: {
-      poolRows: observedPoolRows,
-      aliasesExact: aliases.counts.exactMatches,
-      aliasesMissing: aliases.counts.missing,
-      aliasesMismatched: aliases.counts.mismatches,
-      markerPresent: marker.present,
-      markerValid: marker.valid,
-    },
-    failures,
-    ok: failures.length === 0,
-  };
-}
-
-export function computeSourceLibraryEvidenceId(
-  evidence: Record<string, unknown>,
-): string {
-  const bounded = { ...evidence };
-  delete bounded.evidenceId;
-  return sha256(stable(bounded));
-}
-
 export async function verifySourceLibraryReconciliation(
   report: Report,
   reportBytes: Buffer,
@@ -1108,7 +504,6 @@ export async function verifySourceLibraryReconciliation(
   query: ReadOnlyQuery,
   fromDate = DEFAULT_FROM_DATE,
   environment: SourceLibraryEvidenceEnvironment = "development",
-  revision = "development-unbound",
 ): Promise<VerificationOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(TABLES.map((table) => [
@@ -1157,14 +552,9 @@ export async function verifySourceLibraryReconciliation(
     stubs: stubState.counts,
     stubObservations: stubState.observations,
   };
-  const capturedAt = new Date().toISOString();
-  const fingerprint = sha256(stable(fingerprintInput));
-  const output: Omit<VerificationOutput, "evidenceId"> = {
+  return {
     verifier: "source-library-reconciliation",
     environment,
-    revision,
-    capturedAt,
-    healId,
     repairBoundary: { fromDate },
     report: {
       sha256: sha256(reportBytes),
@@ -1179,13 +569,9 @@ export async function verifySourceLibraryReconciliation(
     pendingRuns: pendingSummary,
     protectedHistory: { references: protectedReferences.length },
     stubs: stubState.counts,
-    idempotencyFingerprint: { algorithm: "sha256", value: fingerprint },
+    idempotencyFingerprint: { algorithm: "sha256", value: sha256(stable(fingerprintInput)) },
     ok: failures.length === 0,
     failures,
-  };
-  return {
-    ...output,
-    evidenceId: computeSourceLibraryEvidenceId(output),
   };
 }
 
@@ -1207,121 +593,9 @@ async function writeOutput(outputPath: string | undefined, output: unknown): Pro
   fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
 }
 
-export const SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS = RELEASE_PREFLIGHT_DB_ATTEMPTS;
-export const isRetryableSourceLibraryDatabaseError =
-  isRetryableReleasePreflightDatabaseError;
-
-type ReadOnlyPoolClient = {
-  query: (text: string, values?: readonly unknown[]) => Promise<{
-    rows: Array<Record<string, unknown>>;
-  }>;
-  release: (destroy?: boolean) => void;
-};
-
-type ReadOnlyPool = {
-  connect: () => Promise<ReadOnlyPoolClient>;
-};
-
-async function runSourceLibraryReadOnlyCheck<T>(
-  pool: ReadOnlyPool,
-  retryConnectionFailures: boolean,
-  check: (query: ReadOnlyQuery) => Promise<T>,
-): Promise<T> {
-  return runReleasePreflightDatabaseRetry(async () => {
-    let client: ReadOnlyPoolClient | undefined;
-    let destroyClient = false;
-    try {
-      client = await pool.connect();
-      await client.query("BEGIN TRANSACTION READ ONLY");
-      const query: ReadOnlyQuery = async (text, values) => {
-        const result = await client!.query(text, values);
-        return { rows: result.rows };
-      };
-      const output = await check(query);
-      await client.query("ROLLBACK");
-      return output;
-    } catch (error) {
-      destroyClient =
-        retryConnectionFailures &&
-        isRetryableReleasePreflightDatabaseError(error);
-      throw error;
-    } finally {
-      client?.release(destroyClient);
-    }
-  }, { enabled: retryConnectionFailures });
-}
-
 function dateFromHealId(healId: string) {
   const match = healId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/);
   return match?.[1];
-}
-
-function currentRevision(): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  }).trim();
-}
-
-export function resolveSourceLibraryRevision(
-  environment: SourceLibraryEvidenceEnvironment,
-  configuredRevision: string | undefined,
-): string {
-  const revision = configuredRevision?.trim() ||
-    (environment === "development" ? currentRevision() : undefined);
-  if (!revision) {
-    throw new Error(
-      "Missing --revision for release evidence; pass the exact deployed 40-character Git commit SHA",
-    );
-  }
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error("Invalid --revision; expected the full 40-character Git commit SHA");
-  }
-  return revision;
-}
-
-export function assertProductionSourceLibraryCapture(options: {
-  environmentArgument: string | undefined;
-  configuredRevision: string | undefined;
-  revisionArgumentProvided: boolean;
-  outputPath: string | undefined;
-  preflight: boolean;
-  environment: NodeJS.ProcessEnv;
-}): void {
-  if (options.environmentArgument !== "release") {
-    throw new Error(
-      "Production source-library capture requires the explicit --environment release flag.",
-    );
-  }
-  if (!options.configuredRevision?.trim()) {
-    throw new Error(
-      "Production source-library capture requires the explicit --revision deployed Git SHA.",
-    );
-  }
-  if (!options.revisionArgumentProvided) {
-    throw new Error(
-      "Production source-library capture requires --revision on the command line; do not rely on an ambient revision variable.",
-    );
-  }
-  resolveSourceLibraryRevision("release", options.configuredRevision);
-  if (options.preflight) {
-    throw new Error(
-      "Production source-library capture does not support --preflight; capture the full bounded verifier result.",
-    );
-  }
-  if (!options.environment.DATABASE_URL?.trim()) {
-    throw new Error(
-      "Production source-library capture requires DATABASE_URL for the read-only production database.",
-    );
-  }
-  if (options.environment.SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE?.trim()) {
-    throw new Error(
-      "Production source-library capture refuses SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE; do not substitute development fixtures for production.",
-    );
-  }
-  if (options.outputPath !== undefined && options.outputPath.trim() === "") {
-    throw new Error("Production source-library capture output path cannot be empty.");
-  }
 }
 
 async function main() {
@@ -1341,58 +615,32 @@ async function main() {
     );
   }
   const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
-  const captureProduction = process.argv.includes("--capture-production");
-  const revisionArgumentProvided = process.argv.includes("--revision");
-  const configuredRevisionArgument =
-    argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION);
-  const revision = resolveSourceLibraryRevision(
-    environment,
-    configuredRevisionArgument,
-  );
   const outputPath = outputPathArgument();
-  const preflightOnly = process.argv.includes("--preflight");
-  if (captureProduction) {
-    assertProductionSourceLibraryCapture({
-      environmentArgument,
-      configuredRevision: configuredRevisionArgument,
-      revisionArgumentProvided,
-      outputPath,
-      preflight: preflightOnly,
-      environment: process.env,
-    });
-  }
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
   const { pool } = await import("@workspace/db");
-  const output = await runSourceLibraryReadOnlyCheck<
-    SourceLibraryPreflightOutput | VerificationOutput
-  >(pool, preflightOnly, (query) =>
-    preflightOnly
-      ? preflightSourceLibraryReconciliation(
-          report,
-          reportBytes,
-          healId,
-          query,
-          environment,
-          revision,
-        )
-      : verifySourceLibraryReconciliation(
-          report,
-          reportBytes,
-          healId,
-          query,
-          fromDate,
-          environment,
-          revision,
-        ),
-  );
-  if (!preflightOnly) {
-    assertBoundedSourceLibraryReconciliationEvidence(output);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN TRANSACTION READ ONLY");
+    const output = await verifySourceLibraryReconciliation(
+      report,
+      reportBytes,
+      healId,
+      async (text, values) => {
+        const result = await client.query(text, values ? [...values] : undefined);
+        return { rows: result.rows as Array<Record<string, unknown>> };
+      },
+      fromDate,
+      environment,
+    );
+    await client.query("ROLLBACK");
+    await writeOutput(outputPath, output);
+    process.stdout.write(`${JSON.stringify(output)}\n`);
+    if (!output.ok) process.exitCode = 1;
+  } finally {
+    client.release();
   }
-  await writeOutput(outputPath, output);
-  process.stdout.write(`${JSON.stringify(output)}\n`);
-  if (!output.ok) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -1402,18 +650,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       environmentIndex >= 0 && process.argv[environmentIndex + 1]
         ? process.argv[environmentIndex + 1]
         : process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT;
-    const revisionIndex = process.argv.indexOf("--revision");
-    const requestedRevision =
-      revisionIndex >= 0 && process.argv[revisionIndex + 1]
-        ? process.argv[revisionIndex + 1]
-        : process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION;
     const output = {
-      verifier: process.argv.includes("--preflight")
-        ? "source-library-reconciliation-preflight"
-        : "source-library-reconciliation",
+      verifier: "source-library-reconciliation",
       environment: requestedEnvironment ?? "unknown",
-      revision: requestedRevision ?? "unknown",
-      capturedAt: new Date().toISOString(),
       ok: false,
       failures: [{ check: "input-or-database", count: 1 }],
       error: error instanceof Error ? error.message : "Verification failed",
@@ -1423,12 +662,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       outputArgument >= 0 && process.argv[outputArgument + 1]
         ? path.resolve(process.cwd(), process.argv[outputArgument + 1])
         : undefined;
-    // A failed production capture is not evidence. In particular, do not leave
-    // a failure-shaped JSON file for the importer or release checker to treat
-    // as a retained artifact. Development verifier failures still write their
-    // bounded diagnostic because the fixture tests use that output to explain
-    // a failed gate.
-    if (outputPath && !process.argv.includes("--capture-production")) {
+    if (outputPath) {
       try {
         fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
       } catch {

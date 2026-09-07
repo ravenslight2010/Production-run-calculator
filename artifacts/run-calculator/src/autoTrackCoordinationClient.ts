@@ -1,4 +1,3 @@
-import type { AutoTrackSchedule } from "@workspace/live-calc";
 import type { SyncPayload } from "./types";
 
 export const AUTO_TRACK_COORDINATION_EVENT = "run-calculator:auto-track-coordination";
@@ -46,35 +45,4 @@ export function subscribeAutoTrackCoordination(
   };
   window.addEventListener(AUTO_TRACK_COORDINATION_EVENT, handle);
   return () => window.removeEventListener(AUTO_TRACK_COORDINATION_EVENT, handle);
-}
-
-type CoordinationShape = Pick<SyncPayload, "autoTrackCoordination">;
-
-/**
- * Map a server-computed schedule into the coordination shape consumed by
- * useAutoTrack. Derived entries receive sequence zero while canonical entries
- * retain the server sequence and due-now verdict.
- */
-export function autoTrackScheduleToCoordination(
-  schedule: AutoTrackSchedule,
-): CoordinationShape {
-  const channelStates: NonNullable<SyncPayload["autoTrackCoordination"]>["runs"][string] = {};
-  for (const entry of schedule.entries) {
-    channelStates[entry.channel] = {
-      generation: schedule.generation,
-      sequence: entry.sequence ?? 0,
-      nextDueAt: entry.nextDueAt,
-      dueNow: entry.dueNow,
-      canonical: entry.canonical,
-      updatedAt: schedule.atMs,
-    };
-  }
-  return {
-    autoTrackCoordination: {
-      version: 1,
-      runs: {
-        [schedule.runId]: channelStates,
-      },
-    },
-  };
 }

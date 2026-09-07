@@ -9,7 +9,6 @@ classification, and bounded coverage gaps, see
 | Suite/config | Classification | Database behavior |
 | --- | --- | --- |
 | `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
-| `playwright.release-debug.config.ts` | destructive/live-day, local debug only | reuses the release lane's local API/web servers and `global-setup.ts`, but writes only debug artifacts and never release evidence |
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
 | `playwright.ai-outage-phone.config.ts` | isolated manager account, non-destructive | runs the AI outage reviewability journey at a Pixel 5 viewport, or against physical Android Chrome when `PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT` is set; no global setup; the account is removed in `afterAll` |
 | `playwright.a11y.config.ts` | isolated sandbox, non-destructive | no global setup; axe scans public and sandbox-authenticated screens without deleting live-day data |
@@ -113,24 +112,6 @@ The package command supplies the approved test-mode flags automatically. The
 Playwright config still fails closed unless the database identity is explicitly
 disposable, and the existing advisory lock plus fixture cleanup remain active.
 
-Check browser-spec syntax without starting Playwright or connecting to a
-database. With no path, the command checks every configured `e2e/*.spec.ts`
-file:
-
-```sh
-pnpm --filter @workspace/run-calculator run check:e2e:syntax
-```
-
-To check one spec, pass its path after `--`:
-
-```sh
-pnpm --filter @workspace/run-calculator run check:e2e:syntax -- \
-  e2e/recipe-refresh-start-freeze.spec.ts
-```
-
-Syntax failures keep the same concise `file:line:column` format used by the
-recipe-refresh preflight.
-
 Run the recurring cross-device smoke matrix before release checks. It is a
 small lifecycle signal, not a replacement for the focused wake, timer, mobile
 layout, or failed-write suites:
@@ -185,40 +166,12 @@ rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
-The main config enumerates 159 cases and retains
+The main config enumerates 117 cases and retains
 `release-evidence/browser-full/FINAL-REPORT.md` after a real full-suite run.
 The report includes the revision, completion counts, total duration, and
 per-file test-result durations. Discovery (`--list`) and focused runs do not
 overwrite a retained full-suite report. The release checker supplies the
 revision-bound output path and verifies the report before accepting `GO`.
-
-To debug one Chromium release spec against the same local API/web server setup,
-provide a disposable `DATABASE_URL` and pass the spec path as an argument:
-
-```sh
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/browser_debug_e2e \
-  pnpm --filter @workspace/run-calculator run test:e2e:release-debug \
-  e2e/screen-off-wake.spec.ts
-```
-
-To run one named case, add Playwright's title filter:
-
-```sh
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/browser_debug_e2e \
-  pnpm --filter @workspace/run-calculator run test:e2e:release-debug \
-  e2e/screen-off-wake.spec.ts --grep "exact test title"
-```
-
-This debug command is destructive and keeps the same disposable-database guard,
-serial worker, Chromium project, suite exclusions, global setup, and local
-server factory as the full release lane. It uses separate
-`test-results/release-debug` and `playwright-report/release-debug` directories
-and does not load the 159-case release reporter, even if
-`PLAYWRIGHT_RELEASE_REPORT_PATH` is set. Its result is never release evidence.
-The full `test:e2e` lane remains the only command that enforces exactly 159
-cases and may retain `release-evidence/browser-full/FINAL-REPORT.md`.
-The command does not set the approved-mode variables itself: a remote database
-whose name lacks an `e2e`, `test`, or `tmp` marker is rejected before cleanup.
 
 
 ## Visual regression baselines

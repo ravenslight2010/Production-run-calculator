@@ -5,10 +5,6 @@ import { HealthCheckResponse } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
 import { getStartupHealth } from "../lib/startupHealth";
-import {
-  backgroundOperationsDegraded,
-  getBackgroundOperationDiagnostics,
-} from "../lib/backgroundOperations";
 
 const router: IRouter = Router();
 
@@ -17,16 +13,15 @@ type CheckStatus = "ok" | "error" | "pending";
 async function readiness(req: Request, res: Response): Promise<void> {
   const startup = getStartupHealth();
   const correlationId = String(
-    (req as Request & { correlationId?: string }).correlationId ??
-      req.id ??
-      "health",
+    (req as Request & { correlationId?: string }).correlationId
+    ?? req.id
+    ?? "health",
   );
   const checks: Record<string, { status: CheckStatus; detail?: string }> = {
     process: { status: "ok" },
     startup: { status: startup.phase === "ready" ? "ok" : "error" },
     database: { status: "pending" },
     dependencies: { status: "pending" },
-    backgroundWorkers: { status: "pending" },
   };
 
   if (startup.phase !== "ready") {
@@ -51,25 +46,15 @@ async function readiness(req: Request, res: Response): Promise<void> {
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "error", detail: "ai_provider_not_configured" };
-    const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
-    checks.backgroundWorkers = backgroundOperationsDegraded(backgroundOperationDiagnostics)
-      ? { status: "error", detail: "sustained_background_worker_failures" }
-      : { status: "ok" };
-    res.locals.backgroundOperationDiagnostics = backgroundOperationDiagnostics;
   }
 
   const allHealthy =
     startup.phase === "ready" &&
     Object.values(checks).every((c) => c.status === "ok");
-  const flatChecks = Object.fromEntries(
-    Object.entries(checks).map(([key, value]) => [key, value.status]),
-  );
+  const flatChecks = Object.fromEntries(Object.entries(checks).map(([key, value]) => [key, value.status]));
   const diagnostics =
     startup.phase === "ready"
-      ? {
-        cacheMaintenance: await getCacheMaintenanceDiagnostics(),
-        backgroundOperations: res.locals.backgroundOperationDiagnostics,
-      }
+      ? { cacheMaintenance: await getCacheMaintenanceDiagnostics() }
       : undefined;
   logger.info(
     {
@@ -92,23 +77,11 @@ async function readiness(req: Request, res: Response): Promise<void> {
   if (allHealthy) {
     // Keep the existing contract for any caller that checks the shape
     const data = HealthCheckResponse.parse({ status: "ok" });
-    res.json({
-      ...data,
-      checks: flatChecks,
-      diagnostics,
-      correlationId,
-      timestamp: new Date().toISOString(),
-    });
+    res.json({ ...data, checks: flatChecks, diagnostics, correlationId, timestamp: new Date().toISOString() });
   } else {
     res.status(503).json({
       status: startup.phase === "starting" ? "starting" : "degraded",
       checks: flatChecks,
-      startup: {
-        phase: startup.phase,
-        stage: startup.stage,
-        durationMs: startup.durationMs,
-        ...(startup.failure ? { errorCode: startup.failure.errorCode } : {}),
-      },
       ...(diagnostics ? { diagnostics } : {}),
       correlationId,
       timestamp: new Date().toISOString(),

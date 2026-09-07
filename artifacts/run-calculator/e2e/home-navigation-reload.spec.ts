@@ -156,16 +156,22 @@ test.describe("Home navigation persistence", () => {
     await signUp(page, username);
 
     await page.goto("/?screen=warehouse", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /^Warehouse Needs —/ })).toBeVisible({
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
       timeout: 25_000,
     });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
     await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
     await expectNoLegacyDepartmentLabels(page);
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /^Warehouse Needs —/ })).toBeVisible({
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
       timeout: 25_000,
     });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
     await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
     await expectNoLegacyDepartmentLabels(page);
   });

@@ -58,7 +58,7 @@ export type ManagerAttentionInput = {
     flavor: string;
     dates: string[];
     totalCases: number;
-    reason: "missing" | "incomplete" | "missing-case-pack";
+    reason: "missing" | "incomplete";
   };
 };
 
@@ -110,7 +110,7 @@ export function buildManagerAttentionItems(
       priority: 3,
       count: input.scheduledRecipeIssueCount,
       title: "Scheduled recipe setup",
-      detail: `${pluralize(input.scheduledRecipeIssueCount, "profile")} is not production-ready before its scheduled run.`,
+      detail: `${pluralize(input.scheduledRecipeIssueCount, "profile")} needs recipe setup before its scheduled run.`,
       urgency: "Upcoming",
       timing: date ? `Next run ${formatScheduleDate(date)}` : "Before the next scheduled run",
       impact: next?.totalCases

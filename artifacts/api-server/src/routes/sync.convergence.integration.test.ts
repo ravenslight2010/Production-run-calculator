@@ -89,6 +89,9 @@ beforeAll(async () => {
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);
@@ -321,7 +324,7 @@ describe("multi-client sync convergence soak", () => {
     await clients[2].pull();
 
     // An old lifecycle and blank value arrive after the latest canonical edit.
-    const stale = clone(fixture());
+    const stale = await client.push(TODAY, fixture(), 0);
     const stalePut = await clients[2].push(TODAY, {
       ...stale,
       runValues: { "run-main": {} },

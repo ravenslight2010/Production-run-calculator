@@ -30,11 +30,9 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
-let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
-let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -72,7 +70,6 @@ beforeAll(async () => {
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
-  const syncMod = await import("./sync");
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
@@ -87,11 +84,9 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
-  applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
   dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
-  runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -134,7 +129,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -165,218 +160,6 @@ function managerAuthHeaders(): Record<string, string> {
 function sandboxAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(SANDBOX)}` };
 }
-
-const EVIDENCE_DATE = "2030-03-10";
-const EVIDENCE_RUN = "evidence-run";
-
-async function seedCompletedEvidenceRun(
-  scope: "live" | "sandbox" = "live",
-  runId = EVIDENCE_RUN,
-) {
-  await db.insert(completedRunHistoryTable).values({
-    id: `completed-${scope}-${runId}`,
-    scope,
-    operationId: `completed-op-${scope}-${runId}`,
-    runId,
-    date: EVIDENCE_DATE,
-    completedAt: new Date("2030-03-10T12:00:00.000Z"),
-    snapshot: { dayState: { runs: [{ id: runId, endedAt: 1 }] }, runValues: {} },
-    snapshotHash: `snapshot-${scope}-${runId}`,
-    actorId: USER,
-  });
-}
-
-function evidenceBody(
-  operationId: string,
-  finalTotal: number,
-  correctionOf?: string,
-  runId = EVIDENCE_RUN,
-) {
-  return {
-    operationId, date: EVIDENCE_DATE, runId, slot: 1, finalTotal,
-    ...(correctionOf ? { correctionOf } : {}),
-  };
-}
-
-async function postEvidence(
-  body: unknown,
-  headers: Record<string, string> = managerAuthHeaders(),
-) {
-  return fetch(`${baseUrl}/api/applicator-batch-evidence/finalize`, {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-describe("POST /sync/applicator-batch-evidence/finalize — PostgreSQL authority", () => {
-  it("persists an initial manager finalization as 201 and acknowledges an exact duplicate as 200", async () => {
-    await seedCompletedEvidenceRun();
-    const body = evidenceBody("evidence-initial", 12);
-    const first = await postEvidence(body);
-    expect(first.status).toBe(201);
-    const duplicate = await postEvidence(body);
-    expect(duplicate.status).toBe(200);
-    const duplicateBody = await duplicate.json() as { duplicate?: boolean };
-    expect(duplicateBody.duplicate).toBe(true);
-    const rows = await db.select().from(applicatorBatchEvidenceTable);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].source).toBe("manager-finalization");
-  });
-
-  it("rejects a same-operation different payload with 409 and rejects non-managers with 403", async () => {
-    await seedCompletedEvidenceRun();
-    const body = evidenceBody("evidence-conflict", 12);
-    expect((await postEvidence(body)).status).toBe(201);
-    expect((await postEvidence(evidenceBody("evidence-conflict", 13))).status).toBe(409);
-    expect((await postEvidence(evidenceBody("evidence-user", 4), authHeaders())).status).toBe(403);
-  });
-
-  it("requires a completed-history row in the same authenticated scope", async () => {
-    expect((await postEvidence(evidenceBody("evidence-missing", 4))).status).toBe(409);
-    await seedCompletedEvidenceRun("live");
-    expect((await postEvidence(evidenceBody("evidence-live", 4))).status).toBe(201);
-    // The sandbox manager cannot attest to the live completed run.
-    expect((await postEvidence(evidenceBody("evidence-sandbox-missing", 4), sandboxAuthHeaders())).status).toBe(409);
-    await seedCompletedEvidenceRun("sandbox");
-    expect((await postEvidence(evidenceBody("evidence-sandbox", 4), sandboxAuthHeaders())).status).toBe(201);
-    const rows = await db.select().from(applicatorBatchEvidenceTable);
-    expect(rows.map((row) => row.scope).sort()).toEqual(["live", "sandbox"]);
-  });
-
-  it("appends a first correction, while a stale correctionOf is rejected", async () => {
-    await seedCompletedEvidenceRun();
-    expect((await postEvidence(evidenceBody("evidence-head", 12))).status).toBe(201);
-    expect((await postEvidence(evidenceBody("evidence-correction", 14, "evidence-head"))).status).toBe(201);
-    expect((await postEvidence(evidenceBody("evidence-stale", 16, "evidence-head"))).status).toBe(409);
-    const rows = await db.select().from(applicatorBatchEvidenceTable);
-    expect(rows.filter((row) => row.source === "manager-correction")).toHaveLength(1);
-  });
-
-  it("serializes concurrent initial finalizations to one winner and one 409", async () => {
-    await seedCompletedEvidenceRun();
-    const [left, right] = await Promise.all([
-      postEvidence(evidenceBody("evidence-race-left", 10)),
-      postEvidence(evidenceBody("evidence-race-right", 11)),
-    ]);
-    expect([left.status, right.status].sort()).toEqual([201, 409]);
-    const rows = await db.select().from(applicatorBatchEvidenceTable);
-    expect(rows.filter((row) => row.source === "manager-finalization")).toHaveLength(1);
-  });
-
-  it("serializes concurrent corrections from one head to one successor and one 409", async () => {
-    await seedCompletedEvidenceRun();
-    expect((await postEvidence(evidenceBody("evidence-race-head", 10))).status).toBe(201);
-    const [left, right] = await Promise.all([
-      postEvidence(evidenceBody("evidence-race-correction-left", 11, "evidence-race-head")),
-      postEvidence(evidenceBody("evidence-race-correction-right", 12, "evidence-race-head")),
-    ]);
-    expect([left.status, right.status].sort()).toEqual([201, 409]);
-    const rows = await db.select().from(applicatorBatchEvidenceTable);
-    expect(rows.filter((row) => row.source === "manager-correction")).toHaveLength(1);
-  });
-});
-
-describe("server-owned applicator ticks — evidence transaction boundary", () => {
-  const TICK_DATE = "2030-03-10";
-  const TICK_RUN = "server-owned-applicator";
-  const TICK_NOW = new Date("2030-03-10T12:00:00.000Z").getTime();
-
-  async function seedServerApplicatorRun() {
-    await db.update(dailySyncTable).set({
-      data: {
-        dayState: {
-          date: TICK_DATE,
-          currentIndex: 0,
-          runs: [{ id: TICK_RUN, subTab: "crusts", startedAt: TICK_NOW - 120_000, metaUpdatedAt: 1 }],
-        },
-        runValuesUpdatedAt: { [TICK_RUN]: 1 },
-        runValues: {
-          [TICK_RUN]: {
-            casesNeeded: 200, crustsPerCycle: 12, cycleSpeed: 600, speedAdjustment: 1,
-            approxLineSpeed: 400, freezerTime: 3, pizzasPerCase: 12, casesPerSkid: 48,
-            casesPerLayer: 12, doughballsPerTray: 36, crustsPerStack: 6, doughBatchYield: 150,
-            crustsPerCase: 12, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0,
-            batchesReady: 0, targetDoughballWeight: 8, doughRecipe: [],
-            sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
-            sauceOzPerPizza: 0, frontlineRecipeName: "", frontlineRecipe: [],
-            app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
-            app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
-            app1BatchCorrectionGeneration: 0,
-            app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
-            app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
-            app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
-            pep1Type: "", pep2Type: "", pep1Combined: true,
-          },
-        },
-      },
-    }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
-  }
-
-  it("commits server-owned applicator progress and evidence together, with retry idempotency", async () => {
-    await seedServerApplicatorRun();
-    const first = await runAutoTrackServerTicks({
-      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
-    });
-    expect(first.accepted).toBeGreaterThan(0);
-    const firstEvidence = await db.select().from(applicatorBatchEvidenceTable);
-    expect(firstEvidence.filter((row) => row.source === "automatic-observation")).toHaveLength(1);
-    const [afterFirst] = await db.select().from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
-    const firstTotal = (afterFirst.data as any).runValues[TICK_RUN].app1BatchesMade;
-    expect(firstTotal).toBe(1);
-    // Hold the accepted claim's next due time in the future to replay the same
-    // server tick boundary without manufacturing a new physical batch event.
-    const heldData = afterFirst.data as any;
-    heldData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].nextDueAt = TICK_NOW + 60_000;
-    await db.update(dailySyncTable).set({ data: heldData })
-      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
-
-    const retry = await runAutoTrackServerTicks({
-      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
-    });
-    expect(retry.outcomes.duplicate ?? 0).toBeGreaterThanOrEqual(0);
-    const secondEvidence = await db.select().from(applicatorBatchEvidenceTable);
-    expect(secondEvidence.filter((row) => row.source === "automatic-observation")).toHaveLength(1);
-    const [afterRetry] = await db.select().from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
-    expect((afterRetry.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(firstTotal);
-  });
-
-  it("rolls back server-owned progress and ledger when evidence append fails", async () => {
-    await seedServerApplicatorRun();
-    await db.execute(sql`
-      CREATE OR REPLACE FUNCTION reject_auto_applicator_evidence() RETURNS trigger
-      LANGUAGE plpgsql AS $$
-      BEGIN
-        IF NEW.source = 'automatic-observation' THEN
-          RAISE EXCEPTION 'test evidence append failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $$;
-      CREATE TRIGGER reject_auto_applicator_evidence_trigger
-      BEFORE INSERT ON applicator_batch_evidence
-      FOR EACH ROW EXECUTE FUNCTION reject_auto_applicator_evidence();
-    `);
-    try {
-      const result = await runAutoTrackServerTicks({
-        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
-      });
-      expect(result.outcomes.error).toBe(1);
-      const [row] = await db.select().from(dailySyncTable)
-        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
-      expect((row.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(0);
-      expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
-      expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
-    } finally {
-      await db.execute(sql`
-        DROP TRIGGER IF EXISTS reject_auto_applicator_evidence_trigger ON applicator_batch_evidence;
-        DROP FUNCTION IF EXISTS reject_auto_applicator_evidence();
-      `);
-    }
-  });
-});
 
 describe("POST /sync/operational-intents — atomic run finalization", () => {
   const DATE = "2030-03-10";
@@ -478,8 +261,6 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
     expect(firstBody.cursor).toBeTypeOf("number");
-    expect(firstBody.canonicalRevision).toBe(1);
-    expect(firstBody.serverTime).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
     // Completed history is the retained daily document flow: the canonical ended
@@ -496,15 +277,6 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
       date: DATE,
       actorId: USER,
     });
-    const [receipt] = await db.select().from(operationalIntentLedgerTable);
-    expect(receipt).toMatchObject({
-      commandType: "operational-intent",
-      actorId: USER,
-      deviceId: "end-client",
-      baseRevision: 0,
-      canonicalRevision: 1,
-    });
-    expect(receipt.serverReceivedAt.getTime()).toBe(firstBody.serverTime);
     expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
       .toBe(completion.completedAt.getTime());
 
@@ -516,13 +288,7 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
     const replay = await postFinalization(finalization("offline:final-one"));
     const replayBody = await replay.json() as any;
-    expect(replayBody).toMatchObject({
-      outcome: "accepted",
-      duplicate: true,
-      cursor: firstBody.cursor,
-      canonicalRevision: firstBody.canonicalRevision,
-      serverTime: firstBody.serverTime,
-    });
+    expect(replayBody).toMatchObject({ outcome: "accepted", duplicate: true, cursor: firstBody.cursor });
     expect(replayBody.data.dayState.runs.find((run: any) => run.id === RUN)?.endedAt)
       .toBe(firstBody.data.dayState.runs.find((run: any) => run.id === RUN).endedAt);
     expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(false);
@@ -748,134 +514,6 @@ describe("GET /sync/operational-intents/cursor", () => {
   });
 });
 
-describe("GET /sync/health — read-only scoped sentinel", () => {
-  const DATE = "2030-03-10";
-
-  async function getHealth(headers: Record<string, string> = managerAuthHeaders()) {
-    return fetch(`${baseUrl}/api/sync/health?date=${DATE}`, { headers });
-  }
-
-  async function seedHealthyDocument() {
-    await db.update(dailySyncTable).set({
-      data: {
-        dayState: {
-          date: DATE,
-          currentIndex: 0,
-          runs: [{ id: "health-run", startedAt: 100, metaUpdatedAt: 100 }],
-        },
-        runValues: { "health-run": { casesNeeded: 10, freezerTime: 5 } },
-      },
-      canonicalRevision: 7,
-    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
-  }
-
-  it("reports a healthy bounded contract without exposing canonical payloads", async () => {
-    await seedHealthyDocument();
-    const response = await getHealth();
-    expect(response.status).toBe(200);
-    const body = await response.json() as any;
-    expect(body).toMatchObject({
-      contractVersion: 1,
-      scope: "live",
-      date: DATE,
-      status: "healthy",
-      evidence: {
-        dailyRowPresent: true,
-        canonicalRevision: 7,
-        ledgerRowsScanned: 0,
-        historyRowsScanned: 0,
-      },
-    });
-    expect(body.checks.map((check: any) => check.name)).toEqual([
-      "canonical-document",
-      "snapshot-revision",
-      "operational-projection",
-      "command-history",
-    ]);
-    expect(body).not.toHaveProperty("data");
-    expect(body).not.toHaveProperty("payload");
-    expect(JSON.stringify(body)).not.toContain("health-run");
-  });
-
-  it("reports a representative canonical mismatch as failing and never repairs it", async () => {
-    await seedHealthyDocument();
-    const before = (await db.select().from(dailySyncTable).where(and(
-      eq(dailySyncTable.scope, "live"),
-      eq(dailySyncTable.date, DATE),
-    )))[0];
-    await db.update(dailySyncTable).set({
-      data: { dayState: { date: DATE, runs: [{ id: "health-run" }] } },
-    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
-
-    const response = await getHealth();
-    const body = await response.json() as any;
-    expect(body.status).toBe("failing");
-    expect(body.checks.find((check: any) => check.name === "operational-projection")).toMatchObject({
-      status: "failing",
-    });
-    expect(body.nextAction).toContain("did not repair");
-
-    const after = (await db.select().from(dailySyncTable).where(and(
-      eq(dailySyncTable.scope, "live"),
-      eq(dailySyncTable.date, DATE),
-    )))[0];
-    expect(after.data).toEqual({ dayState: { date: DATE, runs: [{ id: "health-run" }] } });
-    expect(after.canonicalRevision).toBe(before.canonicalRevision);
-  });
-
-  it("marks accepted receipts without snapshots as failing", async () => {
-    await seedHealthyDocument();
-    await db.insert(operationalIntentLedgerTable).values({
-      scope: "live",
-      date: DATE,
-      intentId: "health-invalid-receipt",
-      outcome: "accepted",
-      snapshot: null,
-    });
-    const body = await (await getHealth()).json() as any;
-    expect(body.status).toBe("failing");
-    expect(body.checks.find((check: any) => check.name === "command-history").status).toBe("failing");
-  });
-
-  it("reports unavailable canonical evidence as a warning without treating it as repaired", async () => {
-    const response = await fetch(`${baseUrl}/api/sync/health?date=2030-04-01`, {
-      headers: managerAuthHeaders(),
-    });
-    const body = await response.json() as any;
-    expect(body.status).toBe("warning");
-    expect(body.evidence).toMatchObject({
-      dailyRowPresent: false,
-      snapshotId: null,
-      canonicalRevision: null,
-    });
-    expect(body.nextAction).toContain("rerun");
-  });
-
-  it("bounds ledger evidence and keeps output free of receipt payloads", async () => {
-    await seedHealthyDocument();
-    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 105 }, (_, index) => ({
-      scope: "live",
-      date: DATE,
-      intentId: `health-bounded-${index}`,
-      outcome: "review-required",
-      snapshot: { privatePayload: `secret-${index}` },
-    })));
-    const body = await (await getHealth()).json() as any;
-    expect(body.evidence.ledgerRowsScanned).toBe(100);
-    expect(body.evidence.ledgerRowsTruncated).toBe(true);
-    expect(body.checks.find((check: any) => check.name === "command-history")).toMatchObject({
-      status: "warning",
-    });
-    expect(JSON.stringify(body)).not.toContain("privatePayload");
-    expect(JSON.stringify(body)).not.toContain("secret-");
-  });
-
-  it("denies non-managers and sandbox sessions before inspecting data", async () => {
-    expect((await getHealth(authHeaders())).status).toBe(403);
-    expect((await getHealth(sandboxAuthHeaders())).status).toBe(403);
-  });
-});
-
 describe("POST /sync/operational-intents — canonical transitions", () => {
   const DATE = "2030-03-10";
   const RUN = "transition-run";
@@ -951,7 +589,6 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
 
     const stale = await post(intent("ordered:stale-pause", startGeneration, "pause"));
     expect(stale.outcome).toBe("conflicted");
-    expect(stale.canonicalRevision).toBe(5);
     expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
   });
 });
@@ -1006,18 +643,9 @@ describe("POST /sync/auto-track/claim", () => {
     const bodies = await Promise.all([a.json(), b.json()]) as Array<{
       outcome: string;
       values: { traysOnLine: number };
-      canonicalRevision: number;
-      serverTime: number;
     }>;
     expect(bodies.map((body) => body.outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every((body) => body.values.traysOnLine === 9)).toBe(true);
-    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([1, 2]));
-    expect(bodies.every((body) => typeof body.serverTime === "number")).toBe(true);
-    const receipts = await db.select().from(operationalIntentLedgerTable);
-    expect(receipts).toHaveLength(2);
-    expect(receipts.every((receipt) => receipt.commandType === "auto-track")).toBe(true);
-    expect(receipts.every((receipt) => receipt.actorId === USER)).toBe(true);
-    expect(new Set(receipts.map((receipt) => receipt.deviceId))).toEqual(new Set(["tab-a", "tab-b"]));
   });
 
   it("returns duplicate for an accepted retry and rejects a stale-base event after manual correction", async () => {
@@ -1084,25 +712,12 @@ describe("POST /sync/auto-track/claim", () => {
       values.app1BatchesMade === 1 && values.app1BatchAnchorNetSec === 60
     )).toBe(true);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
-    const evidence = await db.select().from(applicatorBatchEvidenceTable);
-    expect(evidence).toHaveLength(1);
-    expect(evidence[0]).toMatchObject({
-      scope: "live",
-      date: DATE,
-      runId: RUN,
-      slot: 1,
-      source: "automatic-observation",
-      observedTotal: 1,
-      confirmedTotal: null,
-    });
-    expect(evidence[0].evidenceHash).toMatch(/^[a-f0-9]{64}$/);
 
     const winner = bodies[0].outcome === "accepted"
       ? applicatorEvent("app-a", "app-a:app1:1")
       : applicatorEvent("app-b", "app-b:app1:1");
     expect((await (await post(winner)).json() as { outcome: string }).outcome).toBe("duplicate");
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
-    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(1);
   });
 
   it("atomically advances one Sauce barrel and deducts its inventory once across competing stations", async () => {
@@ -1334,8 +949,6 @@ describe("/sync/today — client-local-date keying", () => {
       headers: authHeaders(),
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get("X-Sync-Response")).toBe("complete");
-    expect(res.headers.get("X-Sync-Snapshot")).toMatch(/^[a-f0-9]{64}$/);
     const data = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
     expect(data?.dayState?.runs?.[0]?.id).toBe("run-2030-03-11");
   });
@@ -1346,11 +959,7 @@ describe("/sync/today — client-local-date keying", () => {
       headers: authHeaders(),
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get("X-Sync-Response")).toBe("complete");
-    expect(res.headers.get("X-Sync-Snapshot")).toMatch(/^[a-f0-9]{64}$/);
     expect(await res.json()).toEqual({
-      syncVersion: 1,
-      completeness: "complete",
       dayState: { date, runs: [] },
       runValues: {},
       runValuesUpdatedAt: {},
@@ -1535,8 +1144,6 @@ describe("/sync partial payload contract", () => {
     });
     expect(partial.status).toBe(200);
     const partialBody = await partial.json() as { data: typeof complete; snapshotId: string };
-    expect(partialBody.data.completeness).toBe("complete");
-    expect((partialBody.data as Record<string, unknown>).baseSnapshotId).toBeUndefined();
     expect(partialBody.data.runValues["partial-r1"].casesNeeded).toBe(18);
     expect(partialBody.data.runValues["partial-r2"].doughRecipeName).toBe("Large");
     expect(partialBody.data.runValues["partial-r2"].doughRecipe).toEqual([{ ingredient: "Flour", lbs: 10 }]);
@@ -2663,63 +2270,6 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
   });
 });
 
-describe("/sync/events — active-run calc tick", () => {
-  // The server re-emits the server-computed calc on a low cadence while a run
-  // is active. Uses LIVE_CALC_TICK_MS so the test does not wait on the 15s
-  // default heartbeat.
-  it("pushes a calcTick frame with serverCalc for the active run", async () => {
-    const date = "2030-03-13";
-    process.env.LIVE_CALC_TICK_MS = "2000";
-    await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({
-        senderId: "calc-tick-writer",
-        payload: {
-          dayState: { runs: [{ id: "active-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }] },
-          runValues: { "active-run": { casesNeeded: 240 } },
-          runValuesUpdatedAt: { "active-run": 1 },
-        },
-      }),
-    });
-
-    const ctrl = new AbortController();
-    const res = await fetch(
-      `${baseUrl}/api/sync/events?clientId=calc-tick-watcher&today=${date}`,
-      { headers: authHeaders(), signal: ctrl.signal },
-    );
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let tickFrame: Record<string, unknown> | undefined;
-    const deadline = Date.now() + 5_000;
-    try {
-      while (Date.now() < deadline && !tickFrame) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const frames = buf.split("\n\n");
-        buf = frames.pop() ?? "";
-        for (const f of frames) {
-          const line = f.split("\n").find((entry) => entry.startsWith("data: "));
-          if (!line) continue;
-          const parsed = JSON.parse(line.slice("data: ".length)) as Record<string, unknown>;
-          if (parsed.calcTick === true) { tickFrame = parsed; break; }
-        }
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
-      ctrl.abort();
-      delete process.env.LIVE_CALC_TICK_MS;
-    }
-
-    expect(tickFrame).toBeDefined();
-    const serverCalc = tickFrame!.serverCalc as { runId?: string } | null | undefined;
-    expect(serverCalc?.runId).toBe("active-run");
-    expect(typeof (tickFrame!.serverTime as number | undefined)).toBe("number");
-  });
-});
-
 describe("/sync/events — date-scoped broadcasts", () => {
   // Two live watchers on the SAME scope but DIFFERENT local dates must not
   // receive each other's pushes, or a peer behind/ahead of UTC would clobber its
@@ -2770,7 +2320,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
       body: JSON.stringify({
         senderId: "schedule-writer",
         payload: {
-          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }], resetAt: 1000 },
+          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep" }], resetAt: 1000 },
           runValues: { "scheduled-run": { casesNeeded: 240 } },
           runValuesUpdatedAt: { "scheduled-run": 1 },
         },
@@ -2796,28 +2346,12 @@ describe("/sync/events — date-scoped broadcasts", () => {
       data?: { dayState?: { runs?: Array<{ id: string }> } };
       serverCalc?: { runId: string } | null;
       autoTrackSchedule?: { runId: string; entries: unknown[] } | null;
-      operationalProjection?: {
-        version: number;
-        runId: string;
-        serverTimeMs: number;
-        calculationRevision: number;
-        effectiveElapsedSec: number;
-        facts: { runStatus: string; pressDone: boolean };
-      } | null;
-      serverTime?: number;
     };
     expect(initial.initial).toBe(true);
     expect(initial.senderId).toBeNull();
     expect(initial.data?.dayState?.runs?.map((run) => run.id)).toContain("scheduled-run");
     expect(initial.serverCalc?.runId).toBe("scheduled-run");
     expect(initial.autoTrackSchedule).toMatchObject({ runId: "scheduled-run", entries: [] });
-    expect(initial.operationalProjection).toMatchObject({
-      version: 1,
-      runId: "scheduled-run",
-      calculationRevision: 0,
-      facts: { runStatus: "running", pressDone: false },
-    });
-    expect(initial.operationalProjection?.serverTimeMs).toBe(initial.serverTime);
   });
 
   it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {
@@ -3035,167 +2569,6 @@ describe("/sync/events — facility-wide master-data broadcasts", () => {
     expect(peerRefreshes.every((frame) => frame.senderId === "recipe-writer")).toBe(true);
     expect(sandboxRefreshes).toHaveLength(0);
   });
-});
-
-describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
-  // A real client sync payload carries the run's complete FormValues. Keep
-  // this fixture realistic so the server can compute a non-empty schedule.
-  const heartbeatFullValues = {
-    casesNeeded: 240,
-    crustsPerCycle: 12,
-    cycleSpeed: 600,
-    speedAdjustment: 1,
-    approxLineSpeed: 450,
-    freezerTime: 3.5,
-    pizzasPerCase: 12,
-    casesPerSkid: 48,
-    casesPerLayer: 12,
-    doughballsPerTray: 36,
-    crustsPerStack: 6,
-    doughBatchYield: 150,
-    crustsPerCase: 12,
-    skidsCompleted: 0,
-    casesOnCurrentSkid: 0,
-    traysOnLine: 0,
-    batchesReady: 0,
-    mixerLowSec: 330,
-    mixerHighSec: 180,
-    hopperSec: 70,
-    carryOverDone: false,
-    sauceOzPerPizza: 2,
-    sauceBarrelLbs: 50,
-    sauceBarrelsMade: 0,
-    sauceBarrelAnchorNetSec: 0,
-    sauceBarrelCorrectionGeneration: 0,
-    app1OzPerPizza: 2.5,
-    app1BatchLbs: 100,
-    app1BatchesMade: 0,
-    app1BatchAnchorNetSec: 0,
-    app1BatchCorrectionGeneration: 0,
-    app2OzPerPizza: 0,
-    app2BatchLbs: 0,
-    app2BatchesMade: 0,
-    app2BatchAnchorNetSec: 0,
-    app2BatchCorrectionGeneration: 0,
-    app3OzPerPizza: 0,
-    app3BatchLbs: 0,
-    app3BatchesMade: 0,
-    app3BatchAnchorNetSec: 0,
-    app3BatchCorrectionGeneration: 0,
-    app4OzPerPizza: 0,
-    app4BatchLbs: 0,
-    app4BatchesMade: 0,
-    app4BatchAnchorNetSec: 0,
-    app4BatchCorrectionGeneration: 0,
-    pep1Sticks: 0,
-    pep1OzPerPizza: 0,
-    pep1BatchLbs: 0,
-    pep2Sticks: 0,
-    pep2OzPerPizza: 0,
-    pep2BatchLbs: 0,
-    pep1Combined: true,
-    pep1TypeB: "",
-    pep2TypeB: "",
-    pep1SticksB: 0,
-    pep1OzPerPizzaB: 0,
-    pep1BatchLbsB: 0,
-    pep2SticksB: 0,
-    pep2OzPerPizzaB: 0,
-    pep2BatchLbsB: 0,
-    app1Type: "app",
-    app2Type: "",
-    app3Type: "",
-    app4Type: "",
-    pep1Type: "",
-    pep2Type: "",
-    dieType: "Round 12",
-    allergen: "none",
-    doughRecipeName: "",
-    targetDoughballWeight: 8,
-    doughRecipe: [],
-    app1CheeseRecipeName: "",
-    app1CheeseRecipe: [],
-    app2CheeseRecipeName: "",
-    app2CheeseRecipe: [],
-    app3CheeseRecipeName: "",
-    app3CheeseRecipe: [],
-    app4CheeseRecipeName: "",
-    app4CheeseRecipe: [],
-    frontlineRecipeName: "",
-    frontlineRecipe: [],
-  };
-
-  it("pushes one schedule frame, then comment-only heartbeats while unchanged", async () => {
-    const date = "2030-04-03";
-    process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
-    try {
-      await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-        method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({
-          senderId: "heartbeat-writer",
-          payload: {
-            dayState: {
-              runs: [{
-                id: "heartbeat-run",
-                brand: "Acme",
-                flavor: "Pep",
-                subTab: "crusts",
-                startedAt: Date.now() - 60_000,
-                metaUpdatedAt: 1,
-              }],
-              resetAt: 1,
-            },
-            runValues: { "heartbeat-run": heartbeatFullValues },
-            runValuesUpdatedAt: { "heartbeat-run": 1 },
-          },
-        }),
-      });
-
-      const ctrl = new AbortController();
-      const res = await fetch(
-        `${baseUrl}/api/sync/events?clientId=heartbeat-watcher&today=${date}`,
-        { headers: authHeaders(), signal: ctrl.signal },
-      );
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let scheduleFrames = 0;
-      let commentBeats = 0;
-      let heartbeatRunId: string | undefined;
-      const deadline = Date.now() + 5_000;
-      try {
-        while (Date.now() < deadline && (scheduleFrames < 1 || commentBeats < 2)) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const frames = buf.split("\n\n");
-          buf = frames.pop() ?? "";
-          for (const frame of frames) {
-            if (frame.includes(": heartbeat")) commentBeats++;
-            const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
-            if (!line) continue;
-            const parsed = JSON.parse(line.slice("data: ".length)) as {
-              heartbeat?: boolean;
-              autoTrackSchedule?: { runId?: string } | null;
-            };
-            if (parsed.heartbeat === true && parsed.autoTrackSchedule) {
-              scheduleFrames++;
-              heartbeatRunId = parsed.autoTrackSchedule.runId;
-            }
-          }
-        }
-      } finally {
-        await reader.cancel().catch(() => {});
-        ctrl.abort();
-      }
-      expect(scheduleFrames).toBe(1);
-      expect(commentBeats).toBeGreaterThanOrEqual(2);
-      expect(heartbeatRunId).toBe("heartbeat-run");
-    } finally {
-      delete process.env.AUTO_TRACK_HEARTBEAT_MS;
-    }
-  }, 15_000);
 });
 
 describe("/sync — conflict logging to sync_conflict_logs", () => {

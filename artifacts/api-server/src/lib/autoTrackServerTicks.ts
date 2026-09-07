@@ -53,7 +53,6 @@ function schedule(
   // an abandoned old running register must never restart net claims.
   const startedAt = number(run.startedAt);
   const endedAt = number(run.endedAt);
-  if (run.autoTrackDisabled === true) return null;
   const values = payload.runValues?.[run.id];
   if (!values) return null;
   const endedDrainActive = options.allowEndedDrain === true
@@ -105,10 +104,9 @@ export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): Au
     const cadence = Math.max(0, entry.dueAt - Math.max(0, number(values[anchorField])));
     const claimNextDueAt = entry.nextDueAt > entry.dueAt
       ? entry.nextDueAt : entry.dueAt + cadence;
-    const prior = coordination?.[entry.channel];
     return [{
       version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
-      sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+      sequence: number(coordination?.[entry.channel]?.sequence) + 1,
       eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
       nextDueAt: claimNextDueAt, baseUpdatedAt, correctionGeneration, mutations,
     } as AutoTrackClaim];

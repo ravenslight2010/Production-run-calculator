@@ -7,14 +7,7 @@
     ".": "./src/index.ts",
     "./linePhases": "./src/linePhases.ts"
   },
-  "dependencies": {
-    "@workspace/factory-constants": "workspace:*",
-    "@workspace/inventory-math": "workspace:*"
-  },
-  "scripts": {
-    "test": "vitest run"
-  },
-  "devDependencies": {
-    "vitest": "5.0.0"
-  }
+  "dependencies": { "@workspace/inventory-math": "workspace:*" },
+  "scripts": { "test": "vitest run" },
+  "devDependencies": { "vitest": "^4.1.9" }
 }

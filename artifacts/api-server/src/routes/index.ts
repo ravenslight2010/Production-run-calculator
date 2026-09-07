@@ -109,9 +109,8 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ...reads(["manage-staff"], "all", "scoped", [
     "/sync/conflict-stats", "/manager-action-queue",
     "/profile-data/health-check", "/profile-data/health-workspace",
-    "/ai-memory/health-check", "/background-operations/diagnostics",
+    "/ai-memory/health-check",
   ]),
-  ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
     "/inventory/count-observations/:id", "/inventory/count-observations",
@@ -138,7 +137,6 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/audit-logs/profile-name-link-cleanup", "/audit-logs",
   ]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
-  ...reads(["use-ai-tools"], "all", "scoped", ["/ai-corrections"]),
 ];
 
 /**
@@ -215,18 +213,12 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
     "POST /run-suggestions/follow-up", "POST /sync/operational-intents",
-    "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
-    "POST /cycle-count-schedules/:id/mark-counted",
+    "POST /sync/auto-track/claim", "PUT /sync/today", "POST /cycle-count-schedules/:id/mark-counted",
     "POST /operations-insights/spec-reconciliation", "POST /ai/spec-reconcile",
     "POST /operations-insights/mix-reconciliation", "POST /ai/mix-reconcile",
     "POST /operations-insights/recap", "POST /ai/summary",
     "POST /operations-insights/anomalies", "POST /ai/anomalies",
-    "POST /operations-insights/schedule-order", "POST /ai/schedule-optimize",
   ]),
-  {
-    method: "POST", path: "/applicator-batch-evidence/finalize", ownership: "manager-only",
-    scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
-  },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", ["POST /run-suggestions/update"]),
   ...writes("capability-gated", "scoped", "allowed", "manage-profiles", [
     "PATCH /brand-profiles/:key/clear-slot", "POST /brand-profiles", "DELETE /brand-profiles",
@@ -248,8 +240,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/count-observations", "POST /inventory/count-observations/:id/cancel",
     "POST /inventory/count-observations/:id/apply", "POST /inventory/adjust", "POST /inventory/locations",
     "PATCH /inventory/locations/:id", "DELETE /inventory/locations/:id", "POST /inventory/transfer",
-    "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
-    "POST /mix-surplus", "PUT /mix-surplus/allocations/:runDate", "DELETE /mix-surplus/lots/:id",
+    "POST /inventory/merge", "PUT /inventory/settings",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
@@ -283,8 +274,9 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
-    "POST /ai/match-import", "POST /ai/parse-spec-sheet", "POST /ai/parse-spec-images",
-    "POST /ai/match-premix",
+    "POST /ai/fill-missing", "POST /ai/match-import", "POST /ai/parse-spec-sheet", "POST /ai/parse-spec-images",
+    "POST /ai/match-premix", "POST /ai/suggest-merges",
+    "POST /operations-insights/schedule-order", "POST /ai/schedule-optimize",
   ]),
   // This route retains its intentional signed-in contribution policy; its
   // handler enforces per-domain write rules and capability requirements before
@@ -294,10 +286,6 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "review-incidents", ["POST /reports/operational"]),
   {
     method: "POST", path: "/field-checks/hardware-confirmations", ownership: "manager-only",
-    scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
-  },
-  {
-    method: "POST", path: "/applicator-batch-evidence/finalize", ownership: "manager-only",
     scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
   },
   ...writes("floor-operational", "scoped", "allowed", undefined, ["POST /run-templates", "DELETE /run-templates", "POST /sandbox/reset"]),

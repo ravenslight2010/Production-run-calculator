@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import webpush from "web-push";
-import { runBackgroundOperation } from "./backgroundOperations";
 import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
@@ -423,16 +422,15 @@ registerServerJob("scheduled-evaluation", {
       || typeof input.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
       throw new Error("scheduled-evaluation requires a date and scheduledFor timestamp");
     }
-    const date = input.date;
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(10, "Evaluating scheduled production alerts");
     // Evaluate at execution time rather than the enqueue timestamp so a queued
     // job cannot emit an alert before its canonical milestone is actually due.
-    const result = await context.commit(() => runWebPushAlerts(Date.now(), {
+    const result = await runWebPushAlerts(Date.now(), {
       scope: context.job.scope as Scope,
-      date,
+      date: input.date,
       signal: context.signal,
-    }));
+    });
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(100, "Scheduled production alerts evaluated");
     return result;
@@ -441,25 +439,14 @@ registerServerJob("scheduled-evaluation", {
 
 export type WebPushAlertScheduler = { stop(): void };
 
-export function startWebPushAlertScheduler(options: {
-  now?: () => number;
-  enqueue?: typeof enqueueScheduledWebPushAlerts;
-} = {}): WebPushAlertScheduler {
+export function startWebPushAlertScheduler(): WebPushAlertScheduler {
   const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
-  const now = options.now ?? Date.now;
-  const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
   let stopped = false;
   let scheduling = false;
   const execute = () => {
     if (stopped || scheduling) return;
     scheduling = true;
-    // Freeze the bucket input across the retry. A partial first insert near a
-    // bucket boundary must converge on the same idempotency keys.
-    const scheduledAt = now();
-    void runBackgroundOperation(
-      "web-push-schedule",
-      () => enqueue(scheduledAt, interval),
-    )
+    void enqueueScheduledWebPushAlerts(Date.now(), interval)
       .catch(() => logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed"))
       .finally(() => { scheduling = false; });
   };

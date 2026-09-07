@@ -3,8 +3,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export const REPORT_KEY_ROTATION_SCAN_LIMIT = 100;
-export const REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER =
-  "report-key-rotation-preflight";
 
 export type ReportSigningKeyring = {
   activeKeyId: string;

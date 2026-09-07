@@ -52,15 +52,26 @@ async function listAll(): Promise<AliasRow[]> {
 router.get("/spec-import-aliases", async (req: Request, res: Response) => {
   try {
     const aliases = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
-    req.log.error({ err }, "failed to list spec-import aliases");
-    res.status(500).json({ error: "Failed to list spec-import aliases" });
+    req.log.error({ err }, "failed to save spec-import aliases");
+    res.status(500).json({ error: "Failed to save spec-import aliases" });
   }
 });
 
-router.post("/spec-import-aliases", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
-  const parsed = SaveSpecImportAliasesBody.safeParse(req.body);
+// Targeted deletion of KNOWN-BAD alias rows: after a correcting re-import
+// overwrites a wrong stored name, the alias that minted the mistake
+// (external label -> wrong canonical name) must be removed or the next import
+// re-applies it and undoes the correction. Matching is exact-by-names
+// (case-insensitive) on kind + externalName + canonicalName. By default, an
+// entry's null/omitted context matches rows with ANY context (legacy behavior
+// for callers that cannot know the poisoned alias's context); `exactContext`
+// changes that to an exact null match. A provided context always matches only
+// that context case-insensitively. This is deliberately NOT a broad sweep —
+// only rows whose full mapping is named get deleted.
+router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
+  const parsed = DeleteSpecImportAliasesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
     return;
@@ -75,39 +86,12 @@ router.post("/spec-import-aliases", requireCapability("manage-profiles"), async 
     const canonicalName = (a.canonicalName ?? "").trim().slice(0, MAX_NAME_LEN);
     const context = a.context ? a.context.trim().slice(0, MAX_NAME_LEN) || null : null;
     if (!externalName || !canonicalName) continue;
-    // A mapping that just restates the same name carries no information.
-    if (externalName.toLowerCase() === canonicalName.toLowerCase()) continue;
-    // Server-side backstop for the blend-name namespace: a generic slot-type
-    // name ("Mix"/"cheese") on either side of an appType alias is poison — it
-    // renames every distinct blend onto one garbage record at the next import.
-    // Old/unfixed clients must not be able to write these.
-    if (kind === "appType" && (isGenericSlotTypeName(externalName) || isGenericSlotTypeName(canonicalName))) {
-      continue;
-    }
-    // Server-side backstop: an appType alias that crosses the mix ↔ cheese
-    // blend family line (adds/removes the word "cheese" between a mix-family
-    // and cheese-family name) renames a DIFFERENT product ("Bobo Breakfast
-    // Mix" → "Bobo's Breakfast Cheese Mix" swapped an egg/bacon premix for a
-    // mozzarella blend). Old/unfixed clients must not be able to write these.
-    if (kind === "appType" && isCrossFamilyMixCheesePair(externalName, canonicalName)) {
-      continue;
-    }
-    // Server-side backstop for ingredient aliases: a pair that drops a
-    // distinguishing modifier word ("Sea Salt" → "Salt") names a DIFFERENT
-    // ingredient, and ingredient aliases auto-apply with no review step.
-    // Old/unfixed clients must not be able to write these.
-    if (
-      (kind === "cheeseIngredient" || kind === "doughIngredient" || kind === "sauceIngredient") &&
-      isModifierDropNamePair(externalName, canonicalName)
-    ) {
-      continue;
-    }
-    incoming.push({ kind, externalName, canonicalName, context });
+    entries.push({ kind: a.kind as SpecAliasKind, externalName, canonicalName, context });
   }
 
   try {
     const scope = currentScope();
-    if (incoming.length > 0) {
+    if (entries.length > 0) {
       const existing = await db
         .select()
         .from(specImportAliasesTable)

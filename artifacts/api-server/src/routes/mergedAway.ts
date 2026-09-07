@@ -40,15 +40,16 @@ async function listAll(): Promise<string[]> {
 router.get("/merged-away", async (req: Request, res: Response) => {
   try {
     const names = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "merged-away");
     res.json({ names });
   } catch (err) {
-    req.log.error({ err }, "failed to list merged-away names");
-    res.status(500).json({ error: "Failed to list merged-away names" });
+    req.log.error({ err }, "failed to save merged-away names");
+    res.status(500).json({ error: "Failed to save merged-away names" });
   }
 });
 
-router.post("/merged-away", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
-  const parsed = SaveMergedAwayBody.safeParse(req.body);
+router.delete("/merged-away", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
+  const parsed = DeleteMergedAwayBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
     return;
@@ -58,7 +59,7 @@ router.post("/merged-away", requireCapability("manage-profiles"), async (req: Re
   const byName = new Set<string>();
   for (const raw of parsed.data.names.slice(0, MAX_BATCH)) {
     const norm = normalizeName(raw);
-    if (norm) byName.add(norm);
+    if (norm) toRemove.push(norm);
   }
 
   try {

@@ -5,9 +5,6 @@ import fieldChecksRouter from "../fieldChecks";
 import actionItemsRouter from "../actionItems";
 import freezerPullItemsRouter from "../freezerPullItems";
 import freezerSurplusRouter from "../freezerSurplus";
-import warehouseSnapshotRouter from "../warehouseSnapshot";
-import mixPlanSnapshotRouter from "../mixPlanSnapshot";
-import mixSurplusRouter from "../mixSurplus";
 import runSuggestionsRouter from "../runSuggestions";
 import operationalReportsRouter from "../operationalReports";
 
@@ -20,9 +17,6 @@ router.use(fieldChecksRouter);
 router.use(actionItemsRouter);
 router.use(freezerPullItemsRouter);
 router.use(freezerSurplusRouter);
-router.use(warehouseSnapshotRouter);
-router.use(mixPlanSnapshotRouter);
-router.use(mixSurplusRouter);
 router.use(runSuggestionsRouter);
 router.use(operationalReportsRouter);
 

@@ -46,12 +46,12 @@ export const SignUpResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 })
@@ -98,12 +98,12 @@ export const SignInResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 })
@@ -139,12 +139,12 @@ export const ChangePasswordResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 })
@@ -232,13 +232,13 @@ export const DeclinePasswordResetResponse = zod.void()
  * @summary List saved production runs
  */
 export const ListRunsResponseItem = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
-  "casesNeeded": zod.int(),
-  "casesLeft": zod.int(),
-  "skidsCompleted": zod.int(),
+  "casesNeeded": zod.number().int(),
+  "casesLeft": zod.number().int(),
+  "skidsCompleted": zod.number().int(),
   "pizzasPerMin": zod.string(),
-  "totalTimeSec": zod.int(),
+  "totalTimeSec": zod.number().int(),
   "batchesNeeded": zod.string(),
   "inputs": zod.record(zod.string(), zod.unknown()),
   "notes": zod.string().optional(),
@@ -252,24 +252,24 @@ export const ListRunsResponse = zod.array(ListRunsResponseItem)
  */
 export const CreateRunBody = zod.object({
   "label": zod.string().optional(),
-  "casesNeeded": zod.int(),
-  "casesLeft": zod.int(),
-  "skidsCompleted": zod.int(),
+  "casesNeeded": zod.number().int(),
+  "casesLeft": zod.number().int(),
+  "skidsCompleted": zod.number().int(),
   "pizzasPerMin": zod.string(),
-  "totalTimeSec": zod.int(),
+  "totalTimeSec": zod.number().int(),
   "batchesNeeded": zod.string(),
   "inputs": zod.record(zod.string(), zod.unknown()),
   "notes": zod.string().optional()
 })
 
 export const CreateRunResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
-  "casesNeeded": zod.int(),
-  "casesLeft": zod.int(),
-  "skidsCompleted": zod.int(),
+  "casesNeeded": zod.number().int(),
+  "casesLeft": zod.number().int(),
+  "skidsCompleted": zod.number().int(),
   "pizzasPerMin": zod.string(),
-  "totalTimeSec": zod.int(),
+  "totalTimeSec": zod.number().int(),
   "batchesNeeded": zod.string(),
   "inputs": zod.record(zod.string(), zod.unknown()),
   "notes": zod.string().optional(),
@@ -291,7 +291,7 @@ export const DeleteRunResponse = zod.void()
  * @summary List inventory items with lots and on-hand
  */
 export const ListInventoryResponseItem = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -299,9 +299,9 @@ export const ListInventoryResponseItem = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -310,7 +310,7 @@ export const ListInventoryResponseItem = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -320,7 +320,7 @@ export const ListInventoryResponseItem = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -338,11 +338,11 @@ export const CreateInventoryItemBody = zod.object({
   "reorderThreshold": zod.number().optional(),
   "productionIngredientId": zod.string().nullish(),
   "conversionFactor": zod.number().nullish(),
-  "consumptionPriority": zod.int().optional()
+  "consumptionPriority": zod.number().int().optional()
 })
 
 export const CreateInventoryItemResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -350,9 +350,9 @@ export const CreateInventoryItemResponse = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -361,7 +361,7 @@ export const CreateInventoryItemResponse = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -371,7 +371,7 @@ export const CreateInventoryItemResponse = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -390,7 +390,7 @@ export const UpdateInventoryItemBody = zod.object({
 })
 
 export const UpdateInventoryItemResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -398,9 +398,9 @@ export const UpdateInventoryItemResponse = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -409,7 +409,7 @@ export const UpdateInventoryItemResponse = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -419,7 +419,7 @@ export const UpdateInventoryItemResponse = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -445,11 +445,11 @@ export const LinkInventoryProductParams = zod.object({
 export const LinkInventoryProductBody = zod.object({
   "productionIngredientId": zod.string().nullable(),
   "conversionFactor": zod.number().nullable(),
-  "consumptionPriority": zod.int().optional()
+  "consumptionPriority": zod.number().int().optional()
 })
 
 export const LinkInventoryProductResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -457,9 +457,9 @@ export const LinkInventoryProductResponse = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -468,7 +468,7 @@ export const LinkInventoryProductResponse = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -478,7 +478,7 @@ export const LinkInventoryProductResponse = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -496,11 +496,11 @@ export const RestockInventoryBody = zod.object({
   "lotNumber": zod.string().optional(),
   "receivedDate": zod.string().nullish(),
   "expirationDate": zod.string().nullish(),
-  "locationId": zod.int().optional()
+  "locationId": zod.number().int().optional()
 })
 
 export const RestockInventoryResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -508,9 +508,9 @@ export const RestockInventoryResponse = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -519,7 +519,7 @@ export const RestockInventoryResponse = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -529,7 +529,7 @@ export const RestockInventoryResponse = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -539,13 +539,13 @@ export const RestockInventoryResponse = zod.object({
  * @summary Manually adjust on-hand quantity (delta-based)
  */
 export const AdjustInventoryBody = zod.object({
-  "itemId": zod.int(),
+  "itemId": zod.number().int(),
   "qtyDelta": zod.number(),
   "note": zod.string().optional()
 })
 
 export const AdjustInventoryResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -553,9 +553,9 @@ export const AdjustInventoryResponse = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -564,7 +564,7 @@ export const AdjustInventoryResponse = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -574,7 +574,7 @@ export const AdjustInventoryResponse = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -593,7 +593,7 @@ export const ConsumeInventoryBody = zod.object({
 
 export const ConsumeInventoryResponse = zod.object({
   "applied": zod.boolean(),
-  "consumed": zod.int().optional()
+  "consumed": zod.number().int().optional()
 })
 
 
@@ -611,7 +611,7 @@ export const MergeInventoryBody = zod.object({
 })
 
 export const MergeInventoryResponse = zod.object({
-  "merged": zod.int(),
+  "merged": zod.number().int(),
   "results": zod.array(zod.object({
   "fromKey": zod.string(),
   "toKey": zod.string(),
@@ -625,7 +625,7 @@ export const MergeInventoryResponse = zod.object({
  * @summary List stock locations (onsite first)
  */
 export const ListInventoryLocationsResponseItem = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "name": zod.string(),
   "isOnsite": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -642,7 +642,7 @@ export const CreateInventoryLocationBody = zod.object({
 })
 
 export const CreateInventoryLocationResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "name": zod.string(),
   "isOnsite": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -662,7 +662,7 @@ export const UpdateInventoryLocationBody = zod.object({
 })
 
 export const UpdateInventoryLocationResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "name": zod.string(),
   "isOnsite": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -683,14 +683,14 @@ export const DeleteInventoryLocationResponse = zod.void()
  * @summary Move stock from one location to another (preserves lots)
  */
 export const TransferInventoryBody = zod.object({
-  "itemId": zod.int(),
-  "fromLocationId": zod.int(),
-  "toLocationId": zod.int(),
+  "itemId": zod.number().int(),
+  "fromLocationId": zod.number().int(),
+  "toLocationId": zod.number().int(),
   "qty": zod.number()
 })
 
 export const TransferInventoryResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "key": zod.string(),
   "category": zod.string(),
   "name": zod.string(),
@@ -698,9 +698,9 @@ export const TransferInventoryResponse = zod.object({
   "reorderThreshold": zod.number(),
   "onHand": zod.number(),
   "lots": zod.array(zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "locationId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "locationId": zod.number().int().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
@@ -709,7 +709,7 @@ export const TransferInventoryResponse = zod.object({
   "createdAt": zod.coerce.date()
 })),
   "byLocation": zod.array(zod.object({
-  "locationId": zod.int(),
+  "locationId": zod.number().int(),
   "locationName": zod.string(),
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
@@ -719,7 +719,7 @@ export const TransferInventoryResponse = zod.object({
   "productionIngredientMergedInto": zod.string().nullish(),
   "conversionFactor": zod.number().nullable(),
   "conversionConfirmed": zod.boolean(),
-  "consumptionPriority": zod.int(),
+  "consumptionPriority": zod.number().int(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -733,9 +733,9 @@ export const ListInventoryLedgerQueryParams = zod.object({
 })
 
 export const ListInventoryLedgerResponseItem = zod.object({
-  "id": zod.int(),
-  "itemId": zod.int(),
-  "lotId": zod.int().nullish(),
+  "id": zod.number().int(),
+  "itemId": zod.number().int(),
+  "lotId": zod.number().int().nullish(),
   "type": zod.string(),
   "qtyDelta": zod.number(),
   "runId": zod.string().nullish(),
@@ -749,7 +749,7 @@ export const ListInventoryLedgerResponse = zod.array(ListInventoryLedgerResponse
  * @summary Get global inventory settings (expiry lead time)
  */
 export const GetInventorySettingsResponse = zod.object({
-  "expirySoonDays": zod.int()
+  "expirySoonDays": zod.number().int()
 })
 
 
@@ -757,11 +757,11 @@ export const GetInventorySettingsResponse = zod.object({
  * @summary Update global inventory settings
  */
 export const UpdateInventorySettingsBody = zod.object({
-  "expirySoonDays": zod.int()
+  "expirySoonDays": zod.number().int()
 })
 
 export const UpdateInventorySettingsResponse = zod.object({
-  "expirySoonDays": zod.int()
+  "expirySoonDays": zod.number().int()
 })
 
 
@@ -780,13 +780,13 @@ export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 
 export const IdentifyInventoryPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
-  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image/jpeg'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
   "candidates": zod.array(zod.object({
   "key": zod.string().max(identifyInventoryPhotoBodyCandidatesItemKeyMax),
   "category": zod.string().max(identifyInventoryPhotoBodyCandidatesItemCategoryMax),
   "name": zod.string().max(identifyInventoryPhotoBodyCandidatesItemNameMax),
   "unit": zod.string().max(identifyInventoryPhotoBodyCandidatesItemUnitMax)
-}).describe('Known inventory/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can\'t inflate the model prompt for cost/DoS purposes.')).optional().describe('Known inventory + production items to match against')
+}).describe('Known inventory\/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can\'t inflate the model prompt for cost\/DoS purposes.')).optional().describe('Known inventory + production items to match against')
 })
 
 export const IdentifyInventoryPhotoResponse = zod.object({
@@ -807,9 +807,9 @@ export const IdentifyInventoryPhotoResponse = zod.object({
  */
 export const QualityCheckPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
-  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image/jpeg'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
   "productType": zod.enum(['pizza', 'crust', 'other']).optional().describe('What the photo is of, to focus the assessment'),
-  "notes": zod.string().optional().describe('Optional plain-language context the user wants considered (e.g. the product/run, expected size, or a specific concern).')
+  "notes": zod.string().optional().describe('Optional plain-language context the user wants considered (e.g. the product\/run, expected size, or a specific concern).')
 })
 
 export const QualityCheckPhotoResponse = zod.object({
@@ -834,7 +834,7 @@ export const QualityCheckPhotoResponse = zod.object({
  */
 export const ProductionSheetPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
-  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image/jpeg'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
   "notes": zod.string().optional().describe('Optional plain-language context the user wants considered (e.g. which line the sheet is for, or the date the sheet covers).')
 })
 
@@ -842,7 +842,7 @@ export const ProductionSheetPhotoResponse = zod.object({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
-  "dieType": zod.string().describe('Die size / crust spec as written on the sheet (may be blank)'),
+  "dieType": zod.string().describe('Die size \/ crust spec as written on the sheet (may be blank)'),
   "casesNeeded": zod.number().describe('Cases to produce for this run (0 when not readable)'),
   "date": zod.string().nullable().describe('ISO date (YYYY-MM-DD) the sheet shows for this run, or null'),
   "confidence": zod.number().describe('0..1 model confidence in this extracted row')
@@ -864,7 +864,7 @@ export const ParseSpecImagesBody = zod.object({
   "images": zod.array(zod.object({
   "imageBase64": zod.string(),
   "mimeType": zod.string().optional()
-})).min(1).max(parseSpecImagesBodyImagesMax).describe('JPEG/PNG/WebP page images, sent as base64 without a data URI prefix')
+})).min(1).max(parseSpecImagesBodyImagesMax).describe('JPEG\/PNG\/WebP page images, sent as base64 without a data URI prefix')
 })
 
 export const ParseSpecImagesResponse = zod.object({
@@ -884,7 +884,7 @@ export const ParseSpecImagesResponse = zod.object({
  */
 export const VerifyLabelPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
-  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image/jpeg'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
   "expected": zod.object({
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
@@ -892,18 +892,18 @@ export const VerifyLabelPhotoBody = zod.object({
   "date": zod.string().optional(),
   "lotCode": zod.string().optional(),
   "caseCount": zod.number().optional()
-}).optional().describe('The values the client expects the label/pallet to show. All optional — only the provided fields are compared.'),
+}).optional().describe('The values the client expects the label\/pallet to show. All optional — only the provided fields are compared.'),
   "notes": zod.string().optional().describe('Optional plain-language context the user wants considered')
 })
 
 export const VerifyLabelPhotoResponse = zod.object({
-  "verdict": zod.enum(['pass', 'warn', 'fail']).describe('Overall verdict — pass (all match), warn (unreadable/uncertain), fail (mismatch)'),
+  "verdict": zod.enum(['pass', 'warn', 'fail']).describe('Overall verdict — pass (all match), warn (unreadable\/uncertain), fail (mismatch)'),
   "summary": zod.string().describe('One-or-two-sentence plain-language overall result'),
   "confidence": zod.number().describe('0..1 model confidence in this verification'),
   "fields": zod.array(zod.object({
   "field": zod.string().describe('Which field this is (brand, flavor, dieType, date, lotCode, caseCount)'),
   "expected": zod.string().nullable().describe('The expected value the client supplied, or null if none'),
-  "observed": zod.string().nullable().describe('What the AI read on the label, or null if unreadable/absent'),
+  "observed": zod.string().nullable().describe('What the AI read on the label, or null if unreadable\/absent'),
   "match": zod.enum(['match', 'mismatch', 'unreadable'])
 }).describe('One expected field compared against what the AI read on the label.')),
   "generatedAt": zod.number(),
@@ -930,7 +930,7 @@ export const RecordQualityCheckBody = zod.object({
 }).describe('A reviewed-and-confirmed quality check to persist into the manager history.')
 
 export const RecordQualityCheckResponse = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "productType": zod.enum(['pizza', 'crust', 'other']),
   "status": zod.enum(['pass', 'warn', 'fail']),
   "confidence": zod.number(),
@@ -957,7 +957,7 @@ export const ListQualityChecksQueryParams = zod.object({
 })
 
 export const ListQualityChecksResponseItem = zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "productType": zod.enum(['pizza', 'crust', 'other']),
   "status": zod.enum(['pass', 'warn', 'fail']),
   "confidence": zod.number(),
@@ -995,8 +995,8 @@ export const WasteInsightBody = zod.object({
   "category": zod.string().max(wasteInsightBodyPlannedItemsItemCategoryMax),
   "name": zod.string().max(wasteInsightBodyPlannedItemsItemNameMax),
   "unit": zod.string().max(wasteInsightBodyPlannedItemsItemUnitMax)
-}).describe('Known inventory/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can\'t inflate the model prompt for cost/DoS purposes.')).optional().describe('Items the current/upcoming production plan would consume, so the AI can recommend which planned products to run first to use at-risk stock. Optional.')
-}).describe('Request for an expiry/waste insight. Inventory and expiry data are read server-side; the optional plannedItems give the AI the production context it needs to suggest which planned products to run first.')
+}).describe('Known inventory\/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can\'t inflate the model prompt for cost\/DoS purposes.')).optional().describe('Items the current\/upcoming production plan would consume, so the AI can recommend which planned products to run first to use at-risk stock. Optional.')
+}).describe('Request for an expiry\/waste insight. Inventory and expiry data are read server-side; the optional plannedItems give the AI the production context it needs to suggest which planned products to run first.')
 
 export const WasteInsightResponse = zod.object({
   "flagged": zod.array(zod.object({
@@ -1020,7 +1020,7 @@ export const WasteInsightResponse = zod.object({
  * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
 export const OperationsSpecReconciliationBody = zod.object({
-  "specSheetId": zod.int().describe('The id of the saved spec sheet to check against'),
+  "specSheetId": zod.number().int().describe('The id of the saved spec sheet to check against'),
   "currentRecipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
   "name": zod.string(),
@@ -1028,7 +1028,7 @@ export const OperationsSpecReconciliationBody = zod.object({
   "ingredient": zod.string(),
   "lbs": zod.number()
 }))
-}).describe('A single recipe (dough/sauce/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough/sauce/cheese)'),
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough\/sauce\/cheese)'),
   "currentProfiles": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -1043,11 +1043,11 @@ export const OperationsSpecReconciliationBody = zod.object({
   "sticks": zod.number(),
   "ozPerPizza": zod.number()
 }))
-}).describe('A brand+flavor profile reduced to the run-setup spec fields the reconcile diff needs (die type, sauce oz/pizza, applicator and pepperoni slots). Extra fields are allowed so a richer profile object passes through.')).optional().describe('The app\'s current brand+flavor profiles, so the diff can also compare profile spec fields (die/sauce/applicators/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared.')
+}).describe('A brand+flavor profile reduced to the run-setup spec fields the reconcile diff needs (die type, sauce oz\/pizza, applicator and pepperoni slots). Extra fields are allowed so a richer profile object passes through.')).optional().describe('The app\'s current brand+flavor profiles, so the diff can also compare profile spec fields (die\/sauce\/applicators\/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared.')
 })
 
 export const OperationsSpecReconciliationResponse = zod.object({
-  "specSheetId": zod.int(),
+  "specSheetId": zod.number().int(),
   "discrepancies": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
   "recipeName": zod.string(),
@@ -1108,13 +1108,13 @@ export const OperationsRecapBody = zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
-  "casesProduced": zod.number().describe('Cases actually produced/finished'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
   "finished": zod.boolean().describe('Whether the run was completed'),
-  "downtimeMinutes": zod.number().describe('Total stoppage/downtime minutes on the run'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).describe('Runs in scope (today\'s runs, or the week\'s finished runs)'),
   "incidentCount": zod.number().optional().describe('Issues reported within the scope (optional context)'),
-  "wasteFlaggedCount": zod.number().optional().describe('Inventory items flagged at-risk / waste within the scope (optional)')
+  "wasteFlaggedCount": zod.number().optional().describe('Inventory items flagged at-risk \/ waste within the scope (optional)')
 })
 
 export const OperationsRecapResponse = zod.object({
@@ -1157,9 +1157,9 @@ export const ExportOperationalReportBody = zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
-  "casesProduced": zod.number().describe('Cases actually produced/finished'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
   "finished": zod.boolean().describe('Whether the run was completed'),
-  "downtimeMinutes": zod.number().describe('Total stoppage/downtime minutes on the run'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
@@ -1192,25 +1192,25 @@ export const ExportOperationalReportResponse = zod.object({
   "quality": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "checks": zod.int().optional(),
-  "issues": zod.int().optional(),
-  "failed": zod.int().optional(),
-  "warnings": zod.int().optional()
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 }),
   "incidents": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "total": zod.int().optional(),
-  "unresolved": zod.int().optional()
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 }),
   "inventory": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "flaggedItems": zod.int().optional()
+  "flaggedItems": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 })
@@ -1232,15 +1232,15 @@ export const FinalizeOperationalReportBody = zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
-  "casesProduced": zod.number().describe('Cases actually produced/finished'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
   "finished": zod.boolean().describe('Whether the run was completed'),
-  "downtimeMinutes": zod.number().describe('Total stoppage/downtime minutes on the run'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
 
 export const FinalizeOperationalReportResponse = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "reportScope": zod.enum(['day', 'week']),
   "periodStart": zod.coerce.date(),
   "periodEnd": zod.coerce.date(),
@@ -1252,7 +1252,7 @@ export const FinalizeOperationalReportResponse = zod.object({
   "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
   "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
   "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
-  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.')
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),
@@ -1284,25 +1284,25 @@ export const FinalizeOperationalReportResponse = zod.object({
   "quality": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "checks": zod.int().optional(),
-  "issues": zod.int().optional(),
-  "failed": zod.int().optional(),
-  "warnings": zod.int().optional()
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 }),
   "incidents": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "total": zod.int().optional(),
-  "unresolved": zod.int().optional()
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 }),
   "inventory": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "flaggedItems": zod.int().optional()
+  "flaggedItems": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 })
@@ -1320,7 +1320,7 @@ export const ListFinalizedOperationalReportsQueryParams = zod.object({
 })
 
 export const ListFinalizedOperationalReportsResponseItem = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "reportScope": zod.enum(['day', 'week']),
   "periodStart": zod.coerce.date(),
   "periodEnd": zod.coerce.date(),
@@ -1332,7 +1332,7 @@ export const ListFinalizedOperationalReportsResponseItem = zod.object({
   "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
   "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
   "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
-  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.')
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 })
 export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
 
@@ -1354,7 +1354,7 @@ export const SearchFinalizedOperationalReportsQueryParams = zod.object({
 })
 
 export const SearchFinalizedOperationalReportsResponseItem = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "reportScope": zod.enum(['day', 'week']),
   "periodStart": zod.coerce.date(),
   "periodEnd": zod.coerce.date(),
@@ -1366,7 +1366,7 @@ export const SearchFinalizedOperationalReportsResponseItem = zod.object({
   "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
   "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
   "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
-  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.')
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 })
 export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinalizedOperationalReportsResponseItem)
 
@@ -1375,11 +1375,11 @@ export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinaliz
  * @summary Retrieve one immutable finalized operational report
  */
 export const GetFinalizedOperationalReportParams = zod.object({
-  "id": zod.uuid()
+  "id": zod.coerce.string().uuid()
 })
 
 export const GetFinalizedOperationalReportResponse = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "reportScope": zod.enum(['day', 'week']),
   "periodStart": zod.coerce.date(),
   "periodEnd": zod.coerce.date(),
@@ -1391,7 +1391,7 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
   "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
   "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
-  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.')
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),
@@ -1423,25 +1423,25 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "quality": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "checks": zod.int().optional(),
-  "issues": zod.int().optional(),
-  "failed": zod.int().optional(),
-  "warnings": zod.int().optional()
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 }),
   "incidents": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "total": zod.int().optional(),
-  "unresolved": zod.int().optional()
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 }),
   "inventory": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "flaggedItems": zod.int().optional()
+  "flaggedItems": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
 })
@@ -1454,12 +1454,12 @@ export const GetFinalizedOperationalReportResponse = zod.object({
  * @summary Download an export from one identified canonical finalized snapshot
  */
 export const DownloadCanonicalOperationalReportParams = zod.object({
-  "id": zod.uuid()
+  "id": zod.coerce.string().uuid()
 })
 
 export const DownloadCanonicalOperationalReportQueryParams = zod.object({
   "format": zod.enum(['csv', 'xlsx', 'print']),
-  "jobId": zod.uuid().optional().describe('Completed export-package job whose pre-generated retained artifact should be served.')
+  "jobId": zod.coerce.string().uuid().optional().describe('Completed export-package job whose pre-generated retained artifact should be served.')
 })
 
 export const DownloadCanonicalOperationalReportResponse = zod.unknown()
@@ -1486,7 +1486,7 @@ export const GetOperationalRunViewResponse = zod.object({
   "pausedAt": zod.number().optional(),
   "endedAt": zod.number().optional(),
   "elapsedBatchSec": zod.number(),
-  "substitutionsApplied": zod.int(),
+  "substitutionsApplied": zod.number().int(),
   "packagingProgress": zod.union([zod.object({
   "skidsCompleted": zod.number(),
   "casesOnCurrentSkid": zod.number()
@@ -1497,7 +1497,7 @@ export const GetOperationalRunViewResponse = zod.object({
   "cycleSpeed": zod.boolean()
 }),
   "stoppages": zod.object({
-  "count": zod.int(),
+  "count": zod.number().int(),
   "downtimeSeconds": zod.number()
 })
 }),
@@ -1593,27 +1593,27 @@ export const GetShiftHandoffDigestResponse = zod.object({
   "incidents": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "note": zod.string().optional(),
-  "itemCount": zod.int()
+  "itemCount": zod.number().int()
 }),
   "quality": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "note": zod.string().optional(),
-  "itemCount": zod.int()
+  "itemCount": zod.number().int()
 }),
   "inventory": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "note": zod.string().optional(),
-  "itemCount": zod.int()
+  "itemCount": zod.number().int()
 }),
   "sync": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "note": zod.string().optional(),
-  "itemCount": zod.int()
+  "itemCount": zod.number().int()
 }),
   "data-health": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "note": zod.string().optional(),
-  "itemCount": zod.int()
+  "itemCount": zod.number().int()
 })
 })
 })
@@ -1692,11 +1692,11 @@ export const OperationsAnomalyDetectionResponse = zod.object({
 export const OperationsScheduleOrderingBody = zod.object({
   "runs": zod.array(zod.object({
   "id": zod.string(),
-  "label": zod.string().describe('Human label for messaging, e.g. "Run 2 · Margherita"'),
+  "label": zod.string().describe('Human label for messaging, e.g. \"Run 2 · Margherita\"'),
   "brand": zod.string(),
   "flavor": zod.string(),
-  "allergen": zod.string().describe('Food allergen for the run ("none" = no allergen). Free-form so allergens named on imported spec sheets beyond egg/soy (e.g. "milk") flow into allergen-sequence checks instead of being dropped to none.'),
-  "dieType": zod.string().optional().describe('Die/crust type; a change between adjacent runs is a changeover')
+  "allergen": zod.string().describe('Food allergen for the run (\"none\" = no allergen). Free-form so allergens named on imported spec sheets beyond egg\/soy (e.g. \"milk\") flow into allergen-sequence checks instead of being dropped to none.'),
+  "dieType": zod.string().optional().describe('Die\/crust type; a change between adjacent runs is a changeover')
 }).describe('One run planned for the day, in the flat shape both apps produce.')).describe('The runs planned for the day, in their current order'),
   "rules": zod.array(zod.object({
   "id": zod.string(),
@@ -1731,6 +1731,47 @@ export const OperationsScheduleOrderingResponse = zod.object({
 
 
 /**
+ * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
+ * @summary Suggest values for blank run-setup fields (AI); read-only
+ */
+export const AiFillMissingBody = zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().optional().describe('Die\/size of the run, if known'),
+  "context": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.string()
+}).describe('A field already filled in, given to the model for grounding.')).optional().describe('Fields already known, for grounding the suggestions'),
+  "fields": zod.array(zod.object({
+  "key": zod.string().describe('Stable field key (matches the run-settings field name)'),
+  "label": zod.string().describe('Human-readable field label'),
+  "category": zod.enum(['identity', 'line', 'packaging', 'sauce', 'applicator', 'pepperoni', 'dough']),
+  "kind": zod.enum(['number', 'text', 'select']),
+  "options": zod.array(zod.string()).optional().describe('Allowed values when kind is \"select\"')
+}).describe('One still-blank run-setup field the model should suggest a value for.')).describe('The blank fields needing a suggested value')
+})
+
+export const AiFillMissingResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "key": zod.string().describe('The field key this suggestion is for (echoes a requested key)'),
+  "value": zod.string().describe('Suggested value, as a string (numbers\/selects coerced client-side)'),
+  "rationale": zod.string().describe('Short plain-language reason for the suggested value'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no suggestions could be made'),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
+})
+
+
+/**
  * Given the saved brands and their flavors plus a list of imported brand/flavor names that did NOT exactly match, returns the best saved match for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the Excel import dialog and the user can still override. Falls back silently to the client's fuzzy matching when unavailable.
  * @summary Match imported brand/flavor names to saved ones (AI); read-only
  */
@@ -1742,39 +1783,59 @@ export const AiMatchImportBody = zod.object({
   "brand": zod.string().describe('The saved brand this flavor belongs to (already resolved)'),
   "flavor": zod.string().describe('The imported flavor name that did not exactly match')
 }).describe('An imported flavor (under a resolved saved brand) needing a match.')).describe('Imported flavors (under a resolved brand) with no exact match'),
-  "knownIngredients": zod.record(zod.string(), zod.array(zod.string())).optional().describe('Saved recipe ingredient names keyed by recipe kind (dough/sauce/cheese); the allowed match targets for ingredient names. Optional.'),
-  "knownAppTypes": zod.array(zod.string()).optional().describe('All saved applicator/topping type names (allowed targets). Optional.'),
+  "knownIngredients": zod.record(zod.string(), zod.array(zod.string())).optional().describe('Saved recipe ingredient names keyed by recipe kind (dough\/sauce\/cheese); the allowed match targets for ingredient names. Optional.'),
+  "knownAppTypes": zod.array(zod.string()).optional().describe('All saved applicator\/topping type names (allowed targets). Optional.'),
   "knownPepTypes": zod.array(zod.string()).optional().describe('All saved pepperoni type names (allowed targets). Optional.'),
   "unmatchedIngredients": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']).describe('The recipe kind whose ingredient pool this name belongs to'),
   "name": zod.string().describe('The imported ingredient name that did not exactly match')
 }).describe('An imported recipe ingredient name (scoped to a recipe kind) needing a match.')).optional().describe('Imported recipe ingredient names with no exact saved match. Optional.'),
-  "unmatchedAppTypes": zod.array(zod.string()).optional().describe('Imported applicator/topping type names with no exact saved match. Optional.'),
+  "unmatchedAppTypes": zod.array(zod.string()).optional().describe('Imported applicator\/topping type names with no exact saved match. Optional.'),
   "unmatchedPepTypes": zod.array(zod.string()).optional().describe('Imported pepperoni type names with no exact saved match. Optional.')
 })
 
 export const AiMatchImportResponse = zod.object({
   "brandMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported brand name (echoes an unmatchedBrands entry)'),
-  "match": zod.string().describe('The saved brand it best matches (always one of brands)')
+  "match": zod.string().describe('The saved brand it best matches (always one of brands)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "flavorMatches": zod.array(zod.object({
   "brand": zod.string().describe('The saved brand the flavor belongs to'),
   "candidate": zod.string().describe('The imported flavor name (echoes an unmatchedFlavors entry)'),
-  "match": zod.string().describe('The saved flavor it best matches (always within that brand)')
+  "match": zod.string().describe('The saved flavor it best matches (always within that brand)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "ingredientMatches": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']).describe('The recipe kind whose ingredient pool the match belongs to'),
   "candidate": zod.string().describe('The imported ingredient name (echoes an unmatchedIngredients entry)'),
-  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)')
+  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported recipe ingredient names. Optional.'),
   "appTypeMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
-  "match": zod.string().describe('The saved name it best matches (always one of the known list)')
-})).optional().describe('Confident matches for imported applicator/topping type names. Optional.'),
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})).optional().describe('Confident matches for imported applicator\/topping type names. Optional.'),
   "pepTypeMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
-  "match": zod.string().describe('The saved name it best matches (always one of the known list)')
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported pepperoni type names. Optional.'),
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
@@ -1799,7 +1860,11 @@ export const AiMatchPremixResponse = zod.object({
   "matches": zod.array(zod.object({
   "name": zod.string().describe('The imported premix name (echoes an unmatchedNames entry)'),
   "brand": zod.string().describe('The saved brand it best matches (always one of brands)'),
-  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits')
+  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
@@ -1824,7 +1889,7 @@ export const AiParseSpecSheetBody = zod.object({
   "cheeseIngredients": zod.array(zod.string()).optional(),
   "doughIngredients": zod.array(zod.string()).optional(),
   "sauceIngredients": zod.array(zod.string()).optional(),
-  "sauceNames": zod.array(zod.string()).optional().describe('Existing sauce/frontline recipe names (incl. ready-made sauces) to ground profile sauceName'),
+  "sauceNames": zod.array(zod.string()).optional().describe('Existing sauce\/frontline recipe names (incl. ready-made sauces) to ground profile sauceName'),
   "dieTypes": zod.array(zod.string()).optional(),
   "doughRecipes": zod.array(zod.string()).optional().describe('Existing dough recipe names (grounds paraphrased recipe names)'),
   "sauceRecipes": zod.array(zod.string()).optional().describe('Existing sauce recipe names (grounds paraphrased recipe names)'),
@@ -1834,7 +1899,7 @@ export const AiParseSpecSheetBody = zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
-  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.')
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).optional().describe('Learned spec-import aliases to ground name mapping')
 })
 
@@ -1851,17 +1916,17 @@ export const AiParseSpecSheetResponse = zod.object({
   "flavor": zod.string(),
   "dieType": zod.string().optional(),
   "sauceOzPerPizza": zod.number().optional(),
-  "sauceName": zod.string().optional().describe('Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name.'),
+  "sauceName": zod.string().optional().describe('Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought\/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name.'),
   "doughName": zod.string().optional().describe('Exact dough or crust recipe name assigned to this product profile.'),
   "targetDoughballWeight": zod.number().gt(aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin).optional().describe('Product-specific target doughball weight in ounces.'),
-  "doughballsPerTray": zod.int().min(1).optional().describe('Product-specific number of doughballs per tray.'),
+  "doughballsPerTray": zod.number().int().min(1).optional().describe('Product-specific number of doughballs per tray.'),
   "pizzasPerCase": zod.number().optional().describe('Case pack: how many pizzas go in one case, when the sheet states it. Optional.'),
   "sauceBarrelLbs": zod.number().optional().describe('Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional.'),
   "applicators": zod.array(zod.object({
   "type": zod.string(),
   "ozPerPizza": zod.number(),
-  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese/topping recipe for this slot derives the batch size from its row sum instead. Optional.'),
-  "slot": zod.int().min(1).max(aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax).optional().describe('Physical applicator slot when the workbook identifies it.'),
+  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese\/topping recipe for this slot derives the batch size from its row sum instead. Optional.'),
+  "slot": zod.number().int().min(1).max(aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax).optional().describe('Physical applicator slot when the workbook identifies it.'),
   "recipeName": zod.string().optional().describe('Exact cheese or mix recipe linked to this applicator slot.')
 })),
   "pepperonis": zod.array(zod.object({
@@ -1869,7 +1934,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "sticks": zod.number(),
   "ozPerPizza": zod.number(),
   "batchLbs": zod.number().optional().describe('Batch size in lbs one made pepperoni batch weighs, when the sheet states it. Optional.')
-}))
+})),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "recipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1879,7 +1948,7 @@ export const AiParseSpecSheetResponse = zod.object({
   "targets": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-})).optional().describe('Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand/flavor. Unioned with the singular brand/flavor.'),
+})).optional().describe('Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand\/flavor. Unioned with the singular brand\/flavor.'),
   "doughballOz": zod.number().optional(),
   "doughBatchYield": zod.number().optional().describe('Dough only: how many crusts one dough batch yields, when the sheet states it. Fallback only — the recipe rows + doughball weight derive the yield instead when both are present. Optional.'),
   "doughballsPerTray": zod.number().optional().describe('Dough only: how many doughballs fit on one tray, when the sheet states it. Optional.'),
@@ -1887,14 +1956,18 @@ export const AiParseSpecSheetResponse = zod.object({
   "rows": zod.array(zod.object({
   "ingredient": zod.string(),
   "lbs": zod.number()
-}))
+})),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "note": zod.string().optional(),
   "warnings": zod.array(zod.object({
   "brand": zod.string().describe('Brand of the profile the warning concerns'),
   "flavor": zod.string().describe('Final (post-correction) flavor of the profile the warning concerns'),
-  "message": zod.string().describe('Human-readable explanation of the correction/flag')
-})).optional().describe('Flavor-grounding corrections/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row.'),
+  "message": zod.string().describe('Human-readable explanation of the correction\/flag')
+})).optional().describe('Flavor-grounding corrections\/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row.'),
   "generatedAt": zod.number(),
   "decision": zod.enum(['suggestion']),
   "aiGenerated": zod.boolean().optional(),
@@ -1904,12 +1977,45 @@ export const AiParseSpecSheetResponse = zod.object({
 
 
 /**
+ * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
+ * @summary Suggest groups of duplicate ingredient names to merge (AI)
+ */
+export const AiSuggestMergesBody = zod.object({
+  "names": zod.array(zod.string()).describe('The full pool of mergeable ingredient\/die names to cluster'),
+  "aliases": zod.array(zod.object({
+  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The canonical name it was folded into')
+}).describe('A learned mapping from a merged-away name to the kept name.')).optional().describe('Learned merge aliases to ground the suggestions'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand `names` was scoped to — used only to tailor the AI prompt\'s wording.')
+})
+
+export const AiSuggestMergesResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "target": zod.string().describe('The recommended canonical name to keep'),
+  "sources": zod.array(zod.string()).describe('The duplicate names to merge into the target'),
+  "reason": zod.string().optional().describe('Optional short rationale for the suggested grouping'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})),
+  "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "note": zod.string().optional().describe('Optional brief overall comment from the model'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
+})
+
+
+/**
  * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
  * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
  */
 export const ListMergeAliasesQueryParams = zod.object({
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab\'s pool to scope the alias list to. Defaults to "ingredient" for backward compatibility.'),
-  "brand": zod.coerce.string().optional().describe('When category is "flavor", scopes the alias list to a single brand\'s flavor pool. Ignored for every other category.')
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab\'s pool to scope the alias list to. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.coerce.string().optional().describe('When category is \"flavor\", scopes the alias list to a single brand\'s flavor pool. Ignored for every other category.')
 })
 
 export const ListMergeAliasesResponse = zod.object({
@@ -1929,8 +2035,8 @@ export const SaveMergeAliasesBody = zod.object({
   "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The canonical name it was folded into')
 }).describe('A learned mapping from a merged-away name to the kept name.')).describe('The batch of merge aliases to upsert'),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
-  "brand": zod.string().optional().describe('When category is "flavor", the single brand this batch is scoped to.')
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand this batch is scoped to.')
 })
 
 export const SaveMergeAliasesResponse = zod.object({
@@ -1946,8 +2052,8 @@ export const SaveMergeAliasesResponse = zod.object({
  * @summary List denied (ignored) ingredient-merge pairs
  */
 export const ListDeniedMergesQueryParams = zod.object({
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab\'s pool to scope the denied-pair list to. Defaults to "ingredient" for backward compatibility.'),
-  "brand": zod.coerce.string().optional().describe('When category is "flavor", scopes the denied-pair list to a single brand\'s flavor pool. Ignored for every other category.')
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab\'s pool to scope the denied-pair list to. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.coerce.string().optional().describe('When category is \"flavor\", scopes the denied-pair list to a single brand\'s flavor pool. Ignored for every other category.')
 })
 
 export const ListDeniedMergesResponse = zod.object({
@@ -1967,8 +2073,8 @@ export const SaveDeniedMergesBody = zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
 }).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove'),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
-  "brand": zod.string().optional().describe('When category is "flavor", the single brand this batch is scoped to.')
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand this batch is scoped to.')
 })
 
 export const SaveDeniedMergesResponse = zod.object({
@@ -1988,8 +2094,8 @@ export const DeleteDeniedMergesBody = zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
 }).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove'),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
-  "brand": zod.string().optional().describe('When category is "flavor", the single brand this batch is scoped to.')
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand this batch is scoped to.')
 })
 
 export const DeleteDeniedMergesResponse = zod.object({
@@ -2015,13 +2121,13 @@ export const listDuplicateReviewsResponseCountMin = 0;
 export const ListDuplicateReviewsResponse = zod.object({
   "groups": zod.array(zod.object({
   "groupKey": zod.string().min(1).max(listDuplicateReviewsResponseGroupsItemGroupKeyMax),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
   "brand": zod.string().nullish(),
   "target": zod.string().min(1),
   "sources": zod.array(zod.string()).min(1),
   "status": zod.enum(['pending', 'resolved', 'ignored'])
 })),
-  "count": zod.int().min(listDuplicateReviewsResponseCountMin)
+  "count": zod.number().int().min(listDuplicateReviewsResponseCountMin)
 })
 
 
@@ -2040,7 +2146,7 @@ export const saveDuplicateReviewsBodyGroupsMax = 1000;
 export const SaveDuplicateReviewsBody = zod.object({
   "groups": zod.array(zod.object({
   "groupKey": zod.string().min(1).max(saveDuplicateReviewsBodyGroupsItemGroupKeyMax),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
   "brand": zod.string().nullish(),
   "target": zod.string().min(1),
   "sources": zod.array(zod.string()).min(1),
@@ -2059,13 +2165,13 @@ export const saveDuplicateReviewsResponseCountMin = 0;
 export const SaveDuplicateReviewsResponse = zod.object({
   "groups": zod.array(zod.object({
   "groupKey": zod.string().min(1).max(saveDuplicateReviewsResponseGroupsItemGroupKeyMax),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
   "brand": zod.string().nullish(),
   "target": zod.string().min(1),
   "sources": zod.array(zod.string()).min(1),
   "status": zod.enum(['pending', 'resolved', 'ignored'])
 })),
-  "count": zod.int().min(saveDuplicateReviewsResponseCountMin)
+  "count": zod.number().int().min(saveDuplicateReviewsResponseCountMin)
 })
 
 
@@ -2093,13 +2199,13 @@ export const resolveDuplicateReviewResponseCountMin = 0;
 export const ResolveDuplicateReviewResponse = zod.object({
   "groups": zod.array(zod.object({
   "groupKey": zod.string().min(1).max(resolveDuplicateReviewResponseGroupsItemGroupKeyMax),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
   "brand": zod.string().nullish(),
   "target": zod.string().min(1),
   "sources": zod.array(zod.string()).min(1),
   "status": zod.enum(['pending', 'resolved', 'ignored'])
 })),
-  "count": zod.int().min(resolveDuplicateReviewResponseCountMin)
+  "count": zod.number().int().min(resolveDuplicateReviewResponseCountMin)
 })
 
 
@@ -2160,7 +2266,7 @@ export const ListProductionRulesResponse = zod.object({
   "value": zod.string().describe('Value under which the rule is waived')
 }).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
   "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
-}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.'))
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
 })
 
 
@@ -2186,7 +2292,7 @@ export const SaveProductionRulesBody = zod.object({
   "value": zod.string().describe('Value under which the rule is waived')
 }).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
   "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
-}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.')).describe('The batch of rules to create or update (by id)')
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.')).describe('The batch of rules to create or update (by id)')
 })
 
 export const SaveProductionRulesResponse = zod.object({
@@ -2207,7 +2313,7 @@ export const SaveProductionRulesResponse = zod.object({
   "value": zod.string().describe('Value under which the rule is waived')
 }).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
   "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
-}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.'))
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
 })
 
 
@@ -2237,7 +2343,7 @@ export const DeleteProductionRulesResponse = zod.object({
   "value": zod.string().describe('Value under which the rule is waived')
 }).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
   "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
-}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.'))
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
 })
 
 
@@ -2249,7 +2355,7 @@ export const ListFreezerPullItemsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
-  "daysEarly": zod.int().describe('Days before the run this item must be pulled (default 3)'),
+  "daysEarly": zod.number().int().describe('Days before the run this item must be pulled (default 3)'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.'))
 })
@@ -2263,7 +2369,7 @@ export const SaveFreezerPullItemsBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
-  "daysEarly": zod.int().describe('Days before the run this item must be pulled (default 3)'),
+  "daysEarly": zod.number().int().describe('Days before the run this item must be pulled (default 3)'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.')).describe('The batch of freezer-pull items to create or update (by id)')
 })
@@ -2272,7 +2378,7 @@ export const SaveFreezerPullItemsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
-  "daysEarly": zod.int().describe('Days before the run this item must be pulled (default 3)'),
+  "daysEarly": zod.number().int().describe('Days before the run this item must be pulled (default 3)'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.'))
 })
@@ -2290,7 +2396,7 @@ export const DeleteFreezerPullItemsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
-  "daysEarly": zod.int().describe('Days before the run this item must be pulled (default 3)'),
+  "daysEarly": zod.number().int().describe('Days before the run this item must be pulled (default 3)'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.'))
 })
@@ -2313,8 +2419,8 @@ export const ListFreezerSurplusResponse = zod.object({
   "flavor": zod.string(),
   "productKey": zod.string(),
   "productionDate": zod.coerce.date(),
-  "totalCases": zod.int().min(1),
-  "remainingCases": zod.int().min(listFreezerSurplusResponseLotsItemRemainingCasesMin)
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(listFreezerSurplusResponseLotsItemRemainingCasesMin)
 })),
   "allocations": zod.array(zod.object({
   "id": zod.string(),
@@ -2324,7 +2430,7 @@ export const ListFreezerSurplusResponse = zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "productKey": zod.string(),
-  "cases": zod.int().min(1)
+  "cases": zod.number().int().min(1)
 }))
 })
 
@@ -2344,7 +2450,7 @@ export const ConfirmFreezerSurplusBody = zod.object({
   "brand": zod.string().min(1).max(confirmFreezerSurplusBodyBrandMax),
   "flavor": zod.string().max(confirmFreezerSurplusBodyFlavorMax),
   "productionDate": zod.coerce.date(),
-  "cases": zod.int().min(1).max(confirmFreezerSurplusBodyCasesMax)
+  "cases": zod.number().int().min(1).max(confirmFreezerSurplusBodyCasesMax)
 })
 
 
@@ -2363,8 +2469,8 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "flavor": zod.string(),
   "productKey": zod.string(),
   "productionDate": zod.coerce.date(),
-  "totalCases": zod.int().min(1),
-  "remainingCases": zod.int().min(confirmFreezerSurplusResponseLotsItemRemainingCasesMin)
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(confirmFreezerSurplusResponseLotsItemRemainingCasesMin)
 })),
   "allocations": zod.array(zod.object({
   "id": zod.string(),
@@ -2374,7 +2480,7 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "productKey": zod.string(),
-  "cases": zod.int().min(1)
+  "cases": zod.number().int().min(1)
 })),
   "createdLot": zod.object({
   "id": zod.string(),
@@ -2382,8 +2488,8 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "flavor": zod.string(),
   "productKey": zod.string(),
   "productionDate": zod.coerce.date(),
-  "totalCases": zod.int().min(1),
-  "remainingCases": zod.int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
 }).nullish()
 })
 
@@ -2417,7 +2523,7 @@ export const ReplaceFreezerSurplusAllocationBody = zod.object({
   "flavor": zod.string().max(replaceFreezerSurplusAllocationBodyFlavorMax),
   "allocations": zod.array(zod.object({
   "lotId": zod.string().min(1).max(replaceFreezerSurplusAllocationBodyAllocationsItemLotIdMax),
-  "cases": zod.int().min(1).max(replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax)
+  "cases": zod.number().int().min(1).max(replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax)
 })).max(replaceFreezerSurplusAllocationBodyAllocationsMax)
 })
 
@@ -2437,8 +2543,8 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "flavor": zod.string(),
   "productKey": zod.string(),
   "productionDate": zod.coerce.date(),
-  "totalCases": zod.int().min(1),
-  "remainingCases": zod.int().min(replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin)
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin)
 })),
   "allocations": zod.array(zod.object({
   "id": zod.string(),
@@ -2448,7 +2554,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "productKey": zod.string(),
-  "cases": zod.int().min(1)
+  "cases": zod.number().int().min(1)
 })),
   "createdLot": zod.object({
   "id": zod.string(),
@@ -2456,305 +2562,8 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "flavor": zod.string(),
   "productKey": zod.string(),
   "productionDate": zod.coerce.date(),
-  "totalCases": zod.int().min(1),
-  "remainingCases": zod.int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
-})
-
-
-/**
- * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
- * @summary List dated prep-mix surplus ledger and freezer balances
- */
-export const listMixSurplusResponseLotsItemAmountMadeMin = 0;
-
-export const listMixSurplusResponseLotsItemAmountUsedMin = 0;
-
-export const listMixSurplusResponseLotsItemAmountRemainingMin = 0;
-
-export const listMixSurplusResponseAllocationsItemAmountMin = 0;
-
-export const listMixSurplusResponseBalancesItemLbsMin = 0;
-
-
-
-export const ListMixSurplusResponse = zod.object({
-  "lots": zod.array(zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(listMixSurplusResponseLotsItemAmountMadeMin),
-  "amountUsed": zod.number().min(listMixSurplusResponseLotsItemAmountUsedMin),
-  "amountRemaining": zod.number().min(listMixSurplusResponseLotsItemAmountRemainingMin)
-})),
-  "allocations": zod.array(zod.object({
-  "id": zod.string(),
-  "lotId": zod.string(),
-  "mixId": zod.string(),
-  "runId": zod.string().optional(),
-  "runDate": zod.coerce.date(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "amount": zod.number().min(listMixSurplusResponseAllocationsItemAmountMin)
-})),
-  "balances": zod.array(zod.object({
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "lbs": zod.number().min(listMixSurplusResponseBalancesItemLbsMin),
-  "productionDates": zod.array(zod.coerce.date())
-}))
-})
-
-
-/**
- * Manager-confirmed record of surplus mix (pounds already made beyond a day's fresh need) as freezer stock. Creates a dated lot with remaining equal to the entered amount. Ledger action only — no inventory writes.
- * @summary Record a confirmed prep-mix surplus lot
- */
-export const recordMixSurplusBodyMixIdMax = 120;
-
-export const recordMixSurplusBodyAmountMadeExclusiveMin = 0.1;
-
-
-
-export const RecordMixSurplusBody = zod.object({
-  "mixId": zod.string().min(1).max(recordMixSurplusBodyMixIdMax),
-  "productionDate": zod.coerce.date(),
-  "amountMade": zod.number().gt(recordMixSurplusBodyAmountMadeExclusiveMin)
-})
-
-export const recordMixSurplusResponseLotsItemAmountMadeMin = 0;
-
-export const recordMixSurplusResponseLotsItemAmountUsedMin = 0;
-
-export const recordMixSurplusResponseLotsItemAmountRemainingMin = 0;
-
-export const recordMixSurplusResponseAllocationsItemAmountMin = 0;
-
-export const recordMixSurplusResponseBalancesItemLbsMin = 0;
-
-export const recordMixSurplusResponseCreatedLotOneAmountMadeMin = 0;
-
-export const recordMixSurplusResponseCreatedLotOneAmountUsedMin = 0;
-
-export const recordMixSurplusResponseCreatedLotOneAmountRemainingMin = 0;
-
-
-
-export const RecordMixSurplusResponse = zod.object({
-  "lots": zod.array(zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(recordMixSurplusResponseLotsItemAmountMadeMin),
-  "amountUsed": zod.number().min(recordMixSurplusResponseLotsItemAmountUsedMin),
-  "amountRemaining": zod.number().min(recordMixSurplusResponseLotsItemAmountRemainingMin)
-})),
-  "allocations": zod.array(zod.object({
-  "id": zod.string(),
-  "lotId": zod.string(),
-  "mixId": zod.string(),
-  "runId": zod.string().optional(),
-  "runDate": zod.coerce.date(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "amount": zod.number().min(recordMixSurplusResponseAllocationsItemAmountMin)
-})),
-  "balances": zod.array(zod.object({
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "lbs": zod.number().min(recordMixSurplusResponseBalancesItemLbsMin),
-  "productionDates": zod.array(zod.coerce.date())
-})),
-  "createdLot": zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountMadeMin),
-  "amountUsed": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountUsedMin),
-  "amountRemaining": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
-})
-
-
-/**
- * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; reducing/omitting an allocation returns that amount to the lot (un-reserved, still in the freezer). Voiding a lot entirely is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes inventory.
- * @summary Apply or release mix surplus for a make-day
- */
-export const ReplaceMixSurplusAllocationsParams = zod.object({
-  "runDate": zod.date()
-})
-
-export const replaceMixSurplusAllocationsBodyAllocationsItemLotIdMax = 120;
-
-export const replaceMixSurplusAllocationsBodyAllocationsItemAmountMin = 0;
-
-export const replaceMixSurplusAllocationsBodyAllocationsMax = 500;
-
-
-
-export const ReplaceMixSurplusAllocationsBody = zod.object({
-  "runDate": zod.coerce.date(),
-  "allocations": zod.array(zod.object({
-  "lotId": zod.string().min(1).max(replaceMixSurplusAllocationsBodyAllocationsItemLotIdMax),
-  "amount": zod.number().min(replaceMixSurplusAllocationsBodyAllocationsItemAmountMin)
-})).max(replaceMixSurplusAllocationsBodyAllocationsMax)
-})
-
-export const replaceMixSurplusAllocationsResponseLotsItemAmountMadeMin = 0;
-
-export const replaceMixSurplusAllocationsResponseLotsItemAmountUsedMin = 0;
-
-export const replaceMixSurplusAllocationsResponseLotsItemAmountRemainingMin = 0;
-
-export const replaceMixSurplusAllocationsResponseAllocationsItemAmountMin = 0;
-
-export const replaceMixSurplusAllocationsResponseBalancesItemLbsMin = 0;
-
-export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin = 0;
-
-export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin = 0;
-
-export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin = 0;
-
-
-
-export const ReplaceMixSurplusAllocationsResponse = zod.object({
-  "lots": zod.array(zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseLotsItemAmountMadeMin),
-  "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseLotsItemAmountUsedMin),
-  "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseLotsItemAmountRemainingMin)
-})),
-  "allocations": zod.array(zod.object({
-  "id": zod.string(),
-  "lotId": zod.string(),
-  "mixId": zod.string(),
-  "runId": zod.string().optional(),
-  "runDate": zod.coerce.date(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "amount": zod.number().min(replaceMixSurplusAllocationsResponseAllocationsItemAmountMin)
-})),
-  "balances": zod.array(zod.object({
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "lbs": zod.number().min(replaceMixSurplusAllocationsResponseBalancesItemLbsMin),
-  "productionDates": zod.array(zod.coerce.date())
-})),
-  "createdLot": zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin),
-  "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin),
-  "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
-})
-
-
-/**
- * Manager override: voids a surplus lot entirely — its remaining balance is set to 0, its allocation rows are removed, and the mix row's amountAlreadyMade is decremented by the voided amount so the plan reducer stops counting disposed surplus (ledger == scalar invariant). Ledger action only — never writes inventory.
- * @summary Void a mix surplus lot (release it from use)
- */
-export const voidMixSurplusLotPathIdMax = 120;
-
-
-
-export const VoidMixSurplusLotParams = zod.object({
-  "id": zod.coerce.string().min(1).max(voidMixSurplusLotPathIdMax)
-})
-
-export const voidMixSurplusLotResponseLotsItemAmountMadeMin = 0;
-
-export const voidMixSurplusLotResponseLotsItemAmountUsedMin = 0;
-
-export const voidMixSurplusLotResponseLotsItemAmountRemainingMin = 0;
-
-export const voidMixSurplusLotResponseAllocationsItemAmountMin = 0;
-
-export const voidMixSurplusLotResponseBalancesItemLbsMin = 0;
-
-export const voidMixSurplusLotResponseCreatedLotOneAmountMadeMin = 0;
-
-export const voidMixSurplusLotResponseCreatedLotOneAmountUsedMin = 0;
-
-export const voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin = 0;
-
-
-
-export const VoidMixSurplusLotResponse = zod.object({
-  "lots": zod.array(zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(voidMixSurplusLotResponseLotsItemAmountMadeMin),
-  "amountUsed": zod.number().min(voidMixSurplusLotResponseLotsItemAmountUsedMin),
-  "amountRemaining": zod.number().min(voidMixSurplusLotResponseLotsItemAmountRemainingMin)
-})),
-  "allocations": zod.array(zod.object({
-  "id": zod.string(),
-  "lotId": zod.string(),
-  "mixId": zod.string(),
-  "runId": zod.string().optional(),
-  "runDate": zod.coerce.date(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "amount": zod.number().min(voidMixSurplusLotResponseAllocationsItemAmountMin)
-})),
-  "balances": zod.array(zod.object({
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "lbs": zod.number().min(voidMixSurplusLotResponseBalancesItemLbsMin),
-  "productionDates": zod.array(zod.coerce.date())
-})),
-  "createdLot": zod.object({
-  "id": zod.string(),
-  "mixId": zod.string(),
-  "name": zod.string(),
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "isPrep": zod.boolean().optional(),
-  "productionDate": zod.coerce.date(),
-  "location": zod.string(),
-  "amountMade": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountMadeMin),
-  "amountUsed": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountUsedMin),
-  "amountRemaining": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin)
+  "totalCases": zod.number().int().min(1),
+  "remainingCases": zod.number().int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
 }).nullish()
 })
 
@@ -2766,71 +2575,66 @@ export const VoidMixSurplusLotResponse = zod.object({
 export const ListDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
-  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('"Extra Case Buffer" in the UI'),
-  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7", 2.0 min for 12").'),
-  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7", 2.0 min for 12").')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7\", 2.0 min for 12\").'),
+  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7\", 2.0 min for 12\").')
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
 
 /**
- * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Existing rows require a current or newer updatedAt revision; stale or revision-less updates are rejected atomically. Revision-less entries remain compatible for first-time creation. Malformed entries are dropped. Manager role required.
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
  * @summary Create or update per-die line-setting defaults (manager only)
  */
 export const SaveDieLineDefaultsBody = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
-  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('"Extra Case Buffer" in the UI'),
-  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7", 2.0 min for 12").'),
-  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7", 2.0 min for 12").')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7\", 2.0 min for 12\").'),
+  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7\", 2.0 min for 12\").')
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
 export const SaveDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
-  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('"Extra Case Buffer" in the UI'),
-  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7", 2.0 min for 12").'),
-  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7", 2.0 min for 12").')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7\", 2.0 min for 12\").'),
+  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7\", 2.0 min for 12\").')
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
 
 /**
- * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Existing rows require a current or newer revision in the revisions map; stale or revision-less resets are rejected atomically. Revision-less names remain compatible when no stored row exists. Manager role required.
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Manager role required.
  * @summary Delete per-die line-setting defaults by die name (manager only)
  */
 export const DeleteDieLineDefaultsBody = zod.object({
-  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed'),
-  "revisions": zod.record(zod.string(), zod.coerce.date()).optional().describe('Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override.')
+  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed')
 })
 
 export const DeleteDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
-  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('"Extra Case Buffer" in the UI'),
-  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7", 2.0 min for 12").'),
-  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7", 2.0 min for 12").')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().nullish().describe('Pre-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.5 min for 7\", 2.0 min for 12\").'),
+  "postTunnelMin": zod.number().nullish().describe('Post-tunnel dwell time override in minutes. Absent = use the app\'s built-in per-die-size default (3.0 min for 7\", 2.0 min for 12\").')
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
@@ -2850,13 +2654,13 @@ export const ListRunSuggestionsResponse = zod.object({
   "configuredValue": zod.number(),
   "recommendedValue": zod.number(),
   "unit": zod.string(),
-  "runCount": zod.int(),
+  "runCount": zod.number().int(),
   "statsLine": zod.string(),
   "narrative": zod.string(),
   "status": zod.enum(['pending', 'accepted', 'dismissed']),
   "followUpNote": zod.string(),
   "updatedAt": zod.number().describe('Epoch milliseconds of the last change')
-}).describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.'))
+}).describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles\/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.'))
 })
 
 
@@ -2873,7 +2677,7 @@ export const ObserveRunSuggestionBody = zod.object({
   "configuredValue": zod.number(),
   "recommendedValue": zod.number(),
   "unit": zod.string(),
-  "runCount": zod.int(),
+  "runCount": zod.number().int(),
   "statsLine": zod.string().describe('Deterministic plain-English stats summary built client-side')
 })
 
@@ -2890,13 +2694,13 @@ export const ObserveRunSuggestionResponse = zod.object({
   "configuredValue": zod.number(),
   "recommendedValue": zod.number(),
   "unit": zod.string(),
-  "runCount": zod.int(),
+  "runCount": zod.number().int(),
   "statsLine": zod.string(),
   "narrative": zod.string(),
   "status": zod.enum(['pending', 'accepted', 'dismissed']),
   "followUpNote": zod.string(),
   "updatedAt": zod.number().describe('Epoch milliseconds of the last change')
-}).optional().describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.')
+}).optional().describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles\/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.')
 })
 
 
@@ -2921,13 +2725,13 @@ export const UpdateRunSuggestionResponse = zod.object({
   "configuredValue": zod.number(),
   "recommendedValue": zod.number(),
   "unit": zod.string(),
-  "runCount": zod.int(),
+  "runCount": zod.number().int(),
   "statsLine": zod.string(),
   "narrative": zod.string(),
   "status": zod.enum(['pending', 'accepted', 'dismissed']),
   "followUpNote": zod.string(),
   "updatedAt": zod.number().describe('Epoch milliseconds of the last change')
-}).describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.'))
+}).describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles\/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.'))
 })
 
 
@@ -2997,9 +2801,9 @@ export const ListRunTemplatesResponse = zod.object({
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
   "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
-  "revision": zod.int().min(listRunTemplatesResponseTemplatesItemRevisionMin).max(listRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "revision": zod.number().int().min(listRunTemplatesResponseTemplatesItemRevisionMin).max(listRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
   "deleted": zod.boolean().default(listRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
-}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to/from its own local form shape).'))
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
@@ -3020,7 +2824,7 @@ export const SaveRunTemplatesBody = zod.object({
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
   "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
-  "revision": zod.int().min(saveRunTemplatesBodyTemplatesItemRevisionMin).max(saveRunTemplatesBodyTemplatesItemRevisionMax).optional().describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "revision": zod.number().int().min(saveRunTemplatesBodyTemplatesItemRevisionMin).max(saveRunTemplatesBodyTemplatesItemRevisionMax).optional().describe('Monotonically increasing client revision (a JS-safe integer)'),
   "deleted": zod.boolean().default(saveRunTemplatesBodyTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.')).describe('The batch of run templates to create or update (by id)')
 })
@@ -3038,9 +2842,9 @@ export const SaveRunTemplatesResponse = zod.object({
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
   "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
-  "revision": zod.int().min(saveRunTemplatesResponseTemplatesItemRevisionMin).max(saveRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "revision": zod.number().int().min(saveRunTemplatesResponseTemplatesItemRevisionMin).max(saveRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
   "deleted": zod.boolean().default(saveRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
-}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to/from its own local form shape).'))
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
@@ -3062,22 +2866,22 @@ export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
 export const DeleteRunTemplatesBody = zod.union([zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "revision": zod.int().min(deleteRunTemplatesBodyOneItemsItemRevisionMin).max(deleteRunTemplatesBodyOneItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+  "revision": zod.number().int().min(deleteRunTemplatesBodyOneItemsItemRevisionMin).max(deleteRunTemplatesBodyOneItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
 })).describe('Deletion tombstones to apply by id and revision'),
   "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
 }),zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "revision": zod.int().min(deleteRunTemplatesBodyTwoItemsItemRevisionMin).max(deleteRunTemplatesBodyTwoItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+  "revision": zod.number().int().min(deleteRunTemplatesBodyTwoItemsItemRevisionMin).max(deleteRunTemplatesBodyTwoItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
 })).optional().describe('Deletion tombstones to apply by id and revision'),
   "ids": zod.array(zod.string()).describe('Legacy deletion ids. The server atomically assigns a newer revision.')
 })]).and(zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "revision": zod.int().min(deleteRunTemplatesBodyThreeItemsItemRevisionMin).max(deleteRunTemplatesBodyThreeItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+  "revision": zod.number().int().min(deleteRunTemplatesBodyThreeItemsItemRevisionMin).max(deleteRunTemplatesBodyThreeItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
 })).optional().describe('Deletion tombstones to apply by id and revision'),
   "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
-})).describe('Revisioned deletion tombstones and/or legacy template ids. At least one of `items` or `ids` must be supplied.')
+})).describe('Revisioned deletion tombstones and\/or legacy template ids. At least one of `items` or `ids` must be supplied.')
 
 export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
@@ -3092,9 +2896,9 @@ export const DeleteRunTemplatesResponse = zod.object({
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
   "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
-  "revision": zod.int().min(deleteRunTemplatesResponseTemplatesItemRevisionMin).max(deleteRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "revision": zod.number().int().min(deleteRunTemplatesResponseTemplatesItemRevisionMin).max(deleteRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
   "deleted": zod.boolean().default(deleteRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
-}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to/from its own local form shape).'))
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
@@ -3127,23 +2931,21 @@ export const UpdateSupervisorPinResponse = zod.object({
 export const ListMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
   "batchSize": zod.number().describe('Pounds of finished mix per batch'),
-  "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
+  "daysEarly": zod.number().int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
-  "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
-  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent/0 = not recorded.')
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
 
 
@@ -3154,45 +2956,41 @@ export const ListMixesResponse = zod.object({
 export const SaveMixesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
   "batchSize": zod.number().describe('Pounds of finished mix per batch'),
-  "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
+  "daysEarly": zod.number().int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
-  "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
-  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent/0 = not recorded.')
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')).describe('The batch of mixes to create or update (by id)')
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')).describe('The batch of mixes to create or update (by id)')
 })
 
 export const SaveMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
   "batchSize": zod.number().describe('Pounds of finished mix per batch'),
-  "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
+  "daysEarly": zod.number().int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
-  "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
-  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent/0 = not recorded.')
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
 
 
@@ -3207,23 +3005,21 @@ export const DeleteMixesBody = zod.object({
 export const DeleteMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
   "batchSize": zod.number().describe('Pounds of finished mix per batch'),
-  "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
+  "daysEarly": zod.number().int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
-  "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
-  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent/0 = not recorded.')
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
 
 
@@ -3235,10 +3031,10 @@ export const ListIngredientsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "name": zod.string().describe('Current display name'),
-  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
   "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
-}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
 
@@ -3250,20 +3046,20 @@ export const SaveIngredientsBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "name": zod.string().describe('Current display name'),
-  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
   "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
-}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.')).describe('The batch of ingredients to create or rename (by id)')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.')).describe('The batch of ingredients to create or rename (by id)')
 })
 
 export const SaveIngredientsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "name": zod.string().describe('Current display name'),
-  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
   "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
-}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
 
@@ -3279,10 +3075,10 @@ export const DeleteIngredientsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "name": zod.string().describe('Current display name'),
-  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
   "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
-}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
 
@@ -3299,10 +3095,10 @@ export const MergeIngredientsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
   "name": zod.string().describe('Current display name'),
-  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
   "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
-}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
 
@@ -3313,10 +3109,9 @@ export const MergeIngredientsResponse = zod.object({
 export const ListCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
-  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor / "All Varieties".'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
   "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
   "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
@@ -3324,10 +3119,10 @@ export const ListCheeseRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
   "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3338,10 +3133,9 @@ export const ListCheeseRecipesResponse = zod.object({
 export const SaveCheeseRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
-  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor / "All Varieties".'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
   "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
   "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
@@ -3349,19 +3143,18 @@ export const SaveCheeseRecipesBody = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
   "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of cheese recipes to create or update (by id)')
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of cheese recipes to create or update (by id)')
 })
 
 export const SaveCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
-  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor / "All Varieties".'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
   "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
   "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
@@ -3369,10 +3162,10 @@ export const SaveCheeseRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
   "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3387,10 +3180,9 @@ export const DeleteCheeseRecipesBody = zod.object({
 export const DeleteCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
-  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor / "All Varieties".'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
   "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
   "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
@@ -3398,10 +3190,10 @@ export const DeleteCheeseRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
   "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3412,7 +3204,6 @@ export const DeleteCheeseRecipesResponse = zod.object({
 export const ListDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3420,20 +3211,20 @@ export const ListDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3444,7 +3235,6 @@ export const ListDoughRecipesResponse = zod.object({
 export const SaveDoughRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3452,26 +3242,25 @@ export const SaveDoughRecipesBody = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
 export const SaveDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3479,20 +3268,20 @@ export const SaveDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3507,7 +3296,6 @@ export const DeleteDoughRecipesBody = zod.object({
 export const DeleteDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3515,20 +3303,20 @@ export const DeleteDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3539,7 +3327,6 @@ export const DeleteDoughRecipesResponse = zod.object({
 export const ListSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3547,20 +3334,20 @@ export const ListSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3571,7 +3358,6 @@ export const ListSauceRecipesResponse = zod.object({
 export const SaveSauceRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3579,26 +3365,25 @@ export const SaveSauceRecipesBody = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
 export const SaveSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3606,20 +3391,20 @@ export const SaveSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3634,7 +3419,6 @@ export const DeleteSauceRecipesBody = zod.object({
 export const DeleteSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3642,20 +3426,20 @@ export const DeleteSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
-  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
-  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
-  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
+  "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s \"target ball weight\"). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0\/absent = unknown. Picking a dough recipe hydrates the run form\'s Doughballs Per Tray from this. Sauce recipes never set it.'),
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
-  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0/absent = unknown.'),
+  "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
   "customers": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string()
-}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -3676,7 +3460,7 @@ export const ListBrandProfilesResponse = zod.object({
 
 
 /**
- * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing forced items are also restricted to the `manage-profiles` capability and are rejected with 403 otherwise, before any write.
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing any forced item additionally require the `use-ai-tools` capability (the same gate as the spec-import parse flow) and are rejected with 403 otherwise, before any write.
  * @summary Create or update brand+flavor setup profiles (stamp-guarded)
  */
 export const SaveBrandProfilesBody = zod.object({
@@ -3731,8 +3515,8 @@ export const DeleteBrandProfilesResponse = zod.object({
 export const ListCycleCountSchedulesResponse = zod.object({
   "schedules": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "section": zod.string().describe('The warehouse section/area to count'),
-  "cadenceDays": zod.int().describe('How many days may elapse between counts (default 7)'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().int().describe('How many days may elapse between counts (default 7)'),
   "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
@@ -3746,8 +3530,8 @@ export const ListCycleCountSchedulesResponse = zod.object({
 export const SaveCycleCountSchedulesBody = zod.object({
   "schedules": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "section": zod.string().describe('The warehouse section/area to count'),
-  "cadenceDays": zod.int().describe('How many days may elapse between counts (default 7)'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().int().describe('How many days may elapse between counts (default 7)'),
   "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.')).describe('The batch of cycle-count schedules to create or update (by id)')
@@ -3756,8 +3540,8 @@ export const SaveCycleCountSchedulesBody = zod.object({
 export const SaveCycleCountSchedulesResponse = zod.object({
   "schedules": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "section": zod.string().describe('The warehouse section/area to count'),
-  "cadenceDays": zod.int().describe('How many days may elapse between counts (default 7)'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().int().describe('How many days may elapse between counts (default 7)'),
   "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
@@ -3775,8 +3559,8 @@ export const DeleteCycleCountSchedulesBody = zod.object({
 export const DeleteCycleCountSchedulesResponse = zod.object({
   "schedules": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "section": zod.string().describe('The warehouse section/area to count'),
-  "cadenceDays": zod.int().describe('How many days may elapse between counts (default 7)'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().int().describe('How many days may elapse between counts (default 7)'),
   "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
@@ -3798,8 +3582,8 @@ export const MarkCycleCountCountedBody = zod.object({
 export const MarkCycleCountCountedResponse = zod.object({
   "schedules": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
-  "section": zod.string().describe('The warehouse section/area to count'),
-  "cadenceDays": zod.int().describe('How many days may elapse between counts (default 7)'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().int().describe('How many days may elapse between counts (default 7)'),
   "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
@@ -3813,7 +3597,7 @@ export const MarkCycleCountCountedResponse = zod.object({
 export const ListAiCorrectionsResponse = zod.object({
   "corrections": zod.array(zod.object({
   "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
-  "fromText": zod.string().describe('The messy/wrong name that was corrected (matched case-insensitively)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
   "toText": zod.string().describe('The canonical name it should be read as')
 }).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.'))
 })
@@ -3826,7 +3610,7 @@ export const ListAiCorrectionsResponse = zod.object({
 export const SaveAiCorrectionsBody = zod.object({
   "corrections": zod.array(zod.object({
   "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
-  "fromText": zod.string().describe('The messy/wrong name that was corrected (matched case-insensitively)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
   "toText": zod.string().describe('The canonical name it should be read as')
 }).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.')).describe('The batch of confirmed corrections to upsert into the shared pool')
 })
@@ -3834,7 +3618,7 @@ export const SaveAiCorrectionsBody = zod.object({
 export const SaveAiCorrectionsResponse = zod.object({
   "corrections": zod.array(zod.object({
   "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
-  "fromText": zod.string().describe('The messy/wrong name that was corrected (matched case-insensitively)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
   "toText": zod.string().describe('The canonical name it should be read as')
 }).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.'))
 })
@@ -3849,10 +3633,10 @@ export const AuditAiMemoryHealthResponse = zod.object({
   "correctionFindings": zod.array(zod.object({
   "entry": zod.object({
   "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
-  "fromText": zod.string().describe('The messy/wrong name that was corrected (matched case-insensitively)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
   "toText": zod.string().describe('The canonical name it should be read as')
 }).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.').and(zod.object({
-  "id": zod.int()
+  "id": zod.number().int()
 })),
   "status": zod.enum(['healthy', 'duplicate', 'covered-by-merge', 'outdated-target', 'chain', 'cycle', 'orphaned', 'needs-review']),
   "evidence": zod.array(zod.string()),
@@ -3864,14 +3648,14 @@ export const AuditAiMemoryHealthResponse = zod.object({
   "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
   "fact": zod.string().describe('The durable observation in plain language')
 }).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.').and(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "source": zod.string().nullish()
 })),
   "status": zod.enum(['exact-duplicate', 'stale-source-reference', 'superseded-name-reference', 'needs-review']),
   "evidence": zod.array(zod.string())
 })),
   "safeRepairs": zod.array(zod.record(zod.string(), zod.unknown())),
-  "summary": zod.record(zod.string(), zod.int()),
+  "summary": zod.record(zod.string(), zod.number().int()),
   "conversationHistoryExcluded": zod.literal(true)
 })
 })
@@ -3886,10 +3670,10 @@ export const ApplyAiMemorySafeFixesResponse = zod.object({
   "correctionFindings": zod.array(zod.object({
   "entry": zod.object({
   "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
-  "fromText": zod.string().describe('The messy/wrong name that was corrected (matched case-insensitively)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
   "toText": zod.string().describe('The canonical name it should be read as')
 }).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.').and(zod.object({
-  "id": zod.int()
+  "id": zod.number().int()
 })),
   "status": zod.enum(['healthy', 'duplicate', 'covered-by-merge', 'outdated-target', 'chain', 'cycle', 'orphaned', 'needs-review']),
   "evidence": zod.array(zod.string()),
@@ -3901,24 +3685,24 @@ export const ApplyAiMemorySafeFixesResponse = zod.object({
   "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
   "fact": zod.string().describe('The durable observation in plain language')
 }).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.').and(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "source": zod.string().nullish()
 })),
   "status": zod.enum(['exact-duplicate', 'stale-source-reference', 'superseded-name-reference', 'needs-review']),
   "evidence": zod.array(zod.string())
 })),
   "safeRepairs": zod.array(zod.record(zod.string(), zod.unknown())),
-  "summary": zod.record(zod.string(), zod.int()),
+  "summary": zod.record(zod.string(), zod.number().int()),
   "conversationHistoryExcluded": zod.literal(true)
 }),
   "after": zod.object({
   "correctionFindings": zod.array(zod.object({
   "entry": zod.object({
   "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
-  "fromText": zod.string().describe('The messy/wrong name that was corrected (matched case-insensitively)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
   "toText": zod.string().describe('The canonical name it should be read as')
 }).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.').and(zod.object({
-  "id": zod.int()
+  "id": zod.number().int()
 })),
   "status": zod.enum(['healthy', 'duplicate', 'covered-by-merge', 'outdated-target', 'chain', 'cycle', 'orphaned', 'needs-review']),
   "evidence": zod.array(zod.string()),
@@ -3930,20 +3714,20 @@ export const ApplyAiMemorySafeFixesResponse = zod.object({
   "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
   "fact": zod.string().describe('The durable observation in plain language')
 }).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.').and(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "source": zod.string().nullish()
 })),
   "status": zod.enum(['exact-duplicate', 'stale-source-reference', 'superseded-name-reference', 'needs-review']),
   "evidence": zod.array(zod.string())
 })),
   "safeRepairs": zod.array(zod.record(zod.string(), zod.unknown())),
-  "summary": zod.record(zod.string(), zod.int()),
+  "summary": zod.record(zod.string(), zod.number().int()),
   "conversationHistoryExcluded": zod.literal(true)
 }),
   "applied": zod.array(zod.record(zod.string(), zod.unknown())),
   "summary": zod.object({
-  "deleted": zod.int(),
-  "retargeted": zod.int()
+  "deleted": zod.number().int(),
+  "retargeted": zod.number().int()
 })
 })
 
@@ -3976,7 +3760,7 @@ export const AuditProfileDataHealthResponse = zod.object({
   "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
-  "summary": zod.record(zod.string(), zod.int())
+  "summary": zod.record(zod.string(), zod.number().int())
 })
 })
 
@@ -4009,7 +3793,7 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
   "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
-  "summary": zod.record(zod.string(), zod.int())
+  "summary": zod.record(zod.string(), zod.number().int())
 }),
   "after": zod.object({
   "findings": zod.array(zod.object({
@@ -4034,7 +3818,7 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
   "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
-  "summary": zod.record(zod.string(), zod.int())
+  "summary": zod.record(zod.string(), zod.number().int())
 }),
   "applied": zod.array(zod.object({
   "id": zod.string(),
@@ -4047,8 +3831,8 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
 })),
   "batchId": zod.string().nullish(),
   "summary": zod.object({
-  "repairedProfiles": zod.int(),
-  "repairedRuns": zod.int()
+  "repairedProfiles": zod.number().int(),
+  "repairedRuns": zod.number().int()
 })
 })
 
@@ -4144,31 +3928,31 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
-  "summary": zod.record(zod.string(), zod.int()),
-  "cleanupHistory": zod.looseObject({
+  "summary": zod.record(zod.string(), zod.number().int()),
+  "cleanupHistory": zod.object({
 
-}).nullable(),
+}).passthrough().nullable(),
   "repairBatches": zod.array(zod.record(zod.string(), zod.unknown())),
   "aiRetention": zod.object({
   "policyVersion": zod.string(),
   "scope": zod.enum(['live', 'sandbox']),
-  "batchLimit": zod.int().min(1),
+  "batchLimit": zod.number().int().min(1),
   "canApply": zod.boolean(),
   "alreadyApplied": zod.boolean(),
   "appliedAt": zod.coerce.date().nullable(),
   "candidates": zod.object({
-  "conversationTurns": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin),
-  "retiredFacilityFacts": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin),
-  "incidentGeneratedTextToLabel": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin),
-  "qualityThumbnailsToRedact": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin),
-  "closedObservationsToRedact": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin),
-  "total": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin)
+  "conversationTurns": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin),
+  "retiredFacilityFacts": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin),
+  "incidentGeneratedTextToLabel": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin),
+  "qualityThumbnailsToRedact": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin),
+  "closedObservationsToRedact": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin),
+  "total": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin)
 }),
   "protected": zod.object({
   "correctionAndAliasRecords": zod.string(),
-  "operationalIncidentRows": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin),
-  "confirmedQualityRows": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin),
-  "openInventoryObservations": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin),
+  "operationalIncidentRows": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin),
+  "confirmedQualityRows": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin),
+  "openInventoryObservations": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin),
   "inventoryLedgerEffects": zod.string()
 }),
   "cutoffs": zod.object({
@@ -4181,9 +3965,9 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "report": zod.object({
   "path": zod.string(),
   "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp),
-  "formatVersion": zod.int(),
-  "automaticProposals": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin),
-  "stubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin),
+  "formatVersion": zod.number().int(),
+  "automaticProposals": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin),
+  "stubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin),
   "planSha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp),
   "snapshot": zod.object({
   "path": zod.string(),
@@ -4193,8 +3977,8 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "manifest": zod.object({
   "path": zod.string(),
   "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp),
-  "retained": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin),
-  "excludedOlderDuplicates": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin)
+  "retained": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin),
+  "excludedOlderDuplicates": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin)
 })
 }),
   "heal": zod.object({
@@ -4203,26 +3987,26 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "appliedAt": zod.coerce.date().nullable(),
   "markerValid": zod.boolean(),
   "result": zod.object({
-  "replacements": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin),
-  "aliasesInserted": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin),
-  "repointedProfiles": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin),
-  "repointedRuns": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin),
-  "deletedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin)
+  "replacements": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin),
+  "aliasesInserted": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin),
+  "repointedProfiles": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin),
+  "repointedRuns": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin),
+  "deletedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin)
 })
 }),
   "checkedAt": zod.coerce.date(),
   "status": zod.enum(['clean', 'warning', 'error', 'not-verified']),
   "freshness": zod.enum(['current', 'stale']),
   "summary": zod.object({
-  "poolMismatches": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin),
-  "aliasGaps": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin),
-  "staleProfileLinks": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin),
-  "stalePendingRunLinks": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin),
-  "protectedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin),
-  "unexpectedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin),
-  "protectedHistoryReferences": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin),
-  "omittedFindings": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin),
-  "findingLimitPerCategory": zod.int().min(1)
+  "poolMismatches": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin),
+  "aliasGaps": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin),
+  "staleProfileLinks": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin),
+  "stalePendingRunLinks": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin),
+  "protectedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin),
+  "unexpectedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin),
+  "protectedHistoryReferences": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin),
+  "omittedFindings": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin),
+  "findingLimitPerCategory": zod.number().int().min(1)
 }),
   "findings": zod.array(zod.object({
   "id": zod.string(),
@@ -4258,14 +4042,14 @@ export const GetProfileNameLinkCleanupAuditResponse = zod.object({
   "id": zod.string(),
   "appliedAt": zod.coerce.date(),
   "summary": zod.object({
-  "scannedProfiles": zod.int(),
-  "correctedProfiles": zod.int(),
-  "skippedStarted": zod.int(),
+  "scannedProfiles": zod.number().int(),
+  "correctedProfiles": zod.number().int(),
+  "skippedStarted": zod.number().int(),
   "removedStubs": zod.object({
-  "dough": zod.int(),
-  "sauce": zod.int(),
-  "cheese": zod.int(),
-  "mix": zod.int()
+  "dough": zod.number().int(),
+  "sauce": zod.number().int(),
+  "cheese": zod.number().int(),
+  "mix": zod.number().int()
 })
 })
 }).nullable()
@@ -4315,7 +4099,7 @@ export const ListSpecImportAliasesResponse = zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
-  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.')
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
 })
 
@@ -4329,7 +4113,7 @@ export const SaveSpecImportAliasesBody = zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
-  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.')
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).describe('The batch of spec-import aliases to upsert')
 })
 
@@ -4338,7 +4122,7 @@ export const SaveSpecImportAliasesResponse = zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
-  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.')
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
 })
 
@@ -4352,9 +4136,9 @@ export const DeleteSpecImportAliasesBody = zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
-  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.')
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).describe('The exact alias mappings to delete'),
-  "exactContext": zod.boolean().optional().describe('When true, a null/omitted alias context matches only stored rows whose context is also null. Defaults to false for the legacy any-context cleanup behavior.')
+  "exactContext": zod.boolean().optional().describe('When true, a null\/omitted alias context matches only stored rows whose context is also null. Defaults to false for the legacy any-context cleanup behavior.')
 })
 
 export const DeleteSpecImportAliasesResponse = zod.object({
@@ -4362,7 +4146,7 @@ export const DeleteSpecImportAliasesResponse = zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
-  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.')
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
 })
 
@@ -4373,14 +4157,14 @@ export const DeleteSpecImportAliasesResponse = zod.object({
  */
 export const ListSpecSheetsResponse = zod.object({
   "specSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 }))
@@ -4393,25 +4177,25 @@ export const ListSpecSheetsResponse = zod.object({
  */
 export const SaveSpecSheetBody = zod.object({
   "label": zod.string(),
-  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older/mobile clients (they share a legacy bucket).'),
-  "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot\'s parse instead of re-running the AI. Omitted by older/mobile clients.'),
+  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older\/mobile clients (they share a legacy bucket).'),
+  "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot\'s parse instead of re-running the AI. Omitted by older\/mobile clients.'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 })
 
 export const SaveSpecSheetResponse = zod.object({
   "specSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 }))
@@ -4427,14 +4211,14 @@ export const DeleteSpecSheetParams = zod.object({
 
 export const DeleteSpecSheetResponse = zod.object({
   "specSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 }))
@@ -4447,7 +4231,7 @@ export const DeleteSpecSheetResponse = zod.object({
  */
 export const ListShippingGuidesResponse = zod.object({
   "shippingGuides": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
@@ -4463,9 +4247,9 @@ export const ListShippingGuidesResponse = zod.object({
   "gripSheets": zod.string().optional(),
   "pizzasPerCase": zod.number().optional(),
   "casesPerSkid": zod.number().optional()
-}).describe('The packaging values a shipping/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
 }))
-}).describe('The reviewed shipping/palletizing-guide snapshot captured at import time.')
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
 }))
 })
 
@@ -4489,14 +4273,14 @@ export const SaveShippingGuideBody = zod.object({
   "gripSheets": zod.string().optional(),
   "pizzasPerCase": zod.number().optional(),
   "casesPerSkid": zod.number().optional()
-}).describe('The packaging values a shipping/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
 }))
-}).describe('The reviewed shipping/palletizing-guide snapshot captured at import time.')
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
 })
 
 export const SaveShippingGuideResponse = zod.object({
   "shippingGuides": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
@@ -4512,9 +4296,9 @@ export const SaveShippingGuideResponse = zod.object({
   "gripSheets": zod.string().optional(),
   "pizzasPerCase": zod.number().optional(),
   "casesPerSkid": zod.number().optional()
-}).describe('The packaging values a shipping/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
 }))
-}).describe('The reviewed shipping/palletizing-guide snapshot captured at import time.')
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
 }))
 })
 
@@ -4528,7 +4312,7 @@ export const DeleteShippingGuideParams = zod.object({
 
 export const DeleteShippingGuideResponse = zod.object({
   "shippingGuides": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
@@ -4544,9 +4328,9 @@ export const DeleteShippingGuideResponse = zod.object({
   "gripSheets": zod.string().optional(),
   "pizzasPerCase": zod.number().optional(),
   "casesPerSkid": zod.number().optional()
-}).describe('The packaging values a shipping/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
 }))
-}).describe('The reviewed shipping/palletizing-guide snapshot captured at import time.')
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
 }))
 })
 
@@ -4557,7 +4341,7 @@ export const DeleteShippingGuideResponse = zod.object({
  */
 export const ListPremixSheetsResponse = zod.object({
   "premixSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
@@ -4571,7 +4355,6 @@ export const ListPremixSheetsResponse = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4589,7 +4372,7 @@ export const ListPremixSheetsResponse = zod.object({
  */
 export const SavePremixSheetBody = zod.object({
   "label": zod.string(),
-  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older/mobile clients (they share a legacy bucket).'),
+  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older\/mobile clients (they share a legacy bucket).'),
   "data": zod.array(zod.object({
   "id": zod.string(),
   "scope": zod.string().optional(),
@@ -4600,7 +4383,6 @@ export const SavePremixSheetBody = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4612,7 +4394,7 @@ export const SavePremixSheetBody = zod.object({
 
 export const SavePremixSheetResponse = zod.object({
   "premixSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
@@ -4626,7 +4408,6 @@ export const SavePremixSheetResponse = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4636,7 +4417,7 @@ export const SavePremixSheetResponse = zod.object({
 }).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
 }))
 }).and(zod.object({
-  "snapshotId": zod.int()
+  "snapshotId": zod.number().int()
 }))
 
 
@@ -4646,7 +4427,7 @@ export const SavePremixSheetResponse = zod.object({
  */
 export const ListCheeseSheetsResponse = zod.object({
   "cheeseSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity; retention keeps two versions per source key.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
@@ -4696,7 +4477,7 @@ export const SaveCheeseSheetBody = zod.object({
 
 export const SaveCheeseSheetResponse = zod.object({
   "cheeseSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity; retention keeps two versions per source key.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
@@ -4718,7 +4499,7 @@ export const SaveCheeseSheetResponse = zod.object({
 }))
 }))
 }).and(zod.object({
-  "snapshotId": zod.int()
+  "snapshotId": zod.number().int()
 }))
 
 
@@ -4731,7 +4512,7 @@ export const DeleteCheeseSheetParams = zod.object({
 
 export const DeleteCheeseSheetResponse = zod.object({
   "cheeseSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity; retention keeps two versions per source key.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
@@ -4764,7 +4545,7 @@ export const DeletePremixSheetParams = zod.object({
 
 export const DeletePremixSheetResponse = zod.object({
   "premixSheets": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
@@ -4778,7 +4559,6 @@ export const DeletePremixSheetResponse = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
-  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4799,14 +4579,14 @@ export const listServerJobsResponseProgressMax = 100;
 
 
 export const ListServerJobsResponseItem = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "type": zod.string(),
   "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
   "snapshotId": zod.string().nullish(),
-  "progress": zod.int().min(listServerJobsResponseProgressMin).max(listServerJobsResponseProgressMax),
+  "progress": zod.number().int().min(listServerJobsResponseProgressMin).max(listServerJobsResponseProgressMax),
   "progressMessage": zod.string().nullish(),
-  "attempt": zod.int(),
-  "maxAttempts": zod.int(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
   "cancelRequested": zod.boolean(),
   "result": zod.unknown().optional(),
   "error": zod.object({
@@ -4845,14 +4625,14 @@ export const createServerJobResponseProgressMax = 100;
 
 
 export const CreateServerJobResponse = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "type": zod.string(),
   "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
   "snapshotId": zod.string().nullish(),
-  "progress": zod.int().min(createServerJobResponseProgressMin).max(createServerJobResponseProgressMax),
+  "progress": zod.number().int().min(createServerJobResponseProgressMin).max(createServerJobResponseProgressMax),
   "progressMessage": zod.string().nullish(),
-  "attempt": zod.int(),
-  "maxAttempts": zod.int(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
   "cancelRequested": zod.boolean(),
   "result": zod.unknown().optional(),
   "error": zod.object({
@@ -4870,7 +4650,7 @@ export const CreateServerJobResponse = zod.object({
  * @summary Read an owned server job
  */
 export const GetServerJobParams = zod.object({
-  "id": zod.uuid()
+  "id": zod.coerce.string().uuid()
 })
 
 export const getServerJobResponseProgressMin = 0;
@@ -4879,14 +4659,14 @@ export const getServerJobResponseProgressMax = 100;
 
 
 export const GetServerJobResponse = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "type": zod.string(),
   "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
   "snapshotId": zod.string().nullish(),
-  "progress": zod.int().min(getServerJobResponseProgressMin).max(getServerJobResponseProgressMax),
+  "progress": zod.number().int().min(getServerJobResponseProgressMin).max(getServerJobResponseProgressMax),
   "progressMessage": zod.string().nullish(),
-  "attempt": zod.int(),
-  "maxAttempts": zod.int(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
   "cancelRequested": zod.boolean(),
   "result": zod.unknown().optional(),
   "error": zod.object({
@@ -4904,7 +4684,7 @@ export const GetServerJobResponse = zod.object({
  * @summary Request cancellation of an owned running or queued server job
  */
 export const CancelServerJobParams = zod.object({
-  "id": zod.uuid()
+  "id": zod.coerce.string().uuid()
 })
 
 export const cancelServerJobResponseProgressMin = 0;
@@ -4913,14 +4693,14 @@ export const cancelServerJobResponseProgressMax = 100;
 
 
 export const CancelServerJobResponse = zod.object({
-  "id": zod.uuid(),
+  "id": zod.string().uuid(),
   "type": zod.string(),
   "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
   "snapshotId": zod.string().nullish(),
-  "progress": zod.int().min(cancelServerJobResponseProgressMin).max(cancelServerJobResponseProgressMax),
+  "progress": zod.number().int().min(cancelServerJobResponseProgressMin).max(cancelServerJobResponseProgressMax),
   "progressMessage": zod.string().nullish(),
-  "attempt": zod.int(),
-  "maxAttempts": zod.int(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
   "cancelRequested": zod.boolean(),
   "result": zod.unknown().optional(),
   "error": zod.object({
@@ -4949,7 +4729,7 @@ export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
 
 export const ListImportHistoryResponse = zod.object({
   "imports": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "importType": zod.enum(['spec', 'premix', 'cheese', 'sauce', 'dough', 'schedule', 'shipping', 'recipe']),
   "sourceKey": zod.string().nullish(),
   "sourceLabel": zod.string(),
@@ -4957,16 +4737,16 @@ export const ListImportHistoryResponse = zod.object({
   "status": zod.enum(['complete', 'partial', 'failed']),
   "summary": zod.object({
   "phases": zod.record(zod.string(), zod.string()).optional(),
-  "counts": zod.record(zod.string(), zod.int().min(listImportHistoryResponseImportsItemSummaryCountsMinOne)).optional(),
+  "counts": zod.record(zod.string(), zod.number().int().min(listImportHistoryResponseImportsItemSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
   "unresolved": zod.array(zod.string()).optional(),
   "skipped": zod.array(zod.string()).optional(),
   "followUp": zod.array(zod.string()).optional(),
-  "snapshotId": zod.int().nullish()
+  "snapshotId": zod.number().int().nullish()
 }),
-  "snapshotId": zod.int().nullish(),
+  "snapshotId": zod.number().int().nullish(),
   "operationId": zod.string().nullish(),
-  "createdAt": zod.int().describe('Epoch milliseconds')
+  "createdAt": zod.number().int().describe('Epoch milliseconds')
 }))
 })
 
@@ -4987,12 +4767,12 @@ export const RecordImportHistoryBody = zod.object({
   "operationId": zod.string().describe('Client-generated idempotency key for safely retrying an audit write.'),
   "summary": zod.object({
   "phases": zod.record(zod.string(), zod.string()).optional(),
-  "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryBodySummaryCountsMinOne)).optional(),
+  "counts": zod.record(zod.string(), zod.number().int().min(recordImportHistoryBodySummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
   "unresolved": zod.array(zod.string()).optional(),
   "skipped": zod.array(zod.string()).optional(),
   "followUp": zod.array(zod.string()).optional(),
-  "snapshotId": zod.int().nullish()
+  "snapshotId": zod.number().int().nullish()
 })
 })
 
@@ -5002,7 +4782,7 @@ export const recordImportHistoryResponseImportSummaryCountsMinOne = 0;
 
 export const RecordImportHistoryResponse = zod.object({
   "import": zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "importType": zod.enum(['spec', 'premix', 'cheese', 'sauce', 'dough', 'schedule', 'shipping', 'recipe']),
   "sourceKey": zod.string().nullish(),
   "sourceLabel": zod.string(),
@@ -5010,16 +4790,16 @@ export const RecordImportHistoryResponse = zod.object({
   "status": zod.enum(['complete', 'partial', 'failed']),
   "summary": zod.object({
   "phases": zod.record(zod.string(), zod.string()).optional(),
-  "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryResponseImportSummaryCountsMinOne)).optional(),
+  "counts": zod.record(zod.string(), zod.number().int().min(recordImportHistoryResponseImportSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
   "unresolved": zod.array(zod.string()).optional(),
   "skipped": zod.array(zod.string()).optional(),
   "followUp": zod.array(zod.string()).optional(),
-  "snapshotId": zod.int().nullish()
+  "snapshotId": zod.number().int().nullish()
 }),
-  "snapshotId": zod.int().nullish(),
+  "snapshotId": zod.number().int().nullish(),
   "operationId": zod.string().nullish(),
-  "createdAt": zod.int().describe('Epoch milliseconds')
+  "createdAt": zod.number().int().describe('Epoch milliseconds')
 })
 })
 
@@ -5033,7 +4813,7 @@ export const ListImportAliasesResponse = zod.object({
   "type": zod.enum(['brand', 'flavor']).describe('Whether this alias maps a brand name or a flavor name'),
   "externalName": zod.string().describe('The raw imported name (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved name the imported name resolves to'),
-  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.')
+  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null\/omitted for brand aliases.')
 }).describe('A learned mapping from a raw imported name to a saved canonical name.'))
 })
 
@@ -5047,7 +4827,7 @@ export const SaveImportAliasesBody = zod.object({
   "type": zod.enum(['brand', 'flavor']).describe('Whether this alias maps a brand name or a flavor name'),
   "externalName": zod.string().describe('The raw imported name (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved name the imported name resolves to'),
-  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.')
+  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null\/omitted for brand aliases.')
 }).describe('A learned mapping from a raw imported name to a saved canonical name.')).describe('The batch of aliases to upsert (confirmed during an import)')
 })
 
@@ -5056,7 +4836,7 @@ export const SaveImportAliasesResponse = zod.object({
   "type": zod.enum(['brand', 'flavor']).describe('Whether this alias maps a brand name or a flavor name'),
   "externalName": zod.string().describe('The raw imported name (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved name the imported name resolves to'),
-  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.')
+  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null\/omitted for brand aliases.')
 }).describe('A learned mapping from a raw imported name to a saved canonical name.'))
 })
 
@@ -5111,8 +4891,8 @@ export const ListIngredientBatchWeightsResponse = zod.object({
 
 
 /**
- * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing positive entries are updated; new positive entries are inserted. An entry with lbs set to zero removes the learned value and stops future auto-fill. Available to any signed-in user.
- * @summary Save or clear learned ingredient batch weights (case-insensitive)
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing entries are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned ingredient batch weights (case-insensitive upsert)
  */
 export const SaveIngredientBatchWeightsBody = zod.object({
   "weights": zod.array(zod.object({
@@ -5198,8 +4978,8 @@ export const submitFieldCheckObservationsResponseDuplicateMin = 0;
 
 
 export const SubmitFieldCheckObservationsResponse = zod.object({
-  "accepted": zod.int().min(submitFieldCheckObservationsResponseAcceptedMin),
-  "duplicate": zod.int().min(submitFieldCheckObservationsResponseDuplicateMin)
+  "accepted": zod.number().int().min(submitFieldCheckObservationsResponseAcceptedMin),
+  "duplicate": zod.number().int().min(submitFieldCheckObservationsResponseDuplicateMin)
 })
 
 
@@ -5227,13 +5007,13 @@ export const GetFieldChecksResponse = zod.object({
   "deviceCategory": zod.string(),
   "metrics": zod.record(zod.string(), zod.number())
 })),
-  "failureCount": zod.int(),
-  "incompleteCount": zod.int(),
+  "failureCount": zod.number().int(),
+  "incompleteCount": zod.number().int(),
   "actionable": zod.boolean(),
   "issueStatus": zod.union([zod.literal('open'),zod.literal('recovered'),zod.literal(null)]).nullable()
 })),
   "overallStatus": zod.enum(['healthy', 'collecting', 'needs-review', 'unsupported']),
-  "actionableCount": zod.int()
+  "actionableCount": zod.number().int()
 })
 
 
@@ -5256,8 +5036,8 @@ export const confirmHardwareFieldCheckResponseDuplicateMin = 0;
 
 
 export const ConfirmHardwareFieldCheckResponse = zod.object({
-  "accepted": zod.int().min(confirmHardwareFieldCheckResponseAcceptedMin),
-  "duplicate": zod.int().min(confirmHardwareFieldCheckResponseDuplicateMin)
+  "accepted": zod.number().int().min(confirmHardwareFieldCheckResponseAcceptedMin),
+  "duplicate": zod.number().int().min(confirmHardwareFieldCheckResponseDuplicateMin)
 })
 
 
@@ -5290,23 +5070,23 @@ export const ApplyAiRetentionCleanupResponse = zod.object({
   "report": zod.object({
   "policyVersion": zod.string(),
   "scope": zod.enum(['live', 'sandbox']),
-  "batchLimit": zod.int().min(1),
+  "batchLimit": zod.number().int().min(1),
   "canApply": zod.boolean(),
   "alreadyApplied": zod.boolean(),
   "appliedAt": zod.coerce.date().nullable(),
   "candidates": zod.object({
-  "conversationTurns": zod.int().min(applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin),
-  "retiredFacilityFacts": zod.int().min(applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin),
-  "incidentGeneratedTextToLabel": zod.int().min(applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin),
-  "qualityThumbnailsToRedact": zod.int().min(applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin),
-  "closedObservationsToRedact": zod.int().min(applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin),
-  "total": zod.int().min(applyAiRetentionCleanupResponseReportCandidatesTotalMin)
+  "conversationTurns": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin),
+  "retiredFacilityFacts": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin),
+  "incidentGeneratedTextToLabel": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin),
+  "qualityThumbnailsToRedact": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin),
+  "closedObservationsToRedact": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin),
+  "total": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesTotalMin)
 }),
   "protected": zod.object({
   "correctionAndAliasRecords": zod.string(),
-  "operationalIncidentRows": zod.int().min(applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin),
-  "confirmedQualityRows": zod.int().min(applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin),
-  "openInventoryObservations": zod.int().min(applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin),
+  "operationalIncidentRows": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin),
+  "confirmedQualityRows": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin),
+  "openInventoryObservations": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin),
   "inventoryLedgerEffects": zod.string()
 }),
   "cutoffs": zod.object({
@@ -5345,7 +5125,7 @@ export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
 
 export const ReportIncidentBody = zod.object({
   "source": zod.enum(['user_report', 'auto_crash']),
-  "screen": zod.string().max(reportIncidentBodyScreenMax).describe('Screen/route the user was on'),
+  "screen": zod.string().max(reportIncidentBodyScreenMax).describe('Screen\/route the user was on'),
   "appPlatform": zod.enum(['web', 'mobile']),
   "appVersion": zod.string().max(reportIncidentBodyAppVersionMax).optional(),
   "description": zod.string().max(reportIncidentBodyDescriptionMax).optional().describe('The user\'s description of the problem (user reports)'),
@@ -5355,7 +5135,7 @@ export const ReportIncidentBody = zod.object({
   "diagnostics": zod.object({
   "action": zod.string().max(reportIncidentBodyDiagnosticsActionMax).optional(),
   "outcome": zod.enum(['error', 'rejected', 'degraded']).optional(),
-  "retryCount": zod.int().min(reportIncidentBodyDiagnosticsRetryCountMin).max(reportIncidentBodyDiagnosticsRetryCountMax).optional(),
+  "retryCount": zod.number().int().min(reportIncidentBodyDiagnosticsRetryCountMin).max(reportIncidentBodyDiagnosticsRetryCountMax).optional(),
   "connectivity": zod.enum(['online', 'offline', 'unstable', 'unknown']).optional(),
   "syncState": zod.enum(['idle', 'pending', 'retrying', 'blocked', 'unknown']).optional(),
   "signalKind": zod.enum(['user_report', 'crash', 'rejected_promise', 'api_failure', 'startup', 'update', 'sync']).optional(),
@@ -5369,9 +5149,9 @@ export const ReportIncidentResponse = zod.object({
   "diagnosis": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
   "workaround": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
   "recurrence": zod.union([zod.object({
-  "count": zod.int().describe('How many prior similar incidents were found'),
+  "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('"Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "aiGenerated": zod.literal(false).describe('New reports do not use automated diagnosis')
 })
 
@@ -5392,14 +5172,14 @@ export const ListIncidentsResponseItem = zod.object({
   "context": zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
-  "errorStack": zod.string().optional().describe('The uncaught error\'s stack/component trace (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
   "browserFamily": zod.string().optional(),
   "deviceClass": zod.string().optional(),
   "correlationId": zod.string().optional(),
   "relatedCorrelationId": zod.string().optional(),
   "action": zod.string().optional(),
   "outcome": zod.string().optional(),
-  "retryCount": zod.int().optional(),
+  "retryCount": zod.number().int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional()
@@ -5407,9 +5187,9 @@ export const ListIncidentsResponseItem = zod.object({
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
   "recurrence": zod.union([zod.object({
-  "count": zod.int().describe('How many prior similar incidents were found'),
+  "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('"Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -5440,7 +5220,7 @@ export const ListIncidentsResponse = zod.array(ListIncidentsResponseItem)
  * @summary Count of unreviewed incidents (manager only)
  */
 export const GetUnreviewedIncidentCountResponse = zod.object({
-  "count": zod.int()
+  "count": zod.number().int()
 })
 
 
@@ -5448,7 +5228,7 @@ export const GetUnreviewedIncidentCountResponse = zod.object({
  * @summary Count unresolved actionable incident work
  */
 export const GetActionableIncidentCountResponse = zod.object({
-  "count": zod.int()
+  "count": zod.number().int()
 })
 
 
@@ -5482,14 +5262,14 @@ export const GetIncidentResponse = zod.object({
   "context": zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
-  "errorStack": zod.string().optional().describe('The uncaught error\'s stack/component trace (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
   "browserFamily": zod.string().optional(),
   "deviceClass": zod.string().optional(),
   "correlationId": zod.string().optional(),
   "relatedCorrelationId": zod.string().optional(),
   "action": zod.string().optional(),
   "outcome": zod.string().optional(),
-  "retryCount": zod.int().optional(),
+  "retryCount": zod.number().int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional()
@@ -5497,9 +5277,9 @@ export const GetIncidentResponse = zod.object({
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
   "recurrence": zod.union([zod.object({
-  "count": zod.int().describe('How many prior similar incidents were found'),
+  "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('"Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -5543,14 +5323,14 @@ export const ReviewIncidentResponse = zod.object({
   "context": zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
-  "errorStack": zod.string().optional().describe('The uncaught error\'s stack/component trace (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
   "browserFamily": zod.string().optional(),
   "deviceClass": zod.string().optional(),
   "correlationId": zod.string().optional(),
   "relatedCorrelationId": zod.string().optional(),
   "action": zod.string().optional(),
   "outcome": zod.string().optional(),
-  "retryCount": zod.int().optional(),
+  "retryCount": zod.number().int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional()
@@ -5558,9 +5338,9 @@ export const ReviewIncidentResponse = zod.object({
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
   "recurrence": zod.union([zod.object({
-  "count": zod.int().describe('How many prior similar incidents were found'),
+  "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('"Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -5605,14 +5385,14 @@ export const ResolveIncidentResponse = zod.object({
   "context": zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
-  "errorStack": zod.string().optional().describe('The uncaught error\'s stack/component trace (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
   "browserFamily": zod.string().optional(),
   "deviceClass": zod.string().optional(),
   "correlationId": zod.string().optional(),
   "relatedCorrelationId": zod.string().optional(),
   "action": zod.string().optional(),
   "outcome": zod.string().optional(),
-  "retryCount": zod.int().optional(),
+  "retryCount": zod.number().int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional()
@@ -5620,9 +5400,9 @@ export const ResolveIncidentResponse = zod.object({
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
   "recurrence": zod.union([zod.object({
-  "count": zod.int().describe('How many prior similar incidents were found'),
+  "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('"Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -5658,7 +5438,7 @@ export const ListManagerActionQueueQueryParams = zod.object({
 
 export const ListManagerActionQueueResponse = zod.object({
   "items": zod.array(zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "scope": zod.string(),
   "dedupKey": zod.string(),
   "category": zod.enum(['incident', 'import', 'data-health', 'sync', 'production-rule', 'report']),
@@ -5675,27 +5455,10 @@ export const ListManagerActionQueueResponse = zod.object({
   "resolutionNote": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date(),
-  "version": zod.int()
+  "version": zod.number().int()
 })),
-  "counts": zod.record(zod.string(), zod.int()),
+  "counts": zod.record(zod.string(), zod.number().int()),
   "nextCursor": zod.string().nullable()
-})
-
-
-/**
- * @summary List sustained background-operation failures visible to managers
- */
-export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
-
-
-
-
-export const GetBackgroundOperationDiagnosticsResponse = zod.object({
-  "warnings": zod.array(zod.object({
-  "operation": zod.enum(['daily-rollover', 'server-job-run', 'server-job-prune', 'web-push-schedule']),
-  "lastFailureAt": zod.coerce.date()
-})).max(getBackgroundOperationDiagnosticsResponseWarningsMax),
-  "windowMs": zod.int().min(1)
 })
 
 
@@ -5713,7 +5476,7 @@ export const updateManagerActionItemBodyResolutionNoteMax = 2000;
 
 
 export const UpdateManagerActionItemBody = zod.object({
-  "version": zod.int(),
+  "version": zod.number().int(),
   "status": zod.enum(['open', 'in_progress', 'deferred', 'resolved']).optional(),
   "assigneeId": zod.string().nullish(),
   "deferReason": zod.string().max(updateManagerActionItemBodyDeferReasonMax).optional(),
@@ -5722,7 +5485,7 @@ export const UpdateManagerActionItemBody = zod.object({
 
 export const UpdateManagerActionItemResponse = zod.object({
   "item": zod.object({
-  "id": zod.int(),
+  "id": zod.number().int(),
   "scope": zod.string(),
   "dedupKey": zod.string(),
   "category": zod.enum(['incident', 'import', 'data-health', 'sync', 'production-rule', 'report']),
@@ -5739,7 +5502,7 @@ export const UpdateManagerActionItemResponse = zod.object({
   "resolutionNote": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date(),
-  "version": zod.int()
+  "version": zod.number().int()
 })
 })
 
@@ -5774,14 +5537,14 @@ export const UpdateIncidentWorkflowResponse = zod.object({
   "context": zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
-  "errorStack": zod.string().optional().describe('The uncaught error\'s stack/component trace (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
   "browserFamily": zod.string().optional(),
   "deviceClass": zod.string().optional(),
   "correlationId": zod.string().optional(),
   "relatedCorrelationId": zod.string().optional(),
   "action": zod.string().optional(),
   "outcome": zod.string().optional(),
-  "retryCount": zod.int().optional(),
+  "retryCount": zod.number().int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional()
@@ -5789,9 +5552,9 @@ export const UpdateIncidentWorkflowResponse = zod.object({
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
   "recurrence": zod.union([zod.object({
-  "count": zod.int().describe('How many prior similar incidents were found'),
+  "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('"Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -5825,12 +5588,12 @@ export const GetMeResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 
@@ -5845,12 +5608,12 @@ export const MarkOnboardingSeenResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 
@@ -5865,12 +5628,12 @@ export const MarkTourCompletedResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 
@@ -5889,12 +5652,12 @@ export const SetNotificationPrefsResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 
@@ -5913,12 +5676,12 @@ export const SetFloorModeResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 
@@ -5929,7 +5692,7 @@ export const SetFloorModeResponse = zod.object({
 export const ListRolesResponseItem = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
-  "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The \"manager\" role is protected (cannot be deleted and must keep the manage-staff capability) and \"operator\" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
@@ -5949,7 +5712,7 @@ export const CreateRoleBody = zod.object({
 export const CreateRoleResponse = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
-  "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The \"manager\" role is protected (cannot be deleted and must keep the manage-staff capability) and \"operator\" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 
 
@@ -5972,7 +5735,7 @@ export const UpdateRoleBody = zod.object({
 export const UpdateRoleResponse = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
-  "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The \"manager\" role is protected (cannot be deleted and must keep the manage-staff capability) and \"operator\" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 
 
@@ -5995,12 +5758,12 @@ export const ListStaffResponseItem = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 export const ListStaffResponse = zod.array(ListStaffResponseItem)
@@ -6023,12 +5786,12 @@ export const SetStaffRoleResponse = zod.object({
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 
@@ -6110,118 +5873,6 @@ export const FinalizeCompletedRunResponse = zod.unknown()
 
 
 /**
- * @summary List append-only applicator batch observations and manager attestations
- */
-export const listApplicatorBatchEvidenceQueryRunIdMax = 500;
-
-export const listApplicatorBatchEvidenceQueryCursorMax = 4096;
-
-
-export const listApplicatorBatchEvidenceQueryCursorRegExp = new RegExp('^[A-Za-z0-9_-]+$');
-export const listApplicatorBatchEvidenceQueryLimitDefault = 500;
-export const listApplicatorBatchEvidenceQueryLimitMax = 500;
-
-
-
-export const ListApplicatorBatchEvidenceQueryParams = zod.object({
-  "from": zod.date().optional(),
-  "to": zod.date().optional(),
-  "runId": zod.coerce.string().max(listApplicatorBatchEvidenceQueryRunIdMax).optional(),
-  "cursor": zod.coerce.string().max(listApplicatorBatchEvidenceQueryCursorMax).regex(listApplicatorBatchEvidenceQueryCursorRegExp).optional(),
-  "limit": zod.coerce.number().int().min(1).max(listApplicatorBatchEvidenceQueryLimitMax).default(listApplicatorBatchEvidenceQueryLimitDefault)
-})
-
-export const listApplicatorBatchEvidenceResponseEvidenceItemSlotMax = 4;
-
-export const listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin = 0;
-
-export const listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin = 0;
-
-export const listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
-
-
-export const ListApplicatorBatchEvidenceResponse = zod.object({
-  "evidence": zod.array(zod.object({
-  "id": zod.string(),
-  "operationId": zod.string(),
-  "date": zod.coerce.date(),
-  "runId": zod.string(),
-  "slot": zod.int().min(1).max(listApplicatorBatchEvidenceResponseEvidenceItemSlotMax),
-  "source": zod.enum(['automatic-observation', 'manager-finalization', 'manager-correction']),
-  "observedTotal": zod.int().min(listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin).optional(),
-  "confirmedTotal": zod.int().min(listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin).optional(),
-  "correctionOf": zod.string().optional(),
-  "evidenceHash": zod.string().regex(listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp),
-  "hashContract": zod.enum(['canonical-json-v1']),
-  "createdAt": zod.coerce.date()
-})),
-  "nextCursor": zod.string().optional().describe('Opaque cursor for the next page; absent when complete.')
-})
-
-
-/**
- * Attests a slot only for an existing immutable completed run in this authenticated scope. Corrections append a new manager record and reference the latest finalization.
- * @summary Append an immutable manager-confirmed physical applicator total
- */
-export const finalizeApplicatorBatchTotalBodyOperationIdMax = 300;
-
-
-export const finalizeApplicatorBatchTotalBodyOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
-export const finalizeApplicatorBatchTotalBodyRunIdMax = 500;
-
-export const finalizeApplicatorBatchTotalBodySlotMax = 4;
-
-export const finalizeApplicatorBatchTotalBodyFinalTotalMin = 0;
-export const finalizeApplicatorBatchTotalBodyFinalTotalMax = 1000000;
-
-export const finalizeApplicatorBatchTotalBodyCorrectionOfMax = 300;
-
-
-export const finalizeApplicatorBatchTotalBodyCorrectionOfRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
-
-
-export const FinalizeApplicatorBatchTotalBody = zod.object({
-  "operationId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyOperationIdMax).regex(finalizeApplicatorBatchTotalBodyOperationIdRegExp),
-  "date": zod.coerce.date().describe('Valid calendar date (not only YYYY-MM-DD syntax)'),
-  "runId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyRunIdMax),
-  "slot": zod.int().min(1).max(finalizeApplicatorBatchTotalBodySlotMax),
-  "finalTotal": zod.int().min(finalizeApplicatorBatchTotalBodyFinalTotalMin).max(finalizeApplicatorBatchTotalBodyFinalTotalMax),
-  "correctionOf": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyCorrectionOfMax).regex(finalizeApplicatorBatchTotalBodyCorrectionOfRegExp).optional()
-})
-
-export const finalizeApplicatorBatchTotalResponseEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
-export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
-
-export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
-
-export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
-
-export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
-
-
-export const FinalizeApplicatorBatchTotalResponse = zod.object({
-  "acknowledged": zod.literal(true),
-  "duplicate": zod.boolean(),
-  "operationId": zod.string(),
-  "evidenceHash": zod.string().regex(finalizeApplicatorBatchTotalResponseEvidenceHashRegExp),
-  "canonical": zod.object({
-  "id": zod.string(),
-  "operationId": zod.string(),
-  "date": zod.coerce.date(),
-  "runId": zod.string(),
-  "slot": zod.int().min(1).max(finalizeApplicatorBatchTotalResponseCanonicalSlotMax),
-  "source": zod.enum(['automatic-observation', 'manager-finalization', 'manager-correction']),
-  "observedTotal": zod.int().min(finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin).optional(),
-  "confirmedTotal": zod.int().min(finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin).optional(),
-  "correctionOf": zod.string().optional(),
-  "evidenceHash": zod.string().regex(finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp),
-  "hashContract": zod.enum(['canonical-json-v1']),
-  "createdAt": zod.coerce.date()
-})
-})
-
-
-/**
  * @summary Read the client-local current-day sync snapshot
  */
 export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -6269,12 +5920,6 @@ export const PutSyncTodayBody = zod.object({
 })
 
 export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-export const putSyncTodayResponseCanonicalRevisionMin = 0;
-
-export const putSyncTodayResponseServerTimeMin = 0;
-
-export const putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin = 0;
-
 
 
 export const PutSyncTodayResponse = zod.object({
@@ -6286,58 +5931,7 @@ export const PutSyncTodayResponse = zod.object({
   "unchanged": zod.boolean().optional(),
   "snapshotId": zod.string().regex(putSyncTodayResponseSnapshotIdRegExp).optional(),
   "stale": zod.boolean().optional(),
-  "epoch": zod.int().optional(),
-  "canonicalRevision": zod.int().min(putSyncTodayResponseCanonicalRevisionMin).optional(),
-  "serverTime": zod.int().min(putSyncTodayResponseServerTimeMin).optional(),
-  "operationalProjection": zod.union([zod.object({
-  "version": zod.literal(1),
-  "runId": zod.string(),
-  "lifecycleGeneration": zod.string(),
-  "serverTimeMs": zod.number(),
-  "capturedAtServerMs": zod.number(),
-  "calculationRevision": zod.int().min(putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin),
-  "effectiveElapsedSec": zod.number(),
-  "timers": zod.object({
-  "nextBatchInSec": zod.number(),
-  "pressRemainingSec": zod.number(),
-  "freezerElapsedSec": zod.number(),
-  "freezerRemainingSec": zod.number()
-}),
-  "counters": zod.object({
-  "casesCompleted": zod.number(),
-  "casesInFreezer": zod.number(),
-  "casesOnLine": zod.number(),
-  "casesLeftToRun": zod.number(),
-  "pressCasesLeft": zod.number(),
-  "traysOnLine": zod.number(),
-  "batchesReady": zod.number(),
-  "sauceBarrelsMade": zod.number(),
-  "app1BatchesMade": zod.number(),
-  "app2BatchesMade": zod.number(),
-  "app3BatchesMade": zod.number(),
-  "app4BatchesMade": zod.number()
-}),
-  "facts": zod.object({
-  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
-  "pressDone": zod.boolean(),
-  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
-  "paceDelta": zod.number()
-}),
-  "calc": zod.record(zod.string(), zod.unknown()),
-  "due": zod.object({
-  "runId": zod.string(),
-  "generation": zod.string(),
-  "atMs": zod.number(),
-  "entries": zod.array(zod.object({
-  "channel": zod.string(),
-  "dueAt": zod.number(),
-  "dueNow": zod.boolean(),
-  "nextDueAt": zod.number(),
-  "canonical": zod.boolean(),
-  "sequence": zod.number().optional()
-}))
-})
-}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()]).optional()
+  "epoch": zod.number().int().optional()
 })
 
 
@@ -6384,12 +5978,12 @@ export const ClaimAutoTrackEventBody = zod.object({
   "runId": zod.string().min(1).max(claimAutoTrackEventBodyClaimRunIdMax),
   "channel": zod.enum(['case', 'tray-consume', 'tray-produce', 'batch-consume', 'batch-produce', 'hopper', 'sauce-barrel', 'app1-batch', 'app2-batch', 'app3-batch', 'app4-batch']),
   "generation": zod.string().min(1).max(claimAutoTrackEventBodyClaimGenerationMax),
-  "sequence": zod.int().min(1).max(claimAutoTrackEventBodyClaimSequenceMax),
+  "sequence": zod.number().int().min(1).max(claimAutoTrackEventBodyClaimSequenceMax),
   "eventId": zod.string().min(1).max(claimAutoTrackEventBodyClaimEventIdMax),
   "dueAt": zod.number(),
   "nextDueAt": zod.number(),
   "baseUpdatedAt": zod.number().min(claimAutoTrackEventBodyClaimBaseUpdatedAtMin),
-  "correctionGeneration": zod.int().min(claimAutoTrackEventBodyClaimCorrectionGenerationMin).optional(),
+  "correctionGeneration": zod.number().int().min(claimAutoTrackEventBodyClaimCorrectionGenerationMin).optional(),
   "mutations": zod.array(zod.object({
   "field": zod.enum(['skidsCompleted', 'casesOnCurrentSkid', 'traysOnLine', 'batchesReady', 'sauceBarrelsMade', 'sauceBarrelAnchorNetSec', 'sauceBarrelCorrectionGeneration', 'app1BatchesMade', 'app1BatchAnchorNetSec', 'app1BatchCorrectionGeneration', 'app2BatchesMade', 'app2BatchAnchorNetSec', 'app2BatchCorrectionGeneration', 'app3BatchesMade', 'app3BatchAnchorNetSec', 'app3BatchCorrectionGeneration', 'app4BatchesMade', 'app4BatchAnchorNetSec', 'app4BatchCorrectionGeneration']),
   "from": zod.number().min(claimAutoTrackEventBodyClaimMutationsItemFromMin).max(claimAutoTrackEventBodyClaimMutationsItemFromMax),
@@ -6401,10 +5995,6 @@ export const ClaimAutoTrackEventBody = zod.object({
 export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
 
 export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-export const claimAutoTrackEventResponseCanonicalRevisionMin = 0;
-
-export const claimAutoTrackEventResponseServerTimeMin = 0;
-
 
 
 export const ClaimAutoTrackEventResponse = zod.object({
@@ -6412,7 +6002,7 @@ export const ClaimAutoTrackEventResponse = zod.object({
   "outcome": zod.enum(['accepted', 'duplicate', 'stale', 'conflict']),
   "state": zod.object({
   "generation": zod.string(),
-  "sequence": zod.int(),
+  "sequence": zod.number().int(),
   "nextDueAt": zod.number(),
   "acceptedEventId": zod.string().optional(),
   "acceptedRunValuesUpdatedAt": zod.number().min(claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin).optional(),
@@ -6423,136 +6013,5 @@ export const ClaimAutoTrackEventResponse = zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
-  "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp),
-  "duplicate": zod.boolean().optional(),
-  "canonicalRevision": zod.int().min(claimAutoTrackEventResponseCanonicalRevisionMin),
-  "serverTime": zod.int().min(claimAutoTrackEventResponseServerTimeMin)
-})
-
-
-/**
- * @summary Apply one server-authoritative production command
- */
-export const submitOperationalIntentQueryEpochMin = 0;
-
-
-
-export const SubmitOperationalIntentQueryParams = zod.object({
-  "today": zod.date().optional(),
-  "epoch": zod.coerce.number().int().min(submitOperationalIntentQueryEpochMin).optional()
-})
-
-export const submitOperationalIntentBodySenderIdMax = 160;
-
-export const submitOperationalIntentBodyDeviceIdMax = 160;
-
-export const submitOperationalIntentBodyBaseRevisionMin = 0;
-
-export const submitOperationalIntentBodyIntentIdMax = 160;
-
-export const submitOperationalIntentBodyIntentRunIdMax = 160;
-
-export const submitOperationalIntentBodyIntentObservedGenerationMax = 160;
-
-export const submitOperationalIntentBodyIntentResetEpochMin = 0;
-
-export const submitOperationalIntentBodyIntentBaseRevisionMin = 0;
-
-export const submitOperationalIntentBodyIntentValuesMinOne = 0;
-export const submitOperationalIntentBodyIntentValuesMaxOne = 1000000;
-
-export const submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax = 300;
-
-export const submitOperationalIntentBodyIntentInventoryLinesItemQtyExclusiveMin = 0;
-export const submitOperationalIntentBodyIntentInventoryLinesItemQtyMax = 1000000;
-
-export const submitOperationalIntentBodyIntentInventoryLinesMax = 200;
-
-
-
-export const SubmitOperationalIntentBody = zod.object({
-  "senderId": zod.string().max(submitOperationalIntentBodySenderIdMax).optional(),
-  "deviceId": zod.string().max(submitOperationalIntentBodyDeviceIdMax).optional(),
-  "baseRevision": zod.int().min(submitOperationalIntentBodyBaseRevisionMin).optional(),
-  "intent": zod.object({
-  "version": zod.literal(1),
-  "id": zod.string().min(1).max(submitOperationalIntentBodyIntentIdMax),
-  "date": zod.coerce.date(),
-  "runId": zod.string().min(1).max(submitOperationalIntentBodyIntentRunIdMax),
-  "observedGeneration": zod.string().min(1).max(submitOperationalIntentBodyIntentObservedGenerationMax),
-  "resetEpoch": zod.int().min(submitOperationalIntentBodyIntentResetEpochMin),
-  "effectiveAt": zod.number(),
-  "baseRevision": zod.int().min(submitOperationalIntentBodyIntentBaseRevisionMin).optional(),
-  "action": zod.enum(['pause', 'resume', 'lifecycle', 'correction']),
-  "lifecycle": zod.enum(['start', 'end']).optional(),
-  "values": zod.record(zod.string(), zod.number().min(submitOperationalIntentBodyIntentValuesMinOne).max(submitOperationalIntentBodyIntentValuesMaxOne)).optional(),
-  "inventoryLines": zod.array(zod.object({
-  "itemKey": zod.string().min(1).max(submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax),
-  "qty": zod.number().gt(submitOperationalIntentBodyIntentInventoryLinesItemQtyExclusiveMin).max(submitOperationalIntentBodyIntentInventoryLinesItemQtyMax)
-})).max(submitOperationalIntentBodyIntentInventoryLinesMax).optional()
-})
-})
-
-
-export const submitOperationalIntentResponseCanonicalRevisionMin = 0;
-
-export const submitOperationalIntentResponseServerTimeMin = 0;
-
-export const submitOperationalIntentResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-
-
-export const SubmitOperationalIntentResponse = zod.object({
-  "ok": zod.boolean(),
-  "outcome": zod.enum(['accepted', 'superseded', 'rebased', 'conflicted', 'review-required']),
-  "duplicate": zod.boolean(),
-  "cursor": zod.int().min(1),
-  "canonicalRevision": zod.int().min(submitOperationalIntentResponseCanonicalRevisionMin),
-  "serverTime": zod.int().min(submitOperationalIntentResponseServerTimeMin),
-  "data": zod.object({
-  "dayState": zod.record(zod.string(), zod.unknown()),
-  "runValues": zod.record(zod.string(), zod.unknown())
-}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
-  "snapshotId": zod.string().regex(submitOperationalIntentResponseSnapshotIdRegExp)
-})
-
-
-/**
- * @summary Read durable command receipts after a scoped cursor
- */
-export const listOperationalIntentReceiptsQueryAfterMin = 0;
-
-
-
-export const ListOperationalIntentReceiptsQueryParams = zod.object({
-  "after": zod.coerce.number().int().min(listOperationalIntentReceiptsQueryAfterMin).optional()
-})
-
-export const listOperationalIntentReceiptsResponseCursorMin = 0;
-
-
-export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
-
-export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
-
-
-
-export const ListOperationalIntentReceiptsResponse = zod.object({
-  "cursor": zod.int().min(listOperationalIntentReceiptsResponseCursorMin),
-  "hasMore": zod.boolean(),
-  "mutations": zod.array(zod.object({
-  "cursor": zod.int().min(1),
-  "date": zod.coerce.date(),
-  "outcome": zod.enum(['accepted', 'superseded', 'rebased', 'conflicted', 'review-required', 'stale', 'duplicate']),
-  "canonicalRevision": zod.int().min(listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin).optional(),
-  "baseRevision": zod.int().min(listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin).optional(),
-  "commandType": zod.string().optional(),
-  "actorId": zod.string().optional(),
-  "deviceId": zod.string().optional(),
-  "serverReceivedAt": zod.coerce.date().optional(),
-  "createdAt": zod.coerce.date(),
-  "snapshot": zod.union([zod.object({
-  "dayState": zod.record(zod.string(), zod.unknown()),
-  "runValues": zod.record(zod.string(), zod.unknown())
-}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional()
-}))
+  "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp)
 })
