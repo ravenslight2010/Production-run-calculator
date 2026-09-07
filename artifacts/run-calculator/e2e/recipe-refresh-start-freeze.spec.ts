@@ -36,6 +36,20 @@ async function openSettings(page: Page): Promise<Locator> {
   return dialog;
 }
 
+async function openIngredientWeights(page: Page, ingredientName: string): Promise<Locator> {
+  const dialog = await openSettings(page);
+  await dialog.getByRole("button", { name: "Lists", exact: true }).click();
+  await dialog.getByRole("button", { name: "Applicator Types", exact: true }).click();
+  const addInput = dialog.getByPlaceholder("Add to Applicator Types…");
+  if (!(await dialog.getByText(ingredientName, { exact: true }).count())) {
+    await addInput.fill(ingredientName);
+    await addInput.press("Enter");
+    await expect(dialog.getByText(ingredientName, { exact: true })).toBeVisible();
+  }
+  await dialog.getByRole("button", { name: "Ingredient Weights", exact: true }).click();
+  await expect(dialog.getByText(ingredientName, { exact: true })).toBeVisible();
+  return dialog;
+}
 async function openRecipeSettings(
   page: Page,
   kind: "dough" | "sauce" | "mixes" | "cheese",
@@ -288,11 +302,16 @@ async function readScheduledRunValues(
   return payload.runValues?.[runId];
 }
 
-test("pending recipes refresh while Start freezes the running snapshot", async ({ page }) => {
-  test.setTimeout(90_000);
+test("remembered plain ingredient batch weights rehydrate in a peer without changing the active run", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(120_000);
   await page.setViewportSize({ width: 390, height: 844 });
 
-    const username = uniqueTestId(`e2e_${scenario.label}_freeze`);
+    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
     const brand = `Recipe Refresh ${uniqueTestId("brand")}`;
     const flavor = `${scenario.label} Fixture`;
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
@@ -306,6 +325,18 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
     });
+
+  const baseValues = {
+    casesNeeded: 100,
+    pizzasPerCase: 1,
+    casesPerSkid: 10,
+    casesPerLayer: 0,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    app1OzPerPizza: 1,
+  };
 
   await fixtures.seedCheeseRecipe(account, {
     id: recipeId,
@@ -428,20 +459,23 @@ test("a delayed shared recipe refresh stays with its original run after a rapid 
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
 
-  const username = uniqueTestId("e2e_recipe_switch");
-  const originalBrand = `Original Run ${uniqueTestId("brand")}`;
-  const originalFlavor = "Profile-backed";
-  const recipeId = uniqueTestId("cheese-recipe");
-  const recipeName = `Shared Cheese ${uniqueTestId("recipe")}`;
-  const originalRunId = uniqueTestId("original-run");
-  const switchedRunId = uniqueTestId("switched-run");
-  const now = Date.now();
-  const account = await fixtures.createAccount({
-    username,
-    password: PASSWORD,
-    capabilities: DEFAULT_MANAGER_CAPABILITIES,
-  });
-  const originalValues = {
+    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
+    const originalBrand = `Original ${scenario.label} ${uniqueTestId("brand")}`;
+    const originalFlavor = "Profile-backed";
+    const recipeId = uniqueTestId(`${scenario.label}-recipe`);
+    const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
+    const originalRunId = uniqueTestId("original-run");
+    const switchedRunId = uniqueTestId("switched-run");
+    const now = Date.now();
+    const account = await fixtures.createAccount({
+      username,
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    });
+
+  const baseValues = {
     casesNeeded: 100,
     pizzasPerCase: 1,
     casesPerSkid: 10,
@@ -450,77 +484,81 @@ test("a delayed shared recipe refresh stays with its original run after a rapid 
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    app1Type: "Cheese",
-    app1OzPerPizza: 16,
-    app1BatchLbs: 0,
-    app1CheeseRecipeName: recipeName,
-    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+    app1OzPerPizza: 1,
   };
-  const switchedValues = {
-    ...originalValues,
-    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 7 }],
-  };
+    const originalValues = scenario.values(recipeName);
+    const switchedValues = {
+      ...originalValues,
+      ...(scenario.kind === "dough"
+        ? { doughRecipe: [{ ingredient: "Dough Flour", lbs: 7 }] }
+        : scenario.kind === "sauce"
+          ? { frontlineRecipe: [{ ingredient: "Sauce Tomatoes", lbs: 7 }] }
+          : {
+              app1OzPerPizza: 1.4,
+              app1CheeseRecipe: [
+                { ingredient: "Mix Ingredient A", lbs: 0.7 },
+                { ingredient: "Mix Ingredient B", lbs: 0.7 },
+              ],
+            }),
+    };
 
-  await fixtures.seedCheeseRecipe(account, {
-    id: recipeId,
-    name: recipeName,
-    brand: originalBrand,
-    components: [{ ingredient: "Cheese", lbs: 10 }],
-  });
-  await fixtures.seedBrandProfile(account, {
-    brand: originalBrand,
-    flavor: originalFlavor,
-    values: originalValues,
-    updatedAt: now,
-  });
-  await fixtures.seedTodaySync({
-    token: account.token,
-    senderId: `recipe-switch-${username}`,
-    date: TODAY,
-    payload: {
-      dayState: {
-        date: TODAY,
-        runs: [
-          {
-            id: originalRunId,
-            brand: originalBrand,
-            flavor: originalFlavor,
-            metaUpdatedAt: now,
-            seeded: false,
-          },
-          {
-            id: switchedRunId,
-            brand: "",
-            flavor: "",
-            metaUpdatedAt: now,
-            seeded: false,
-          },
-        ],
-        currentIndex: 0,
-        resetAt: 0,
-        substitutions: [],
-        substitutionLog: [],
-        stagedItems: {},
+    await scenario.seed(fixtures, account, recipeName, recipeId, originalBrand, originalFlavor);
+    await fixtures.seedBrandProfile(account, {
+      brand: originalBrand,
+      flavor: originalFlavor,
+      values: originalValues,
+      updatedAt: now,
+    });
+    await fixtures.seedTodaySync({
+      token: account.token,
+      senderId: `${scenario.label}-recipe-switch-${username}`,
+      date: TODAY,
+      payload: {
+        dayState: {
+          date: TODAY,
+          runs: [
+            {
+              id: originalRunId,
+              brand: originalBrand,
+              flavor: originalFlavor,
+              metaUpdatedAt: now,
+              seeded: false,
+            },
+            {
+              id: switchedRunId,
+              brand: "",
+              flavor: "",
+              metaUpdatedAt: now,
+              seeded: false,
+            },
+          ],
+          currentIndex: 0,
+          resetAt: 0,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        },
+        runValues: {
+          [originalRunId]: originalValues,
+          [switchedRunId]: switchedValues,
+        },
+        runValuesUpdatedAt: {
+          [originalRunId]: now,
+          [switchedRunId]: now,
+        },
+        packagingProgress: {},
       },
-      runValues: {
-        [originalRunId]: originalValues,
-        [switchedRunId]: switchedValues,
-      },
-      runValuesUpdatedAt: {
-        [originalRunId]: now,
-        [switchedRunId]: now,
-      },
-      packagingProgress: {},
-    },
-  });
+    });
 
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
-  const originalBefore = await readIngredientDetail(page, originalRunId);
-  const switchedBefore = await readIngredientDetail(page, switchedRunId);
-  const refreshGate = await holdNextDelayedCompletion(page, "/api/brand-profiles");
+    const originalBefore = await readIngredientDetail(page, originalRunId);
+    const switchedBefore = await readIngredientDetail(page, switchedRunId);
+    let refreshGate:
+      | { observed: Promise<void>; release: () => Promise<void> }
+      | undefined;
 
   try {
     await setRecipeBatchLbs(page, recipeName, "20");
@@ -689,7 +727,9 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     test.setTimeout(150_000);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const username = uniqueTestId(`e2e_${scenario.label}_freeze`);
+    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
     const brand = `Recipe Refresh ${uniqueTestId("brand")}`;
     const flavor = `${scenario.label} Fixture`;
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
@@ -702,6 +742,18 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
     });
+
+  const baseValues = {
+    casesNeeded: 100,
+    pizzasPerCase: 1,
+    casesPerSkid: 10,
+    casesPerLayer: 0,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    app1OzPerPizza: 1,
+  };
     const values = scenario.values(recipeName);
 
     await scenario.seed(fixtures, account, recipeName, recipeId, brand, flavor);
@@ -746,6 +798,8 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     });
     await peerContext.addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
     const peer = await peerContext.newPage();
+
+    const activeRunBefore = await readServerRunValue(page, activeRunId);
 
     try {
       await Promise.all([
@@ -859,6 +913,8 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     await page.setViewportSize({ width: 390, height: 844 });
 
     const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
     const originalBrand = `Original ${scenario.label} ${uniqueTestId("brand")}`;
     const originalFlavor = "Profile-backed";
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
@@ -871,6 +927,18 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
     });
+
+  const baseValues = {
+    casesNeeded: 100,
+    pizzasPerCase: 1,
+    casesPerSkid: 10,
+    casesPerLayer: 0,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    app1OzPerPizza: 1,
+  };
     const originalValues = scenario.values(recipeName);
     const switchedValues = {
       ...originalValues,
@@ -987,3 +1055,91 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     }
   });
 }
+
+  const rememberedIngredient = `Remembered Ingredient ${uniqueTestId("ingredient")}`;
+
+  const pendingValues = {
+    ...baseValues,
+    app1Type: rememberedIngredient,
+    app1BatchLbs: 0,
+  };
+
+    const peerWeights = await openIngredientWeights(peer, rememberedIngredient);
+
+  const pendingBrand = `Batch Weight Pending ${uniqueTestId("brand")}`;
+
+  const activeFlavor = "Active Snapshot";
+
+async function saveIngredientBatchWeight(
+  page: Page,
+  ingredientName: string,
+  lbs: string,
+): Promise<void> {
+  const dialog = await openIngredientWeights(page, ingredientName);
+  const input = dialog
+    .getByText(ingredientName, { exact: true })
+    .locator("..")
+    .getByRole("spinbutton");
+  const saved = page.waitForResponse((response) =>
+    response.url().endsWith("/api/ingredient-batch-weights")
+      && response.request().method() === "POST"
+      && response.status() === 200,
+  );
+  await input.fill(lbs);
+  await input.blur();
+  await saved;
+  await expect(input).toHaveValue(lbs);
+  await dialog.getByRole("button", { name: "Close settings" }).click();
+}
+
+async function readServerProfileValue(
+  page: Page,
+  brand: string,
+  flavor: string,
+): Promise<Record<string, unknown> | null> {
+  const response = await page.request.get("/api/brand-profiles", {
+    headers: { "Cache-Control": "no-cache" },
+  });
+  if (!response.ok()) {
+    throw new Error(`Read canonical profile failed (${response.status()})`);
+  }
+  const payload = await response.json() as {
+    items?: Array<{
+      brand?: string;
+      flavor?: string;
+      values?: Record<string, unknown>;
+    }>;
+  };
+  const brandKey = brand.trim().toLowerCase();
+  const flavorKey = flavor.trim().toLowerCase();
+  const profile = payload.items?.find((item) =>
+    item.brand?.trim().toLowerCase() === brandKey
+      && item.flavor?.trim().toLowerCase() === flavorKey,
+  );
+  return profile?.values ?? null;
+}
+
+  const pendingFlavor = "Pending Snapshot";
+
+  const pendingRunId = uniqueTestId("pending-run");
+
+  const activeValues = {
+    ...baseValues,
+    app1Type: activeIngredient,
+    app1BatchLbs: 5,
+  };
+
+  const activeIngredient = `Active Ingredient ${uniqueTestId("ingredient")}`;
+
+    const activeProfileBefore = await readServerProfileValue(
+      page,
+      activeBrand,
+      activeFlavor,
+    );
+
+  const activeRunId = uniqueTestId("active-run");
+
+    const peerWeightInput = peerWeights
+      .getByText(rememberedIngredient, { exact: true })
+      .locator("..")
+      .getByRole("spinbutton");
