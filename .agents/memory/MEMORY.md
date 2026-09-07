@@ -1,6 +1,7 @@
 - [Packaging pause/resume flow](packaging-pause-clock-handoff.md) — pause stops the Press; downstream drains by zone, and Resume refills before packaging tracking restarts.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Cross-run autosave contamination](cross-run-autosave-contamination.md) — autosave useEffect([v]) reads run ID from dayStateRef (latest ref) but v can lag; lastFormRunIdRef guards prevent wrong product's data landing in another run's slot/profile.
+- [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
 - [Dough families and variants](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) — one family recipe; specific-flavor matching must beat catch-all and may override a wrong stored weight.
 - [Near-exact link profile propagation](near-exact-link-profile-propagation.md) — linkSpecImportNamedRecipesToExisting profile field pass uses matchCleaned (layer-1 only); near-exact auto-renames need a separate nearExactApplied map or profile doughName/sauceName stays stale.
 - [SSE meta stamp source](sse-meta-stamp-source.md) — SSE LWW must use overlayRunMetaStamps(prev.runs) not raw React state; saveDayState stamps localStorage only, React state keeps old stamp, so startRun's startedAt gets erased by a stale SSE echo.

@@ -5,7 +5,10 @@ import {
   mergeProfileIntoOpenForm,
   saveProfile,
 } from "./storage";
-import { runSharedRecipeRefresh } from "./profileRecipeRefresh";
+import {
+  orchestrateSharedRecipeRefresh,
+  runSharedRecipeRefresh,
+} from "./profileRecipeRefresh";
 import { DEFAULT_VALUES, PROFILE_KEY, CRUST_PROFILE_KEY } from "./types";
 import type { FormValues } from "./types";
 
@@ -180,6 +183,35 @@ describe("shared recipe snapshot boundary", () => {
       }
     },
   );
+
+  it("does not apply a delayed shared recipe refresh to the run selected after fan-out starts", async () => {
+    let currentRun = { id: "run-a" };
+    let resolveProfiles!: (value: number) => void;
+    let profileFanOutFinished = false;
+    const profilesFinished = new Promise<number>((resolve) => {
+      resolveProfiles = resolve;
+    });
+    let openFormRefreshes = 0;
+
+    const refresh = orchestrateSharedRecipeRefresh({
+      getCurrentRun: () => currentRun,
+      refreshProfiles: async () => {
+        const result = await profilesFinished;
+        profileFanOutFinished = true;
+        return result;
+      },
+      refreshOpenForm: () => {
+        openFormRefreshes += 1;
+      },
+    });
+
+    currentRun = { id: "run-b" };
+    resolveProfiles(1);
+
+    await expect(refresh).resolves.toBe(1);
+    expect(profileFanOutFinished).toBe(true);
+    expect(openFormRefreshes).toBe(0);
+  });
 
   it("does not copy production progress or run-specific targets from a profile", () => {
     const current = form({

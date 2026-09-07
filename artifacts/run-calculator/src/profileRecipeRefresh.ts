@@ -7,7 +7,7 @@ import type { RunMeta } from "./types";
 
 export type ProfileRecipeRefreshTarget = { brand: string; flavor: string };
 
-export type SharedRecipeRefreshRun = Pick<RunMeta, "startedAt" | "pausedAt" | "endedAt">;
+export type SharedRecipeRefreshRun = Pick<RunMeta, "id" | "startedAt" | "pausedAt" | "endedAt">;
 
 /** One eligibility contract for pending-run and open-form shared edits. */
 export function isSharedRecipeRefreshEligible(
@@ -45,8 +45,11 @@ export async function orchestrateSharedRecipeRefresh<T>(
     refreshOpenForm: () => void;
   },
 ): Promise<T> {
+  const refreshStartedForRunId = opts.getCurrentRun()?.id;
   const result = await opts.refreshProfiles();
-  runSharedRecipeRefresh(opts.getCurrentRun(), opts.refreshOpenForm);
+  const currentRun = opts.getCurrentRun();
+  if (currentRun?.id !== refreshStartedForRunId) return result;
+  runSharedRecipeRefresh(currentRun, opts.refreshOpenForm);
   return result;
 }
 
