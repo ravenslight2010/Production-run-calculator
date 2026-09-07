@@ -266,6 +266,7 @@ async function assertOverlayActionHitTargets(
     const failures: string[] = [];
 
     for (const control of controls) {
+      control.scrollIntoView({ block: "nearest", inline: "nearest" });
       const rect = control.getBoundingClientRect();
       if (
         rect.bottom <= 0 ||
@@ -492,6 +493,18 @@ async function signInToSandbox(page: Page): Promise<boolean> {
   });
 }
 
+async function signInToManagerSandbox(page: Page): Promise<void> {
+  const password = "PhoneLayoutTest123!";
+  const username = uniqueUsername();
+  testUsernames.add(username);
+  await signUpAndHandleOnboarding(page, username, password, {
+    signupCode: getSignupCode(),
+  });
+  await promoteToManager(username);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+}
+
 async function promoteToManager(username: string): Promise<void> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
@@ -519,6 +532,33 @@ async function promoteToManager(username: string): Promise<void> {
   } finally {
     await db.end().catch(() => {});
   }
+}
+
+async function assertReachableDialogAction(
+  action: Locator,
+  area: string,
+): Promise<void> {
+  await action.scrollIntoViewIfNeeded();
+  await expect(action, `${area} should be visible after scrolling`).toBeVisible();
+  const viewport = action.page().viewportSize();
+  const geometry = await action.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.bottom - 2));
+    const hit = document.elementFromPoint(x, y);
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      hit: hit ? element.contains(hit) : false,
+    };
+  });
+  expect(geometry.left, `${area} left edge should stay on-screen`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.right, `${area} right edge should stay on-screen`).toBeLessThanOrEqual((viewport?.width ?? 0) + 1);
+  expect(geometry.top, `${area} top edge should stay on-screen`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.bottom, `${area} bottom edge should stay on-screen`).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
+  expect(geometry.hit, `${area} lower edge should receive the action`).toBe(true);
 }
 
 async function visible(locator: Locator): Promise<boolean> {
@@ -1017,6 +1057,112 @@ test.describe("phone layout smoke", () => {
     });
     await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
   });
+
+  for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
+    test(`operational dialog actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToManagerSandbox(page);
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+
+      // Start a disposable run through the real Run workflow so Log Line Stop
+      // opens from the same action an operator uses on the station screen.
+      await page.getByTestId("tab-run").click();
+      const casesNeeded = page.getByTestId("input-casesNeeded");
+      await expect(casesNeeded).toBeVisible();
+      await casesNeeded.fill("1");
+      await page.getByTestId("button-start-run").click();
+      await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+
+      const logStoppage = page.getByTestId("button-log-stoppage");
+      await expect(logStoppage).toBeVisible();
+      await logStoppage.click();
+      const stopDialog = page.getByRole("dialog", { name: "Log Line Stop" });
+      await expect(stopDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        stopDialog,
+        `Log Line Stop at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        stopDialog.getByRole("button", { name: "Log Without Reason" }),
+        `Log Without Reason at ${viewport.width}x${viewport.height}`,
+      );
+
+      // The manager-only stop-reason editor is opened from the stop dialog,
+      // not by directly mounting a fixture state.
+      await stopDialog.getByRole("button", { name: "Edit list" }).click();
+      const reasonDialog = page.getByRole("dialog", { name: "Quick Reason List" });
+      await expect(reasonDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        reasonDialog,
+        `Quick Reason List at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        reasonDialog.getByPlaceholder("Add new reason…"),
+        `Quick Reason List input at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        reasonDialog.getByRole("button", { name: "Add", exact: true }),
+        `Quick Reason List Add at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        reasonDialog.getByRole("button", { name: "Reset to defaults" }),
+        `Quick Reason List reset at ${viewport.width}x${viewport.height}`,
+      );
+      await reasonDialog.getByRole("button", { name: "Close quick reason list" }).click();
+      await expect(reasonDialog).toBeHidden();
+      await stopDialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(stopDialog).toBeHidden();
+
+      // Password uses the manager's More menu and remains unsubmitted: filling
+      // valid-shaped values enables the real lower action without changing the
+      // disposable account's credentials.
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Password", exact: true }).click();
+      const passwordDialog = page.getByRole("dialog", { name: "Password" });
+      await expect(passwordDialog).toBeVisible();
+      await passwordDialog.getByLabel("Current password").fill("not-the-password");
+      await passwordDialog.getByRole("textbox", { name: "New password", exact: true }).fill("PhoneLayoutNew123!");
+      await passwordDialog.getByRole("textbox", { name: "Confirm new password", exact: true }).fill("PhoneLayoutNew123!");
+      await assertReachableDialogAction(
+        passwordDialog.getByRole("button", { name: "Update password", exact: true }),
+        `Update password at ${viewport.width}x${viewport.height}`,
+      );
+      await passwordDialog.getByRole("button", { name: "Close password dialog" }).click();
+      await expect(passwordDialog).toBeHidden();
+
+      // Schedule is also opened from More. Exercise both the list's lower
+      // action and the editor's lower actions without saving a schedule.
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+      const scheduleDialog = page.getByRole("dialog");
+      await expect(scheduleDialog).toBeVisible();
+      await expect(scheduleDialog.getByRole("heading", { name: "Scheduled Days" })).toBeVisible();
+      await assertOverlayActionHitTargets(
+        scheduleDialog,
+        `Scheduled Days list at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        scheduleDialog.getByRole("button", { name: "Schedule New Day" }),
+        `Schedule New Day at ${viewport.width}x${viewport.height}`,
+      );
+      await scheduleDialog.getByRole("button", { name: "Schedule New Day" }).click();
+      await expect(scheduleDialog.getByRole("heading", { name: /Plan for/ })).toBeVisible();
+      await expect(scheduleDialog.getByRole("button", { name: "Save Schedule" })).toBeVisible();
+      await assertReachableDialogAction(
+        scheduleDialog.getByRole("button", { name: "Cancel", exact: true }),
+        `Schedule editor Cancel at ${viewport.width}x${viewport.height}`,
+      );
+      await scheduleDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(scheduleDialog.getByRole("button", { name: "Schedule New Day" })).toBeVisible();
+      await scheduleDialog.getByRole("button", { name: "Close scheduled days" }).click();
+      await expect(scheduleDialog).toBeHidden();
+    });
+  }
 
   test(`sign-in is usable without overflow in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
     page,

@@ -2986,6 +2986,11 @@ async function encodeSpecPhoto(file: File): Promise<{ imageBase64: string; mimeT
   return { imageBase64: encoded, mimeType: "image/jpeg" };
 }
 
+const HOME_DIALOG_OVERLAY_CLASS =
+  "fixed inset-x-0 top-0 z-[70] flex h-[100dvh] items-center justify-center overflow-y-auto bg-black/60 p-4";
+const HOME_DIALOG_CARD_SCROLL_CLASS =
+  "my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto";
+
 export default function Home() {
   useAccessibleDialogStack();
   const {
@@ -16406,8 +16411,8 @@ export default function Home() {
 
       {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
       {showPinDialog && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          <div
+           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
@@ -17019,8 +17024,8 @@ export default function Home() {
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
         {showStopDialog && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" role="presentation" onClick={() => setShowStopDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} role="presentation" onClick={() => setShowStopDialog(false)}>
+            <div className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <OctagonX className="w-5 h-5 text-orange-400 shrink-0" />
                 <h2 id="stop-dialog-title" className="text-base font-bold">Log Line Stop</h2>
@@ -17090,8 +17095,8 @@ export default function Home() {
 
         {/* ── Edit Stoppage Dialog ───────────────────────────────────────────── */}
         {editingStop && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingStop(null)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setEditingStop(null)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-primary shrink-0" />
                 <h2 id="edit-event-dialog-title" className="text-base font-bold">Edit Event</h2>
@@ -17168,8 +17173,8 @@ export default function Home() {
 
         {/* ── Manual Entry Dialog ────────────────────────────────────────────── */}
         {showManualStopDialog && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowManualStopDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="add-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowManualStopDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="add-event-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
                 <h2 id="add-event-dialog-title" className="text-base font-bold">Add Past Event</h2>
@@ -17256,8 +17261,8 @@ export default function Home() {
 
         {/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */}
         {showEditReasonsDialog && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="quick-reason-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowEditReasonsDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="quick-reason-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <ListChecks className="w-5 h-5 text-primary shrink-0" />
                 <h2 id="quick-reason-dialog-title" className="text-base font-bold">Quick Reason List</h2>
@@ -17394,8 +17399,8 @@ export default function Home() {
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowPasswordDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-md`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-primary" />
@@ -17680,8 +17685,8 @@ export default function Home() {
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScheduleDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md flex flex-col`} onClick={e => e.stopPropagation()}>
               {scheduleView === "list" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
