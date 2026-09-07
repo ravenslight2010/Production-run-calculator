@@ -404,12 +404,12 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.profiles[3].allergen).toBe("milk allergen");
     expect(out.profiles[4].allergen).toBeUndefined();
   });
-  it("treats dough/sauce rows as OUNCES by default (converts to lbs); cheese rows stay verbatim per-pizza oz", () => {
+  it("preserves raw recipe row numbers for dough, sauce, and cheese", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [
-        // Cheese-kind rows carry per-pizza OUNCES verbatim in the lbs field
-        // (SpecCheeseRecipeDraft contract) — never ÷16 converted.
+        // Every recipe kind carries the source sheet's raw number in the lbs
+        // field; rowsUnit is descriptive provenance only.
         { kind: "cheese", name: "Fajita Blend", rowsUnit: "oz",
           rows: [{ ingredient: "Mozz", lbs: 1.5 }, { ingredient: "Onion", lbs: 0.5 }] },
         { kind: "dough", name: "Std Dough", rowsUnit: "OUNCES",
@@ -422,10 +422,10 @@ describe("sanitizeParsedSpecImport", () => {
       { ingredient: "Mozz", lbs: 1.5 },
       { ingredient: "Onion", lbs: 0.5 },
     ]);
-    expect(out.recipes[1].rows).toEqual([{ ingredient: "Flour", lbs: 31.25 }]);
-    expect(out.recipes[2].rows).toEqual([{ ingredient: "Tomato", lbs: 2 }]);
+    expect(out.recipes[1].rows).toEqual([{ ingredient: "Flour", lbs: 500 }]);
+    expect(out.recipes[2].rows).toEqual([{ ingredient: "Tomato", lbs: 32 }]);
   });
-  it("keeps recipe rows as-is ONLY when the sheet explicitly marks them as pounds", () => {
+  it("keeps recipe rows as-is regardless of the reported unit", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [

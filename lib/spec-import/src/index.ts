@@ -4853,29 +4853,19 @@ export function sanitizeParsedSpecImport(
     const name = clampName(o.name, lim.maxNameChars);
     const rows: RecipeRow[] = [];
     const rawRows = Array.isArray(o.rows) ? o.rows : [];
-    // Spec sheets at this factory write recipe ingredient amounts in OUNCES,
-    // so ounces is the DEFAULT: every row is converted oz→lbs here unless the
-    // sheet explicitly labels the amounts as pounds (AI reports the unit it
-    // saw via `rowsUnit`; it never does arithmetic). The canonical
-    // ParsedRecipe (and everything downstream — batch math, inventory,
-    // review preview) stays in lbs.
-    const unitRaw = clampName(o.rowsUnit, 16).toLowerCase();
-    const rowsAreLbs =
-      unitRaw === "lb" || unitRaw === "lb." || unitRaw === "lbs" || unitRaw === "lbs." ||
-      unitRaw === "pound" || unitRaw === "pounds";
-    // Cheese-kind rows are EXEMPT from the conversion: by long-standing
-    // contract their `lbs` field carries per-pizza OUNCES verbatim (see
-    // SpecCheeseRecipeDraft) — converting them ÷16 corrupted mix/cheese
-    // per-pizza amounts (1.5 oz became 0.094).
-    const rowsAreOz = !rowsAreLbs && kind !== "cheese";
+    // Recipe rows are an opaque numeric value from the source sheet. The AI
+    // reports `rowsUnit` as descriptive provenance, but the shared parsed
+    // contract intentionally preserves the number verbatim for every recipe
+    // kind. In particular, never apply an implicit oz↔lb conversion here:
+    // large imports can contain pound-valued dough/sauce rows even when the
+    // workbook layout usually uses ounces.
     for (const row of rawRows.slice(0, lim.maxRecipeRows)) {
       if (!row || typeof row !== "object") continue;
       const ro = row as Record<string, unknown>;
       const ingredient = clampName(ro.ingredient, lim.maxNameChars);
       const raw = num(ro.lbs);
       if (!ingredient || raw == null) continue;
-      const lbs = rowsAreOz ? Math.round((raw / 16) * 1000) / 1000 : raw;
-      rows.push({ ingredient, lbs });
+      rows.push({ ingredient, lbs: raw });
     }
     if (rows.length === 0) continue;
     // A stick-applied pep (pepperoni sticks OR cheese sticks) is a pep TYPE

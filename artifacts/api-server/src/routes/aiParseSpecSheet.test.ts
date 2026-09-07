@@ -108,6 +108,53 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
   });
 });
 
+describe("recipe row raw-unit contract", () => {
+  it("requires exact raw numbers and makes rowsUnit provenance-only", () => {
+    const { system, user } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("never convert, rescale, or reinterpret any number between units");
+    expect(system).toContain("`rowsUnit` is descriptive provenance only");
+    expect(system).toContain("preserves the raw row number exactly");
+    expect(user).toContain('"rowsUnit":"lbs"|"oz"');
+  });
+
+  it("preserves dough and sauce row numbers regardless of reported unit", () => {
+    const out = sanitizeParseSpecSheet(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "dough",
+            name: "Large Dough",
+            rowsUnit: "oz",
+            rows: [{ ingredient: "Flour", lbs: 48 }],
+          },
+          {
+            kind: "sauce",
+            name: "Large Sauce",
+            rowsUnit: "lbs",
+            rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+          },
+        ],
+      },
+      input(),
+    );
+    expect(out.recipes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "dough",
+          name: "Large Dough",
+          rows: [{ ingredient: "Flour", lbs: 48 }],
+        }),
+        expect.objectContaining({
+          kind: "sauce",
+          name: "Large Sauce",
+          rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+        }),
+      ]),
+    );
+  });
+});
+
 // Regression guard for the dough yield table row-type distinction. Customer/
 // product rows in a yield table (e.g. "Lucia's Craft Bacon Burger Supreme")
 // must NOT become the recipe name — the procedure title is the recipe name and

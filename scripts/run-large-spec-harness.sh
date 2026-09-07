@@ -49,8 +49,8 @@
 #
 # EXIT CODE
 # ─────────
-#   0  All assertions passed.
-#   1  Data was lost or mismatched (see logged diffs above).
+#   0  All assertions passed, including exact raw recipe row values.
+#   1  Data was lost, rescaled, or mismatched (see logged diffs above).
 #      If the AI model recently changed, re-tune the chunk budget:
 #        lib/spec-import/src/index.ts  →  DEFAULT_LIMITS.maxTotalChars
 #        artifacts/api-server/src/routes/ai.ts  →  max_completion_tokens

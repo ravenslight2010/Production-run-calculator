@@ -410,14 +410,15 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "ounces PER PIZZA, while a recipe row's `lbs` is a RAW numeric field holding the " +
     "amount exactly as written on the sheet (the sheet may label it pounds OR ounces " +
     "— see RECIPE ROW UNITS). Do not put a per-pizza ounce figure into a recipe row " +
-    "or vice-versa, and never convert any number between units. " +
+    "or vice-versa, and never convert, rescale, or reinterpret any number between units. " +
     "RECIPE ROW UNITS: this factory's sheets normally write recipe ingredient " +
     "amounts in OUNCES. Copy each amount verbatim into that row's `lbs`, and " +
     "REPORT the unit on the recipe via `rowsUnit`: \"oz\" when the sheet marks " +
     "those amounts as ounces (an oz/ozs/ounces column header or label), \"lbs\" " +
     "ONLY when the sheet explicitly marks them as pounds. Omit `rowsUnit` when " +
-    "the sheet states no unit — the app then assumes ounces. NEVER convert the " +
-    "numbers yourself — the app converts ounces to pounds after reading. " +
+    "the sheet states no unit. `rowsUnit` is descriptive provenance only; it does " +
+    "not authorize any conversion. The app preserves the raw row number exactly " +
+    "as returned, regardless of whether the sheet labels it ounces or pounds. " +
     "`sticks` is a whole-pepperoni-stick count, separate from its oz/pizza. Match " +
     "each value to the correct brand/flavor/ingredient row it sits on; if a cell is " +
     "blank or unreadable, omit that field rather than borrowing a neighbor's number. " +

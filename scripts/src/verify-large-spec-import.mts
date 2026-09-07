@@ -21,7 +21,7 @@
 // - Per-chunk prompt budget: 4,000 chars
 //   (DEFAULT_LIMITS.maxTotalChars in lib/spec-import/src/index.ts).
 //   4k chunks (~20 profiles or ~15 recipes each) verified correct with zero
-//   loss or unit-conversion errors across smoke (4×3), 4×8, and 10×4 runs.
+//   loss or raw-unit errors across smoke (4×3), 4×8, and 10×4 runs.
 // - max_completion_tokens: 65,536 on POST /ai/parse-spec-sheet
 //   (artifacts/api-server/src/routes/ai.ts). A chunk carrying ~240 profiles
 //   overflowed 32,768 output tokens, so the route uses the model's full 64k
@@ -30,9 +30,9 @@
 //   lib/spec-import/src/index.ts). Unchanged — 4k chunks carry at most ~20
 //   profiles so this limit is never reached.
 // - Test data: harness ingredient weights use realistic per-ingredient bases
-//   (Flour ~50 lbs, Yeast ~0.5 lbs, etc.) so the model does not "correct"
-//   them from oz to lbs. Unrealistic values (10–22 lbs of yeast) triggered
-//   model grounding that divided all weights by 16.
+//   (Flour ~50, Yeast ~0.5, etc.) and the assertions compare every returned
+//   recipe row with the raw generated number. This catches any model or
+//   sanitizer behavior that silently rescales values.
 //
 // WHAT IT DOES
 // ────────────
@@ -335,7 +335,7 @@ function checkResult(dataset: Dataset, merged: ParsedSpecImport): string[] {
         failures.push(`MISSING RECIPE: [${kind}] ${expected.name}`);
         continue;
       }
-      // Rows: every generated ingredient present with the exact lbs.
+      // Rows: every generated ingredient present with the exact raw number.
       const gotRows = new Map((got.rows ?? []).map((r) => [norm(r.ingredient), r.lbs]));
       for (const row of expected.rows) {
         const lbs = gotRows.get(norm(row.ingredient));
@@ -343,7 +343,7 @@ function checkResult(dataset: Dataset, merged: ParsedSpecImport): string[] {
           failures.push(`MISSING ROW: [${kind}] ${expected.name} → ${row.ingredient}`);
         } else if (Math.abs(lbs - row.lbs) > 1e-9) {
           failures.push(
-            `WRONG LBS: [${kind}] ${expected.name} → ${row.ingredient}: got ${lbs}, expected ${row.lbs}`,
+            `WRONG RAW ROW VALUE: [${kind}] ${expected.name} → ${row.ingredient}: got ${lbs}, expected ${row.lbs}`,
           );
         }
       }
