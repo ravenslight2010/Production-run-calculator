@@ -3,6 +3,8 @@
   "environment": "development",
   "status": "blocked",
   "canRotate": false,
+  "failure": "audit-unavailable",
+  "remediation": "The target database could not be audited. Restore database connectivity and rerun this preflight before rotating keys.",
   "activeKeyId": null,
   "storedKeyIds": [],
   "missingKeyIds": [],
@@ -10,8 +12,6 @@
     "limit": 100,
     "checkedDistinctKeyIds": 0,
     "truncated": false,
-    "complete": true
-  },
-  "failure": "keyring-unavailable",
-  "remediation": "Restore a valid OPERATIONAL_REPORT_SIGNING_KEYS keyring, including the active key and every retained proof key, then rerun this preflight."
+    "complete": false
+  }
 }
