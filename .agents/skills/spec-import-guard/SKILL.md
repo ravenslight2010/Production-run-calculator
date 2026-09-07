@@ -62,11 +62,11 @@ Run **both** after any prompt or model change:
 **Run this whenever `AI_MODELS` / `pickModel` changes.** It is the primary guard against silent data loss at scale. Full run takes 10–20 minutes (real AI calls, costs money).
 
 **Prerequisites:**
-1. API server running: start the `artifacts/api-server: API Server` workflow (port 8080) **or** the `API Server` workflow (port 5000).
+1. API server running: start the `artifacts/api-server: API Server` workflow. Its configured local port is **8080**, from `artifacts/api-server/.replit-artifact/artifact.toml`.
 2. Set env vars — either:
    - `VERIFY_USERNAME` + `VERIFY_PASSWORD` (an existing manager account), or
    - Leave both unset to auto-sign-up a fresh user (only works when it will be the **first** user in the DB — use a clean test database or promote via `user_roles.role='manager'`).
-3. If the API is on a non-default port, set `API_BASE=http://localhost:PORT/api`.
+3. The harness defaults to `API_BASE=http://localhost:8080/api`, matching the local workflow. Set `API_BASE=http://localhost:PORT/api` only when intentionally targeting another server or port. The nightly GitHub Actions job is a deliberate exception: it starts a standalone server with `PORT=5000` and sets `API_BASE=http://localhost:5000/api`; that CI override does not change the local workflow port.
 
 **Quick smoke run (cheap, ~2 min, 12 chunks):**
 ```bash
