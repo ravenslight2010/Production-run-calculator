@@ -15043,7 +15043,7 @@ export default function Home() {
           },
         ];
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h3 id="cast-screens-dialog-title" className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
@@ -15140,7 +15140,7 @@ export default function Home() {
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
       {showReorderDialog && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-4"
           onClick={() => setShowReorderDialog(false)}
         >
           <div
@@ -15403,7 +15403,7 @@ export default function Home() {
 
         return (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
             onClick={() => setShowManageDialog(false)}
           >
             <div
@@ -16407,7 +16407,7 @@ export default function Home() {
       {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
       {showPinDialog && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
@@ -16968,7 +16968,7 @@ export default function Home() {
 
         {/* ── Re-import case-count offer: per-run Accept / Keep ────────────── */}
         {caseUpdatePrompt && caseUpdatePrompt.length > 0 && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
               <div className="flex items-center gap-2">
                 <h2 id="case-counts-dialog-title" className="text-base font-bold">Case counts changed</h2>
@@ -17019,7 +17019,7 @@ export default function Home() {
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
         {showStopDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="presentation" onClick={() => setShowStopDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" role="presentation" onClick={() => setShowStopDialog(false)}>
             <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <OctagonX className="w-5 h-5 text-orange-400 shrink-0" />
@@ -17090,7 +17090,7 @@ export default function Home() {
 
         {/* ── Edit Stoppage Dialog ───────────────────────────────────────────── */}
         {editingStop && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingStop(null)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingStop(null)}>
             <div role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-primary shrink-0" />
@@ -17168,7 +17168,7 @@ export default function Home() {
 
         {/* ── Manual Entry Dialog ────────────────────────────────────────────── */}
         {showManualStopDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowManualStopDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowManualStopDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="add-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
@@ -17256,7 +17256,7 @@ export default function Home() {
 
         {/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */}
         {showEditReasonsDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="quick-reason-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <ListChecks className="w-5 h-5 text-primary shrink-0" />
@@ -17394,7 +17394,7 @@ export default function Home() {
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
@@ -17680,7 +17680,7 @@ export default function Home() {
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
               {scheduleView === "list" ? (
                 <>
@@ -19027,7 +19027,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 />
                 {/* Blank-run sweep confirmation dialog */}
                 {confirmRemoveBlanks && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
+                  <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
                     <div className="bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
                       <h2 className="text-base font-bold">Remove {blankRunIds.length} blank run{blankRunIds.length > 1 ? "s" : ""}?</h2>
                       <p className="text-sm text-muted-foreground">

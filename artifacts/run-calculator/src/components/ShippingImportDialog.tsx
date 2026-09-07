@@ -131,7 +131,7 @@ export default function ShippingImportDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="dialog-shipping-import">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" data-testid="dialog-shipping-import">
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shipping-import-dialog-title" className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-lg border border-border bg-background shadow-lg">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h2 id="shipping-import-dialog-title" className="text-sm font-semibold">Import Shipping &amp; Palletizing Guide</h2>

@@ -231,6 +231,80 @@ async function assertPhoneLayout(
   expect(failures, `Phone layout failures in ${label}`).toEqual([]);
 }
 
+async function assertOverlayActionHitTargets(
+  overlay: Locator,
+  area: string,
+): Promise<void> {
+  const failures = await overlay.evaluate((root) => {
+    const isVisible = (element: HTMLElement) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        element.getAttribute("aria-hidden") !== "true" &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number.parseFloat(style.opacity || "1") > 0 &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+    const describe = (element: HTMLElement) =>
+      element.getAttribute("data-testid") ||
+      element.getAttribute("aria-label") ||
+      element.textContent?.trim().replace(/\s+/g, " ").slice(0, 60) ||
+      element.tagName.toLowerCase();
+    const controls = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'button, input, select, textarea, [role="button"], [role="tab"], a[href]',
+      ),
+    ).filter(
+      (element) =>
+        isVisible(element) &&
+        !element.hasAttribute("disabled") &&
+        element.getAttribute("aria-disabled") !== "true",
+    );
+    const failures: string[] = [];
+
+    for (const control of controls) {
+      const rect = control.getBoundingClientRect();
+      if (
+        rect.bottom <= 0 ||
+        rect.right <= 0 ||
+        rect.top >= window.innerHeight ||
+        rect.left >= window.innerWidth
+      ) {
+        continue;
+      }
+
+      // Probe the lower edge specifically: that is where a fixed bottom
+      // navigation can intercept an otherwise reachable action.
+      const x = Math.min(
+        window.innerWidth - 1,
+        Math.max(0, rect.left + rect.width / 2),
+      );
+      const y = Math.min(
+        window.innerHeight - 1,
+        Math.max(0, rect.bottom - 2),
+      );
+      const hit = document.elementFromPoint(x, y);
+      const hitElement = hit instanceof HTMLElement ? hit : null;
+      const isExternalPreviewBanner =
+        hitElement?.textContent?.includes("temporary development preview") ??
+        false;
+      if (!hit || (!control.contains(hit) && !isExternalPreviewBanner)) {
+        failures.push(
+          `${JSON.stringify(describe(control))} lower edge is hit by ` +
+            `${hitElement ? JSON.stringify(describe(hitElement)) : "nothing"}`,
+        );
+      }
+    }
+
+    return failures;
+  });
+
+  expect(failures, `Overlay action hit targets in ${area}`).toEqual([]);
+}
+
 async function assertFocusedFieldIsKeyboardSafe(
   page: Page,
   field: Locator,
@@ -602,6 +676,10 @@ test.describe("phone layout smoke", () => {
         name: "Manage Lists & Settings",
       });
       await expect(manageDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+        "Manage Lists & Settings",
+      );
       await assertPhoneLayout(page, "setup/manage surface");
       await assertKeyboardReachable(page, "setup/manage surface", 12);
 
@@ -636,6 +714,33 @@ test.describe("phone layout smoke", () => {
       await assertPhoneLayout(page, "Excel import review dialog");
       await assertKeyboardReachable(page, "Excel import review dialog", 8);
       await closeImportReview(page);
+    });
+  }
+
+  for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
+    test(`guided tour lower actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToSandbox(page);
+
+      await page.getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Guided Tour" }).click();
+      const tour = page.locator('[role="dialog"][aria-modal="true"]');
+      await expect(tour).toBeVisible();
+      await assertOverlayActionHitTargets(
+        tour,
+        `Guided Tour at ${viewport.width}x${viewport.height}`,
+      );
+
+      await tour.getByRole("button", { name: "Next" }).click();
+      await assertOverlayActionHitTargets(
+        tour,
+        `Guided Tour second step at ${viewport.width}x${viewport.height}`,
+      );
+      await tour.getByRole("button", { name: "Back" }).click();
+      await tour.getByRole("button", { name: "Skip" }).click();
+      await expect(tour).toBeHidden();
     });
   }
 
@@ -686,6 +791,7 @@ test.describe("phone layout smoke", () => {
       await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
       await expect(page.getByTestId("floor-skid-done")).toBeVisible();
       await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+      await assertOverlayActionHitTargets(overlay, "Floor Mode controls");
       for (const testId of [
         "floor-pause-run",
         "floor-cases-minus",
@@ -705,6 +811,7 @@ test.describe("phone layout smoke", () => {
       await page.getByTestId("floor-complete-run").click();
       const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
       await expect(completeDialog).toBeVisible();
+      await assertOverlayActionHitTargets(completeDialog, "Floor Mode completion dialog");
       if (viewport.width === 1280) {
         await completeDialog.getByTestId("floor-confirm-complete-run").click();
         await expect(completeDialog).toBeHidden();
