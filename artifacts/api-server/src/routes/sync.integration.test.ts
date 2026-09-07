@@ -42,6 +42,7 @@ let baseUrl: string;
 
 const USER = "user-1";
 const MANAGER = "manager-1";
+const SANDBOX = "sandbox-1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
@@ -133,8 +134,12 @@ beforeEach(async () => {
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
     { id: MANAGER, username: "manager", passwordHash: "x" },
+    { id: SANDBOX, username: "sandbox", passwordHash: "x", sandbox: true },
   ]);
-  await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);
+  await db.insert(userRolesTable).values([
+    { userId: MANAGER, role: "manager" },
+    { userId: SANDBOX, role: "manager" },
+  ]);
   // Three consecutive dates well clear of any real "today" so the assertions
   // don't depend on when the suite runs.
   await db.insert(dailySyncTable).values([
@@ -150,6 +155,10 @@ function authHeaders(): Record<string, string> {
 
 function managerAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(MANAGER)}` };
+}
+
+function sandboxAuthHeaders(): Record<string, string> {
+  return { authorization: `Bearer ${signToken(SANDBOX)}` };
 }
 
 describe("POST /sync/operational-intents — atomic run finalization", () => {
@@ -2408,6 +2417,157 @@ describe("/sync/events — date-scoped broadcasts", () => {
     ctrl.abort();
     await Promise.allSettled([p]);
     expect(events).not.toContain("future-importer");
+  });
+});
+
+describe("/sync/events — facility-wide master-data broadcasts", () => {
+  type SyncFrame = Record<string, unknown>;
+
+  function collectEvents(
+    date: string,
+    clientId: string,
+    headers: Record<string, string>,
+    ctrl: AbortController,
+    sink: SyncFrame[],
+  ): Promise<void> {
+    return (async () => {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/sync/events?clientId=${clientId}&today=${date}`,
+          { headers, signal: ctrl.signal },
+        );
+        reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          buf += decoder.decode(value, { stream: true });
+          const frames = buf.split("\n\n");
+          buf = frames.pop() ?? "";
+          for (const frame of frames) {
+            const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
+            if (!line) continue;
+            const parsed = JSON.parse(line.slice("data: ".length)) as SyncFrame;
+            sink.push(parsed);
+          }
+        }
+      } catch {
+        // Aborted or stream error — collection is best-effort.
+      } finally {
+        await reader?.cancel().catch(() => {});
+      }
+    })();
+  }
+
+  it("nudges every different-date peer for dough, sauce, cheese, and mix writes without self-echo or scope leakage", async () => {
+    const writerCtrl = new AbortController();
+    const peerCtrl = new AbortController();
+    const sandboxCtrl = new AbortController();
+    const writerEvents: SyncFrame[] = [];
+    const peerEvents: SyncFrame[] = [];
+    const sandboxEvents: SyncFrame[] = [];
+
+    const writerStream = collectEvents(
+      "2030-03-10",
+      "recipe-writer",
+      managerAuthHeaders(),
+      writerCtrl,
+      writerEvents,
+    );
+    const peerStream = collectEvents(
+      "2030-03-11",
+      "recipe-peer",
+      authHeaders(),
+      peerCtrl,
+      peerEvents,
+    );
+    const sandboxStream = collectEvents(
+      "2030-03-12",
+      "sandbox-peer",
+      sandboxAuthHeaders(),
+      sandboxCtrl,
+      sandboxEvents,
+    );
+
+    // Different local dates must not affect facility-wide recipe refreshes, but
+    // the sandbox stream must remain isolated from the live facility.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const writeRecipe = (path: string, item: Record<string, unknown>) =>
+      fetch(`${baseUrl}/api/${path}`, {
+        method: "POST",
+        headers: {
+          ...managerAuthHeaders(),
+          "content-type": "application/json",
+          "x-client-id": "recipe-writer",
+        },
+        body: JSON.stringify({ items: [item] }),
+      });
+
+    const responses = await Promise.all([
+      writeRecipe("dough-recipes", {
+        id: "refresh-dough",
+        name: "Refresh Dough",
+        notes: "",
+        components: [],
+        enabled: true,
+        brand: "",
+        flavors: [],
+      }),
+      writeRecipe("sauce-recipes", {
+        id: "refresh-sauce",
+        name: "Refresh Sauce",
+        notes: "",
+        components: [],
+        enabled: true,
+        brand: "",
+        flavors: [],
+      }),
+      writeRecipe("cheese-recipes", {
+        id: "refresh-cheese",
+        name: "Refresh Cheese",
+        brand: "",
+        flavors: [],
+        shredderSetting: "",
+        cellulose: "",
+        notes: "",
+        components: [],
+        enabled: true,
+      }),
+      writeRecipe("mixes", {
+        id: "refresh-mix",
+        name: "Refresh Mix",
+        brand: "",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        notes: "",
+        amountAlreadyMade: 0,
+        components: [],
+        isPrep: false,
+        enabled: true,
+      }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    writerCtrl.abort();
+    peerCtrl.abort();
+    sandboxCtrl.abort();
+    await Promise.allSettled([writerStream, peerStream, sandboxStream]);
+
+    const isMasterDataRefresh = (frame: SyncFrame) =>
+      frame.type === "master-data" && frame.masterDataChanged === true;
+    const writerRefreshes = writerEvents.filter(isMasterDataRefresh);
+    const peerRefreshes = peerEvents.filter(isMasterDataRefresh);
+    const sandboxRefreshes = sandboxEvents.filter(isMasterDataRefresh);
+
+    expect(writerRefreshes).toHaveLength(0);
+    expect(peerRefreshes).toHaveLength(4);
+    expect(peerRefreshes.every((frame) => frame.senderId === "recipe-writer")).toBe(true);
+    expect(sandboxRefreshes).toHaveLength(0);
   });
 });
 
