@@ -4,6 +4,8 @@ import {
   fencePendingEndSnapshots,
   capturePreEndLifecycle,
   operationalIntentSummary,
+  operationalIntentStorageHealth,
+  operationalIntentRecoveryTelemetry,
   queueOperationalIntent,
   readOperationalIntentOutbox,
   retryOperationalIntent,
@@ -17,6 +19,7 @@ describe("operational intent outbox", () => {
     setOperationalIntentIdentity(null);
     localStorage.clear();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
   it("persists the exact correction and retains it for retry until canonical outcome", async () => {
@@ -171,5 +174,122 @@ describe("operational intent outbox", () => {
     expect(readOperationalIntentOutbox()).toEqual([]);
     setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
     expect(readOperationalIntentOutbox()[0]).toMatchObject({ id: intent.id, state: "sending" });
+  });
+  it("keeps a pending action across an offline reload boundary and adopts canonical data only after retry", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const canonical = { runValues: { "run-1": { casesOnCurrentSkid: 12 } } };
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new Error("browser went offline"))
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted", data: canonical }) });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const { setOperationalIntentCanonicalAdopter } = await import("./operationalIntentOutbox");
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "correction", values: { casesOnCurrentSkid: 12 } });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "pending", failure: "network" })]);
+
+    // A reload creates a new owner binding but does not clear the durable key.
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "pending" })]);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(adopt).toHaveBeenCalledWith(canonical, expect.objectContaining({ id: intent.id }), "accepted");
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("replays a sending record after a browser death without losing an accepted server action", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    let release!: (value: unknown) => void;
+    const firstResponse = new Promise((resolve) => { release = resolve; });
+    const fetch = vi.fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause" });
+    const firstFlush = flushOperationalIntentOutbox();
+    await vi.waitFor(() => expect(readOperationalIntentOutbox()[0]?.state).toBe("sending"));
+    setOperationalIntentIdentity(null);
+    release({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    await firstFlush;
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "sending" })]);
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("pauses on token expiry and resumes only after explicit auth retry", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "resume" });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+      guidance: "Sign in again, then choose Retry.",
+    })]);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+  });
+  it("keeps an accepted action replayable when terminal storage is quota-exhausted", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause" });
+    const originalSetItem = Storage.prototype.setItem.bind(localStorage);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key, value) {
+      if (key.includes(":terminal:")) throw new DOMException("quota", "QuotaExceededError");
+      originalSetItem(key, value);
+    });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "sending" })]);
+    expect(operationalIntentStorageHealth().writeFailures).toBeGreaterThan(0);
+
+    vi.restoreAllMocks();
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("fences pending intents across reset and makes an explicit retry adopt the new epoch", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause" });
+    const { applyResetWipe } = await import("./adapters/browserResetPersistence");
+    expect(applyResetWipe(7)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id,
+      state: "blocked",
+      resetEpoch: 0,
+      guidance: expect.stringContaining("before a reset"),
+    })]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "accepted", resetEpoch: 7 })]);
+  });
+  it("surfaces corrupt records and bounds recovery telemetry without deleting valid work", () => {
+    const validIntent = queueOperationalIntent({ runId: "valid", observedGeneration: "valid:1", effectiveAt: 1, action: "pause" });
+    localStorage.setItem("run-calculator:operational-intent-outbox:v1:pending:corrupt", "{not-json");
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: validIntent.id })]);
+    expect(operationalIntentStorageHealth().corruptRecords).toBeGreaterThan(0);
+    expect(operationalIntentRecoveryTelemetry()).toMatchObject({
+      unresolved: 1,
+      pending: 1,
+      sending: 0,
+      corruptRecords: expect.any(Number),
+    });
   });
 });

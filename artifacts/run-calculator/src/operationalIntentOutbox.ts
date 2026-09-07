@@ -18,6 +18,12 @@ let activeFlush: Promise<void> | undefined;
 let retryTimer: number | undefined;
 let activeOwner: string | undefined;
 let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void) | undefined;
+type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
+const storageHealth = {
+  corruptRecords: 0,
+  unavailableReads: 0,
+  writeFailures: 0,
+};
 
 export type OperationalIntentState = "pending" | "sending" | "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected";
 export type OperationalIntentFailure = "network" | "rate-limited" | "server" | "authentication" | "permission" | "validation" | "quota";
@@ -37,6 +43,31 @@ export type OperationalIntent = {
   attempts?: number; nextRetryAt?: number; lastAttemptAt?: number;
   failure?: OperationalIntentFailure; guidance?: string; resolvedAt?: number;
 };
+
+export type OperationalIntentStorageHealth = {
+  corruptRecords: number;
+  unavailableReads: number;
+  writeFailures: number;
+};
+
+export type OperationalIntentRecoveryTelemetry = {
+  unresolved: number;
+  pending: number;
+  sending: number;
+  repeatedlyFailing: number;
+  storageFailures: number;
+  corruptRecords: number;
+};
+
+function noteStorageFailure(kind: OperationalIntentStorageFailure): void {
+  if (kind === "corrupt") storageHealth.corruptRecords = Math.min(1000, storageHealth.corruptRecords + 1);
+  if (kind === "unavailable") storageHealth.unavailableReads = Math.min(1000, storageHealth.unavailableReads + 1);
+  if (kind === "write") storageHealth.writeFailures = Math.min(1000, storageHealth.writeFailures + 1);
+}
+
+export function operationalIntentStorageHealth(): OperationalIntentStorageHealth {
+  return { ...storageHealth };
+}
 
 export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbox"; userId: string } | null): void {
   activeOwner = identity ? `${identity.scope}:${identity.userId}` : undefined;
@@ -82,12 +113,24 @@ function valid(item: unknown): item is OperationalIntent {
 function notify(): void { window.dispatchEvent(new Event(OPERATIONAL_INTENT_OUTBOX_EVENT)); }
 function readKeys(prefix: string): OperationalIntent[] {
   const records: OperationalIntent[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key?.startsWith(prefix)) continue;
+  let length = 0;
+  try {
+    length = localStorage.length;
+  } catch {
+    noteStorageFailure("unavailable");
+    return records;
+  }
+  for (let i = 0; i < length; i++) {
+    let key: string | null = null;
     try {
+      key = localStorage.key(i);
+      if (!key?.startsWith(prefix)) continue;
       const value = JSON.parse(localStorage.getItem(key) ?? "null");
-      if (!valid(value) || !activeOwner) continue;
+      if (!valid(value)) {
+        noteStorageFailure("corrupt");
+        continue;
+      }
+      if (!activeOwner) continue;
       // Pre-identity records are visible for explicit recovery, but are never
       // silently submitted under whichever account happens to sign in first.
       if (!value.owner) {
@@ -100,7 +143,9 @@ function readKeys(prefix: string): OperationalIntent[] {
         continue;
       }
       if (value.owner === activeOwner) records.push(value);
-    } catch { /* ignore one corrupt record */ }
+    } catch {
+      noteStorageFailure("corrupt");
+    }
   }
   return records;
 }
@@ -114,14 +159,20 @@ function migrate(): void {
         if (!localStorage.getItem(`${prefix}${item.id}`)) localStorage.setItem(`${prefix}${item.id}`, JSON.stringify(item));
       }
       localStorage.removeItem(KEY);
-    } catch { /* leave malformed legacy data for a later repair path */ }
+    } catch {
+      noteStorageFailure("corrupt");
+      /* leave malformed legacy data for a later repair path */
+    }
   }
   // A previous release kept terminals in one RMW blob. Split it without ever replacing another tab's records.
   try {
     const old = JSON.parse(localStorage.getItem(LEGACY_TERMINAL_KEY) ?? "[]");
     if (Array.isArray(old)) for (const item of old.filter(valid)) localStorage.setItem(`${TERMINAL_PREFIX}${item.id}`, JSON.stringify(item));
     localStorage.removeItem(LEGACY_TERMINAL_KEY);
-  } catch { /* malformed display history is non-production evidence */ }
+  } catch {
+    noteStorageFailure("corrupt");
+    /* malformed display history is non-production evidence */
+  }
 }
 export const readOperationalIntentOutbox = (): OperationalIntent[] => {
   if (typeof window === "undefined") return [];
@@ -129,9 +180,20 @@ export const readOperationalIntentOutbox = (): OperationalIntent[] => {
     migrate();
     return [...readKeys(PENDING_PREFIX), ...readKeys(TERMINAL_PREFIX)]
       .sort((a, b) => a.effectiveAt - b.effectiveAt || a.id.localeCompare(b.id));
-  } catch { return []; }
+  } catch {
+    noteStorageFailure("unavailable");
+    return [];
+  }
 };
-function persistPending(item: OperationalIntent): void { localStorage.setItem(`${PENDING_PREFIX}${item.id}`, JSON.stringify(item)); }
+function persistPending(item: OperationalIntent): boolean {
+  try {
+    localStorage.setItem(`${PENDING_PREFIX}${item.id}`, JSON.stringify(item));
+    return true;
+  } catch {
+    noteStorageFailure("write");
+    return false;
+  }
+}
 function pruneTerminals(): void {
   // Review-required records are unresolved production evidence and are never
   // part of the bounded display-history eviction.
@@ -152,13 +214,28 @@ function currentDeliveryMatches(item: OperationalIntent): boolean {
     return false;
   }
 }
-function terminalize(item: OperationalIntent, state: Extract<OperationalIntentState, "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected">, fields: Partial<OperationalIntent> = {}): void {
-  if (!currentDeliveryMatches(item)) return;
+function terminalize(item: OperationalIntent, state: Extract<OperationalIntentState, "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected">, fields: Partial<OperationalIntent> = {}): boolean {
+  if (!currentDeliveryMatches(item)) return false;
   const record = { ...item, ...fields, state, resolvedAt: Date.now() };
-  localStorage.setItem(`${TERMINAL_PREFIX}${item.id}`, JSON.stringify(record));
-  localStorage.removeItem(`${PENDING_PREFIX}${item.id}`);
+  try {
+    // Adopt the terminal receipt before removing the pending record. If the
+    // browser is full or dies here, the sending record remains replayable.
+    localStorage.setItem(`${TERMINAL_PREFIX}${item.id}`, JSON.stringify(record));
+  } catch {
+    noteStorageFailure("write");
+    notify();
+    return false;
+  }
+  try {
+    localStorage.removeItem(`${PENDING_PREFIX}${item.id}`);
+  } catch {
+    noteStorageFailure("write");
+    notify();
+    return false;
+  }
   pruneTerminals();
   notify();
+  return true;
 }
 function canonicalInventoryLines(lines: Array<{ itemKey: string; qty: number }> | undefined): Array<{ itemKey: string; qty: number }> {
   const totals = new Map<string, number>();
@@ -176,12 +253,25 @@ export function operationalIntentSummary(): Record<OperationalIntentState, numbe
   for (const item of readOperationalIntentOutbox()) result[item.state]++;
   return result;
 }
+
+export function operationalIntentRecoveryTelemetry(): OperationalIntentRecoveryTelemetry {
+  const records = readOperationalIntentOutbox();
+  const unresolved = records.filter((item) => !["accepted", "superseded", "rebased"].includes(item.state));
+  return {
+    unresolved: Math.min(1000, unresolved.length),
+    pending: Math.min(1000, records.filter((item) => item.state === "pending").length),
+    sending: Math.min(1000, records.filter((item) => item.state === "sending").length),
+    repeatedlyFailing: Math.min(1000, records.filter((item) => (item.attempts ?? 0) >= 3).length),
+    storageFailures: Math.min(1000, storageHealth.unavailableReads + storageHealth.writeFailures),
+    corruptRecords: storageHealth.corruptRecords,
+  };
+}
 export function queueOperationalIntent(input: Omit<OperationalIntent, "version" | "id" | "date" | "resetEpoch" | "state"> & { date?: string }): OperationalIntent {
   const inventoryLines = input.action === "lifecycle" && input.lifecycle === "end" ? canonicalInventoryLines(input.inventoryLines) : input.inventoryLines;
   if (input.action === "lifecycle" && input.lifecycle === "end" && !validPreEndLifecycle(input.preEndLifecycle)) throw new Error("Run completion lifecycle snapshot is invalid");
   if (!activeOwner) throw new Error("Offline action could not be saved before sign-in completed");
   const intent: OperationalIntent = { ...input, inventoryLines, version: 1, id: `offline:${crypto.randomUUID()}`, date: input.date ?? todayStr(), resetEpoch: getStoredResetEpoch(), state: "pending", owner: activeOwner, attempts: 0 };
-  try { persistPending(intent); } catch { throw new Error("Offline action could not be saved on this device (storage may be full)"); }
+  if (!persistPending(intent)) throw new Error("Offline action could not be saved on this device (storage may be full)");
   notify(); return intent;
 }
 export function retryOperationalIntent(id: string): boolean {
@@ -191,7 +281,7 @@ export function retryOperationalIntent(id: string): boolean {
     if (!valid(item) || item.state === "sending" || ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(item.state)) return false;
     if (item.owner && item.owner !== activeOwner) return false;
     if (item.failure === "rate-limited" && (item.nextRetryAt ?? 0) > Date.now()) return false;
-    persistPending({ ...item, owner: activeOwner, state: "pending", deliveryToken: undefined, nextRetryAt: 0, failure: undefined, guidance: undefined });
+    if (!persistPending({ ...item, owner: activeOwner, resetEpoch: getStoredResetEpoch(), state: "pending", deliveryToken: undefined, nextRetryAt: 0, failure: undefined, guidance: undefined })) return false;
     localStorage.removeItem(terminalKey); notify(); scheduleNextFlush(); return true;
   } catch { return false; }
 }
@@ -233,8 +323,10 @@ function temporary(item: OperationalIntent, failure: OperationalIntentFailure, g
   notify();
   scheduleNextFlush();
 }
-function lockKey(): string { return `${LOCK_KEY}:${activeOwner ?? "signed-out"}`; }
-function acquireLock(): string | undefined {
+type FlushLock = { owner: string; key: string };
+
+function lockKey(identity = activeOwner): string { return `${LOCK_KEY}:${identity ?? "signed-out"}`; }
+function acquireLock(): FlushLock | undefined {
   const now = Date.now();
   try {
     const key = lockKey();
@@ -243,24 +335,22 @@ function acquireLock(): string | undefined {
     const owner = crypto.randomUUID();
     localStorage.setItem(key, JSON.stringify({ until: now + LOCK_LEASE_MS, owner }));
     // A same-millisecond contender must not proceed unless it owns the lock it wrote.
-    return JSON.parse(localStorage.getItem(key) ?? "null").owner === owner ? owner : undefined;
+    return JSON.parse(localStorage.getItem(key) ?? "null").owner === owner ? { owner, key } : undefined;
   } catch { return undefined; }
 }
-function renewLock(owner: string): boolean {
+function renewLock(lock: FlushLock): boolean {
   try {
-    const key = lockKey();
-    const current = JSON.parse(localStorage.getItem(key) ?? "null") as { owner?: string } | null;
-    if (current?.owner !== owner) return false;
-    localStorage.setItem(key, JSON.stringify({ owner, until: Date.now() + LOCK_LEASE_MS }));
+    const current = JSON.parse(localStorage.getItem(lock.key) ?? "null") as { owner?: string } | null;
+    if (current?.owner !== lock.owner) return false;
+    localStorage.setItem(lock.key, JSON.stringify({ owner: lock.owner, until: Date.now() + LOCK_LEASE_MS }));
     return true;
   } catch {
     return false;
   }
 }
-function releaseLock(owner: string): void {
+function releaseLock(lock: FlushLock): void {
   try {
-    const key = lockKey();
-    if (JSON.parse(localStorage.getItem(key) ?? "null").owner === owner) localStorage.removeItem(key);
+    if (JSON.parse(localStorage.getItem(lock.key) ?? "null").owner === lock.owner) localStorage.removeItem(lock.key);
   } catch { /* the expired lock can be reclaimed later */ }
 }
 function scheduleNextFlush(): void {
@@ -280,11 +370,11 @@ function scheduleNextFlush(): void {
 async function flushWithStorageLock(senderId: string): Promise<void> {
     if (typeof window === "undefined" || !navigator.onLine || !activeOwner) return;
     const ownerAtStart = activeOwner;
-    const lockOwner = acquireLock();
-    if (!lockOwner) return;
+    const lock = acquireLock();
+    if (!lock) return;
     let deliveryController: AbortController | undefined;
     const renewal = window.setInterval(() => {
-      if (!renewLock(lockOwner)) deliveryController?.abort();
+      if (!renewLock(lock)) deliveryController?.abort();
     }, LOCK_RENEW_MS);
     try {
       for (const original of readOperationalIntentOutbox().filter((x) => ["pending", "sending"].includes(x.state)).sort((a, b) => a.effectiveAt - b.effectiveAt || a.id.localeCompare(b.id))) {
@@ -297,6 +387,13 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
           lastAttemptAt: Date.now(),
         };
         persistPending(item); notify();
+        if (item.resetEpoch < getStoredResetEpoch()) {
+          terminalize(item, "blocked", {
+            failure: "validation",
+            guidance: "This action was created before a reset. Review the current run, then choose Retry or Discard.",
+          });
+          continue;
+        }
         deliveryController = new AbortController();
         const deliveryTimeout = window.setTimeout(() => deliveryController?.abort(), DELIVERY_TIMEOUT_MS);
         try {
@@ -323,7 +420,7 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
     } finally {
       window.clearInterval(renewal);
       deliveryController?.abort();
-      releaseLock(lockOwner);
+      releaseLock(lock);
       scheduleNextFlush();
     }
 }

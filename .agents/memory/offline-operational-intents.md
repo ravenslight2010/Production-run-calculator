@@ -32,3 +32,9 @@ Recoverable browser commands are bound to the authenticated user and live/sandbo
 **Why:** A late response after sign-out or lease loss can otherwise adopt another scope's canonical state, resurrect a terminal command, or lift an End fence before atomic finalization. Event-only retries also strand work when connectivity stays online after a transient server failure.
 
 **How to apply:** Schedule one wake-up for the earliest retry deadline, keep review-required records outside terminal-history eviction, quarantine legacy unowned records until explicit recovery, and keep blocked or rejected Ends fenced until retry or explicit discard.
+
+Reset cleanup must preserve the operational-intent namespace, and a cross-tab lease must retain the exact storage key it acquired even if auth identity changes while delivery is in flight.
+
+**Why:** Broad legacy browser-key prefixes can erase still-reviewable commands during a reset, while deriving lease cleanup from the current identity strands a valid lock after sign-out and blocks the next authenticated session.
+
+**How to apply:** Exclude durable operational keys explicitly from reset wipes, and release/renew leases using the captured owner key rather than live auth state.

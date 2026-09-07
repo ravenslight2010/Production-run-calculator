@@ -69,3 +69,24 @@ commands use the same conventions:
 - wake reconciliation adopts before publishing or advancing counters;
 - completed history and pending completion uploads survive live-data reset;
 - reset does not introduce another state store or protocol.
+
+## Offline recovery failure matrix
+
+Operational intent recovery is deliberately durable at every acknowledgement
+boundary. The following outcomes are deterministic and reviewable:
+
+| Failure point | Local result | Recovery |
+|---|---|---|
+| Browser closes while pending | Per-ID pending record remains | Reload and retry after connectivity returns |
+| Browser closes while sending | Sending record remains replayable | Reload re-delivers the same intent ID; the server ledger is idempotent |
+| Network/server/rate-limit failure | Pending record retains bounded attempts, failure, and next retry time | Automatic backoff or explicit Retry |
+| 401/token expiry | Blocked terminal receipt with auth guidance; no automatic replay | Complete normal sign-in, then Retry |
+| Reset while pending | Older-epoch intent is blocked before delivery and retained for review | Retry explicitly, which adopts the current epoch, or Discard |
+| 400/422 validation failure | Permanently rejected receipt with correction guidance | Review the run and create a corrected action; discard the receipt if appropriate |
+| 403 permission failure | Blocked receipt with manager/permission guidance | Resolve access, then Retry |
+| Local corruption or quota failure | Health signal is visible in Sync Status; valid records are not deleted | Free space or reload, then review/retry retained records |
+| Accepted response before terminal write | Sending record is retained until terminal receipt can be persisted | Reload/reconnect retries the idempotent intent |
+
+Recovery telemetry is aggregate-only and bounded: it reports counts of
+unresolved, pending, sending, repeatedly failing, corrupt, and storage-failure
+records. It does not include action payloads, identities, or recipe data.

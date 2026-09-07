@@ -6,6 +6,7 @@ import {
   discardOperationalIntent,
   flushOperationalIntentOutbox,
   OPERATIONAL_INTENT_OUTBOX_EVENT,
+  operationalIntentStorageHealth,
   operationalIntentSummary,
   readOperationalIntentOutbox,
   retryOperationalIntent,
@@ -45,6 +46,7 @@ export default function SyncStatusPopover(props: Props) {
   const [horizontalOffset, setHorizontalOffset] = useState(0);
   const [intentSummary, setIntentSummary] = useState(() => operationalIntentSummary());
   const [intents, setIntents] = useState(() => readOperationalIntentOutbox());
+  const [storageHealth, setStorageHealth] = useState(() => operationalIntentStorageHealth());
   const panelRef = useRef<HTMLDivElement>(null);
   const horizontalOffsetRef = useRef(0);
   const failed = props.status === "failed";
@@ -88,6 +90,7 @@ export default function SyncStatusPopover(props: Props) {
     const refresh = () => {
       setIntentSummary(operationalIntentSummary());
       setIntents(readOperationalIntentOutbox());
+      setStorageHealth(operationalIntentStorageHealth());
     };
     window.addEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
     // The custom event updates this tab; storage updates the other open tabs.
@@ -97,6 +100,10 @@ export default function SyncStatusPopover(props: Props) {
       window.removeEventListener("storage", refresh);
     };
   }, []);
+  const storageIssue =
+    storageHealth.corruptRecords > 0 ||
+    storageHealth.unavailableReads > 0 ||
+    storageHealth.writeFailures > 0;
 
   return (
     <div className="relative">
@@ -125,6 +132,14 @@ export default function SyncStatusPopover(props: Props) {
             </div>
             <span className={`h-2 w-2 rounded-full ${failed ? "bg-red-500" : delayed || props.status === "retrying" ? "bg-amber-400" : "bg-emerald-500"}`} />
           </div>
+          {storageIssue && (
+            <div role="alert" className="mt-3 rounded border border-red-500/50 bg-red-500/10 p-2 text-red-200">
+              <p className="font-semibold">Local recovery needs attention</p>
+              <p className="mt-1">
+                Some offline actions could not be read or acknowledged locally. Accepted server work is retained; free device space or reload, then review the retained actions below.
+              </p>
+            </div>
+          )}
            <div className="mt-3 grid grid-cols-2 gap-2 rounded bg-muted/30 p-2">
              <span>Next action</span><strong className="text-right">{failed ? "Retry latest retained change" : attentionState === "review" ? "Retry and confirm acknowledgment" : "Monitor"}</strong>
             <span>Production date</span><strong className="text-right">{props.date}</strong>
