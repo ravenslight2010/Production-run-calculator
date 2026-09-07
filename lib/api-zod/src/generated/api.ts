@@ -1218,6 +1218,191 @@ export const ExportOperationalReportResponse = zod.object({
 
 
 /**
+ * Re-derives the canonical report from server-side scoped records and appends it to the audit archive. Client report JSON is never accepted. Repeating a finalization for the same scope and reporting period returns the original immutable record and never replaces it.
+ * @summary Finalize an immutable authoritative operational report
+ */
+export const finalizeOperationalReportBodyRunsMax = 600;
+
+
+
+export const FinalizeOperationalReportBody = zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string().describe('ISO date, or week-ending date for a weekly report'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
+  "finished": zod.boolean().describe('Whether the run was completed'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
+  "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
+}).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
+})
+
+export const FinalizeOperationalReportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string()
+}).and(zod.object({
+  "scope": zod.enum(['live', 'sandbox']),
+  "idempotent": zod.boolean().optional(),
+  "report": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "periodStart": zod.string(),
+  "periodEnd": zod.string(),
+  "generatedAt": zod.coerce.date(),
+  "production": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "runsPlanned": zod.number(),
+  "runsFinished": zod.number(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "attainmentPct": zod.number(),
+  "totalDowntimeMinutes": zod.number(),
+  "totalStoppages": zod.number(),
+  "topDowntime": zod.union([zod.object({
+  "label": zod.string(),
+  "minutes": zod.number()
+}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
+  "unfinishedRuns": zod.array(zod.string()),
+  "incidentCount": zod.number(),
+  "wasteFlaggedCount": zod.number(),
+  "hasData": zod.boolean()
+}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
+  "quality": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "incidents": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "inventory": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "flaggedItems": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+})
+})
+}))
+
+
+/**
+ * @summary List finalized reports for a reporting period
+ */
+export const ListFinalizedOperationalReportsQueryParams = zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.date()
+})
+
+export const ListFinalizedOperationalReportsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string()
+})
+export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
+
+
+/**
+ * @summary Retrieve one immutable finalized operational report
+ */
+export const GetFinalizedOperationalReportParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const GetFinalizedOperationalReportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string()
+}).and(zod.object({
+  "scope": zod.enum(['live', 'sandbox']),
+  "idempotent": zod.boolean().optional(),
+  "report": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "periodStart": zod.string(),
+  "periodEnd": zod.string(),
+  "generatedAt": zod.coerce.date(),
+  "production": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "runsPlanned": zod.number(),
+  "runsFinished": zod.number(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "attainmentPct": zod.number(),
+  "totalDowntimeMinutes": zod.number(),
+  "totalStoppages": zod.number(),
+  "topDowntime": zod.union([zod.object({
+  "label": zod.string(),
+  "minutes": zod.number()
+}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
+  "unfinishedRuns": zod.array(zod.string()),
+  "incidentCount": zod.number(),
+  "wasteFlaggedCount": zod.number(),
+  "hasData": zod.boolean()
+}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
+  "quality": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "incidents": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "inventory": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "flaggedItems": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+})
+})
+}))
+
+
+/**
  * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
  * @summary Read one manager-only server-derived operational run view
  */

@@ -70,6 +70,8 @@ import type {
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
+  FinalizedOperationalReport,
+  FinalizedOperationalReportSummary,
   FollowUpRunSuggestion200,
   ForgotPasswordRequest,
   FreezerPullItemList,
@@ -104,6 +106,7 @@ import type {
   LabelVerifyResult,
   ListCompletedHistoryParams,
   ListDeniedMergesParams,
+  ListFinalizedOperationalReportsParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
   ListInventoryLedgerParams,
@@ -3603,6 +3606,246 @@ export const useExportOperationalReport = <TError = ErrorType<void>,
       > => {
       return useMutation(getExportOperationalReportMutationOptions(options));
     }
+
+export const getFinalizeOperationalReportUrl = () => {
+
+
+
+
+  return `/api/reports/operational/finalize`
+}
+
+/**
+ * Re-derives the canonical report from server-side scoped records and appends it to the audit archive. Client report JSON is never accepted. Repeating a finalization for the same scope and reporting period returns the original immutable record and never replaces it.
+ * @summary Finalize an immutable authoritative operational report
+ */
+export const finalizeOperationalReport = async (operationalReportInput: OperationalReportInput, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReport> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FinalizedOperationalReport>(getFinalizeOperationalReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(operationalReportInput)
+  }
+);}
+
+
+
+
+
+export const getFinalizeOperationalReportMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeOperationalReport>>, TError,FinalizeOperationalReportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finalizeOperationalReport>>, TError,FinalizeOperationalReportMutationVariables, TContext> => {
+
+const mutationKey = ['finalizeOperationalReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finalizeOperationalReport>>, FinalizeOperationalReportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  finalizeOperationalReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinalizeOperationalReportMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeOperationalReport>>>
+    export type FinalizeOperationalReportMutationBody = BodyType<OperationalReportInput>
+    export type FinalizeOperationalReportMutationError = ErrorType<void>
+    export type FinalizeOperationalReportMutationVariables = {data: BodyType<OperationalReportInput>}
+
+    /**
+ * @summary Finalize an immutable authoritative operational report
+ */
+export const useFinalizeOperationalReport = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeOperationalReport>>, TError,FinalizeOperationalReportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof finalizeOperationalReport>>,
+        TError,
+        FinalizeOperationalReportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFinalizeOperationalReportMutationOptions(options));
+    }
+
+export const getListFinalizedOperationalReportsUrl = (params: ListFinalizedOperationalReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational/finalized?${stringifiedParams}` : `/api/reports/operational/finalized`
+}
+
+/**
+ * @summary List finalized reports for a reporting period
+ */
+export const listFinalizedOperationalReports = async (params: ListFinalizedOperationalReportsParams, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReportSummary[]> => {
+
+  return customFetch<FinalizedOperationalReportSummary[]>(getListFinalizedOperationalReportsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFinalizedOperationalReportsQueryKey = (params?: ListFinalizedOperationalReportsParams,) => {
+    return [
+    `/api/reports/operational/finalized`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFinalizedOperationalReportsQueryOptions = <TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(params: ListFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFinalizedOperationalReportsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFinalizedOperationalReports>>> = ({ signal }) => listFinalizedOperationalReports(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFinalizedOperationalReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listFinalizedOperationalReports>>>
+export type ListFinalizedOperationalReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List finalized reports for a reporting period
+ */
+
+export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
+ params: ListFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFinalizedOperationalReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFinalizedOperationalReportUrl = (id: string,) => {
+
+
+
+
+  return `/api/reports/operational/finalized/${id}`
+}
+
+/**
+ * @summary Retrieve one immutable finalized operational report
+ */
+export const getFinalizedOperationalReport = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReport> => {
+
+  return customFetch<FinalizedOperationalReport>(getGetFinalizedOperationalReportUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFinalizedOperationalReportQueryKey = (id: string,) => {
+    return [
+    `/api/reports/operational/finalized/${id}`
+    ] as const;
+    }
+
+
+export const getGetFinalizedOperationalReportQueryOptions = <TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFinalizedOperationalReportQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFinalizedOperationalReport>>> = ({ signal }) => getFinalizedOperationalReport(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFinalizedOperationalReportQueryResult = NonNullable<Awaited<ReturnType<typeof getFinalizedOperationalReport>>>
+export type GetFinalizedOperationalReportQueryError = ErrorType<void>
+
+
+/**
+ * @summary Retrieve one immutable finalized operational report
+ */
+
+export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFinalizedOperationalReportQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetOperationalRunViewUrl = (params: GetOperationalRunViewParams,) => {
   const normalizedParams = new URLSearchParams();

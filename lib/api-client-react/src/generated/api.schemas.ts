@@ -1457,6 +1457,118 @@ export interface OperationalReportInput {
   runs?: SummaryRunInput[];
 }
 
+export type FinalizedOperationalReportSummaryReportScope = typeof FinalizedOperationalReportSummaryReportScope[keyof typeof FinalizedOperationalReportSummaryReportScope];
+
+
+export const FinalizedOperationalReportSummaryReportScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export interface FinalizedOperationalReportSummary {
+  id: string;
+  reportScope: FinalizedOperationalReportSummaryReportScope;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  generatedBy: string;
+  finalizedAt: string;
+  finalizedBy: string;
+  contentHash: string;
+}
+
+export type FinalizedOperationalReportScope = typeof FinalizedOperationalReportScope[keyof typeof FinalizedOperationalReportScope];
+
+
+export const FinalizedOperationalReportScope = {
+  live: 'live',
+  sandbox: 'sandbox',
+} as const;
+
+export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
+
+
+export const OperationalReportScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export type OperationalReportQualityAvailability = typeof OperationalReportQualityAvailability[keyof typeof OperationalReportQualityAvailability];
+
+
+export const OperationalReportQualityAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
+
+
+export const OperationalReportIncidentsAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
+
+
+export const OperationalReportInventoryAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportQualityValue = {
+  checks?: number;
+  issues?: number;
+  failed?: number;
+  warnings?: number;
+} | null;
+
+export type OperationalReportQuality = {
+  availability: OperationalReportQualityAvailability;
+  value: OperationalReportQualityValue;
+  note?: string;
+};
+
+export type OperationalReportIncidentsValue = {
+  total?: number;
+  unresolved?: number;
+} | null;
+
+export type OperationalReportIncidents = {
+  availability: OperationalReportIncidentsAvailability;
+  value: OperationalReportIncidentsValue;
+  note?: string;
+};
+
+export type OperationalReportInventoryValue = {
+  flaggedItems?: number;
+} | null;
+
+export type OperationalReportInventory = {
+  availability: OperationalReportInventoryAvailability;
+  value: OperationalReportInventoryValue;
+  note?: string;
+};
+
+export interface OperationalReport {
+  scope: OperationalReportScope;
+  date: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  production: SummaryStats;
+  quality: OperationalReportQuality;
+  incidents: OperationalReportIncidents;
+  inventory: OperationalReportInventory;
+}
+
+export type FinalizedOperationalReport = FinalizedOperationalReportSummary & {
+  scope: FinalizedOperationalReportScope;
+  idempotent?: boolean;
+  report: OperationalReport;
+};
+
 export type OperationalRunViewVersion = typeof OperationalRunViewVersion[keyof typeof OperationalRunViewVersion];
 
 
@@ -1671,84 +1783,6 @@ export interface OperationalRunView {
   calculatedAt: number;
   freshness: OperationalRunViewFreshness;
   formulaProvenance: OperationalRunViewFormulaProvenance;
-}
-
-export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
-
-
-export const OperationalReportScope = {
-  day: 'day',
-  week: 'week',
-} as const;
-
-export type OperationalReportQualityAvailability = typeof OperationalReportQualityAvailability[keyof typeof OperationalReportQualityAvailability];
-
-
-export const OperationalReportQualityAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export type OperationalReportQualityValue = {
-  checks?: number;
-  issues?: number;
-  failed?: number;
-  warnings?: number;
-} | null;
-
-export type OperationalReportQuality = {
-  availability: OperationalReportQualityAvailability;
-  value: OperationalReportQualityValue;
-  note?: string;
-};
-
-export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
-
-
-export const OperationalReportIncidentsAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export type OperationalReportIncidentsValue = {
-  total?: number;
-  unresolved?: number;
-} | null;
-
-export type OperationalReportIncidents = {
-  availability: OperationalReportIncidentsAvailability;
-  value: OperationalReportIncidentsValue;
-  note?: string;
-};
-
-export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
-
-
-export const OperationalReportInventoryAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export type OperationalReportInventoryValue = {
-  flaggedItems?: number;
-} | null;
-
-export type OperationalReportInventory = {
-  availability: OperationalReportInventoryAvailability;
-  value: OperationalReportInventoryValue;
-  note?: string;
-};
-
-export interface OperationalReport {
-  scope: OperationalReportScope;
-  date: string;
-  periodStart: string;
-  periodEnd: string;
-  generatedAt: string;
-  production: SummaryStats;
-  quality: OperationalReportQuality;
-  incidents: OperationalReportIncidents;
-  inventory: OperationalReportInventory;
 }
 
 export type ShiftHandoffItemSource = typeof ShiftHandoffItemSource[keyof typeof ShiftHandoffItemSource];
@@ -4568,6 +4602,19 @@ export const ListQualityChecksStatus = {
   pass: 'pass',
   warn: 'warn',
   fail: 'fail',
+} as const;
+
+export type ListFinalizedOperationalReportsParams = {
+scope: ListFinalizedOperationalReportsScope;
+date: string;
+};
+
+export type ListFinalizedOperationalReportsScope = typeof ListFinalizedOperationalReportsScope[keyof typeof ListFinalizedOperationalReportsScope];
+
+
+export const ListFinalizedOperationalReportsScope = {
+  day: 'day',
+  week: 'week',
 } as const;
 
 export type GetOperationalRunViewParams = {

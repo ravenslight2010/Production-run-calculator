@@ -1,4 +1,5 @@
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { createHash, randomUUID } from "node:crypto";
 import * as z from "zod";
 import {
   aggregateDaySummary,
@@ -15,6 +16,7 @@ import {
   completedRunHistoryTable,
   syncConflictLogsTable,
   qualityChecksTable,
+  finalizedOperationalReportsTable,
 } from "@workspace/db";
 import {
   deriveOperationalRunView,
@@ -48,6 +50,31 @@ const BodySchema = z.object({
   // canonical daily_sync rows, so this compatibility field is intentionally ignored.
   runs: z.array(RunSchema).max(600).optional(),
 });
+const FinalizedReportQuery = z.object({
+  scope: z.enum(["day", "week"]),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+const FinalizedReportId = z.object({ id: z.string().uuid() });
+
+function reportHash(report: OperationalReport): string {
+  return createHash("sha256").update(JSON.stringify(report)).digest("hex");
+}
+
+function finalizedReportResponse(row: typeof finalizedOperationalReportsTable.$inferSelect) {
+  return {
+    id: row.id,
+    scope: row.scope,
+    reportScope: row.reportScope,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    generatedAt: row.generatedAt.toISOString(),
+    generatedBy: row.generatedBy,
+    finalizedAt: row.finalizedAt.toISOString(),
+    finalizedBy: row.finalizedBy,
+    contentHash: row.contentHash,
+    report: row.payload as OperationalReport,
+  };
+}
 
 function addDays(iso: string, amount: number): string {
   const d = new Date(`${iso}T12:00:00Z`);
@@ -322,7 +349,7 @@ router.get(
 );
 
 router.post(
-  "/reports/operational",
+  ["/reports/operational", "/reports/operational/finalize"],
   requireCapability("review-incidents"),
   async (req, res): Promise<void> => {
     const parsed = validateOperationalReportBody(req.body);
@@ -662,8 +689,101 @@ router.post(
         },
       },
     };
-    res.json(report);
+    if (!req.path.endsWith("/finalize")) {
+      res.json(report);
+      return;
+    }
+    // This branch deliberately uses the report just derived above.  It never
+    // accepts report JSON from the browser and it does not edit source facts.
+    const existing = await db.select().from(finalizedOperationalReportsTable).where(and(
+      eq(finalizedOperationalReportsTable.scope, scope),
+      eq(finalizedOperationalReportsTable.reportScope, report.scope),
+      eq(finalizedOperationalReportsTable.periodStart, report.periodStart),
+      eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
+    ));
+    if (existing.length === 1) {
+      res.status(200).json({ ...finalizedReportResponse(existing[0]), idempotent: true });
+      return;
+    }
+    if (existing.length > 1) {
+      operationalError(res, 409, "finalized-report-ambiguous", "More than one finalized report exists for this period.");
+      return;
+    }
+    const finalizedAt = new Date();
+    const row = {
+      id: randomUUID(),
+      scope,
+      reportScope: report.scope,
+      periodStart: report.periodStart,
+      periodEnd: report.periodEnd,
+      generatedAt: new Date(report.generatedAt),
+      generatedBy: report.attribution?.generatedBy ?? req.userId ?? "authenticated manager",
+      finalizedAt,
+      finalizedBy: req.userId ?? "authenticated manager",
+      contentHash: reportHash(report),
+      payload: report,
+    };
+    try {
+      await db.insert(finalizedOperationalReportsTable).values(row);
+    } catch (error) {
+      // A concurrent retry must never replace another finalized snapshot.
+      const concurrent = await db.select().from(finalizedOperationalReportsTable).where(and(
+        eq(finalizedOperationalReportsTable.scope, scope),
+        eq(finalizedOperationalReportsTable.reportScope, report.scope),
+        eq(finalizedOperationalReportsTable.periodStart, report.periodStart),
+        eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
+      ));
+      if (concurrent.length === 1) {
+        res.status(200).json({ ...finalizedReportResponse(concurrent[0]), idempotent: true });
+        return;
+      }
+      throw error;
+    }
+    res.status(201).json({
+      id: row.id, scope: row.scope, reportScope: row.reportScope,
+      periodStart: row.periodStart, periodEnd: row.periodEnd,
+      generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
+      finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy,
+      contentHash: row.contentHash, report,
+    });
   },
 );
+
+router.get("/reports/operational/finalized", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const parsed = FinalizedReportQuery.safeParse(req.query);
+  if (!parsed.success) {
+    operationalError(res, 400, "invalid-query", "Valid scope and date query parameters are required.");
+    return;
+  }
+  const [periodStart, periodEnd] = dateRange(parsed.data.scope, parsed.data.date);
+  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
+    eq(finalizedOperationalReportsTable.scope, currentScope()),
+    eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope),
+    eq(finalizedOperationalReportsTable.periodStart, periodStart),
+    eq(finalizedOperationalReportsTable.periodEnd, periodEnd),
+  )).orderBy(desc(finalizedOperationalReportsTable.finalizedAt));
+  res.json(rows.map((row) => ({
+    id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
+    generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
+    finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy, contentHash: row.contentHash,
+  })));
+});
+
+router.get("/reports/operational/finalized/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const parsed = FinalizedReportId.safeParse(req.params);
+  if (!parsed.success) {
+    operationalError(res, 400, "invalid-report-id", "A valid finalized report id is required.");
+    return;
+  }
+  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
+    eq(finalizedOperationalReportsTable.id, parsed.data.id),
+    eq(finalizedOperationalReportsTable.scope, currentScope()),
+  ));
+  if (rows.length !== 1) {
+    operationalError(res, 404, "finalized-report-not-found", "Finalized report not found.");
+    return;
+  }
+  res.json(finalizedReportResponse(rows[0]));
+});
 
 export default router;

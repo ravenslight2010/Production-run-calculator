@@ -2,6 +2,7 @@
 // per file below.
 export * from "./runs";
 export * from "./sync";
+export * from "./operationalReports";
 export * from "./operationalIntentLedger";
 export * from "./dataReset";
 export * from "./dataHeals";

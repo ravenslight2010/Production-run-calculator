@@ -1062,6 +1062,80 @@ paths:
         "403":
           description: Manager capability required
 
+  /reports/operational/finalize:
+    post:
+      operationId: finalizeOperationalReport
+      tags: [audit]
+      summary: Finalize an immutable authoritative operational report
+      description: >-
+        Re-derives the canonical report from server-side scoped records and
+        appends it to the audit archive. Client report JSON is never accepted.
+        Repeating a finalization for the same scope and reporting period returns
+        the original immutable record and never replaces it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationalReportInput"
+      responses:
+        "201":
+          description: Finalized report created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizedOperationalReport" }
+        "200":
+          description: Existing finalized report returned idempotently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizedOperationalReport" }
+        "400": { description: Invalid input }
+        "403": { description: Manager capability required }
+        "409": { description: Canonical source data is incomplete or ambiguous }
+
+  /reports/operational/finalized:
+    get:
+      operationId: listFinalizedOperationalReports
+      tags: [audit]
+      summary: List finalized reports for a reporting period
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, enum: [day, week] }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Immutable finalized report archive entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FinalizedOperationalReportSummary" }
+        "403": { description: Manager capability required }
+
+  /reports/operational/finalized/{id}:
+    get:
+      operationId: getFinalizedOperationalReport
+      tags: [audit]
+      summary: Retrieve one immutable finalized operational report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Immutable finalized report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizedOperationalReport" }
+        "403": { description: Manager capability required }
+        "404": { description: Report absent from this scope }
+
   /reports/operational-view:
     get:
       operationId: getOperationalRunView
@@ -6426,6 +6500,30 @@ components:
           maxItems: 600
           items:
             $ref: "#/components/schemas/SummaryRunInput"
+
+    FinalizedOperationalReportSummary:
+      type: object
+      required: [id, reportScope, periodStart, periodEnd, generatedAt, generatedBy, finalizedAt, finalizedBy, contentHash]
+      properties:
+        id: { type: string, format: uuid }
+        reportScope: { type: string, enum: [day, week] }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        generatedBy: { type: string }
+        finalizedAt: { type: string, format: date-time }
+        finalizedBy: { type: string }
+        contentHash: { type: string }
+
+    FinalizedOperationalReport:
+      allOf:
+        - $ref: "#/components/schemas/FinalizedOperationalReportSummary"
+        - type: object
+          required: [scope, report]
+          properties:
+            scope: { type: string, enum: [live, sandbox] }
+            idempotent: { type: boolean }
+            report: { $ref: "#/components/schemas/OperationalReport" }
 
     OperationalRunView:
       type: object

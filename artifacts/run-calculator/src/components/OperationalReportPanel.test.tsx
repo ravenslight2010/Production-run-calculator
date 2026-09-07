@@ -134,6 +134,37 @@ describe("OperationalReportPanel", () => {
     expect(screen.getByRole("button", { name: "Excel" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Print / PDF" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Finalize" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("finalizes only an authoritative preview and lets a manager browse and view archived reports", async () => {
+    vi.mocked(useMe).mockReturnValue({
+      me: null, role: null, capabilities: ["review-incidents"],
+      hasCapability: (cap) => cap === "review-incidents", isManager: true, isLoading: false,
+    });
+    const archived = {
+      id: "11111111-1111-4111-8111-111111111111",
+      finalizedAt: "2026-09-04T13:00:00.000Z", finalizedBy: "manager",
+      contentHash: "a".repeat(64), report,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => report })
+      .mockResolvedValueOnce({ ok: true, json: async () => archived })
+      .mockResolvedValueOnce({ ok: true, json: async () => [archived] })
+      .mockResolvedValueOnce({ ok: true, json: async () => archived });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: "Preview report" }));
+    await userEvent.click(screen.getByRole("button", { name: "Finalize" }));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/reports/operational/finalize");
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      scope: "day", date: expect.any(String),
+    });
+    expect(await screen.findByText(/Authoritative report finalized/i)).toBeTruthy();
+    expect(screen.getByText(/Finalized reports for this period/i)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "View finalized report" }));
+    expect(fetchMock.mock.calls[3][0]).toBe(`/api/reports/operational/finalized/${archived.id}`);
+    expect(await screen.findByText(/Viewing immutable finalized report/i)).toBeTruthy();
   });
 
 });

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, BarChart2, Download, FileSpreadsheet, Lock, Loader2, Printer, Share2 } from "lucide-react";
+import { AlertTriangle, BarChart2, Download, FileSpreadsheet, Lock, Loader2, Printer, Share2, Archive } from "lucide-react";
 import * as XLSX from "xlsx";
 import { aggregateDaySummary, type OperationalReport } from "@workspace/day-summary";
 import type { SummaryInput } from "../aiSummary";
@@ -14,6 +14,16 @@ import { useMe } from "../useRole";
 
 type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput };
 export type OperationalReportDetailRange = { start: string; end: string; scope: "day" | "week" };
+type FinalizedReportListItem = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  generatedBy: string;
+  finalizedAt: string;
+  finalizedBy: string;
+  contentHash: string;
+};
 
 function periodStartFor(scope: "day" | "week", date: string): string {
   if (scope === "day") return date;
@@ -111,6 +121,9 @@ export default function OperationalReportPanel({
   const [reportSource, setReportSource] = useState<"authoritative" | "local-offline">("authoritative");
   const [busy, setBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
+  const [finalizeBusy, setFinalizeBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [history, setHistory] = useState<FinalizedReportListItem[]>([]);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -136,6 +149,62 @@ export default function OperationalReportPanel({
       setStatus("Local/offline fallback ready. Statistics are from this device and are not authoritative.");
     } finally {
       setBusy(false);
+    }
+  }
+  async function finalize() {
+    if (!report || reportSource !== "authoritative") return;
+    setFinalizeBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/reports/operational/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Scope/date are selection parameters only; the server derives every
+        // report fact again from canonical records.
+        body: JSON.stringify({ scope, date }),
+      });
+      if (!response.ok) throw new Error("Finalization failed");
+      const finalized = await response.json() as { id: string; report: OperationalReport; idempotent?: boolean };
+      setReport(finalized.report);
+      setReportSource("authoritative");
+      await loadHistory();
+      setStatus(finalized.idempotent
+        ? `Finalized report already exists (${finalized.id}). The original snapshot was retained.`
+        : `Authoritative report finalized (${finalized.id}).`);
+    } catch {
+      setError("Could not finalize the authoritative report. No report was changed.");
+    } finally {
+      setFinalizeBusy(false);
+    }
+  }
+  async function loadHistory() {
+    setHistoryBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/reports/operational/finalized?scope=${scope}&date=${encodeURIComponent(date)}`);
+      if (!response.ok) throw new Error("History request failed");
+      setHistory(await response.json() as FinalizedReportListItem[]);
+      setStatus("Finalized reports loaded for the selected reporting period.");
+    } catch {
+      setError("Could not load finalized reports for this reporting period.");
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+  async function openFinalized(id: string) {
+    setHistoryBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/reports/operational/finalized/${encodeURIComponent(id)}`);
+      if (!response.ok) throw new Error("Finalized report request failed");
+      const finalized = await response.json() as { report: OperationalReport };
+      setReport(finalized.report);
+      setReportSource("authoritative");
+      setStatus("Viewing immutable finalized report.");
+    } catch {
+      setError("Could not retrieve the finalized report.");
+    } finally {
+      setHistoryBusy(false);
     }
   }
   function download(kind: "csv" | "xlsx") {
@@ -204,8 +273,15 @@ export default function OperationalReportPanel({
         <button type="button" onClick={() => void generate()} disabled={busy || !date} className="h-9 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
           {busy ? <><Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> Building…</> : "Preview report"}
         </button>
+        <button type="button" onClick={() => void loadHistory()} disabled={historyBusy || !date} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50">
+          {historyBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Archive className="w-4 h-4 inline mr-1" />} Finalized reports
+        </button>
         {report && (
           <>
+            <button type="button" onClick={() => void finalize()} disabled={finalizeBusy || reportSource !== "authoritative"} title={reportSource === "local-offline" ? "Offline fallback reports cannot be finalized." : undefined} className="h-9 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-50">
+              {finalizeBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Lock className="w-4 h-4 inline mr-1" />}
+              Finalize
+            </button>
             <button type="button" onClick={() => download("csv")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
               <Download className="w-4 h-4 inline mr-1" /> CSV
             </button>
@@ -224,6 +300,17 @@ export default function OperationalReportPanel({
       </div>
       {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
       {status && <p className="text-sm text-muted-foreground" role="status" aria-live="polite">{status}</p>}
+      {history.length > 0 && (
+        <section aria-label="Finalized report history" className="rounded-lg border border-border/60 p-3">
+          <h3 className="text-sm font-bold">Finalized reports for this period</h3>
+          <ul className="mt-2 space-y-2 text-xs">
+            {history.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2">
+              <span>Finalized {new Date(item.finalizedAt).toLocaleString()} by {item.finalizedBy} · {item.contentHash.slice(0, 12)}</span>
+              <button type="button" className="font-semibold text-primary hover:underline" onClick={() => void openFinalized(item.id)}>View finalized report</button>
+            </li>)}
+          </ul>
+        </section>
+      )}
       {report && (
         <article className="report-print-root space-y-4 border-t border-border/60 pt-3 print:border-0 print:text-black" aria-label="Shift report">
           <header>

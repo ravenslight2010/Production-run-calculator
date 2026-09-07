@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -16,6 +16,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
+let finalizedOperationalReportsTable: DbModule["finalizedOperationalReportsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -56,6 +57,7 @@ beforeAll(async () => {
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
+  finalizedOperationalReportsTable = dbMod.finalizedOperationalReportsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -91,7 +93,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   clearSandboxCache();
-  await db.execute(sql`TRUNCATE ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${finalizedOperationalReportsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
@@ -285,5 +287,39 @@ describe("operational report endpoints", () => {
     expect(await res.json()).toMatchObject({
       error: { code: "canonical-snapshot-invalid" },
     });
+  });
+
+  it("finalizes only a server-derived snapshot, keeps it immutable, and lists/retrieves only its scope", async () => {
+    await db.insert(dailySyncTable).values([
+      { scope: "live", date: "2026-09-06", data: snapshot({ id: "live-final", brand: "Original", flavor: "Snapshot", startedAt: 1_000, endedAt: 2_000 }) },
+      { scope: "sandbox", date: "2026-09-06", data: snapshot({ id: "sandbox-final", brand: "Sandbox", flavor: "Snapshot", startedAt: 1_000, endedAt: 2_000 }) },
+    ]);
+    expect((await req(null, "POST", "/api/reports/operational/finalize", { scope: "day", date: "2026-09-06" })).status).toBe(401);
+    expect((await req(OPERATOR, "POST", "/api/reports/operational/finalize", { scope: "day", date: "2026-09-06" })).status).toBe(403);
+    const created = await req(MANAGER, "POST", "/api/reports/operational/finalize", {
+      scope: "day", date: "2026-09-06",
+      // Must be ignored; this is not the canonical server output.
+      report: { production: { casesProduced: 999999 } },
+    });
+    expect(created.status).toBe(201);
+    const archived = await created.json() as { id: string; contentHash: string; report: { production: { casesProduced: number }; productionRows: Array<{ run: string }> } };
+    expect(archived.report.production.casesProduced).not.toBe(999999);
+    expect(archived.report.productionRows[0]?.run).toMatch(/Original Snapshot/);
+    expect(archived.contentHash).toMatch(/^[a-f0-9]{64}$/);
+
+    await db.update(dailySyncTable).set({
+      data: snapshot({ id: "live-final", brand: "Mutated", flavor: "Source", startedAt: 1_000, endedAt: 2_000 }, 500),
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, "2026-09-06")));
+    const retry = await req(MANAGER, "POST", "/api/reports/operational/finalize", { scope: "day", date: "2026-09-06" });
+    expect(retry.status).toBe(200);
+    expect((await retry.json() as { id: string; idempotent: boolean; report: { productionRows: Array<{ run: string }> } })).toMatchObject({
+      id: archived.id, idempotent: true, report: { productionRows: [{ run: "Original Snapshot" }] },
+    });
+    const listed = await req(MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06");
+    expect((await listed.json() as Array<{ id: string }>).map((row) => row.id)).toEqual([archived.id]);
+    const retrieved = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
+    expect((await retrieved.json() as { report: { productionRows: Array<{ run: string }> } }).report.productionRows[0]?.run).toBe("Original Snapshot");
+    expect((await req(SANDBOX_MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`)).status).toBe(404);
+    expect((await req(SANDBOX_MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06")).status).toBe(200);
   });
 });
