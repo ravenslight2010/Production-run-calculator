@@ -98,12 +98,19 @@ E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
 ```
 
 Run the linked-recipe refresh and Start-freeze regression with the same safety
-boundary:
+boundary. Unlike the general approved-mode suites, this command also requires
+the database name itself to contain an explicit disposable marker. Local and
+CI runs should set `DATABASE_URL` to the same kind of dedicated target (for
+example, a database named `recipe_refresh_e2e`) and then invoke this command:
 
 ```sh
-E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/recipe_refresh_e2e \
   pnpm --filter @workspace/run-calculator run test:e2e:recipe-refresh
 ```
+
+The package command supplies the approved test-mode flags automatically. The
+Playwright config still fails closed unless the database identity is explicitly
+disposable, and the existing advisory lock plus fixture cleanup remain active.
 
 Run the recurring cross-device smoke matrix before release checks. It is a
 small lifecycle signal, not a replacement for the focused wake, timer, mobile

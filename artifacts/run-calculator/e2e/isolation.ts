@@ -161,6 +161,31 @@ export function requireIsolatedTestDatabase(operation: string): string {
   return url;
 }
 
+/**
+ * The recipe-refresh suite changes shared recipe master data in addition to
+ * clearing disposable live-day rows. Require the connection itself to name a
+ * disposable database; approved-mode flags alone are intentionally not enough.
+ */
+export function requireDedicatedTestDatabase(operation: string): string {
+  const url = requireIsolatedTestDatabase(operation);
+  let database = "";
+  try {
+    const parsed = new URL(url);
+    database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+  } catch {
+    // requireIsolatedTestDatabase already emitted the actionable URL error.
+  }
+
+  if (!/(?:^|[-_])(e2e|test|tests|tmp|temporary)(?:[-_]|$)/i.test(database)) {
+    throw new Error(
+      `${operation} requires a dedicated disposable database. ` +
+        "Use a database name containing an explicit e2e, test, tmp, or " +
+        "temporary marker; approved test-mode flags alone are not sufficient.",
+    );
+  }
+  return url;
+}
+
 export function uniqueTestId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random()
     .toString(36)
