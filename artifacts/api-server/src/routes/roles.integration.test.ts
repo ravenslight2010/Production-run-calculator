@@ -515,6 +515,13 @@ const ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    name: "GET /audit-logs/profile-name-link-cleanup",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/audit-logs/profile-name-link-cleanup",
+    okStatus: 200,
+  },
+  {
     name: "GET /roles",
     capability: "manage-staff",
     method: "GET",
@@ -851,6 +858,22 @@ const ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    name: "GET /reports/handoff",
+    capability: "review-incidents",
+    method: "GET",
+    path: () => "/api/reports/handoff?date=2026-09-06",
+    okStatus: 200,
+  },
+  {
+    name: "GET /reports/operational-view",
+    capability: "review-incidents",
+    method: "GET",
+    path: () => "/api/reports/operational-view?date=2026-09-06&runId=missing",
+    // The capability check must run before the handler's canonical-snapshot
+    // lookup.  A 404 here proves the authorized request reached that lookup.
+    okStatus: 404,
+  },
+  {
     name: "POST /master-data/health/scan",
     capability: "manage-profiles",
     method: "POST",
@@ -956,6 +979,7 @@ describe("capability-based access control", () => {
 
   it("keeps every registered application write in the mutation authorization matrix", async () => {
     const {
+      directAuthorizationCoverageRouters,
       mutationAuthorizationInventory,
       mutationAuthorizationRouters,
       validateMutationAuthorizationInventory,
@@ -964,6 +988,11 @@ describe("capability-based access control", () => {
     // every mounted API router (including public auth endpoints) is checked, so
     // a new write fails unless it is classified and its gate precedes its handler.
     validateMutationAuthorizationInventory(mutationAuthorizationRouters);
+    expect(
+      directAuthorizationCoverageRouters.every(({ router }) =>
+        mutationAuthorizationRouters.some((entry) => entry.router === router),
+      ),
+    ).toBe(true);
     expect(mutationAuthorizationInventory).toContainEqual({
       method: "POST",
       path: "/auth/change-password",
@@ -1004,6 +1033,40 @@ describe("capability-based access control", () => {
 
     const scheduledAllowed = await req(MANAGER, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
     expect(scheduledAllowed.status).toBe(200);
+  });
+
+  it("keeps scheduled-day read variants authenticated and scope-bound without weakening scheduled writes", async () => {
+    const scheduledPayload = {
+      dayState: {
+        runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Future" }],
+        resetAt: 0,
+      },
+      runValues: {},
+    };
+    const scheduledWrite = await req(
+      MANAGER,
+      "PUT",
+      "/api/sync/2099-01-02?today=2025-01-01",
+      { senderId: "scheduled-read-coverage", payload: scheduledPayload },
+    );
+    expect(scheduledWrite.status).toBe(200);
+
+    // The scheduled GETs are shared day-state reads, so an operator may read
+    // them after authentication. The write variant above remains manager-only.
+    const scheduledDay = await req(OPERATOR, "GET", "/api/sync/2099-01-02");
+    expect(scheduledDay.status).toBe(200);
+    const scheduledDayBody = await scheduledDay.json() as {
+      dayState: { runs: Array<{ id: string }> };
+    };
+    expect(scheduledDayBody.dayState.runs[0].id).toBe("scheduled-run");
+
+    const scheduledList = await req(OPERATOR, "GET", "/api/sync/scheduled?today=2025-01-01&include=runs");
+    expect(scheduledList.status).toBe(200);
+    const scheduledRows = await scheduledList.json() as Array<{ date: string }>;
+    expect(scheduledRows.some((row) => row.date === "2099-01-02")).toBe(true);
+
+    expect((await req(null, "GET", "/api/sync/2099-01-02")).status).toBe(401);
+    expect((await req(null, "GET", "/api/sync/scheduled")).status).toBe(401);
   });
 
   it("resolves the expected capabilities for every seeded role", async () => {

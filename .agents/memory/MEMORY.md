@@ -1,5 +1,6 @@
 - [Packaging pause/resume flow](packaging-pause-clock-handoff.md) — pause stops the Press; downstream drains by zone, and Resume refills before packaging tracking restarts.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
+- [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Cross-run autosave contamination](cross-run-autosave-contamination.md) — autosave useEffect([v]) reads run ID from dayStateRef (latest ref) but v can lag; lastFormRunIdRef guards prevent wrong product's data landing in another run's slot/profile.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
 - [Dough families and variants](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) — one family recipe; specific-flavor matching must beat catch-all and may override a wrong stored weight.

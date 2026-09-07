@@ -63,6 +63,11 @@ export const directAuthorizationCoverageRouters = [
 ] as const;
 
 export const mutationAuthorizationRouters = [
+  // Keep the original route owners in this guard as well as their capability
+  // families.  The family mounts are the production composition, while these
+  // direct owners make it impossible for a newly added direct mount (or an
+  // alternate handler on one of these routers) to escape classification.
+  ...directAuthorizationCoverageRouters,
   { name: "health", router: healthRouter }, { name: "auth", router: authRouter },
   { name: "core-sync-runs", router: coreSyncRunsRouter },
   { name: "master-data-imports", router: masterDataImportsRouter },
