@@ -50,6 +50,9 @@ export interface AuthorizedFixtureCleanupOptions {
   profileKeys?: Iterable<string>;
   syncDates?: Iterable<string>;
   cheeseRecipeIds?: Iterable<string>;
+  doughRecipeIds?: Iterable<string>;
+  sauceRecipeIds?: Iterable<string>;
+  mixIds?: Iterable<string>;
 }
 
 export interface CheeseRecipeFixture {
@@ -67,6 +70,39 @@ export interface CheeseRecipeFixture {
     sharePct?: number;
   }>;
   enabled?: boolean;
+}
+
+export interface NamedRecipeFixture {
+  id: string;
+  name: string;
+  notes?: string;
+  components?: Array<{
+    ingredient: string;
+    lbs: number;
+  }>;
+  enabled?: boolean;
+  brand?: string;
+  flavors?: string[];
+  doughballWeightOz?: number;
+  doughballsPerTray?: number;
+}
+
+export interface MixFixture {
+  id: string;
+  name: string;
+  brand?: string;
+  flavor?: string;
+  batchSize?: number;
+  daysEarly?: number;
+  notes?: string;
+  amountAlreadyMade?: number;
+  components?: Array<{
+    ingredient: string;
+    perPizza: number;
+    perBatchLbs?: number;
+  }>;
+  enabled?: boolean;
+  isPrep?: boolean;
 }
 
 /**
@@ -152,6 +188,9 @@ export class AuthorizedBrowserFixtures {
   private readonly profileKeys = new Set<string>();
   private readonly syncDates = new Set<string>();
   private readonly cheeseRecipeIds = new Set<string>();
+  private readonly doughRecipeIds = new Set<string>();
+  private readonly sauceRecipeIds = new Set<string>();
+  private readonly mixIds = new Set<string>();
   private lockClient: Client | undefined;
   private startPromise: Promise<void> | undefined;
 
@@ -364,6 +403,66 @@ export class AuthorizedBrowserFixtures {
     return recipe.id;
   }
 
+  async seedNamedRecipe(
+    kind: "dough" | "sauce",
+    account: Pick<AuthorizedTestAccount, "token">,
+    recipe: NamedRecipeFixture,
+  ): Promise<string> {
+    await this.start();
+    const response = await this.request.post(
+      `${this.apiBase}/api/${kind}-recipes`,
+      {
+        headers: { Cookie: `rc_auth=${account.token}` },
+        data: {
+          items: [{
+            notes: "",
+            components: [],
+            enabled: true,
+            brand: "",
+            flavors: [],
+            ...recipe,
+          }],
+        },
+      },
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Fixture ${kind} recipe seed failed: ${await responseFailure(response)}`,
+      );
+    }
+    (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).add(recipe.id);
+    return recipe.id;
+  }
+
+  async seedMix(
+    account: Pick<AuthorizedTestAccount, "token">,
+    mix: MixFixture,
+  ): Promise<string> {
+    await this.start();
+    const response = await this.request.post(`${this.apiBase}/api/mixes`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      data: {
+        items: [{
+          brand: "",
+          flavor: "",
+          batchSize: 0,
+          daysEarly: 0,
+          notes: "",
+          amountAlreadyMade: 0,
+          components: [],
+          enabled: true,
+          isPrep: false,
+          ...mix,
+        }],
+      },
+    });
+    if (!response.ok()) {
+      throw new Error(`Fixture mix seed failed: ${await responseFailure(response)}`);
+    }
+    this.mixIds.add(mix.id);
+    return mix.id;
+  }
+
   async removeBrandProfiles(
     keys: Iterable<string> = this.profileKeys,
     scope = "live",
@@ -406,14 +505,63 @@ export class AuthorizedBrowserFixtures {
     selected.forEach((id) => this.cheeseRecipeIds.delete(id));
   }
 
+  async removeNamedRecipes(
+    kind: "dough" | "sauce",
+    ids: Iterable<string>,
+  ): Promise<void> {
+    const selected = [...ids];
+    if (selected.length === 0) return;
+    await this.withDatabase(`remove browser fixture ${kind} recipes`, async (db) => {
+      await db.query(
+        `DELETE FROM ${kind}_recipes WHERE id = ANY($1::text[]) AND scope = $2`,
+        [selected, "live"],
+      );
+    });
+    (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).forEach((id) => {
+      if (selected.includes(id)) {
+        (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).delete(id);
+      }
+    });
+  }
+
+  async removeDoughRecipes(
+    ids: Iterable<string> = this.doughRecipeIds,
+  ): Promise<void> {
+    await this.removeNamedRecipes("dough", ids);
+  }
+
+  async removeSauceRecipes(
+    ids: Iterable<string> = this.sauceRecipeIds,
+  ): Promise<void> {
+    await this.removeNamedRecipes("sauce", ids);
+  }
+
+  async removeMixes(ids: Iterable<string> = this.mixIds): Promise<void> {
+    const selected = [...ids];
+    if (selected.length === 0) return;
+    await this.withDatabase("remove browser fixture mixes", async (db) => {
+      await db.query(
+        "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
+        [selected, "live"],
+      );
+    });
+    selected.forEach((id) => this.mixIds.delete(id));
+  }
+
   async cleanup(options: AuthorizedFixtureCleanupOptions = {}): Promise<void> {
     for (const key of options.profileKeys ?? []) this.profileKeys.add(key);
     for (const date of options.syncDates ?? []) this.syncDates.add(date);
     for (const id of options.cheeseRecipeIds ?? []) this.cheeseRecipeIds.add(id);
+    for (const id of options.doughRecipeIds ?? []) this.doughRecipeIds.add(id);
+    for (const id of options.sauceRecipeIds ?? []) this.sauceRecipeIds.add(id);
+    for (const id of options.mixIds ?? []) this.mixIds.add(id);
     const errors: unknown[] = [];
     await this.removeBrandProfiles().catch((error) => errors.push(error));
     await this.removeTodaySync().catch((error) => errors.push(error));
     await this.removeCheeseRecipes().catch((error) => errors.push(error));
+    await this.removeDoughRecipes().catch((error) => errors.push(error));
+    await this.removeSauceRecipes().catch((error) => errors.push(error));
+    await this.removeMixes().catch((error) => errors.push(error));
     await this.withDatabase("cleanup authorized browser fixtures", async (db) => {
       await cleanupTestUsers(db, this.usernames);
       if (this.roleNames.size > 0) {
