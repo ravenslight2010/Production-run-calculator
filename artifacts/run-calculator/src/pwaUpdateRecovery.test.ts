@@ -1,6 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { updateAndReload } from "./pwaUpdateRecovery";
+import {
+  claimStaleAssetRecoveryAttempt,
+  clearStaleAppShellCaches,
+  updateAndReload,
+} from "./pwaUpdateRecovery";
+
+describe("claimStaleAssetRecoveryAttempt", () => {
+  it("allows one attempt per build while allowing a new build to recover", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    };
+
+    expect(claimStaleAssetRecoveryAttempt("old-build", storage)).toBe(true);
+    expect(claimStaleAssetRecoveryAttempt("old-build", storage)).toBe(false);
+    expect(claimStaleAssetRecoveryAttempt("new-build", storage)).toBe(true);
+  });
+});
+
+describe("clearStaleAppShellCaches", () => {
+  it("removes precached app shells without deleting unrelated runtime caches", async () => {
+    const remove = vi.fn().mockResolvedValue(true);
+    await clearStaleAppShellCaches({
+      keys: vi.fn().mockResolvedValue([
+        "workbox-precache-v2-http://app.test/",
+        "google-fonts-cache",
+      ]),
+      delete: remove,
+    });
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
+  });
+});
 
 describe("updateAndReload", () => {
   it("checks, activates, and reloads only after the recovery action is chosen", async () => {
