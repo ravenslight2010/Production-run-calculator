@@ -7,7 +7,7 @@
  */
 
 /**
- * Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.
+ * Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.
  */
 export type FinalizedOperationalReportSummaryHashContract = typeof FinalizedOperationalReportSummaryHashContract[keyof typeof FinalizedOperationalReportSummaryHashContract];
 

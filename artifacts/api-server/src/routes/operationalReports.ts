@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import * as z from "zod";
 import {
@@ -204,22 +204,47 @@ type FinalizedReportIntegrity =
 function finalizedReportIntegrity(
   row: typeof finalizedOperationalReportsTable.$inferSelect,
 ): FinalizedReportIntegrity {
-  const canonicalHash = reportHash(row.payload);
-  if (canonicalHash === row.contentHash) {
+  if (
+    row.hashContract !== null
+    && row.hashContract !== CURRENT_HASH_CONTRACT
+    && row.hashContract !== LEGACY_JSON_HASH_CONTRACT
+  ) {
     return {
-      ok: true,
-      actualHash: canonicalHash,
-      hashContract: CURRENT_HASH_CONTRACT,
+      ok: false,
+      actualHashes: {
+        [CURRENT_HASH_CONTRACT]: "not-computed-for-unrecognized-contract",
+        [LEGACY_JSON_HASH_CONTRACT]: "not-computed-for-unrecognized-contract",
+      },
     };
   }
-  const legacyHash = legacyReportHash(row.payload);
-  if (legacyHash === row.contentHash) {
-    return {
-      ok: true,
-      actualHash: legacyHash,
-      hashContract: LEGACY_JSON_HASH_CONTRACT,
-    };
+
+  if (row.hashContract === CURRENT_HASH_CONTRACT || row.hashContract === null) {
+    const canonicalHash = reportHash(row.payload);
+    if (canonicalHash === row.contentHash) {
+      return {
+        ok: true,
+        actualHash: canonicalHash,
+        hashContract: CURRENT_HASH_CONTRACT,
+      };
+    }
   }
+  if (row.hashContract === LEGACY_JSON_HASH_CONTRACT || row.hashContract === null) {
+    const legacyHash = legacyReportHash(row.payload);
+    if (legacyHash === row.contentHash) {
+      return {
+        ok: true,
+        actualHash: legacyHash,
+        hashContract: LEGACY_JSON_HASH_CONTRACT,
+      };
+    }
+  }
+
+  const canonicalHash = row.hashContract === LEGACY_JSON_HASH_CONTRACT
+    ? "not-computed-for-json-v1-contract"
+    : reportHash(row.payload);
+  const legacyHash = row.hashContract === CURRENT_HASH_CONTRACT
+    ? "not-computed-for-canonical-json-v2-contract"
+    : legacyReportHash(row.payload);
   return {
     ok: false,
     actualHashes: {
@@ -227,6 +252,28 @@ function finalizedReportIntegrity(
       [LEGACY_JSON_HASH_CONTRACT]: legacyHash,
     },
   };
+}
+
+async function persistVerifiedHashContract(
+  row: typeof finalizedOperationalReportsTable.$inferSelect,
+  integrity: Extract<FinalizedReportIntegrity, { ok: true }>,
+): Promise<void> {
+  if (row.hashContract !== null) return;
+  await db.update(finalizedOperationalReportsTable)
+    .set({ hashContract: integrity.hashContract })
+    .where(and(
+      eq(finalizedOperationalReportsTable.id, row.id),
+      eq(finalizedOperationalReportsTable.scope, row.scope),
+      isNull(finalizedOperationalReportsTable.hashContract),
+    ));
+}
+
+async function verifiedFinalizedReportIntegrity(
+  row: typeof finalizedOperationalReportsTable.$inferSelect,
+): Promise<FinalizedReportIntegrity> {
+  const integrity = finalizedReportIntegrity(row);
+  if (integrity.ok) await persistVerifiedHashContract(row, integrity);
+  return integrity;
 }
 
 function finalizedReportResponse(
@@ -249,10 +296,25 @@ function finalizedReportResponse(
   };
 }
 
+const finalizedReportMetadataColumns = {
+  id: finalizedOperationalReportsTable.id,
+  reportScope: finalizedOperationalReportsTable.reportScope,
+  periodStart: finalizedOperationalReportsTable.periodStart,
+  periodEnd: finalizedOperationalReportsTable.periodEnd,
+  generatedAt: finalizedOperationalReportsTable.generatedAt,
+  generatedBy: finalizedOperationalReportsTable.generatedBy,
+  finalizedAt: finalizedOperationalReportsTable.finalizedAt,
+  finalizedBy: finalizedOperationalReportsTable.finalizedBy,
+  contentHash: finalizedOperationalReportsTable.contentHash,
+  hashContract: finalizedOperationalReportsTable.hashContract,
+};
+
 function finalizedReportMetadata(
-  row: typeof finalizedOperationalReportsTable.$inferSelect,
+  row: {
+    [K in keyof typeof finalizedReportMetadataColumns]:
+      typeof finalizedOperationalReportsTable.$inferSelect[K];
+  },
 ) {
-  const integrity = finalizedReportIntegrity(row);
   return {
     id: row.id,
     reportScope: row.reportScope,
@@ -263,7 +325,10 @@ function finalizedReportMetadata(
     finalizedAt: row.finalizedAt.toISOString(),
     finalizedBy: row.finalizedBy,
     contentHash: row.contentHash,
-    hashContract: integrity.ok ? integrity.hashContract : "unrecognized",
+    hashContract: row.hashContract === CURRENT_HASH_CONTRACT
+      || row.hashContract === LEGACY_JSON_HASH_CONTRACT
+      ? row.hashContract
+      : "unrecognized",
   };
 }
 
@@ -931,7 +996,7 @@ router.post(
       eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
     ));
     if (existing.length === 1) {
-      const integrity = finalizedReportIntegrity(existing[0]);
+      const integrity = await verifiedFinalizedReportIntegrity(existing[0]);
       if (!integrity.ok) {
         sendFinalizedReportIntegrityError(req, res, existing[0], integrity);
         return;
@@ -955,6 +1020,7 @@ router.post(
       finalizedAt,
       finalizedBy: req.userId ?? "authenticated manager",
       contentHash: reportHash(report),
+      hashContract: CURRENT_HASH_CONTRACT,
       payload: report,
     };
     try {
@@ -968,7 +1034,7 @@ router.post(
         eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
       ));
       if (concurrent.length === 1) {
-        const integrity = finalizedReportIntegrity(concurrent[0]);
+        const integrity = await verifiedFinalizedReportIntegrity(concurrent[0]);
         if (!integrity.ok) {
           sendFinalizedReportIntegrityError(req, res, concurrent[0], integrity);
           return;
@@ -995,7 +1061,7 @@ router.get("/reports/operational/finalized", requireCapability("review-incidents
     return;
   }
   const [periodStart, periodEnd] = dateRange(parsed.data.scope, parsed.data.date);
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
+  const rows = await db.select(finalizedReportMetadataColumns).from(finalizedOperationalReportsTable).where(and(
     eq(finalizedOperationalReportsTable.scope, currentScope()),
     eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope),
     eq(finalizedOperationalReportsTable.periodStart, periodStart),
@@ -1010,7 +1076,7 @@ router.get("/reports/operational/finalized/search", requireCapability("review-in
     operationalError(res, 400, "invalid-query", "Valid startDate and endDate parameters within a 366-day range are required. Limit must be between 1 and 100.");
     return;
   }
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
+  const rows = await db.select(finalizedReportMetadataColumns).from(finalizedOperationalReportsTable).where(and(
     eq(finalizedOperationalReportsTable.scope, currentScope()),
     parsed.data.scope ? eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope) : undefined,
     gte(finalizedOperationalReportsTable.periodEnd, parsed.data.startDate),
@@ -1036,7 +1102,7 @@ router.get("/reports/operational/finalized/:id", requireCapability("review-incid
     operationalError(res, 404, "finalized-report-not-found", "Finalized report not found.");
     return;
   }
-  const integrity = finalizedReportIntegrity(rows[0]);
+  const integrity = await verifiedFinalizedReportIntegrity(rows[0]);
   if (!integrity.ok) {
     sendFinalizedReportIntegrityError(req, res, rows[0], integrity);
     return;

@@ -1249,7 +1249,7 @@ export const FinalizeOperationalReportResponse = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),
@@ -1326,7 +1326,7 @@ export const ListFinalizedOperationalReportsResponseItem = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
 })
 export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
 
@@ -1357,7 +1357,7 @@ export const SearchFinalizedOperationalReportsResponseItem = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
 })
 export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinalizedOperationalReportsResponseItem)
 
@@ -1379,7 +1379,7 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),

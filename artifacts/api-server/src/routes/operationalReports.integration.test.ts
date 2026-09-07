@@ -307,6 +307,12 @@ describe("operational report endpoints", () => {
     expect(archived.report.productionRows[0]?.run).toMatch(/Original Snapshot/);
     expect(archived.contentHash).toMatch(/^[a-f0-9]{64}$/);
     expect(archived.hashContract).toBe("canonical-json-v2");
+    const persistedCreated = await db.select({
+      hashContract: finalizedOperationalReportsTable.hashContract,
+    }).from(finalizedOperationalReportsTable).where(
+      eq(finalizedOperationalReportsTable.id, archived.id),
+    );
+    expect(persistedCreated).toEqual([{ hashContract: "canonical-json-v2" }]);
 
     await db.update(dailySyncTable).set({
       data: snapshot({ id: "live-final", brand: "Mutated", flavor: "Source", startedAt: 1_000, endedAt: 2_000 }, 500),
@@ -446,6 +452,12 @@ describe("operational report endpoints", () => {
       hashContract: "json-v1",
       report: legacyPayload,
     });
+    const classifiedLegacy = await db.select({
+      hashContract: finalizedOperationalReportsTable.hashContract,
+    }).from(finalizedOperationalReportsTable).where(
+      eq(finalizedOperationalReportsTable.id, legacyId),
+    );
+    expect(classifiedLegacy).toEqual([{ hashContract: "json-v1" }]);
     const listed = await req(
       MANAGER,
       "GET",
@@ -471,6 +483,12 @@ describe("operational report endpoints", () => {
         message: "The finalized report failed integrity verification and cannot be exported.",
       },
     });
+    const classificationAfterTamper = await db.select({
+      hashContract: finalizedOperationalReportsTable.hashContract,
+    }).from(finalizedOperationalReportsTable).where(
+      eq(finalizedOperationalReportsTable.id, legacyId),
+    );
+    expect(classificationAfterTamper).toEqual([{ hashContract: "json-v1" }]);
   });
 
   it("searches a bounded date range across day and week reports within the manager facility", async () => {
@@ -492,12 +510,13 @@ describe("operational report endpoints", () => {
       finalizedAt,
       finalizedBy: MANAGER,
       contentHash: id.padEnd(64, "a"),
+      hashContract: null,
       payload: {},
     });
     await db.insert(finalizedOperationalReportsTable).values([
-      row("live-day-1", "live", "day", "2026-09-01", "2026-09-01"),
-      row("live-week-1", "live", "week", "2026-08-27", "2026-09-02"),
-      row("live-day-2", "live", "day", "2026-09-03", "2026-09-03"),
+      { ...row("live-day-1", "live", "day", "2026-09-01", "2026-09-01"), hashContract: "json-v1" },
+      { ...row("live-week-1", "live", "week", "2026-08-27", "2026-09-02"), hashContract: "canonical-json-v2" },
+      { ...row("live-day-2", "live", "day", "2026-09-03", "2026-09-03"), hashContract: "future-json-v3" },
       row("outside-range", "live", "day", "2026-08-31", "2026-08-31"),
       row("sandbox-day", "sandbox", "day", "2026-09-03", "2026-09-03"),
     ]);
@@ -505,10 +524,10 @@ describe("operational report endpoints", () => {
     expect((await req(OPERATOR, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03")).status).toBe(403);
     const searched = await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03");
     expect(searched.status).toBe(200);
-    expect((await searched.json() as Array<{ id: string; reportScope: string }>).map(({ id, reportScope }) => ({ id, reportScope }))).toEqual([
-      { id: "live-day-2", reportScope: "day" },
-      { id: "live-week-1", reportScope: "week" },
-      { id: "live-day-1", reportScope: "day" },
+    expect((await searched.json() as Array<{ id: string; reportScope: string; hashContract: string }>).map(({ id, reportScope, hashContract }) => ({ id, reportScope, hashContract }))).toEqual([
+      { id: "live-day-2", reportScope: "day", hashContract: "unrecognized" },
+      { id: "live-week-1", reportScope: "week", hashContract: "canonical-json-v2" },
+      { id: "live-day-1", reportScope: "day", hashContract: "json-v1" },
     ]);
 
     const dayOnly = await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03&scope=day&limit=1");
@@ -528,6 +547,88 @@ describe("operational report endpoints", () => {
         AND indexname = 'finalized_operational_reports_scope_end_finalized_idx'
     `);
     expect(indexes.rows[0]?.indexdef).toMatch(/\(scope, period_end DESC(?: NULLS LAST)?, finalized_at DESC(?: NULLS LAST)?\)/);
+
+    const hashContractColumn = await db.execute(sql`
+      SELECT is_nullable, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'finalized_operational_reports'
+        AND column_name = 'hash_contract'
+    `);
+    expect(hashContractColumn.rows).toEqual([{
+      is_nullable: "YES",
+      column_default: null,
+    }]);
+  });
+
+  it("leaves an unverified legacy row unclassified after metadata search and failed detail verification", async () => {
+    const id = "20000000-0000-4000-8000-000000000001";
+    const unsupportedId = "20000000-0000-4000-8000-000000000002";
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    await db.insert(finalizedOperationalReportsTable).values([
+      {
+        id,
+        scope: "live",
+        reportScope: "day",
+        periodStart: "2026-09-04",
+        periodEnd: "2026-09-04",
+        generatedAt: finalizedAt,
+        generatedBy: MANAGER,
+        finalizedAt,
+        finalizedBy: MANAGER,
+        contentHash: "f".repeat(64),
+        payload: { unknown: "contract" },
+      },
+      {
+        id: unsupportedId,
+        scope: "live",
+        reportScope: "day",
+        periodStart: "2026-09-03",
+        periodEnd: "2026-09-03",
+        generatedAt: finalizedAt,
+        generatedBy: MANAGER,
+        finalizedAt,
+        finalizedBy: MANAGER,
+        contentHash: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        hashContract: "future-json-v3",
+        payload: {},
+      },
+    ]);
+
+    const listed = await req(
+      MANAGER,
+      "GET",
+      "/api/reports/operational/finalized/search?startDate=2026-09-04&endDate=2026-09-04",
+    );
+    expect(await listed.json()).toMatchObject([{
+      id,
+      hashContract: "unrecognized",
+    }]);
+    expect((await db.select({
+      hashContract: finalizedOperationalReportsTable.hashContract,
+    }).from(finalizedOperationalReportsTable).where(
+      eq(finalizedOperationalReportsTable.id, id),
+    ))).toEqual([{ hashContract: null }]);
+
+    const detail = await req(MANAGER, "GET", `/api/reports/operational/finalized/${id}`);
+    expect(detail.status).toBe(409);
+    expect((await db.select({
+      hashContract: finalizedOperationalReportsTable.hashContract,
+    }).from(finalizedOperationalReportsTable).where(
+      eq(finalizedOperationalReportsTable.id, id),
+    ))).toEqual([{ hashContract: null }]);
+
+    const unsupportedDetail = await req(
+      MANAGER,
+      "GET",
+      `/api/reports/operational/finalized/${unsupportedId}`,
+    );
+    expect(unsupportedDetail.status).toBe(409);
+    expect((await db.select({
+      hashContract: finalizedOperationalReportsTable.hashContract,
+    }).from(finalizedOperationalReportsTable).where(
+      eq(finalizedOperationalReportsTable.id, unsupportedId),
+    ))).toEqual([{ hashContract: "future-json-v3" }]);
   });
 
   it("fails closed when an archived report payload no longer matches its content hash", async () => {

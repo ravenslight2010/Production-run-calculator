@@ -6679,7 +6679,7 @@ components:
         hashContract:
           type: string
           enum: [json-v1, canonical-json-v2, unrecognized]
-          description: Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.
+          description: Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.
 
     FinalizedOperationalReport:
       allOf:

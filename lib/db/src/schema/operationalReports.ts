@@ -1,8 +1,9 @@
 import { index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
-// Finalized reports are an audit record, not a working document.  There are no
-// mutable columns: a period can be finalized once per scope and retries return
-// that original record rather than replacing it.
+// Finalized reports are an audit record, not a working document. A period can
+// be finalized once per scope and retries return that original record rather
+// than replacing it. hashContract is derived verification metadata: legacy
+// rows remain null until their immutable payload and hash verify successfully.
 export const finalizedOperationalReportsTable = pgTable(
   "finalized_operational_reports",
   {
@@ -16,6 +17,7 @@ export const finalizedOperationalReportsTable = pgTable(
     finalizedAt: timestamp("finalized_at", { withTimezone: true }).notNull(),
     finalizedBy: text("finalized_by").notNull(),
     contentHash: text("content_hash").notNull(),
+    hashContract: text("hash_contract"),
     payload: jsonb("payload").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
