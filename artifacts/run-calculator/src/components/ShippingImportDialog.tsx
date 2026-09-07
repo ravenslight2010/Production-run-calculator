@@ -132,15 +132,15 @@ export default function ShippingImportDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" data-testid="dialog-shipping-import">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shipping-import-dialog-title" className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-lg border border-border bg-background shadow-lg">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shipping-import-dialog-title" className="w-full max-w-2xl h-[85vh] max-h-[85vh] min-h-0 flex flex-col rounded-lg border border-border bg-background shadow-lg">
+        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border">
           <h2 id="shipping-import-dialog-title" className="text-sm font-semibold">Import Shipping &amp; Palletizing Guide</h2>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-muted" aria-label="Close" data-testid="button-shipping-import-close">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-3">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin" /> Reading the guide…
@@ -239,25 +239,25 @@ export default function ShippingImportDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
-          <span className="text-xs text-muted-foreground">
+        <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-t border-border">
+          <span className="basis-full min-w-0 text-xs text-muted-foreground">
             {prepared ? `${applyRows.length} of ${candidates.length} row${candidates.length === 1 ? "" : "s"} will apply` : ""}
           </span>
           {requiresAcknowledgement && (
-            <label className="flex items-center gap-2 text-xs text-amber-700">
-              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
-              I reviewed the changes; existing profile settings may be replaced.
+            <label className="flex min-w-0 flex-1 items-start gap-2 text-xs text-amber-700 max-[479px]:basis-full">
+              <input type="checkbox" className="h-4 w-4 shrink-0" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              <span>I reviewed the changes; existing profile settings may be replaced.</span>
             </label>
           )}
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted" data-testid="button-shipping-import-cancel">
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-2 max-[479px]:w-full">
+            <button type="button" onClick={onClose} className="min-h-11 px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted" data-testid="button-shipping-import-cancel">
               Cancel
             </button>
             <button
               type="button"
               disabled={applying || loading || !!error || applyRows.length === 0 || (requiresAcknowledgement && !acknowledged)}
               onClick={confirm}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="button-shipping-import-confirm"
             >
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}

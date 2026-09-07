@@ -218,15 +218,15 @@ export function SauceGuideImportDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 p-4">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="sauce-guide-import-dialog-title" className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl bg-background border border-border shadow-xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="sauce-guide-import-dialog-title" data-testid="dialog-sauce-guide-import" className="w-full max-w-2xl h-[90vh] max-h-[90vh] min-h-0 flex flex-col rounded-xl bg-background border border-border shadow-xl">
+        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border">
           <h2 id="sauce-guide-import-dialog-title" className="font-semibold text-sm">Import Sauce Guide</h2>
           <button type="button" aria-label="Close sauce guide import" onClick={onClose} className="p-1 rounded hover:bg-muted">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-3">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
               <Loader2 className="w-4 h-4 animate-spin" /> Reading sauce guide…
@@ -268,6 +268,7 @@ export function SauceGuideImportDialog({
                               <span className="text-sm font-semibold">{brand || c.guideBrandName}</span>
                             ) : (
                               <select
+                                data-testid={`select-sauce-guide-brand-${c.id}`}
                                 value={brand}
                                 onChange={(e) => pickBrand(c.id, e.target.value)}
                                 className="text-xs border border-border rounded px-2 py-1 bg-background max-w-[180px]"
@@ -294,6 +295,7 @@ export function SauceGuideImportDialog({
                             <span className="text-xs font-medium text-muted-foreground w-12 shrink-0">Sauce</span>
                             {sauceRecipeNames.length > 0 ? (
                               <select
+                                data-testid={`select-sauce-guide-recipe-${c.id}`}
                                 value={recipe}
                                 onChange={(e) => setRecipePicks((p) => ({ ...p, [c.id]: e.target.value }))}
                                 className="text-xs border border-border rounded px-2 py-1 bg-background max-w-[240px]"
@@ -340,25 +342,26 @@ export function SauceGuideImportDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
-          {applyRows.length > 0 && (
-            <label className="flex items-center gap-2 text-xs text-amber-700">
-              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
-              I reviewed the changes; existing profile assignments may be replaced.
-            </label>
-          )}
-          <span className="text-xs text-muted-foreground">
+        <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-t border-border">
+          <span className="basis-full min-w-0 text-xs text-muted-foreground">
             {prepared ? `${applyRows.length} of ${candidates.length} row${candidates.length === 1 ? "" : "s"} will apply` : ""}
           </span>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted">
+          {applyRows.length > 0 && (
+            <label className="flex min-w-0 flex-1 items-start gap-2 text-xs text-amber-700 max-[479px]:basis-full">
+              <input type="checkbox" className="h-4 w-4 shrink-0" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              <span>I reviewed the changes; existing profile assignments may be replaced.</span>
+            </label>
+          )}
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-2 max-[479px]:w-full">
+            <button type="button" onClick={onClose} className="min-h-11 px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted" data-testid="button-sauce-guide-import-cancel">
               Cancel
             </button>
             <button
               type="button"
               disabled={applying || loading || !!error || applyRows.length === 0 || (requiresAcknowledgement && !acknowledged)}
               onClick={confirm}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-sauce-guide-import-confirm"
             >
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               {applying ? "Applying…" : "Apply Sauce Assignments"}
@@ -477,15 +480,15 @@ export function DoughGuideImportDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 p-4">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dough-guide-import-dialog-title" className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl bg-background border border-border shadow-xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dough-guide-import-dialog-title" data-testid="dialog-dough-guide-import" className="w-full max-w-2xl h-[90vh] max-h-[90vh] min-h-0 flex flex-col rounded-xl bg-background border border-border shadow-xl">
+        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border">
           <h2 id="dough-guide-import-dialog-title" className="font-semibold text-sm">Import Dough Recipe Guide</h2>
           <button type="button" aria-label="Close dough guide import" onClick={onClose} className="p-1 rounded hover:bg-muted">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-3">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
               <Loader2 className="w-4 h-4 animate-spin" /> Reading dough recipe guide…
@@ -527,6 +530,7 @@ export function DoughGuideImportDialog({
                               <span className="text-sm font-semibold">{brand || c.guideBrandName}</span>
                             ) : (
                               <select
+                                data-testid={`select-dough-guide-brand-${c.id}`}
                                 value={brand}
                                 onChange={(e) => pickBrand(c.id, e.target.value)}
                                 className="text-xs border border-border rounded px-2 py-1 bg-background max-w-[180px]"
@@ -548,6 +552,7 @@ export function DoughGuideImportDialog({
                             <span className="text-xs font-medium text-muted-foreground w-12 shrink-0">Dough</span>
                             {doughRecipeNames.length > 0 ? (
                               <select
+                                data-testid={`select-dough-guide-recipe-${c.id}`}
                                 value={recipe}
                                 onChange={(e) => setRecipePicks((p) => ({ ...p, [c.id]: e.target.value }))}
                                 className="text-xs border border-border rounded px-2 py-1 bg-background max-w-[240px]"
@@ -592,25 +597,26 @@ export function DoughGuideImportDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
-          {applyRows.length > 0 && (
-            <label className="flex items-center gap-2 text-xs text-amber-700">
-              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
-              I reviewed the changes; existing profile assignments may be replaced.
-            </label>
-          )}
-          <span className="text-xs text-muted-foreground">
+        <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-t border-border">
+          <span className="basis-full min-w-0 text-xs text-muted-foreground">
             {prepared ? `${applyRows.length} of ${candidates.length} row${candidates.length === 1 ? "" : "s"} will apply` : ""}
           </span>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted">
+          {applyRows.length > 0 && (
+            <label className="flex min-w-0 flex-1 items-start gap-2 text-xs text-amber-700 max-[479px]:basis-full">
+              <input type="checkbox" className="h-4 w-4 shrink-0" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              <span>I reviewed the changes; existing profile assignments may be replaced.</span>
+            </label>
+          )}
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-2 max-[479px]:w-full">
+            <button type="button" onClick={onClose} className="min-h-11 px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted" data-testid="button-dough-guide-import-cancel">
               Cancel
             </button>
             <button
               type="button"
               disabled={applying || loading || !!error || applyRows.length === 0 || (requiresAcknowledgement && !acknowledged)}
               onClick={confirm}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-dough-guide-import-confirm"
             >
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               {applying ? "Applying…" : "Apply Dough Assignments"}
