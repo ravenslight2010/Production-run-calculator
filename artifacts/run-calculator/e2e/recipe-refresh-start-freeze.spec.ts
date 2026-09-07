@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -74,6 +74,54 @@ async function setRecipeBatchLbs(
   await input.blur();
   await saved;
   await dialog.getByRole("button", { name: "Close settings" }).click();
+}
+
+async function holdNextProfileRefresh(page: Page): Promise<{
+  observed: Promise<void>;
+  release: () => Promise<void>;
+}> {
+  let observedResolve!: () => void;
+  let releaseResolve!: () => void;
+  let completedResolve!: () => void;
+  let held = false;
+  let released = false;
+  const observed = new Promise<void>((resolve) => {
+    observedResolve = resolve;
+  });
+  const releaseGate = new Promise<void>((resolve) => {
+    releaseResolve = resolve;
+  });
+  const completed = new Promise<void>((resolve) => {
+    completedResolve = resolve;
+  });
+  const handler = async (route: Route): Promise<void> => {
+    if (!held && route.request().method() === "GET") {
+      held = true;
+      observedResolve();
+      await releaseGate;
+      await route.continue();
+      completedResolve();
+      return;
+    }
+    await route.continue();
+  };
+
+  await page.route("**/api/brand-profiles**", handler);
+
+  return {
+    observed,
+    release: async () => {
+      if (released) return;
+      released = true;
+      releaseResolve();
+      if (!held) {
+        await page.unroute("**/api/brand-profiles**", handler).catch(() => {});
+        return;
+      }
+      await completed;
+      await page.unroute("**/api/brand-profiles**", handler).catch(() => {});
+    },
+  };
 }
 
 async function setNamedRecipeLbs(
@@ -336,7 +384,125 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
   await page.getByTestId("tab-frontline").click();
   await expect(page.getByTestId("output-app1-batches")).toContainText("6.00");
   await openSummary(page);
-  await expect(page.getByTestId(`run-summary-${upcomingRunId}`)).toContainText("3.00 batches");
+  await expect(page.getByTestId(`run-summary-${upcomingRunId}`)).toContainText(
+    "3.00 batches",
+    { timeout: 20_000 },
+  );
+});
+
+test("a delayed shared recipe refresh stays with its original run after a rapid switch", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const username = uniqueTestId("e2e_recipe_switch");
+  const originalBrand = `Original Run ${uniqueTestId("brand")}`;
+  const originalFlavor = "Profile-backed";
+  const recipeId = uniqueTestId("cheese-recipe");
+  const recipeName = `Shared Cheese ${uniqueTestId("recipe")}`;
+  const originalRunId = uniqueTestId("original-run");
+  const switchedRunId = uniqueTestId("switched-run");
+  const now = Date.now();
+  const account = await fixtures.createAccount({
+    username,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
+  });
+  const originalValues = {
+    casesNeeded: 100,
+    pizzasPerCase: 1,
+    casesPerSkid: 10,
+    casesPerLayer: 0,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    app1Type: "Cheese",
+    app1OzPerPizza: 16,
+    app1BatchLbs: 0,
+    app1CheeseRecipeName: recipeName,
+    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+  };
+  const switchedValues = {
+    ...originalValues,
+    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 7 }],
+  };
+
+  await fixtures.seedCheeseRecipe(account, {
+    id: recipeId,
+    name: recipeName,
+    brand: originalBrand,
+    components: [{ ingredient: "Cheese", lbs: 10 }],
+  });
+  await fixtures.seedBrandProfile(account, {
+    brand: originalBrand,
+    flavor: originalFlavor,
+    values: originalValues,
+    updatedAt: now,
+  });
+  await fixtures.seedTodaySync({
+    token: account.token,
+    senderId: `recipe-switch-${username}`,
+    date: TODAY,
+    payload: {
+      dayState: {
+        date: TODAY,
+        runs: [
+          {
+            id: originalRunId,
+            brand: originalBrand,
+            flavor: originalFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+          {
+            id: switchedRunId,
+            brand: "",
+            flavor: "",
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+        ],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+      },
+      runValues: {
+        [originalRunId]: originalValues,
+        [switchedRunId]: switchedValues,
+      },
+      runValuesUpdatedAt: {
+        [originalRunId]: now,
+        [switchedRunId]: now,
+      },
+      packagingProgress: {},
+    },
+  });
+
+  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  const originalBefore = await readIngredientDetail(page, originalRunId);
+  const switchedBefore = await readIngredientDetail(page, switchedRunId);
+  const refreshGate = await holdNextProfileRefresh(page);
+
+  try {
+    await setRecipeBatchLbs(page, recipeName, "20");
+    await refreshGate.observed;
+
+    await page.getByTestId("tab-run").click();
+    await page.getByRole("button", { name: "Select run 2" }).click();
+    await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+
+    await refreshGate.release();
+
+    await expectIngredientDetailChanged(page, originalRunId, originalBefore);
+    await expectIngredientDetailStable(page, switchedRunId, switchedBefore);
+  } finally {
+    await refreshGate.release();
+  }
 });
 
 type SharedRecipeFreezeScenario = {

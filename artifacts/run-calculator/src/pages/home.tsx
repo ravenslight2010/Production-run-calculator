@@ -4724,35 +4724,6 @@ export default function Home() {
       }
       if (recipeByName.size === 0) return;
 
-      // Seed all server profiles into localStorage before scanning.
-      let serverPairs: { brand: string; flavor: string }[] = [];
-      try {
-        serverPairs = await seedProfilesFromServer();
-      } catch {
-        // Network unavailable — fall back to whatever localStorage already holds.
-      }
-
-      // Collect all brand__flavor profile keys.
-      const seenSuffixes = new Set<string>();
-      const profileSuffixes: string[] = [];
-      const PREFIX = "run-calc-profile-";
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k?.startsWith(PREFIX)) continue;
-        const suffix = k.slice(PREFIX.length);
-        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-      for (const { brand, flavor } of serverPairs) {
-        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-        if (!seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-
       const cheeseSlots = [
         { nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe" },
         { nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe" },
@@ -4763,6 +4734,35 @@ export default function Home() {
       const updatedCount = await orchestrateSharedRecipeRefresh({
         getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
         refreshProfiles: async () => {
+          // Keep profile hydration inside the orchestrated work so the
+          // originating run is captured before this first async boundary.
+          let serverPairs: { brand: string; flavor: string }[] = [];
+          try {
+            serverPairs = await seedProfilesFromServer();
+          } catch {
+            // Network unavailable — fall back to whatever localStorage already holds.
+          }
+
+          const seenSuffixes = new Set<string>();
+          const profileSuffixes: string[] = [];
+          const PREFIX = "run-calc-profile-";
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k?.startsWith(PREFIX)) continue;
+            const suffix = k.slice(PREFIX.length);
+            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
+          for (const { brand, flavor } of serverPairs) {
+            const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+            if (!seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
+
           let count = 0;
           const propagations: Promise<void>[] = [];
 
