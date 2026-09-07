@@ -28,6 +28,8 @@ describe("operational intent outbox", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce({ ok: true, json: async () => ({ outcome: "accepted" }) });
     vi.stubGlobal("fetch", fetch);
+    const replaySignal = vi.fn();
+    window.addEventListener("calculator-field-check-signal", replaySignal);
     const intent = queueOperationalIntent({
       runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 123,
       action: "correction", values: { traysOnLine: 5, batchesReady: 2 },
@@ -40,6 +42,39 @@ describe("operational intent outbox", () => {
     await flushOperationalIntentOutbox();
     expect(operationalIntentSummary().accepted).toBe(1);
     expect(fetch.mock.calls[0][1].body).toContain('"traysOnLine":5');
+    expect(replaySignal).not.toHaveBeenCalled();
+  });
+  it("reports an offline queue replay only after an offline-deferred intent is acknowledged", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    const replaySignal = vi.fn();
+    window.addEventListener("calculator-field-check-signal", replaySignal);
+    const intent = queueOperationalIntent({
+      runId: "offline-run",
+      observedGeneration: "offline-run:1",
+      effectiveAt: 123,
+      action: "pause",
+    });
+    expect(intent.deferredOffline).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()[0]).toMatchObject({
+      id: intent.id,
+      state: "pending",
+      deferredOffline: true,
+    });
+    expect(replaySignal).not.toHaveBeenCalled();
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ outcome: "accepted" }),
+    }));
+    await flushOperationalIntentOutbox();
+
+    expect(replaySignal).toHaveBeenCalledOnce();
+    expect((replaySignal.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      checkName: "offline-queue-replay",
+      outcome: "success",
+    });
   });
   it("restores the complete paused lifecycle while an offline End awaits finalization", async () => {
     const canonicalLifecycle = {

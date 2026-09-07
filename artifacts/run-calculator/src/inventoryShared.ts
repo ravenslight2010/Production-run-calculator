@@ -1445,11 +1445,13 @@ export type FieldChecksReport = {
 export const fetchIncidents = () => api<Incident[]>("/incidents");
 export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
 export const confirmHardwareFieldCheck = (body: {
-  checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+  checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
+    "safe-area-clearance" | "camera-file-selection" | "update-handoff" |
+    "process-kill-recovery";
   checkVersion: "2026-09";
   outcome: "success" | "failure" | "incomplete";
   observedAt: string;
-  deviceCategory: "android-phone" | "android-tablet" | "ipad";
+  deviceCategory: "android-phone" | "android-tablet" | "ipad" | "iphone";
 }) => diagnosticIngestionApi<{ accepted: number; duplicate: number }>(
   "hardwareConfirmations",
   {

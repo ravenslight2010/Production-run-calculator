@@ -63,6 +63,13 @@ export const FIELD_CHECK_CATALOG = [
     expiresHours: 168,
   },
   {
+    name: "offline-queue-replay",
+    label: "Offline queue replay",
+    observedBy: "browser",
+    evidence: "A queued offline operation received a server acknowledgment after connectivity returned.",
+    expiresHours: 168,
+  },
+  {
     name: "pwa-update-handoff",
     label: "PWA update handoff",
     observedBy: "browser",
@@ -89,6 +96,34 @@ export const FIELD_CHECK_CATALOG = [
     observedBy: "hardware",
     evidence: "The app cannot verify visual keyboard clearance across physical devices.",
     expiresHours: null,
+  },
+  {
+    name: "orientation-layout",
+    label: "Orientation layout",
+    observedBy: "hardware",
+    evidence: "A manager visually confirmed that the working screen remains usable after rotating a physical device.",
+    expiresHours: 720,
+  },
+  {
+    name: "safe-area-clearance",
+    label: "Safe-area and fixed-navigation clearance",
+    observedBy: "hardware",
+    evidence: "A manager visually confirmed controls are not obstructed by device safe areas or fixed navigation.",
+    expiresHours: 720,
+  },
+  {
+    name: "camera-file-selection",
+    label: "Camera and file selection",
+    observedBy: "hardware",
+    evidence: "A manager confirmed the physical device can open and cancel its camera or file picker without uploading production data.",
+    expiresHours: 720,
+  },
+  {
+    name: "update-handoff",
+    label: "Update handoff",
+    observedBy: "hardware",
+    evidence: "A manager confirmed the guided update and reopen protocol on a physical device.",
+    expiresHours: 720,
   },
   {
     name: "process-kill-recovery",
@@ -126,6 +161,7 @@ const observationSchema = z.object({
     "android-phone",
     "android-tablet",
     "ipad",
+    "iphone",
     "other-browser",
   ]),
   metrics: z.record(z.string(), z.number().finite().min(0).max(10_000_000)).default({}),
@@ -144,11 +180,19 @@ const observationSchema = z.object({
 });
 
 const hardwareConfirmationSchema = z.object({
-  checkName: z.enum(["touch-accuracy", "keyboard-clearance", "process-kill-recovery"]),
+  checkName: z.enum([
+    "touch-accuracy",
+    "keyboard-clearance",
+    "orientation-layout",
+    "safe-area-clearance",
+    "camera-file-selection",
+    "update-handoff",
+    "process-kill-recovery",
+  ]),
   checkVersion: z.literal(HARDWARE_CHECK_VERSION),
   outcome: z.enum(["success", "failure", "incomplete"]),
   observedAt: z.string().datetime({ offset: true }),
-  deviceCategory: z.enum(["android-phone", "android-tablet", "ipad"]),
+  deviceCategory: z.enum(["android-phone", "android-tablet", "ipad", "iphone"]),
 }).strict();
 
 export type HardwareConfirmationInput = z.infer<typeof hardwareConfirmationSchema>;
@@ -263,7 +307,10 @@ export function deriveFieldCheckStatus(input: {
 }): FieldCheckStatus {
   if (input.observedBy === "hardware") {
     if (input.actionable) return "needs-review";
-    return input.lastSuccessfulAt ? "healthy" : "unsupported";
+    if (!input.lastSuccessfulAt) return "unsupported";
+    return input.expiresHours === null || isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())
+      ? "healthy"
+      : "unsupported";
   }
   if (input.actionable) return "needs-review";
   return input.lastSuccessfulAt && isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())

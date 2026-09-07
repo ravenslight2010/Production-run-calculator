@@ -364,10 +364,12 @@ function FieldChecksPanel({
   canConfirmHardware: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad">("android-phone");
+  const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad" | "iphone">("android-phone");
   const confirmation = useMutation({
     mutationFn: (input: {
-      checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+      checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
+        "safe-area-clearance" | "camera-file-selection" | "update-handoff" |
+        "process-kill-recovery";
       outcome: "success" | "failure" | "incomplete";
     }) => confirmHardwareFieldCheck({
       ...input,
@@ -393,7 +395,7 @@ function FieldChecksPanel({
             Field checks
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Passive evidence from normal staff use, scoped to this facility. No run data is collected.
+            Advisory evidence scoped to this facility. No run data, screenshots, or device fingerprints are collected.
           </p>
         </div>
         {report && (
@@ -411,13 +413,16 @@ function FieldChecksPanel({
       ) : (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
+            <p className="sm:col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Browser-observed checks
+            </p>
             {browserChecks.map((check) => (
               <FieldCheckCard key={check.name} check={check} />
             ))}
           </div>
           <div className="rounded-md border border-border bg-card/60 p-2.5">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Hardware-only checks
+              Guided hardware confirmations
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Browser evidence cannot confirm these. Follow the physical-device protocol without entering production data, then record only the device category, protocol version, outcome, and time.
@@ -433,12 +438,13 @@ function FieldChecksPanel({
                   <option value="android-phone">Android phone</option>
                   <option value="android-tablet">Android tablet</option>
                   <option value="ipad">iPad</option>
+                  <option value="iphone">iPhone</option>
                 </select>
               </label>
             )}
             <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
               <li>Use a clean training or idle screen; do not start or edit a production run.</li>
-              <li>Check touch targets, keyboard clearance, or fully close and reopen the app as described in the protocol.</li>
+              <li>Perform only the named check: rotate, inspect clearance, open and cancel a picker, update/reopen, or test the listed interaction.</li>
               <li>Record Pass, Fail, or Incomplete below immediately after the physical check.</li>
             </ol>
             <div className="mt-3 space-y-2">
@@ -458,7 +464,10 @@ function FieldChecksPanel({
                             className="h-7 px-2 text-[11px]"
                             disabled={confirmation.isPending}
                             onClick={() => confirmation.mutate({
-                              checkName: check.name as "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery",
+                              checkName: check.name as "touch-accuracy" | "keyboard-clearance" |
+                                "orientation-layout" | "safe-area-clearance" |
+                                "camera-file-selection" | "update-handoff" |
+                                "process-kill-recovery",
                               outcome,
                             })}
                           >
@@ -496,7 +505,7 @@ function FieldChecksPanel({
                       {failure.outcome === "incomplete" ? "Repeatedly incomplete" : "Failed"} · build {failure.appBuild} · {failure.deviceCategory}
                     </p>
                     <p className="text-muted-foreground">
-                      Browser-observed evidence only; measurements are bounded and contain no production payload.
+                      {check.observedBy === "browser" ? "Browser-observed" : "Guided hardware"} evidence only; measurements are bounded and contain no production payload.
                     </p>
                   </div>
                 )),

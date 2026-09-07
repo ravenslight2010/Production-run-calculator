@@ -37,6 +37,7 @@ export type OperationalIntent = {
   lifecycle?: "start" | "end"; values?: Record<string, number>;
   inventoryLines?: Array<{ itemKey: string; qty: number }>;
   preEndLifecycle?: PreEndLifecycle;
+  deferredOffline?: boolean;
   state: OperationalIntentState;
   owner?: string;
   deliveryToken?: string;
@@ -270,7 +271,18 @@ export function queueOperationalIntent(input: Omit<OperationalIntent, "version" 
   const inventoryLines = input.action === "lifecycle" && input.lifecycle === "end" ? canonicalInventoryLines(input.inventoryLines) : input.inventoryLines;
   if (input.action === "lifecycle" && input.lifecycle === "end" && !validPreEndLifecycle(input.preEndLifecycle)) throw new Error("Run completion lifecycle snapshot is invalid");
   if (!activeOwner) throw new Error("Offline action could not be saved before sign-in completed");
-  const intent: OperationalIntent = { ...input, inventoryLines, version: 1, id: `offline:${crypto.randomUUID()}`, date: input.date ?? todayStr(), resetEpoch: getStoredResetEpoch(), state: "pending", owner: activeOwner, attempts: 0 };
+  const intent: OperationalIntent = {
+    ...input,
+    inventoryLines,
+    version: 1,
+    id: `offline:${crypto.randomUUID()}`,
+    date: input.date ?? todayStr(),
+    resetEpoch: getStoredResetEpoch(),
+    state: "pending",
+    owner: activeOwner,
+    attempts: 0,
+    deferredOffline: typeof navigator !== "undefined" && navigator.onLine === false,
+  };
   if (!persistPending(intent)) throw new Error("Offline action could not be saved on this device (storage may be full)");
   notify(); return intent;
 }
@@ -368,7 +380,15 @@ function scheduleNextFlush(): void {
   }, Math.max(0, next - Date.now()));
 }
 async function flushWithStorageLock(senderId: string): Promise<void> {
-    if (typeof window === "undefined" || !navigator.onLine || !activeOwner) return;
+    if (typeof window === "undefined" || !activeOwner) return;
+    if (!navigator.onLine) {
+      for (const item of readOperationalIntentOutbox().filter((candidate) =>
+        ["pending", "sending"].includes(candidate.state) && !candidate.deferredOffline
+      )) {
+        persistPending({ ...item, deferredOffline: true });
+      }
+      return;
+    }
     const ownerAtStart = activeOwner;
     const lock = acquireLock();
     if (!lock) return;
@@ -397,12 +417,17 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
         deliveryController = new AbortController();
         const deliveryTimeout = window.setTimeout(() => deliveryController?.abort(), DELIVERY_TIMEOUT_MS);
         try {
-          const res = await fetch(`/api/sync/operational-intents?today=${encodeURIComponent(item.date)}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: deliveryController.signal, body: JSON.stringify({ senderId, intent: (({ state: _state, owner: _owner, deliveryToken: _token, preEndLifecycle: _local, attempts: _a, nextRetryAt: _n, lastAttemptAt: _l, failure: _f, guidance: _g, resolvedAt: _r, ...wire }) => wire)(item) }) });
+          const res = await fetch(`/api/sync/operational-intents?today=${encodeURIComponent(item.date)}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: deliveryController.signal, body: JSON.stringify({ senderId, intent: (({ state: _state, owner: _owner, deliveryToken: _token, preEndLifecycle: _local, attempts: _a, nextRetryAt: _n, lastAttemptAt: _l, failure: _f, guidance: _g, resolvedAt: _r, deferredOffline: _offline, ...wire }) => wire)(item) }) });
           let body: { outcome?: string; data?: unknown } = {}; try { body = await res.json(); } catch { /* status classification still applies */ }
           if (activeOwner !== ownerAtStart || !currentDeliveryMatches(item)) continue;
           if (res.ok && ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(body.outcome ?? "")) {
             const outcome = body.outcome as "accepted" | "superseded" | "rebased" | "conflicted" | "review-required";
             if (body.data) adoptCanonical?.(body.data, item, outcome);
+            if (item.deferredOffline) {
+              window.dispatchEvent(new CustomEvent("calculator-field-check-signal", {
+                detail: { checkName: "offline-queue-replay", outcome: "success" },
+              }));
+            }
             terminalize(item, outcome); continue;
           }
           if (res.status === 401) terminalize(item, "blocked", { failure: "authentication", guidance: "Sign in again, then choose Retry." });
