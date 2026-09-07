@@ -76,9 +76,59 @@ recipe merge. Any future production candidates should be reported with minimal
 recipe identifiers and aggregate counts for manager review; they must not be
 automatically changed without a stronger deterministic predicate.
 
-Live verification status: **not verified**. Production access and direct
-production edits are outside this task. Publishing remains a separate release
-decision.
+## Production master-data verification
+
+Date: 2026-09-07
+Mode: read-only production database queries, scope `live`
+Audit window: 2025-09-07 through 2026-10-07
+No production row was inserted, updated, or deleted.
+
+The bounded application report now enforces:
+
+- an allow-listed `live`/`sandbox` scope;
+- a maximum of 2,000 rows per source table and 2,000 findings;
+- a maximum of 500 component/embedded rows per recipe;
+- a 256 KiB JSON document limit with explicit truncation metadata;
+- a bounded date window covering the prior 365 days and next 30 days; and
+- retained import-history coverage, including whether its row limit was reached.
+
+The report classifies exact/canonical resolutions, ambiguous duplicate names,
+and orphaned or stale references. It does not apply a repair. Any repair
+proposal carries an owner, deterministic fingerprint, before/after preview,
+and the existing data-health repair-batch undo contract.
+
+### Live findings
+
+The production scope contained 156 profiles, 18 dough recipes, 26 sauce
+recipes, 126 cheese recipes, 50 mixes, 528 ingredients, 26 import aliases,
+739 spec-import aliases, 217 merge aliases, and 40 daily-sync documents.
+
+- **Pool duplicate names:** zero duplicate-name groups in dough, sauce, cheese,
+  or mix pools.
+- **Profile-to-pool links:** 0 missing dough links, 17 missing sauce links, and
+  0 ambiguous dough or sauce links. These remain manager-review findings.
+- **Orphaned recipe components:** 3 dough, 3 sauce, and 6 mix component rows
+  reference no current ingredient name. Cheese had no matching finding in the
+  bounded query. These are protected review-only references; no ingredient
+  replacement was inferred.
+- **Run/profile references:** 145 runs were present in the audit window; 9 did
+  not resolve to a current setup profile. They remain protected operational
+  history and are not cleanup candidates.
+- **Alias checks:** import aliases had 0 stale rows, 0 ambiguous groups, and
+  merge aliases had 0 stale ingredient rows and 0 ambiguous groups. The
+  spec-import alias namespace had 6 stale rows (1 brand and 5 recipe-name
+  mappings) plus 2 ambiguous external/context groups. Those remain
+  review-only and are not fuzzy-resolved.
+- **Protected import history:** 2 retained import-history rows were available
+  for the scope. The production schema did not expose a
+  `completed_run_history` table during this read-only check, so immutable
+  completed-run history could not be independently audited and is explicitly
+  recorded as a coverage gap rather than guessed at.
+
+This is an audit result, not approval to heal data. A later repair must be
+separately owned, previewed from a fresh fingerprint, applied through the
+existing repair batch, and verified through its undo path. Publishing remains
+a separate release decision.
 
 ## Evidence
 

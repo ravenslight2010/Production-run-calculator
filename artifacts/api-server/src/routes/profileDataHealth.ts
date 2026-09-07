@@ -15,7 +15,11 @@ import {
 } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
-import { buildMasterDataHealthReport, type MasterDataHealthReport } from "../lib/masterDataHealth";
+import {
+  buildMasterDataHealthReport,
+  masterDataRepairFingerprint,
+  type MasterDataHealthReport,
+} from "../lib/masterDataHealth";
 import { applyAiRetentionCleanup, buildAiRetentionReport, type AiRetentionReport } from "../lib/aiRetention";
 import { sourceLibraryReconciliationStatus, type SourceLibraryReconciliationStatus } from "../lib/sourceLibraryReconciliationHeal";
 import { findRepairResult } from "../lib/repairResultsRepository";
@@ -87,6 +91,10 @@ export type DataHealthRepair =
     externalName: string;
     canonicalName: string;
     context: string | null;
+    fingerprint: string;
+    owner: "import-review";
+    preview: { before: string; after: string };
+    undo: "data-health-repair-batch";
   };
 
 export type DataHealthWorkspace = {
@@ -622,7 +630,14 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
             && String(rowValues.externalName ?? "") === repair.externalName
             && String(rowValues.canonicalName ?? "") === repair.canonicalName
             && String(rowValues.context ?? rowValues.brandContext ?? "") === String(repair.context ?? "");
-          if (!sameMapping) { skipped++; continue; }
+          const currentFingerprint = masterDataRepairFingerprint({
+            source: repair.source,
+            rowId: repair.rowId,
+            externalName: rowValues.externalName ?? "",
+            canonicalName: rowValues.canonicalName ?? "",
+            context: rowValues.context ?? rowValues.brandContext ?? null,
+          });
+          if (!sameMapping || currentFingerprint !== repair.fingerprint) { skipped++; continue; }
           await tx.delete(table).where(and(eq(table.id, repair.rowId), eq(table.scope, scope)));
           const previousValues = repair.source === "import"
             ? { scope, type: rowValues.type, externalName: rowValues.externalName, canonicalName: rowValues.canonicalName, brandContext: rowValues.brandContext ?? null }
