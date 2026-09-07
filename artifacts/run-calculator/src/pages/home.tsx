@@ -4624,80 +4624,103 @@ export default function Home() {
     async (entries: { name: string; lbs: number }[]) => {
       if (entries.length === 0) return;
 
+      // Capture the form snapshot before profile hydration begins. The
+      // orchestration below captures the selected run at this same boundary
+      // and only applies these open-form updates if that run is still active.
+      const openForm = form.getValues() as Record<string, unknown>;
+      let openFormUpdates: Partial<Record<string, number>> = {};
+
       // Ensure all server profiles are present in localStorage before scanning
       // (gap-fill only — never clobbers local edits). This covers the race
       // where a manager saves a batch weight before the boot reconciliation
       // effect has finished downloading the full factory profile pool.
-      let serverPairs: { brand: string; flavor: string }[] = [];
-      try {
-        serverPairs = await seedProfilesFromServer();
-      } catch {
-        // Network unavailable — fall back to whatever localStorage already holds.
-      }
+      await orchestrateSharedRecipeRefresh({
+        getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+        refreshProfiles: async () => {
+          let serverPairs: { brand: string; flavor: string }[] = [];
+          try {
+            serverPairs = await seedProfilesFromServer();
+          } catch {
+            // Network unavailable — fall back to whatever localStorage already holds.
+          }
 
-      // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
-      // then union with the server pairs so profiles seeded above are included.
-      const seenSuffixes = new Set<string>();
-      const profileSuffixes: string[] = [];
-      const PREFIX = "run-calc-profile-";
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k) continue;
-        if (!k.startsWith(PREFIX)) continue;
-        const suffix = k.slice(PREFIX.length);
-        // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
-        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-      // Add any server profiles that seedProfilesFromServer reported but
-      // couldn't write to localStorage (quota issues) — we still want to
-      // attempt to load them if they're already there under a different casing.
-      for (const { brand, flavor } of serverPairs) {
-        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-        if (!seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
+          // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
+          // then union with the server pairs so profiles seeded above are included.
+          const seenSuffixes = new Set<string>();
+          const profileSuffixes: string[] = [];
+          const PREFIX = "run-calc-profile-";
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k) continue;
+            if (!k.startsWith(PREFIX)) continue;
+            const suffix = k.slice(PREFIX.length);
+            // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
+            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
+          // Add any server profiles that seedProfilesFromServer reported but
+          // couldn't write to localStorage (quota issues) — we still want to
+          // attempt to load them if they're already there under a different casing.
+          for (const { brand, flavor } of serverPairs) {
+            const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+            if (!seenSuffixes.has(suffix)) {
+              seenSuffixes.add(suffix);
+              profileSuffixes.push(suffix);
+            }
+          }
 
-      const profiles: BatchWeightPropagationProfile[] = [];
+          const profiles: BatchWeightPropagationProfile[] = [];
 
-      for (const suffix of profileSuffixes) {
-        const dunderIdx = suffix.indexOf("__");
-        if (dunderIdx < 0) continue;
-        const brand  = suffix.slice(0, dunderIdx);
-        const flavor = suffix.slice(dunderIdx + 2);
+          for (const suffix of profileSuffixes) {
+            const dunderIdx = suffix.indexOf("__");
+            if (dunderIdx < 0) continue;
+            const brand  = suffix.slice(0, dunderIdx);
+            const flavor = suffix.slice(dunderIdx + 2);
 
-        const profile = loadProfile(brand, flavor);
-        if (!profile) continue;
-        profiles.push({ brand, flavor, profile: profile as Record<string, unknown> });
-      }
+            const profile = loadProfile(brand, flavor);
+            if (!profile) continue;
+            profiles.push({ brand, flavor, profile: profile as Record<string, unknown> });
+          }
 
-      await executeBatchWeightPropagation({
-        profiles,
-        openForm: form.getValues() as Record<string, unknown>,
-        entries,
-        defaultPepTypes: DEFAULT_PEP_TYPES,
-        saveProfile: (brand, flavor, updates) => {
-          const profile = loadProfile(brand, flavor);
-          if (!profile) return false;
-          // Profile writes are manager-only; non-managers still get the
-          // in-memory heal (open-form update below) but never persist it.
-          return canManageProfiles && saveProfile(
-            brand,
-            flavor,
-            { ...profile, ...updates } as FormValues,
-          );
+          const result = await executeBatchWeightPropagation({
+            profiles,
+            openForm,
+            entries,
+            defaultPepTypes: DEFAULT_PEP_TYPES,
+            saveProfile: (brand, flavor, updates) => {
+              const profile = loadProfile(brand, flavor);
+              if (!profile) return false;
+              // Profile writes are manager-only; non-managers still get the
+              // in-memory heal (open-form update below) but never persist it.
+              return canManageProfiles && saveProfile(
+                brand,
+                flavor,
+                { ...profile, ...updates } as FormValues,
+              );
+            },
+            propagateToPendingRuns: propagateProfileToPendingRuns,
+            // The open form is applied only by refreshOpenForm after the
+            // originating-run identity check. Saved profiles and pending runs
+            // above must still finish if the operator switched runs.
+            setOpenFormValue: () => {},
+            notify: toast,
+          });
+          openFormUpdates = result.plan.openFormUpdates;
+          return result;
         },
-        propagateToPendingRuns: propagateProfileToPendingRuns,
-        setOpenFormValue: (field, lbs) => form.setValue(
-          field as Parameters<typeof form.setValue>[0],
-          lbs as never,
-          { shouldDirty: true },
-        ),
-        notify: toast,
+        refreshOpenForm: () => {
+          for (const [field, lbs] of Object.entries(openFormUpdates)) {
+            if (lbs !== undefined) {
+              form.setValue(
+                field as Parameters<typeof form.setValue>[0],
+                lbs as never,
+                { shouldDirty: true },
+              );
+            }
+          }
+        },
       });
     },
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)

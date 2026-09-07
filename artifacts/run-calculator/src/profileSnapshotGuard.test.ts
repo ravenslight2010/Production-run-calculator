@@ -9,6 +9,7 @@ import {
   orchestrateSharedRecipeRefresh,
   runSharedRecipeRefresh,
 } from "./profileRecipeRefresh";
+import { executeBatchWeightPropagation } from "./ingredientBatchWeights";
 import { DEFAULT_VALUES, PROFILE_KEY, CRUST_PROFILE_KEY } from "./types";
 import type { FormValues } from "./types";
 
@@ -211,6 +212,60 @@ describe("shared recipe snapshot boundary", () => {
     await expect(refresh).resolves.toBe(1);
     expect(profileFanOutFinished).toBe(true);
     expect(openFormRefreshes).toBe(0);
+  });
+
+  it("finishes delayed batch-weight fan-out without updating the newly selected run form", async () => {
+    let currentRun = { id: "run-a" };
+    let releaseProfiles!: () => void;
+    const profileGate = new Promise<void>((resolve) => {
+      releaseProfiles = resolve;
+    });
+    const savedProfiles: string[] = [];
+    const pendingRuns: string[] = [];
+    const openFormWrites: Record<string, number> = {};
+    let batchPlan: { openFormUpdates: Partial<Record<string, number>> } | undefined;
+
+    const refresh = orchestrateSharedRecipeRefresh({
+      getCurrentRun: () => currentRun,
+      refreshProfiles: async () => {
+        await profileGate;
+        const result = await executeBatchWeightPropagation({
+          profiles: [{
+            brand: "Brand",
+            flavor: "Flavor",
+            profile: { app1Type: "Mozzarella", app1BatchLbs: 5, app1CheeseRecipe: [] },
+          }],
+          openForm: { app1Type: "Mozzarella", app1BatchLbs: 5, app1CheeseRecipe: [] },
+          entries: [{ name: "Mozzarella", lbs: 12 }],
+          defaultPepTypes: [],
+          saveProfile: (brand, flavor) => {
+            savedProfiles.push(`${brand}/${flavor}`);
+            return true;
+          },
+          propagateToPendingRuns: async (brand, flavor) => {
+            pendingRuns.push(`${brand}/${flavor}`);
+          },
+          setOpenFormValue: () => {},
+          notify: () => {},
+        });
+        batchPlan = result.plan;
+        return result;
+      },
+      refreshOpenForm: () => {
+        for (const [field, lbs] of Object.entries(batchPlan?.openFormUpdates ?? {})) {
+          if (lbs !== undefined) openFormWrites[field] = lbs;
+        }
+      },
+    });
+
+    currentRun = { id: "run-b" };
+    releaseProfiles();
+    const result = await refresh;
+
+    expect(result.savedProfileCount).toBe(1);
+    expect(savedProfiles).toEqual(["Brand/Flavor"]);
+    expect(pendingRuns).toEqual(["Brand/Flavor"]);
+    expect(openFormWrites).toEqual({});
   });
 
   it("does not copy production progress or run-specific targets from a profile", () => {
