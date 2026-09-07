@@ -32,6 +32,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
+// Receipt ownership is covered separately. Keep these hook tests isolated from
+// persistent IndexedDB/localStorage claims created by other notification cases.
+vi.mock("../../alertReceipts", () => ({
+  claimAlertReceipt: vi.fn().mockResolvedValue(true),
+}));
+
 // ── Sanity: confirm jsdom really omits Notification ──────────────────────────
 // If this fails the whole test file's premise is wrong.
 if (typeof window !== "undefined" && "Notification" in window) {
@@ -210,10 +216,7 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
     // vibrate fires synchronously in fireStage.
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
 
-    // Flush microtask queue so the async Notification constructor call runs.
-    await act(async () => { await Promise.resolve(); });
-
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     // Confirm frontline title.
     expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage FRONTLINE for next run");
   });
@@ -236,8 +239,7 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
         calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
       }));
     });
-    await act(async () => { await Promise.resolve(); });
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
 
     // Second tick — frontlineNotifRef already holds run-1.
     act(() => {
@@ -272,10 +274,9 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
         calc: { ...makeParams(T0).calc, pressCasesLeft: 15 },
       }));
     });
-    await act(async () => { await Promise.resolve(); });
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledTimes(2));
 
     // Both frontline and packaging should have fired (both thresholds crossed).
-    expect(notifCtor).toHaveBeenCalledTimes(2);
     const titles = notifCtor.mock.calls.map((c: unknown[]) => c[0]);
     expect(titles).toContain("🚚 Warehouse: stage FRONTLINE for next run");
     expect(titles).toContain("🚚 Warehouse: stage PACKAGING for next run");
@@ -299,9 +300,7 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
         calc: { ...makeParams(T0).calc, pressCasesLeft: 35 }, // ≤40 but >20
       }));
     });
-    await act(async () => { await Promise.resolve(); });
-
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage FRONTLINE for next run");
 
     notifCtor.mockClear();
@@ -314,10 +313,9 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
         calc: { ...makeParams(T0).calc, pressCasesLeft: 15 }, // ≤20
       }));
     });
-    await act(async () => { await Promise.resolve(); });
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
 
     // Only packaging fires this time — frontline is already latched.
-    expect(notifCtor).toHaveBeenCalledOnce();
     expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage PACKAGING for next run");
   });
 
@@ -449,9 +447,7 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
         v: { freezerTime: 10, casesNeeded: 30, casesPerSkid: 20 },
       }));
     });
-    await act(async () => { await Promise.resolve(); });
-
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage FRONTLINE for next run");
     // Short-run body mentions "under 2 skids total".
     const body = (notifCtor.mock.calls[0][1] as NotificationOptions).body ?? "";
@@ -477,8 +473,7 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
         calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
       }));
     });
-    await act(async () => { await Promise.resolve(); });
-
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     const body = (notifCtor.mock.calls[0][1] as NotificationOptions).body ?? "";
     expect(body).toContain("Run 2 – Cheese");
   });

@@ -9,6 +9,12 @@ import { renderHook } from "@testing-library/react";
 import { useNotifications } from "./hooks/useNotifications";
 import type { RunMeta } from "./types";
 
+// Receipt ownership is covered separately. Keep timing/latch tests isolated from
+// persistent IndexedDB/localStorage claims created by other notification cases.
+vi.mock("./alertReceipts", () => ({
+  claimAlertReceipt: vi.fn().mockResolvedValue(true),
+}));
+
 const shown: string[] = [];
 
 class FakeNotification {
@@ -95,8 +101,7 @@ describe("15-minute alert crossing latch", () => {
       initialProps: makeProps({ adjustedTimeSec: 1200, startedAt: start }),
     });
     rerender(makeProps({ adjustedTimeSec: 890, startedAt: start }));
-    await flush();
-    expect(shown.filter((t) => t.includes("15 minutes"))).toHaveLength(1);
+    await vi.waitFor(() => expect(shown.filter((t) => t.includes("15 minutes"))).toHaveLength(1));
     rerender(makeProps({ adjustedTimeSec: 880, startedAt: start }));
     await flush();
     expect(shown.filter((t) => t.includes("15 minutes"))).toHaveLength(1);
@@ -110,8 +115,7 @@ describe("latch semantics across run switches", () => {
       initialProps: makeProps({ adjustedTimeSec: 1200, startedAt: start, runId: "A" }),
     });
     rerender(makeProps({ adjustedTimeSec: 850, startedAt: start, runId: "A" }));
-    await flush();
-    expect(shown.filter((t) => t.includes("15 minutes"))).toHaveLength(1);
+    await vi.waitFor(() => expect(shown.filter((t) => t.includes("15 minutes"))).toHaveLength(1));
     // Switch to run B (long countdown), then back to A still under 15 min.
     rerender(makeProps({ adjustedTimeSec: 2000, startedAt: Date.now(), runId: "B" }));
     rerender(makeProps({ adjustedTimeSec: 700, startedAt: start, runId: "A" }));
@@ -184,7 +188,6 @@ describe("run-complete first-minute safety floor", () => {
       initialProps: makeProps({ adjustedTimeSec: 30, startedAt: start }),
     });
     rerender(makeProps({ adjustedTimeSec: 0, startedAt: start }));
-    await flush();
-    expect(shown.filter((t) => t.includes("Run time complete"))).toHaveLength(1);
+    await vi.waitFor(() => expect(shown.filter((t) => t.includes("Run time complete"))).toHaveLength(1));
   });
 });

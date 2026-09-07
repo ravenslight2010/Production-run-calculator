@@ -29,6 +29,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
+// Receipt ownership is covered separately. Keep these hook tests isolated from
+// persistent IndexedDB/localStorage claims created by other notification cases.
+vi.mock("../../alertReceipts", () => ({
+  claimAlertReceipt: vi.fn().mockResolvedValue(true),
+}));
+
 // ── Sanity: confirm jsdom really omits Notification ──────────────────────────
 // If this assertion fails the whole test file's premise is wrong.
 if (typeof window !== "undefined" && "Notification" in window) {
@@ -219,11 +225,7 @@ describe("useNotifications — 15-min effect (no Notification API)", () => {
       }));
     });
 
-    // showAppNotification's body is async — flush the microtask queue so
-    // `new Notification(...)` inside the async IIFE actually runs.
-    await act(async () => { await Promise.resolve(); });
-
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     // Confirm the title matches the 15-min alert.
     expect(notifCtor.mock.calls[0][0]).toBe("⏰ 15 minutes left");
   });
@@ -246,9 +248,7 @@ describe("useNotifications — 15-min effect (no Notification API)", () => {
         calc: { ...makeParams(T0).calc, adjustedTimeSec: 850 },
       }));
     });
-    await act(async () => { await Promise.resolve(); });
-
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
 
     // Second tick — still inside the 0-900 window; effect returns early on
     // the `notifiedRunRef.current === runId` check.
