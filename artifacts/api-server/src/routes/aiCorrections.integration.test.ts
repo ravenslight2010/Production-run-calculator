@@ -17,6 +17,7 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
 import { signToken } from "../lib/auth";
+import type { ProfileDataHealthService } from "./profileDataHealth";
 
 // The router imports AI routes at load time; mock the provider so no real
 // requests are made and pickModel / AI_MODELS remain resolvable.
@@ -57,6 +58,7 @@ let qualityChecksTable: DbModule["qualityChecksTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
+let profileDataHealthService: ProfileDataHealthService;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -91,8 +93,10 @@ beforeAll(async () => {
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
+  const profileDataHealthMod = await import("./profileDataHealth");
   const userValidityMod = await import("../lib/userValidity");
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
+  profileDataHealthService = profileDataHealthMod.createProfileDataHealthService(dbMod.db);
   db = dbMod.db;
   pool = dbMod.pool;
   usersTable = dbMod.usersTable;
@@ -646,6 +650,53 @@ describe("AI memory health check", () => {
 });
 
 describe("profile data health check", () => {
+  it("assembles reports and applies and guards undo through the application service", async () => {
+    await db.insert(sauceRecipesTable).values({
+      id: "service-sauce",
+      scope: "live",
+      name: "Service Sauce",
+      components: [{ ingredient: "Tomato", lbs: 20 }],
+    });
+    await db.insert(savedSpecSheetsTable).values({
+      scope: "live",
+      label: "service source",
+      data: { profiles: [{ brand: "Service Brand", flavor: "cheese", sauceName: "Service Sauce" }] },
+    });
+    await db.insert(brandProfilesTable).values({
+      key: "service-brand__cheese",
+      scope: "live",
+      brand: "Service Brand",
+      flavor: "cheese",
+      values: { frontlineRecipeName: "", frontlineRecipe: [] },
+      updatedAtMs: 10,
+    });
+
+    const report = await profileDataHealthService.buildReport();
+    expect(report.safeRepairs).toHaveLength(1);
+    const workspace = await profileDataHealthService.buildWorkspace();
+    expect(workspace.safeRepairs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ repairType: "profile-link", id: report.safeRepairs[0]?.id }),
+    ]));
+
+    const applied = await profileDataHealthService.applyRepairs(
+      [report.safeRepairs[0]!.id],
+      { userId: "service-test", ipAddress: "127.0.0.1", userAgent: "vitest" },
+    ) as { batchId: string; outcome: { applied: number } };
+    expect(applied.outcome.applied).toBe(1);
+
+    const [changed] = await db.select().from(brandProfilesTable);
+    await db.update(brandProfilesTable)
+      .set({ updatedAtMs: changed.updatedAtMs + 1 })
+      .where(eq(brandProfilesTable.key, changed.key));
+    const undone = await profileDataHealthService.undoRepairBatch(applied.batchId);
+    expect(undone).toMatchObject({
+      status: 200,
+      body: { summary: { applied: 0, skipped: 1, failed: 0, repairedRuns: 0 } },
+    });
+    const [guarded] = await db.select().from(brandProfilesTable);
+    expect(guarded.values).toMatchObject({ frontlineRecipeName: "Service Sauce" });
+  });
+
   it("is manager-only, reports without mutation, safely repairs exact links, and preserves started run snapshots", async () => {
     const manager = await freshManager();
     const operator = await freshOperator();

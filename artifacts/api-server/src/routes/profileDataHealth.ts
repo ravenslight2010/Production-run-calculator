@@ -110,6 +110,23 @@ export type DataHealthWorkspace = {
   sourceReconciliation: SourceLibraryReconciliationStatus;
 };
 
+export type DataHealthActor = {
+  userId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+};
+
+export type DataHealthUndoResult =
+  | { status: 200; body: Record<string, unknown> }
+  | { status: 404 | 409; body: { error: string } };
+
+export type ProfileDataHealthService = {
+  buildReport(): Promise<ProfileDataHealthReport>;
+  buildWorkspace(): Promise<DataHealthWorkspace>;
+  applyRepairs(findingIds: string[], actor: DataHealthActor): Promise<Record<string, unknown>>;
+  undoRepairBatch(batchId: string): Promise<DataHealthUndoResult>;
+};
+
 const router = Router();
 
 function record(value: unknown): JsonRecord {
@@ -481,15 +498,6 @@ function repairStillMatches(values: JsonRecord, updatedAtMs: number | null, repa
   return hash({ updatedAt: updatedAtMs ?? 0, name: currentName, rows: currentRows, expectedName }) === repair.fingerprint;
 }
 
-router.get("/profile-data/health-check", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
-    res.json({ report: await profileDataHealthReport(db) });
-  } catch (err) {
-    req.log.error({ err }, "failed to audit profile data health");
-    res.status(500).json({ error: "Failed to audit profile data health" });
-  }
-});
-
 router.post("/profile-data/ai-retention/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
   try {
     const report = await applyAiRetentionCleanup();
@@ -505,25 +513,14 @@ router.post("/profile-data/ai-retention/apply", requireCapability("manage-staff"
   }
 });
 
-router.get("/profile-data/health-workspace", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
-    res.json({ workspace: await dataHealthWorkspace(db) });
-  } catch (err) {
-    req.log.error({ err }, "failed to load data health workspace");
-    res.status(500).json({ error: "Failed to load data health workspace" });
-  }
-});
-
-router.post("/profile-data/health-check/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
+export function createProfileDataHealthService(database: typeof db = db): ProfileDataHealthService {
+  return {
+    buildReport: () => profileDataHealthReport(database),
+    buildWorkspace: () => dataHealthWorkspace(database),
+    async applyRepairs(findingIds, actor) {
     const scope = currentScope();
-    if (!Array.isArray(req.body?.findingIds) || req.body.findingIds.length === 0 || req.body.findingIds.length > 100
-      || req.body.findingIds.some((id: unknown) => typeof id !== "string" || id.length === 0 || id.length > 240)) {
-      res.status(400).json({ error: "Select between 1 and 100 valid health findings" });
-      return;
-    }
-    const requested = new Set(req.body.findingIds as string[]);
-    const result = await db.transaction(async (tx) => {
+    const requested = new Set(findingIds);
+    return database.transaction(async (tx) => {
       const before = await profileDataHealthReport(tx);
       const master = await buildMasterDataHealthReport(tx, scope);
       const supportedIds = new Set([
@@ -644,12 +641,12 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
       if (applied.length > 0) {
         batchId = `profile-data-health:${now}:${Math.random().toString(36).slice(2, 10)}`;
         await tx.insert(dataHealthRepairBatchesTable).values({
-           id: batchId, scope, actor: req.userId ?? "unknown", records: [...applied, ...runRecords],
+           id: batchId, scope, actor: actor.userId ?? "unknown", records: [...applied, ...runRecords],
           summary: { applied: applied.length, skipped, failed: 0, repairedRuns },
         });
         await tx.insert(auditLogsTable).values({
           scope,
-          actor: req.userId ?? "unknown",
+          actor: actor.userId ?? "unknown",
           action: "profile_data_health_repair",
           resource: "brand_profiles",
           changes: {
@@ -661,8 +658,8 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
               .map((repair) => ({ source: repair.source, rowId: repair.rowId })),
             repairedRuns,
           },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent") ?? undefined,
+          ipAddress: actor.ipAddress,
+          userAgent: actor.userAgent,
         });
       }
        return {
@@ -677,19 +674,12 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
          },
        };
     });
-    res.json(result);
-  } catch (err) {
-    req.log.error({ err }, "failed to apply profile data health repairs");
-    res.status(500).json({ error: "Failed to apply profile data health repairs" });
-  }
-});
-
-router.post("/profile-data/health-check/batches/:batchId/undo", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
+    },
+    async undoRepairBatch(batchId) {
     const scope = currentScope();
-    const result = await db.transaction(async (tx) => {
+    return database.transaction(async (tx) => {
       const [batch] = await tx.select().from(dataHealthRepairBatchesTable)
-        .where(and(eq(dataHealthRepairBatchesTable.id, String(req.params.batchId)), eq(dataHealthRepairBatchesTable.scope, scope))).for("update");
+        .where(and(eq(dataHealthRepairBatchesTable.id, batchId), eq(dataHealthRepairBatchesTable.scope, scope))).for("update");
       if (!batch) return { status: 404 as const, body: { error: "Repair batch not found" } };
       if (batch.status === "undone") {
         const value = record(batch.summary);
@@ -844,6 +834,51 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
         .where(eq(dataHealthRepairBatchesTable.id, batch.id));
       return { status: 200 as const, body: { batchId: batch.id, summary } };
     });
+    },
+  };
+}
+
+const dataHealthService = createProfileDataHealthService();
+
+router.get("/profile-data/health-check", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    res.json({ report: await dataHealthService.buildReport() });
+  } catch (err) {
+    req.log.error({ err }, "failed to audit profile data health");
+    res.status(500).json({ error: "Failed to audit profile data health" });
+  }
+});
+
+router.get("/profile-data/health-workspace", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    res.json({ workspace: await dataHealthService.buildWorkspace() });
+  } catch (err) {
+    req.log.error({ err }, "failed to load data health workspace");
+    res.status(500).json({ error: "Failed to load data health workspace" });
+  }
+});
+
+router.post("/profile-data/health-check/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    if (!Array.isArray(req.body?.findingIds) || req.body.findingIds.length === 0 || req.body.findingIds.length > 100
+      || req.body.findingIds.some((id: unknown) => typeof id !== "string" || id.length === 0 || id.length > 240)) {
+      res.status(400).json({ error: "Select between 1 and 100 valid health findings" });
+      return;
+    }
+    res.json(await dataHealthService.applyRepairs(req.body.findingIds as string[], {
+      userId: req.userId,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") ?? undefined,
+    }));
+  } catch (err) {
+    req.log.error({ err }, "failed to apply profile data health repairs");
+    res.status(500).json({ error: "Failed to apply profile data health repairs" });
+  }
+});
+
+router.post("/profile-data/health-check/batches/:batchId/undo", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    const result = await dataHealthService.undoRepairBatch(String(req.params.batchId));
     res.status(result.status).json(result.body);
   } catch (err) {
     req.log.error({ err }, "failed to undo profile data health repairs");
