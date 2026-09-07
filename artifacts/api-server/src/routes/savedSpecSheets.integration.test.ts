@@ -209,6 +209,64 @@ describe("saved-spec-sheets routes", () => {
     expect(sheets[0]?.data).toEqual(rich);
   });
 
+  it("round-trips raw dough and sauce rows from a merged multi-file snapshot unchanged", async () => {
+    // The client saves the canonical merge of all parsed files/chunks, rather
+    // than the intermediate chunk array. Keep both recipes in one payload and
+    // use the compound source key a multi-file import sends so this exercises
+    // the real JSONB persistence boundary without asking the API to reinterpret
+    // recipe row values.
+    const mergedMultiFileSnapshot = {
+      profiles: [
+        {
+          brand: "Raw Values",
+          flavor: "API Round Trip",
+          doughName: "Large Dough",
+          sauceName: "Large Sauce",
+          applicators: [],
+          pepperonis: [],
+        },
+      ],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Large Dough",
+          rows: [
+            { ingredient: "Flour", lbs: 500 },
+            { ingredient: "Water", lbs: 125.25 },
+          ],
+        },
+        {
+          kind: "sauce",
+          name: "Large Sauce",
+          rows: [
+            { ingredient: "Tomato", lbs: 32 },
+            { ingredient: "Water", lbs: 8.5 },
+          ],
+        },
+      ],
+      note: "Merged from dough.xlsx and sauce.xlsx",
+    };
+
+    await save(
+      "merged multi-file snapshot",
+      mergedMultiFileSnapshot,
+      "live",
+      "dough|sauce",
+    );
+
+    // Fetch separately from the POST response: the regression is specifically
+    // that the persisted saved snapshot remains byte-for-byte equivalent in
+    // shape and numeric values when the client reloads it.
+    const reloaded = await list();
+    expect(reloaded).toHaveLength(1);
+    expect(reloaded[0]?.sourceKey).toBe("dough|sauce");
+    expect(reloaded[0]?.data).toEqual(mergedMultiFileSnapshot);
+
+    const recipes = (reloaded[0]?.data as typeof mergedMultiFileSnapshot).recipes;
+    expect(recipes.find((recipe) => recipe.kind === "dough")?.rows[0]?.lbs).toBe(500);
+    expect(recipes.find((recipe) => recipe.kind === "sauce")?.rows[0]?.lbs).toBe(32);
+  });
+
   it("keeps only the two most recent snapshots (newest first), pruning older ones", async () => {
     await save("first", specData("a"));
     await save("second", specData("b"));

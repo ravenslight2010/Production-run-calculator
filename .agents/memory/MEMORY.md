@@ -127,7 +127,6 @@
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Live performance traces](live-performance-trace.md) — run real-time browser traces in the background when their observation window exceeds the foreground shell timeout.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
-- [Deferred Gemini fallback](deferred-gemini-fallback.md) — keep the direct GOOGLE_API_KEY fallback separate until AI feature work.
 - [Multi-day import auth](schedule-import-401.md) — raw-fetch write loops must stop on 401 and trigger the normal unauthorized path instead of reporting misleading per-day failures.
 - [Dependency override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
 - [Startup failure evidence](startup-failure-evidence.md) — preserve the first categorized startup record separately from rolling logs during repeated readiness probes.
