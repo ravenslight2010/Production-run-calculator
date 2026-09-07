@@ -93,6 +93,8 @@ describe("FreezerSurplusPanel capability gates", () => {
 
     expect(screen.queryByRole("spinbutton", { name: "Excess finished cases" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Confirm surplus" })).toBeNull();
+    expect(screen.getByTestId("freezer-surplus-record-read-only")).toBeTruthy();
+    expect(screen.getByText("Read-only")).toBeTruthy();
     expect(screen.getByText(/requires inventory management access/i)).toBeTruthy();
     expect(onConfirm).not.toHaveBeenCalled();
   });
@@ -118,6 +120,8 @@ describe("FreezerSurplusPanel capability gates", () => {
     expect(screen.getByTestId("freezer-surplus-run-run-2")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /choose pull|revise pull/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Confirm pull" })).toBeNull();
+    expect(screen.getByTestId("freezer-surplus-pull-read-only")).toBeTruthy();
+    expect(screen.getByText("Read-only")).toBeTruthy();
     expect(screen.getByText(/requires inventory management access/i)).toBeTruthy();
   });
 

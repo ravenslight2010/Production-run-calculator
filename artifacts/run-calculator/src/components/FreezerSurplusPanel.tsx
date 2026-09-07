@@ -142,9 +142,15 @@ export function FreezerSurplusPanel({
               </button>
             </div>
             ) : (
-              <p className="mt-3 text-xs font-medium text-muted-foreground">
-                Recording freezer surplus requires inventory management access.
-              </p>
+              <div
+                className="mt-3 rounded-md border border-border/60 bg-background/50 px-3 py-2"
+                data-testid="freezer-surplus-record-read-only"
+              >
+                <p className="text-xs font-semibold text-foreground">Read-only</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Recording freezer surplus requires inventory management access.
+                </p>
+              </div>
             )}
             {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
             {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
@@ -251,9 +257,15 @@ export function FreezerSurplusPanel({
             })}
           </div>
            {!canManageInventory && loaded && runs.length > 0 && (
-             <p className="mt-3 text-xs font-medium text-muted-foreground">
-               Choosing or changing freezer pulls requires inventory management access.
-             </p>
+              <div
+                className="mt-3 rounded-md border border-border/60 bg-background/50 px-3 py-2"
+                data-testid="freezer-surplus-pull-read-only"
+              >
+                <p className="text-xs font-semibold text-foreground">Read-only</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Choosing or changing freezer pulls requires inventory management access.
+                </p>
+              </div>
            )}
           {localMessage && <p className="mt-2 text-xs font-medium text-sky-300" role="status">{localMessage}</p>}
         </div>

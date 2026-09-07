@@ -243,6 +243,18 @@ export default function FillMissingPanel({
           )}
         </div>
 
+        {proposals && pending.length > 0 && !canManageProfiles && (
+          <div
+            className="rounded-md border border-border/60 bg-muted/30 px-3 py-2"
+            data-testid="fill-missing-remembered-read-only"
+          >
+            <p className="text-xs font-semibold text-foreground">Remembered values are read-only</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              You can apply a confirmed value to this run, but saving it for future runs requires profile management access.
+            </p>
+          </div>
+        )}
+
         {aiError && (
           <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
             <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
@@ -350,11 +362,6 @@ export default function FillMissingPanel({
                             <SkipForward className="h-3.5 w-3.5" /> Skip
                           </Button>
                         </div>
-                      )}
-                      {!canManageProfiles && p.fillable && (
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          Applying to this run does not save a remembered profile value without profile management access.
-                        </p>
                       )}
                     </div>
                   );

@@ -229,10 +229,10 @@ const handoffNextAction = (state: HandoffItem["attentionState"], status: Handoff
   status === "historical" ? "Review when convenient" : state === "blocker" ? "Act now" : state === "review" ? "Review and decide" : "Monitor";
 
 router.get("/reports/handoff", requireCapability("review-incidents"), async (req, res): Promise<void> => {
-  const parsed = FinalizedReportId.safeParse(req.params);
+  const parsed = HandoffQuery.safeParse(req.query);
   if (!parsed.success) { res.status(400).json({ error: "A valid production date is required" }); return; }
   const date = parsed.data.date;
-    const scope = currentScope();
+  const scope = currentScope();
   const start = new Date(`${date}T00:00:00.000Z`);
   const end = new Date(`${date}T23:59:59.999Z`);
   const unavailable = (note: string) => ({ availability: "unavailable" as const, note, itemCount: 0 });
@@ -260,17 +260,16 @@ router.get("/reports/handoff", requireCapability("review-incidents"), async (req
     sources.incidents = { availability: "available", itemCount: open.length };
     for (const row of open) {
       const context = row.context && typeof row.context === "object" ? row.context as Record<string, unknown> : {};
-        const status = error.code === "missing-run" ? 404
-          : error.code === "duplicate-run" || error.code === "reset-mismatch" ? 409 : 400;
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
+      const status = row.workflowState === "resolved" ? "resolved" : row.status === "reviewed" ? "reviewed" : "open";
+      const severity = row.priority === "urgent" ? "urgent" : row.priority === "high" ? "high" : row.priority === "low" ? "low" : "medium";
+      const state = handoffAttention(severity, status);
       items.push({ id: `incident:${row.id}`, source: "incidents", severity, status, title: row.source === "auto_crash" ? "Auto-captured crash" : "Reported issue", detail: String(context.description ?? context.errorMessage ?? row.diagnosis ?? "Incident requires manager review."), affectedRun: typeof context.runId === "string" ? context.runId : null, affectedProduct: typeof context.product === "string" ? context.product : null, occurredAt: safeDate(row.createdAt), sourcePath: "incidents", historical: false, attentionState: state, nextAction: handoffNextAction(state, status) });
     }
   }
   if (quality) {
     const exceptions = quality.filter((row) => row.status === "warn" || row.status === "fail");
     sources.quality = { availability: "available", itemCount: exceptions.length };
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
+     for (const row of exceptions) { const state = handoffAttention(row.status === "fail" ? "high" : "medium", "historical"); items.push({ id: `quality:${row.id}`, source: "quality", severity: row.status === "fail" ? "high" : "medium", status: "historical", title: `${row.productType} quality exception`, detail: row.summary || `${Array.isArray(row.issues) ? row.issues.length : 0} issue(s) recorded.`, affectedRun: null, affectedProduct: row.productType, occurredAt: safeDate(row.createdAt), sourcePath: "quality", historical: true, attentionState: state, nextAction: handoffNextAction(state, "historical") }); }
   }
   if (inventory) {
     const [inventoryItems, lots, ledger] = inventory;
@@ -279,19 +278,16 @@ router.get("/reports/handoff", requireCapability("review-incidents"), async (req
     const risk = inventoryItems.filter((item) => item.reorderThreshold > 0 && (onHand.get(item.id) ?? 0) <= item.reorderThreshold);
     const waste = ledger.filter((row) => row.type === "adjust" && row.qtyDelta < 0);
     sources.inventory = { availability: "available", itemCount: risk.length + waste.length };
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
+     for (const item of risk) { const severity = inventorySeverity(onHand.get(item.id) ?? 0, item.reorderThreshold); const state = handoffAttention(severity, "current"); items.push({ id: `inventory-risk:${item.id}`, source: "inventory", severity, status: "current", title: `${item.name} is at or below reorder level`, detail: `${onHand.get(item.id) ?? 0} ${item.unit} on hand; reorder level is ${item.reorderThreshold} ${item.unit}.`, affectedRun: null, affectedProduct: item.name, occurredAt: safeDate(item.updatedAt), sourcePath: "inventory", historical: false, attentionState: state, nextAction: handoffNextAction(state, "current") }); }
      for (const row of waste) { const item = inventoryItems.find((candidate) => candidate.id === row.itemId); const state = handoffAttention("medium", "historical"); items.push({ id: `inventory-ledger:${row.id}`, source: "inventory", severity: "medium", status: "historical", title: `${item?.name ?? "Inventory item"} adjustment`, detail: `${Math.abs(row.qtyDelta)} ${item?.unit ?? "units"} removed${row.note ? ` — ${row.note}` : ""}.`, affectedRun: row.runId, affectedProduct: item?.name ?? null, occurredAt: safeDate(row.createdAt), sourcePath: "inventory", historical: true, attentionState: state, nextAction: handoffNextAction(state, "historical") }); }
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
   }
   if (sync) {
     sources.sync = { availability: "available", itemCount: sync.length };
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
+     for (const row of sync) { const state = handoffAttention(row.conflictCount > 3 ? "high" : "medium", "historical"); items.push({ id: `sync:${row.id}`, source: "sync", severity: row.conflictCount > 3 ? "high" : "medium", status: "historical", title: "Sync conflict recorded", detail: `${row.conflictCount} conflict${row.conflictCount === 1 ? "" : "s"} resolved by ${row.resolution}.`, affectedRun: null, affectedProduct: null, occurredAt: safeDate(row.createdAt), sourcePath: "sync", historical: true, attentionState: state, nextAction: handoffNextAction(state, "historical") }); }
   }
   if (health) {
     const pending = health.findings.filter((finding) => finding.repairability === "review" || finding.severity !== "info");
     sources["data-health"] = { availability: "available", itemCount: pending.length };
-     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
      for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
   }
   const severityOrder: Record<HandoffSeverity, number> = { urgent: 0, high: 1, medium: 2, low: 3, info: 4 };
@@ -309,7 +305,7 @@ router.get(
   "/reports/operational-view",
   requireCapability("review-incidents"),
   async (req, res): Promise<void> => {
-  const parsed = FinalizedReportId.safeParse(req.params);
+    const parsed = OperationalViewQuery.safeParse(req.query);
     if (!parsed.success) {
       operationalError(res, 400, "invalid-query", "Valid date and runId query parameters are required.");
       return;
@@ -324,29 +320,17 @@ router.get(
       eq(completedRunHistoryTable.date, date),
       eq(completedRunHistoryTable.runId, runId),
     ));
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
-    eq(finalizedOperationalReportsTable.id, parsed.data.id),
-    eq(finalizedOperationalReportsTable.scope, currentScope()),
-  ));
+    const rows = completed.length === 0 ? await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, scope),
+      eq(dailySyncTable.date, date),
+    )) : [];
     if (completed.length > 1) {
       operationalError(res, 409, "snapshot-ambiguous", "More than one immutable completion exists for this run.");
       return;
     }
     if (completed.length === 1) {
-    const row = {
-      id: randomUUID(),
-      scope,
-      reportScope: report.scope,
-      periodStart: report.periodStart,
-      periodEnd: report.periodEnd,
-      generatedAt: new Date(report.generatedAt),
-      generatedBy: report.attribution?.generatedBy ?? req.userId ?? "authenticated manager",
-      finalizedAt,
-      finalizedBy: req.userId ?? "authenticated manager",
-      contentHash: reportHash(report),
-      payload: report,
-    };
-      const snapshot = adaptCanonicalOperationalSnapshot(row.data);
+      const row = completed[0];
+      const snapshot = adaptCanonicalOperationalSnapshot(row.snapshot);
       if (!snapshot) { operationalError(res, 400, "invalid-snapshot", "The immutable completion is not an object."); return; }
       try {
         res.json(deriveOperationalRunView({
@@ -368,27 +352,13 @@ router.get(
       operationalError(res, 409, "snapshot-ambiguous", "More than one canonical snapshot exists for this date.");
       return;
     }
-    const row = {
-      id: randomUUID(),
-      scope,
-      reportScope: report.scope,
-      periodStart: report.periodStart,
-      periodEnd: report.periodEnd,
-      generatedAt: new Date(report.generatedAt),
-      generatedBy: report.attribution?.generatedBy ?? req.userId ?? "authenticated manager",
-      finalizedAt,
-      finalizedBy: req.userId ?? "authenticated manager",
-      contentHash: reportHash(report),
-      payload: report,
-    };
-      const snapshot = adaptCanonicalOperationalSnapshot(row.data);
-      snapshotTimes.push(row.updatedAt.getTime());
-      if (row.source === "active") mutableSnapshotTimes.push(row.updatedAt.getTime());
-      if (!snapshot || !Array.isArray(snapshot.dayState?.runs)) {
-        canonicalFailure = { date: row.date, code: "invalid-snapshot" };
-        break;
-      }
-      const resetAt = (snapshot.dayState as { resetAt?: unknown }).resetAt;
+    const row = rows[0];
+    const snapshot = adaptCanonicalOperationalSnapshot(row.data);
+    if (!snapshot) {
+      operationalError(res, 400, "invalid-snapshot", "The canonical snapshot is not an object.");
+      return;
+    }
+    const resetAt = (snapshot.dayState as { resetAt?: unknown } | undefined)?.resetAt;
     if (resetAt !== undefined && (typeof resetAt !== "number" || !Number.isFinite(resetAt) || resetAt < 0)) {
       operationalError(res, 409, "reset-ambiguity", "The canonical snapshot has an ambiguous reset generation.");
       return;
@@ -441,13 +411,13 @@ router.post(
   ["/reports/operational", "/reports/operational/finalize"],
   requireCapability("review-incidents"),
   async (req, res): Promise<void> => {
-  const parsed = FinalizedReportId.safeParse(req.params);
+    const parsed = validateOperationalReportBody(req.body);
     if (!parsed.ok) {
       res.status(parsed.status).json({ error: parsed.error });
       return;
     }
     const input = parsed.data;
-  const [periodStart, periodEnd] = dateRange(parsed.data.scope, parsed.data.date);
+    const [periodStart, periodEnd] = dateRange(input.scope, input.date);
     const scope = currentScope();
     const [qualityRows, incidentRows, inventoryRows, lots, syncRows, completionRows] = await Promise.all([
       db.select().from(qualityChecksTable).where(
@@ -533,10 +503,12 @@ router.post(
       completionRows.map((row) => `${row.date}\u0000${row.runId}`),
     );
     for (const row of syncRows) {
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
-    eq(finalizedOperationalReportsTable.id, parsed.data.id),
-    eq(finalizedOperationalReportsTable.scope, currentScope()),
-  ));
+      const rows = rowsByDate.get(row.date) ?? [];
+      rows.push({ date: row.date, data: row.data, updatedAt: row.updatedAt, source: "active" });
+      rowsByDate.set(row.date, rows);
+    }
+    for (const row of completionRows) {
+      const rows = rowsByDate.get(row.date) ?? [];
       rows.push({
         date: row.date,
         data: row.snapshot,
@@ -547,24 +519,7 @@ router.post(
       rowsByDate.set(row.date, rows);
     }
     for (const date of expectedDates) {
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
-    eq(finalizedOperationalReportsTable.id, parsed.data.id),
-    eq(finalizedOperationalReportsTable.scope, currentScope()),
-  ));
-      rows.push({
-        date: row.date,
-        data: row.snapshot,
-        updatedAt: row.completedAt,
-        source: "completed",
-        completedRunId: row.runId,
-      });
-      rowsByDate.set(row.date, rows);
-    }
-    for (const date of expectedDates) {
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
-    eq(finalizedOperationalReportsTable.id, parsed.data.id),
-    eq(finalizedOperationalReportsTable.scope, currentScope()),
-  ));
+      const rows = rowsByDate.get(date) ?? [];
       if (rows.length === 0) {
         canonicalFailure = {
           date,
@@ -805,12 +760,19 @@ router.post(
       eq(finalizedOperationalReportsTable.periodStart, report.periodStart),
       eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
     ));
-
-  const integrity = finalizedReportIntegrity(rows[0]);
-
-  const integrity = finalizedReportIntegrity(rows[0]);
-
-  const integrity = finalizedReportIntegrity(rows[0]);
+    if (existing.length === 1) {
+      const integrity = finalizedReportIntegrity(existing[0]);
+      if (!integrity.ok) {
+        sendFinalizedReportIntegrityError(req, res, existing[0], integrity.actualHash);
+        return;
+      }
+      res.status(200).json({ ...finalizedReportResponse(existing[0]), idempotent: true });
+      return;
+    }
+    if (existing.length > 1) {
+      operationalError(res, 409, "finalized-report-ambiguous", "More than one finalized report exists for this period.");
+      return;
+    }
     const finalizedAt = new Date();
     const row = {
       id: randomUUID(),
@@ -835,16 +797,62 @@ router.post(
         eq(finalizedOperationalReportsTable.periodStart, report.periodStart),
         eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
       ));
-  const parsed = FinalizedReportId.safeParse(req.params);
+      if (concurrent.length === 1) {
+        const integrity = finalizedReportIntegrity(concurrent[0]);
+        if (!integrity.ok) {
+          sendFinalizedReportIntegrityError(req, res, concurrent[0], integrity.actualHash);
+          return;
+        }
+        res.status(200).json({ ...finalizedReportResponse(concurrent[0]), idempotent: true });
+        return;
+      }
+      throw error;
+    }
+    res.status(201).json({
+      id: row.id, scope: row.scope, reportScope: row.reportScope,
+      periodStart: row.periodStart, periodEnd: row.periodEnd,
+      generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
+      finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy,
+      contentHash: row.contentHash, report,
+    });
+  },
+);
+
+router.get("/reports/operational/finalized", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const parsed = ExactFinalizedReportQuery.safeParse(req.query);
   if (!parsed.success) {
     operationalError(res, 400, "invalid-query", "Valid scope and date query parameters are required.");
     return;
   }
   const [periodStart, periodEnd] = dateRange(parsed.data.scope, parsed.data.date);
   const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
-    eq(finalizedOperationalReportsTable.id, parsed.data.id),
     eq(finalizedOperationalReportsTable.scope, currentScope()),
-  ));
+    eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope),
+    eq(finalizedOperationalReportsTable.periodStart, periodStart),
+    eq(finalizedOperationalReportsTable.periodEnd, periodEnd),
+  )).orderBy(desc(finalizedOperationalReportsTable.finalizedAt));
+  res.json(rows.map((row) => ({
+    id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
+    generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
+    finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy, contentHash: row.contentHash,
+  })));
+});
+
+router.get("/reports/operational/finalized/search", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const parsed = RangeFinalizedReportQuery.safeParse(req.query);
+  if (!parsed.success) {
+    operationalError(res, 400, "invalid-query", "Valid startDate and endDate parameters within a 366-day range are required. Limit must be between 1 and 100.");
+    return;
+  }
+  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
+    eq(finalizedOperationalReportsTable.scope, currentScope()),
+    parsed.data.scope ? eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope) : undefined,
+    gte(finalizedOperationalReportsTable.periodEnd, parsed.data.startDate),
+    lte(finalizedOperationalReportsTable.periodEnd, parsed.data.endDate),
+  )).orderBy(
+    desc(finalizedOperationalReportsTable.periodEnd),
+    desc(finalizedOperationalReportsTable.finalizedAt),
+  ).limit(parsed.data.limit);
   res.json(rows.map((row) => ({
     id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
     generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
@@ -862,21 +870,16 @@ router.get("/reports/operational/finalized/:id", requireCapability("review-incid
     eq(finalizedOperationalReportsTable.id, parsed.data.id),
     eq(finalizedOperationalReportsTable.scope, currentScope()),
   ));
-  res.json(rows.map((row) => ({
-    id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
-    generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
-    finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy, contentHash: row.contentHash,
-  })));
-});
-
-router.get("/reports/operational/finalized/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {
-  const parsed = FinalizedReportId.safeParse(req.params);
-  if (!parsed.success) {
-    operationalError(res, 400, "invalid-report-id", "A valid finalized report id is required.");
+  if (rows.length !== 1) {
+    operationalError(res, 404, "finalized-report-not-found", "Finalized report not found.");
     return;
   }
-  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
-    eq(finalizedOperationalReportsTable.id, parsed.data.id),
-    eq(finalizedOperationalReportsTable.scope, currentScope()),
-  ));
+  const integrity = finalizedReportIntegrity(rows[0]);
+  if (!integrity.ok) {
+    sendFinalizedReportIntegrityError(req, res, rows[0], integrity.actualHash);
+    return;
+  }
+  res.json(finalizedReportResponse(rows[0]));
+});
+
 export default router;

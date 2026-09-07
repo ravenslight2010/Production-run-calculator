@@ -80,7 +80,9 @@ describe("FillMissingPanel capability gates", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: /scan for missing data/i }));
-    expect(screen.getByText(/does not save a remembered profile value/i)).toBeTruthy();
+    expect(screen.getByTestId("fill-missing-remembered-read-only")).toBeTruthy();
+    expect(screen.getByText(/remembered values are read-only/i)).toBeTruthy();
+    expect(screen.getByText(/saving it for future runs requires profile management access/i)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /apply/i }));
 
     expect(onCommit).toHaveBeenCalledWith("targetDoughballWeight", 8);
@@ -92,6 +94,7 @@ describe("FillMissingPanel capability gates", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: /scan for missing data/i }));
+    expect(screen.queryByTestId("fill-missing-remembered-read-only")).toBeNull();
     await user.click(screen.getByRole("button", { name: /apply/i }));
 
     expect(mocks.saveFillMissingValues).toHaveBeenCalledWith([

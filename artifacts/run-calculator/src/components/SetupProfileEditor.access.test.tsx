@@ -117,12 +117,14 @@ afterEach(() => {
 });
 
 describe("SetupProfileEditor capability gate", () => {
-  it("keeps Save Setup disabled and explains the restriction without manage-profiles", () => {
+  it("replaces Save Setup with a read-only explanation without manage-profiles", () => {
     mocks.loadProfile.mockReturnValue(null);
 
     render(<SetupProfileEditor {...editorProps(false)} />);
 
-    expect(screen.getByRole("button", { name: "Save Setup" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Save Setup" })).toBeNull();
+    expect(screen.getByTestId("setup-profile-read-only")).toBeTruthy();
+    expect(screen.getByText(/read-only setup profile/i)).toBeTruthy();
     expect(screen.getByText(/requires profile management access/i)).toBeTruthy();
     expect(mocks.saveProfile).not.toHaveBeenCalled();
   });
