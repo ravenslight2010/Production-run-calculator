@@ -275,6 +275,39 @@ async function readServerRunValue(page: Page, runId: string): Promise<string> {
   return JSON.stringify(payload.runValues?.[runId] ?? null);
 }
 
+async function readServerRunField(
+  page: Page,
+  runId: string,
+  field: string,
+): Promise<unknown> {
+  const response = await page.request.get(`/api/sync/today?today=${TODAY}`, {
+    headers: { "Cache-Control": "no-cache" },
+  });
+  if (!response.ok()) {
+    throw new Error(`Read canonical run field failed (${response.status()})`);
+  }
+  const payload = await response.json() as {
+    runValues?: Record<string, Record<string, unknown>>;
+  };
+  return payload.runValues?.[runId]?.[field];
+}
+
+async function readServerProfileValues(
+  page: Page,
+  key: string,
+): Promise<Record<string, unknown> | undefined> {
+  const response = await page.request.get("/api/brand-profiles", {
+    headers: { "Cache-Control": "no-cache" },
+  });
+  if (!response.ok()) {
+    throw new Error(`Read canonical profile failed (${response.status()})`);
+  }
+  const payload = await response.json() as {
+    items?: { key: string; values?: Record<string, unknown> }[];
+  };
+  return payload.items?.find((item) => item.key === key)?.values;
+}
+
 async function expectServerRunValueChanged(
   page: Page,
   runId: string,
@@ -572,6 +605,179 @@ test("a delayed shared recipe refresh stays with its original run after a rapid 
 
     await expectIngredientDetailChanged(page, originalRunId, originalBefore);
     await expectIngredientDetailStable(page, switchedRunId, switchedBefore);
+  } finally {
+    await refreshGate.release();
+  }
+});
+
+test("a delayed learned batch weight updates profiles and pending runs without crossing the open run", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const username = uniqueTestId("e2e_batch_weight_switch");
+  const ingredient = `Plain Topping ${uniqueTestId("ingredient")}`;
+  const originalBrand = `Original Weight ${uniqueTestId("brand")}`;
+  const originalFlavor = "Profile-backed";
+  const switchedBrand = `Switched Weight ${uniqueTestId("brand")}`;
+  const switchedFlavor = "Pending";
+  const originalRunId = uniqueTestId("original-run");
+  const switchedRunId = uniqueTestId("switched-run");
+  const pendingRunId = uniqueTestId("pending-run");
+  const now = Date.now();
+  const originalProfileKey = `${originalBrand.toLowerCase()}__${originalFlavor.toLowerCase()}`;
+  const switchedProfileKey = `${switchedBrand.toLowerCase()}__${switchedFlavor.toLowerCase()}`;
+  const account = await fixtures.createAccount({
+    username,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
+  });
+
+  const values = (batchLbs: number) => ({
+    casesNeeded: 100,
+    pizzasPerCase: 1,
+    casesPerSkid: 10,
+    casesPerLayer: 0,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    app1Type: ingredient,
+    app1OzPerPizza: 1,
+    app1BatchLbs: batchLbs,
+    app1CheeseRecipe: [],
+  });
+  const originalValues = values(5);
+  const switchedValues = values(7);
+
+  await fixtures.seedBrandProfile(account, {
+    brand: originalBrand,
+    flavor: originalFlavor,
+    values: originalValues,
+    updatedAt: now,
+  });
+  await fixtures.seedBrandProfile(account, {
+    brand: switchedBrand,
+    flavor: switchedFlavor,
+    values: switchedValues,
+    updatedAt: now,
+  });
+  await fixtures.seedTodaySync({
+    token: account.token,
+    senderId: `batch-weight-switch-${username}`,
+    date: TODAY,
+    payload: {
+      dayState: {
+        date: TODAY,
+        runs: [
+          {
+            id: originalRunId,
+            brand: originalBrand,
+            flavor: originalFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+          {
+            id: switchedRunId,
+            brand: switchedBrand,
+            flavor: switchedFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+          {
+            id: pendingRunId,
+            brand: switchedBrand,
+            flavor: switchedFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+        ],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+      },
+      runValues: {
+        [originalRunId]: originalValues,
+        [switchedRunId]: switchedValues,
+        [pendingRunId]: switchedValues,
+      },
+      runValuesUpdatedAt: {
+        [originalRunId]: now,
+        [switchedRunId]: now,
+        [pendingRunId]: now,
+      },
+      packagingProgress: {},
+    },
+  });
+
+  await page.addInitScript(({ ingredientName }) => {
+    localStorage.setItem("run-calc-ingredient-types", JSON.stringify([ingredientName]));
+  }, { ingredientName: ingredient });
+  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  await page.getByRole("button", { name: /^More/ }).click();
+  await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+  await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
+  const batchWeight = page.getByTestId("input-app1BatchLbs");
+  await expect(batchWeight).toHaveValue("5");
+
+  const refreshGate = await holdNextProfileRefresh(page);
+  try {
+    const savedWeight = page.waitForResponse((response) =>
+      response.url().includes("/api/ingredient-batch-weights")
+        && response.request().method() === "POST"
+        && response.status() === 200,
+    );
+    await batchWeight.fill("12");
+    await batchWeight.blur();
+    await savedWeight;
+    await refreshGate.observed;
+
+    await page.getByTestId("tab-run").click();
+    await page.getByRole("button", { name: "Select run 2" }).click();
+    await expect(page.getByText("Run 2 of 3", { exact: true })).toBeVisible();
+
+    await refreshGate.release();
+
+    await expect(page.getByRole("button", { name: /^More/ })).toBeVisible();
+    await expect.poll(
+      async () => (await readServerProfileValues(page, originalProfileKey))?.app1BatchLbs,
+      { timeout: 25_000 },
+    ).toBe(12);
+    await expect.poll(
+      async () => (await readServerProfileValues(page, switchedProfileKey))?.app1BatchLbs,
+      { timeout: 25_000 },
+    ).toBe(12);
+    await expect.poll(
+      () => readServerRunField(page, originalRunId, "app1BatchLbs"),
+      { timeout: 25_000 },
+    ).toBe(12);
+    await expect.poll(
+      () => readServerRunField(page, pendingRunId, "app1BatchLbs"),
+      { timeout: 25_000 },
+    ).toBe(12);
+    await expect.poll(
+      () => readServerRunField(page, switchedRunId, "app1BatchLbs"),
+      { timeout: 25_000 },
+    ).toBe(7);
+
+    await page.getByRole("button", { name: "Select run 1" }).click();
+    await expect(page.getByText("Run 1 of 3", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    await expect(page.getByTestId("input-app1BatchLbs")).toHaveValue("12");
+
+    await page.getByTestId("tab-run").click();
+    await page.getByRole("button", { name: "Select run 2" }).click();
+    await expect(page.getByText("Run 2 of 3", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    await expect(page.getByTestId("input-app1BatchLbs")).toHaveValue("7");
   } finally {
     await refreshGate.release();
   }
