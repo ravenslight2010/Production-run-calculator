@@ -661,6 +661,238 @@ describe("operational report endpoints", () => {
     });
   });
 
+  it("warns managers when a historical report proof key is no longer retained", async () => {
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    const proofRow = (id: string, proofKeyId: string, periodEnd: string) => ({
+      id,
+      scope: "live",
+      reportScope: "day",
+      periodStart: periodEnd,
+      periodEnd,
+      generatedAt: finalizedAt,
+      generatedBy: MANAGER,
+      finalizedAt,
+      finalizedBy: MANAGER,
+      contentHash: "a".repeat(64),
+      hashContract: "canonical-json-v2",
+      proofContract: "hmac-sha256-v1",
+      proofKeyId,
+      proofSignature: "b".repeat(64),
+      payload: {},
+    });
+    await db.insert(finalizedOperationalReportsTable).values([
+      proofRow("proof-health-active", "test-current", "2026-09-06"),
+      proofRow("proof-health-retained", "test-previous", "2026-09-05"),
+      proofRow("proof-health-missing", "removed-historical", "2026-09-04"),
+      { ...proofRow("proof-health-other-scope", "sandbox-missing", "2026-09-03"), scope: "sandbox" },
+    ]);
+
+    expect((await req(OPERATOR, "GET", "/api/reports/operational/finalized/proof-key-health")).status).toBe(403);
+    const response = await req(MANAGER, "GET", "/api/reports/operational/finalized/proof-key-health");
+    expect(response.status).toBe(200);
+    const health = await response.json() as Record<string, unknown>;
+    expect(health).toMatchObject({
+      status: "attention-required",
+      scope: "live",
+      activeKeyId: "test-current",
+      storedProofKeyIds: ["removed-historical", "test-current", "test-previous"],
+      availableStoredProofKeyIds: ["test-current", "test-previous"],
+      missingStoredProofKeyIds: ["removed-historical"],
+      scan: {
+        limit: 100,
+        checkedDistinctKeyIds: 3,
+        truncated: false,
+      },
+      message: "Finalized report proof-key retention needs manager attention.",
+    });
+    expect(health.remediation).toContain("Restore the retained signing key");
+    expect(health.remediation).toContain("removed-historical");
+    expect(JSON.stringify(health)).not.toContain(REPORT_SIGNING_KEYRING.keys["test-current"]);
+    expect(JSON.stringify(health)).not.toContain(REPORT_SIGNING_KEYRING.keys["test-previous"]);
+
+    const indexes = await db.execute(sql`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname = 'finalized_operational_reports_scope_proof_key_idx'
+    `);
+    expect(indexes.rows[0]?.indexdef).toMatch(
+      /\(scope, proof_contract, proof_key_id\)/,
+    );
+  });
+
+  it("reports healthy when every active and retained proof key remains configured", async () => {
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    await db.insert(finalizedOperationalReportsTable).values([
+      {
+        id: "proof-health-current",
+        scope: "live",
+        reportScope: "day",
+        periodStart: "2026-09-06",
+        periodEnd: "2026-09-06",
+        generatedAt: finalizedAt,
+        generatedBy: MANAGER,
+        finalizedAt,
+        finalizedBy: MANAGER,
+        contentHash: "a".repeat(64),
+        hashContract: "canonical-json-v2",
+        proofContract: "hmac-sha256-v1",
+        proofKeyId: "test-current",
+        proofSignature: "b".repeat(64),
+        payload: {},
+      },
+      {
+        id: "proof-health-previous",
+        scope: "live",
+        reportScope: "day",
+        periodStart: "2026-09-05",
+        periodEnd: "2026-09-05",
+        generatedAt: finalizedAt,
+        generatedBy: MANAGER,
+        finalizedAt,
+        finalizedBy: MANAGER,
+        contentHash: "c".repeat(64),
+        hashContract: "canonical-json-v2",
+        proofContract: "hmac-sha256-v1",
+        proofKeyId: "test-previous",
+        proofSignature: "d".repeat(64),
+        payload: {},
+      },
+    ]);
+
+    const response = await req(MANAGER, "GET", "/api/reports/operational/finalized/proof-key-health");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "healthy",
+      activeKeyId: "test-current",
+      storedProofKeyIds: ["test-current", "test-previous"],
+      availableStoredProofKeyIds: ["test-current", "test-previous"],
+      missingStoredProofKeyIds: [],
+      remediation: null,
+    });
+  });
+
+  it("keeps the key-retention audit bounded and flags an incomplete scan", async () => {
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    await db.insert(finalizedOperationalReportsTable).values(
+      Array.from({ length: 101 }, (_, index) => {
+        const suffix = String(index).padStart(3, "0");
+        return {
+          id: `bounded-proof-health-${suffix}`,
+          scope: "live",
+          reportScope: "day",
+          periodStart: `bounded-${suffix}`,
+          periodEnd: `bounded-${suffix}`,
+          generatedAt: finalizedAt,
+          generatedBy: MANAGER,
+          finalizedAt,
+          finalizedBy: MANAGER,
+          contentHash: "a".repeat(64),
+          hashContract: "canonical-json-v2",
+          proofContract: "hmac-sha256-v1",
+          proofKeyId: `historical-${suffix}`,
+          proofSignature: "b".repeat(64),
+          payload: {},
+        };
+      }),
+    );
+
+    const response = await req(MANAGER, "GET", "/api/reports/operational/finalized/proof-key-health");
+    expect(response.status).toBe(200);
+    const health = await response.json() as {
+      status: string;
+      storedProofKeyIds: string[];
+      missingStoredProofKeyIds: string[];
+      scan: { limit: number; checkedDistinctKeyIds: number; truncated: boolean };
+      remediation: string;
+    };
+    expect(health.status).toBe("attention-required");
+    expect(health.storedProofKeyIds).toHaveLength(100);
+    expect(health.missingStoredProofKeyIds).toHaveLength(100);
+    expect(health.scan).toEqual({
+      limit: 100,
+      checkedDistinctKeyIds: 100,
+      truncated: true,
+    });
+    expect(health.remediation).toContain("Restore the retained signing keys");
+  });
+
+  it("does not expand key-health results when many reports reuse one retained key", async () => {
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    await db.insert(finalizedOperationalReportsTable).values(
+      Array.from({ length: 150 }, (_, index) => {
+        const suffix = String(index).padStart(3, "0");
+        return {
+          id: `repeated-proof-health-${suffix}`,
+          scope: "live",
+          reportScope: "day",
+          periodStart: `repeated-${suffix}`,
+          periodEnd: `repeated-${suffix}`,
+          generatedAt: finalizedAt,
+          generatedBy: MANAGER,
+          finalizedAt,
+          finalizedBy: MANAGER,
+          contentHash: "a".repeat(64),
+          hashContract: "canonical-json-v2",
+          proofContract: "hmac-sha256-v1",
+          proofKeyId: "test-previous",
+          proofSignature: "b".repeat(64),
+          payload: {},
+        };
+      }),
+    );
+
+    const response = await req(MANAGER, "GET", "/api/reports/operational/finalized/proof-key-health");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "healthy",
+      storedProofKeyIds: ["test-previous"],
+      availableStoredProofKeyIds: ["test-previous"],
+      missingStoredProofKeyIds: [],
+      scan: {
+        limit: 100,
+        checkedDistinctKeyIds: 1,
+        truncated: false,
+      },
+    });
+  });
+
+  it("returns safe remediation when the signing keyring is unavailable", async () => {
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    await db.insert(finalizedOperationalReportsTable).values({
+      id: "proof-health-keyring-unavailable",
+      scope: "live",
+      reportScope: "day",
+      periodStart: "2026-09-06",
+      periodEnd: "2026-09-06",
+      generatedAt: finalizedAt,
+      generatedBy: MANAGER,
+      finalizedAt,
+      finalizedBy: MANAGER,
+      contentHash: "a".repeat(64),
+      hashContract: "canonical-json-v2",
+      proofContract: "hmac-sha256-v1",
+      proofKeyId: "test-current",
+      proofSignature: "b".repeat(64),
+      payload: {},
+    });
+    delete process.env.OPERATIONAL_REPORT_SIGNING_KEYS;
+
+    const response = await req(MANAGER, "GET", "/api/reports/operational/finalized/proof-key-health");
+    expect(response.status).toBe(200);
+    const health = await response.json() as Record<string, unknown>;
+    expect(health).toMatchObject({
+      status: "attention-required",
+      activeKeyId: null,
+      storedProofKeyIds: ["test-current"],
+      availableStoredProofKeyIds: [],
+      missingStoredProofKeyIds: ["test-current"],
+      message: "Finalized report proof-key retention needs manager attention.",
+    });
+    expect(health.remediation).toContain("Restore a valid OPERATIONAL_REPORT_SIGNING_KEYS keyring");
+    expect(JSON.stringify(health)).not.toContain(REPORT_SIGNING_KEYRING.keys["test-current"]);
+  });
+
   it("searches a bounded date range across day and week reports within the manager facility", async () => {
     const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
     const row = (

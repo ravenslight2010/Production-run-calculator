@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import * as z from "zod";
 import {
@@ -91,6 +91,7 @@ const FinalizedReportExportQuery = z.object({
 const LEGACY_JSON_HASH_CONTRACT = "json-v1" as const;
 const CURRENT_HASH_CONTRACT = "canonical-json-v2" as const;
 const CURRENT_PROOF_CONTRACT = "hmac-sha256-v1" as const;
+const FINALIZED_REPORT_KEY_HEALTH_SCAN_LIMIT = 100;
 type FinalizedReportHashContract =
   | typeof LEGACY_JSON_HASH_CONTRACT
   | typeof CURRENT_HASH_CONTRACT;
@@ -1259,6 +1260,75 @@ router.get("/reports/operational/finalized/search", requireCapability("review-in
     desc(finalizedOperationalReportsTable.finalizedAt),
   ).limit(parsed.data.limit);
   res.json(rows.map((row) => finalizedReportMetadata(row)));
+});
+
+router.get("/reports/operational/finalized/proof-key-health", requireCapability("review-incidents"), async (_req, res): Promise<void> => {
+  const scope = currentScope();
+  // Each recursive step seeks the next key ID through the
+  // (scope, proof_contract, proof_key_id) index. This bounds database work by
+  // distinct key IDs instead of scanning every report signed by a repeated key.
+  const scanned = await db.execute(sql`
+    WITH RECURSIVE stored_proof_keys(proof_key_id) AS (
+      SELECT min(proof_key_id)
+      FROM finalized_operational_reports
+      WHERE scope = ${scope}
+        AND proof_contract = ${CURRENT_PROOF_CONTRACT}
+        AND proof_key_id IS NOT NULL
+      UNION ALL
+      SELECT (
+        SELECT min(next_report.proof_key_id)
+        FROM finalized_operational_reports AS next_report
+        WHERE next_report.scope = ${scope}
+          AND next_report.proof_contract = ${CURRENT_PROOF_CONTRACT}
+          AND next_report.proof_key_id > stored_proof_keys.proof_key_id
+      )
+      FROM stored_proof_keys
+      WHERE stored_proof_keys.proof_key_id IS NOT NULL
+    )
+    SELECT proof_key_id AS "proofKeyId"
+    FROM stored_proof_keys
+    WHERE proof_key_id IS NOT NULL
+    LIMIT ${FINALIZED_REPORT_KEY_HEALTH_SCAN_LIMIT + 1}
+  `);
+  const scannedRows = scanned.rows as Array<{ proofKeyId: unknown }>;
+  const truncated = scannedRows.length > FINALIZED_REPORT_KEY_HEALTH_SCAN_LIMIT;
+  const storedProofKeyIds = scannedRows
+    .slice(0, FINALIZED_REPORT_KEY_HEALTH_SCAN_LIMIT)
+    .map(({ proofKeyId }) => proofKeyId)
+    .filter((proofKeyId): proofKeyId is string => typeof proofKeyId === "string");
+  const keyring = reportSigningKeyring();
+  const availableStoredProofKeyIds = keyring
+    ? storedProofKeyIds.filter((proofKeyId) => Boolean(reportSigningKey(keyring, proofKeyId)))
+    : [];
+  const availableSet = new Set(availableStoredProofKeyIds);
+  const missingStoredProofKeyIds = storedProofKeyIds.filter((proofKeyId) => !availableSet.has(proofKeyId));
+  const attentionRequired = !keyring || missingStoredProofKeyIds.length > 0 || truncated;
+
+  const remediation = !keyring
+    ? "Restore a valid OPERATIONAL_REPORT_SIGNING_KEYS keyring, including every retained proof key, before finalizing or verifying reports."
+    : missingStoredProofKeyIds.length > 0
+      ? `Restore the retained signing key${missingStoredProofKeyIds.length === 1 ? "" : "s"} for proof key ID${missingStoredProofKeyIds.length === 1 ? "" : "s"} ${missingStoredProofKeyIds.join(", ")} in OPERATIONAL_REPORT_SIGNING_KEYS before removing or rotating keys.`
+      : truncated
+        ? "More proof key IDs exist than this bounded audit can inspect. Reduce historical key-ID churn or run a complete offline audit before rotating keys."
+        : null;
+
+  res.json({
+    status: attentionRequired ? "attention-required" : "healthy",
+    scope,
+    activeKeyId: keyring?.activeKeyId ?? null,
+    storedProofKeyIds,
+    availableStoredProofKeyIds,
+    missingStoredProofKeyIds,
+    scan: {
+      limit: FINALIZED_REPORT_KEY_HEALTH_SCAN_LIMIT,
+      checkedDistinctKeyIds: storedProofKeyIds.length,
+      truncated,
+    },
+    message: attentionRequired
+      ? "Finalized report proof-key retention needs manager attention."
+      : "Every stored finalized-report proof key checked by this audit is retained in the configured keyring.",
+    remediation,
+  });
 });
 
 router.get("/reports/operational/finalized/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {

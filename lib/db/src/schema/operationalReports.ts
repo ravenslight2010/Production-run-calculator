@@ -31,6 +31,9 @@ export const finalizedOperationalReportsTable = pgTable(
     index("finalized_operational_reports_scope_end_finalized_idx").on(
       t.scope, t.periodEnd.desc(), t.finalizedAt.desc(),
     ),
+    index("finalized_operational_reports_scope_proof_key_idx").on(
+      t.scope, t.proofContract, t.proofKeyId,
+    ),
   ],
 );
 
