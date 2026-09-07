@@ -30,6 +30,7 @@ import {
   sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
   validateReleaseReport,
+  validateWebKitBrowserEvidence,
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
@@ -62,6 +63,20 @@ async function fixture(
       path,
       file === "release-check-report.md"
         ? report
+        : file === "browser-smoke/webkit-result.json"
+          ? `${JSON.stringify({
+              schemaVersion: 1,
+              browser: "webkit",
+              revision: "current-revision",
+              environment: "disposable release test",
+              result: "passed",
+              cases: [{
+                file: "release-webkit-smoke.spec.ts",
+                title: "fixture smoke",
+                status: "passed",
+                durationMs: 100,
+              }],
+            })}\n`
         : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
           ? `${JSON.stringify({
               verifier: "source-library-reconciliation",
@@ -185,6 +200,14 @@ async function run(): Promise<void> {
   assert.ok(
     releaseGateLabelsForMode("standard").includes("onboarding bypass guard"),
     "standard release checks must include the onboarding bypass guard",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("standard").includes("browser WebKit smoke"),
+    "standard release checks must include the bounded WebKit browser smoke",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes("browser-smoke/webkit-result.json"),
+    "WebKit smoke evidence must be retained through the release allowlist",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes(
@@ -380,6 +403,46 @@ async function run(): Promise<void> {
       expectedMode: "standard",
       expectedLabels: validLabels,
     }),
+  );
+  assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          browser: "webkit",
+          revision: "current-revision",
+          environment: "disposable release test",
+          result: "passed",
+          cases: [
+            {
+              file: "release-webkit-smoke.spec.ts",
+              title: "auth smoke",
+              status: "passed",
+              durationMs: 100,
+            },
+          ],
+        }),
+      ),
+      { currentRevision: "current-revision", requirePass: true },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            schemaVersion: 1,
+            browser: "webkit",
+            revision: "old-revision",
+            environment: "disposable release test",
+            result: "passed",
+            cases: [],
+          }),
+        ),
+        { currentRevision: "current-revision" },
+      ),
+    /revision is stale/,
+    "stale WebKit evidence must not be accepted",
   );
   assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(

@@ -211,6 +211,11 @@ const fullBrowserReportPath = resolve(
   releaseEvidenceDir,
   "browser-full/FINAL-REPORT.md",
 );
+const webkitBrowserEvidencePath = resolve(
+  rootDir,
+  releaseEvidenceDir,
+  "browser-smoke/webkit-result.json",
+);
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE =
@@ -226,6 +231,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
@@ -668,7 +674,6 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
-      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
     stage: "browser-smoke",
     concurrencyLimit: 1,
@@ -679,9 +684,22 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
-      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
     stage: "browser-accessibility",
+    concurrencyLimit: 1,
+  },
+  {
+    label: "browser WebKit smoke",
+    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
+    env: {
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
+      RELEASE_BROWSER_ENVIRONMENT: process.env.CI
+        ? "ci"
+        : "development",
+    },
+    stage: "browser-webkit",
     concurrencyLimit: 1,
   },
 ];
@@ -941,6 +959,7 @@ export async function verifyReleaseEvidence(
     ...(evidenceMode === "full"
       ? ["browser-full/FINAL-REPORT.md" as const]
       : []),
+    "browser-smoke/webkit-result.json" as const,
   ];
   const missingEvidence = requiredEvidence.filter((file) => !files.includes(file));
   if (missingEvidence.length > 0) {
@@ -980,6 +999,13 @@ export async function verifyReleaseEvidence(
       expectedEnvironment: expectedSourceLibraryEnvironment,
     });
   }
+  const webkitEvidence = await readFile(
+    resolve(evidenceRoot, "browser-smoke/webkit-result.json"),
+  );
+  validateWebKitBrowserEvidence(webkitEvidence, {
+    currentRevision: revision,
+    requirePass: /^Decision:\s*GO\s*$/m.test(report),
+  });
   if (evidenceMode === "full") {
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
@@ -996,6 +1022,92 @@ export async function verifyReleaseEvidence(
       files.length === 1 ? "" : "s"
     }.`,
   );
+}
+
+export function validateWebKitBrowserEvidence(
+  evidenceBytes: Uint8Array,
+  options: { currentRevision: string; requirePass?: boolean },
+): void {
+  const MAX_EVIDENCE_BYTES = 64 * 1024;
+  if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
+    throw new Error(
+      `WebKit browser evidence exceeds the ${MAX_EVIDENCE_BYTES}-byte bound.`,
+    );
+  }
+
+  let evidence: unknown;
+  try {
+    evidence = JSON.parse(Buffer.from(evidenceBytes).toString("utf8"));
+  } catch {
+    throw new Error("WebKit browser evidence is not valid JSON.");
+  }
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error("WebKit browser evidence must be a JSON object.");
+  }
+  const record = evidence as Record<string, unknown>;
+  if (record.schemaVersion !== 1 || record.browser !== "webkit") {
+    throw new Error("WebKit browser evidence has an unsupported schema or browser.");
+  }
+  if (
+    typeof record.revision !== "string" ||
+    record.revision !== options.currentRevision
+  ) {
+    throw new Error(
+      `WebKit browser evidence revision is stale or missing (expected ${options.currentRevision}).`,
+    );
+  }
+  if (typeof record.environment !== "string" || !record.environment.trim()) {
+    throw new Error("WebKit browser evidence environment is missing.");
+  }
+  if (
+    record.result !== "passed" &&
+    record.result !== "failed" &&
+    record.result !== "timedout" &&
+    record.result !== "interrupted"
+  ) {
+    throw new Error("WebKit browser evidence has an invalid result.");
+  }
+  if (options.requirePass && record.result !== "passed") {
+    throw new Error("WebKit browser evidence cannot support GO unless it passed.");
+  }
+  if (!Array.isArray(record.cases) || record.cases.length === 0) {
+    throw new Error("WebKit browser evidence must enumerate at least one test case.");
+  }
+  const validStatuses = new Set([
+    "passed",
+    "failed",
+    "timedout",
+    "skipped",
+    "interrupted",
+    "not-run",
+  ]);
+  const validClassifications = new Set([
+    "product",
+    "test-setup",
+    "infrastructure",
+    "optional-environment-gap",
+  ]);
+  for (const testCase of record.cases) {
+    if (!testCase || typeof testCase !== "object" || Array.isArray(testCase)) {
+      throw new Error("WebKit browser evidence contains an invalid test case.");
+    }
+    const item = testCase as Record<string, unknown>;
+    if (
+      typeof item.file !== "string" ||
+      typeof item.title !== "string" ||
+      typeof item.status !== "string" ||
+      !validStatuses.has(item.status)
+    ) {
+      throw new Error("WebKit browser evidence contains an incomplete test case.");
+    }
+    if (
+      item.failureClassification !== undefined &&
+      (typeof item.failureClassification !== "string" ||
+        !validClassifications.has(item.failureClassification))
+    ) {
+      throw new Error("WebKit browser evidence contains an invalid failure classification.");
+    }
+  }
 }
 
 export function validateSourceLibraryReconciliationEvidence(
@@ -1611,6 +1723,7 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-api.log", "API startup log"),
     evidenceLink("clean-start/startup-web.log", "Web startup log"),
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
+    evidenceLink("browser-smoke/webkit-result.json", "WebKit browser smoke evidence"),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     evidenceLink(
       SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
@@ -1740,6 +1853,14 @@ async function writeReleaseReport(
   } catch {
     // Full browser evidence validation below reports a missing file when the
     // full release decision requires it.
+  }
+  try {
+    await access(
+      resolve(rootDir, releaseEvidenceDir, "browser-smoke/webkit-result.json"),
+    );
+    availableEvidenceFiles.add("browser-smoke/webkit-result.json");
+  } catch {
+    // The evidence verifier reports the missing WebKit artifact when required.
   }
   let browserDurationRegressions: BrowserDurationRegression[] | undefined;
   if (fullRun) {

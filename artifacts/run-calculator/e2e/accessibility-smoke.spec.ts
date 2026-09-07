@@ -12,6 +12,15 @@ import {
 } from "./onboarding";
 
 const testUsernames = new Set<string>();
+const DOCUMENT_SHELL_RULES = ["landmark-one-main", "region"] as const;
+const SCREEN_RULES: Record<string, readonly string[]> = {
+  "sign-in": [],
+  "live run": ["button-name", "color-contrast", "heading-order"],
+  "warehouse attention hierarchy": ["button-name", "color-contrast", "landmark-unique"],
+  "manager setup dialog": ["button-name", "landmark-unique"],
+  "setup profiles dialog": ["button-name", "label", "landmark-unique"],
+  "reported issues field checks": ["button-name", "color-contrast", "heading-order"],
+};
 
 function signupCode(): string {
   if (!process.env.STAFF_SIGNUP_CODE) {
@@ -25,6 +34,21 @@ async function scan(
   screen: string,
   additionalDisabledRules: string[] = [],
 ): Promise<void> {
+  const documentedRules = new Set([
+    ...DOCUMENT_SHELL_RULES,
+    ...Object.values(SCREEN_RULES).flat(),
+    // Import dialogs share the same narrowly-scoped legacy shell exceptions.
+    "button-name",
+    "label",
+    "landmark-unique",
+  ]);
+  const undocumentedRules = additionalDisabledRules.filter(
+    (rule) => !documentedRules.has(rule),
+  );
+  expect(
+    undocumentedRules,
+    `Accessibility scan on ${screen} used an undocumented rule suppression`,
+  ).toEqual([]);
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "best-practice"])
     .exclude("#replit-dev-banner")
