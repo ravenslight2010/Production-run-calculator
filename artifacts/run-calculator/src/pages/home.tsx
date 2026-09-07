@@ -5388,7 +5388,7 @@ export default function Home() {
   const [mgSelectedPreset, setMgSelectedPreset] = useState<string | null>(null);
   const [mgPresetRows, setMgPresetRows] = useState<RecipeRow[]>([]);
   const [exportSelection, setExportSelection] = useState<ExportSelection>({
-    profiles: true,
+    specs: true,
     dough: true,
     sauce: true,
     cheese: true,
@@ -16042,14 +16042,14 @@ export default function Home() {
 
                     {canExportSpec && (
                       <div className="pt-3 mt-1 border-t border-border space-y-2">
-                        <p className="text-xs text-muted-foreground">Export spec sheets &amp; recipes to an Excel workbook. Choose what to include — the file re-imports through the spec/premix importers.</p>
+                        <p className="text-xs text-muted-foreground">Download separate, re-importable Excel workbooks. Selecting all five downloads five files.</p>
                         <div className="grid grid-cols-2 gap-2">
                           {([
-                            ["profiles", "Profiles"],
-                            ["dough", "Dough Recipes"],
-                            ["sauce", "Sauce Recipes"],
-                            ["cheese", "Cheese Recipes"],
-                            ["mixes", "Mix Recipes"],
+                            ["specs", "Specs"],
+                            ["dough", "Dough"],
+                            ["sauce", "Sauce"],
+                            ["cheese", "Cheese"],
+                            ["mixes", "Mixes"],
                           ] as [keyof ExportSelection, string][]).map(([key, label]) => (
                             <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
                               <input
@@ -16072,13 +16072,29 @@ export default function Home() {
                               const res = await (await loadWorkbookWorkflow()).specExport.exportSpecRecipes(exportSelection, todayStr());
                               if (exportStartedAt !== null && typeof performance !== "undefined")
                                 recordPerformance("import-spec-export", performance.now() - exportStartedAt, "storage");
-                              if (res.specSheets === 0 && res.mixSheets === 0) {
+                              const downloaded = Object.entries(res.downloaded);
+                              if (downloaded.length === 0 && res.failed.length === 0) {
                                 toast({ title: "Nothing to export", description: "The selected data is empty. Add spec profiles, recipes, or mixes first." });
                               } else {
-                                const parts: string[] = [];
-                                if (res.specSheets) parts.push(`spec/recipes (${res.specSheets} sheet${res.specSheets === 1 ? "" : "s"})`);
-                                if (res.mixSheets) parts.push(`mixes (${res.mixSheets} sheet${res.mixSheets === 1 ? "" : "s"})`);
-                                toast({ title: "Export ready", description: `Downloaded ${parts.join(" and ")}.` });
+                                const labels: Record<keyof ExportSelection, string> = {
+                                  specs: "Specs",
+                                  dough: "Dough",
+                                  sauce: "Sauce",
+                                  cheese: "Cheese",
+                                  mixes: "Mixes",
+                                };
+                                const parts = downloaded.map(([kind, sheets]) =>
+                                  `${labels[kind as keyof ExportSelection]} (${sheets} sheet${sheets === 1 ? "" : "s"})`,
+                                );
+                                if (res.failed.length) {
+                                  toast({
+                                    variant: "destructive",
+                                    title: downloaded.length ? "Some exports failed" : "Export failed",
+                                    description: `${parts.length ? `Downloaded ${parts.join(", ")}. ` : ""}Couldn't download ${res.failed.map((kind) => labels[kind]).join(", ")}.`,
+                                  });
+                                } else {
+                                  toast({ title: "Exports ready", description: `Downloaded ${parts.join(", ")}.` });
+                                }
                               }
                             } catch {
                               toast({ variant: "destructive", title: "Export failed", description: "Couldn't build the workbook. Please try again." });
@@ -16087,7 +16103,7 @@ export default function Home() {
                             }
                           }}
                           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed">
-                          <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Exporting…" : "Export Spec/Recipes"}
+                          <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Exporting…" : "Download Workbooks"}
                         </button>
                       </div>
                     )}

@@ -82,6 +82,11 @@ export type ParsedPremix = {
   components: ParsedPremixComponent[];
   /** Source worksheet tab (for display / de-dup hints). */
   sheetName: string;
+  /** Explicit product markers emitted by grouped exports, when present. */
+  productBrand?: string;
+  productFlavor?: string;
+  /** True when product marker rows were present, including intentionally blank markers. */
+  productMarked?: boolean;
 };
 
 // ── Cell helpers ─────────────────────────────────────────────────────────────
@@ -203,6 +208,45 @@ function findDaysEarly(
   return { daysEarly: 0, noteRow: null };
 }
 
+function findProductMarkers(
+  rows: string[][],
+  headerRow: number,
+  ingredientCol: number,
+): { productBrand?: string; productFlavor?: string; productMarked?: boolean } {
+  let productBrand = "";
+  let productFlavor = "";
+  let productMarked = false;
+  for (let r = Math.max(0, headerRow - 6); r < headerRow; r++) {
+    const label = norm(cell(rows, r, ingredientCol));
+    const value = cell(rows, r, ingredientCol + 1);
+    if (label === "product brand") {
+      productMarked = true;
+      productBrand = value;
+    }
+    if (label === "product flavor") {
+      productMarked = true;
+      productFlavor = value;
+    }
+  }
+  return {
+    productBrand: productBrand || undefined,
+    productFlavor: productFlavor || undefined,
+    productMarked: productMarked || undefined,
+  };
+}
+
+function findLocalDaysEarly(
+  rows: string[][],
+  headerRow: number,
+  ingredientCol: number,
+  blockEndCol: number,
+): { daysEarly: number; notes?: string; noteRow: number | null } {
+  const start = Math.max(0, headerRow - 6);
+  const localRows = rows.slice(start, headerRow + 1);
+  const result = findDaysEarly(localRows, ingredientCol, blockEndCol);
+  return { ...result, noteRow: result.noteRow == null ? null : result.noteRow + start };
+}
+
 type ParsedBlock = {
   premix: ParsedPremix;
   /**
@@ -262,7 +306,11 @@ function parseBlock(
 
   if (!name && components.length === 0) return null;
 
-  const { daysEarly, notes, noteRow } = findDaysEarly(rows, ingredientCol, blockEndCol);
+  const markers = findProductMarkers(rows, anchor.row, ingredientCol);
+  const { daysEarly, notes, noteRow } =
+    markers.productMarked
+      ? findLocalDaysEarly(rows, anchor.row, ingredientCol, blockEndCol)
+      : findDaysEarly(rows, ingredientCol, blockEndCol);
 
   // Which ingredient does the pull note point at?
   // 1) An ingredient whose own cell carries the note wins.
@@ -309,6 +357,7 @@ function parseBlock(
       pullIngredients,
       components,
       sheetName: grid.name,
+      ...markers,
     },
     isPullAnnotation,
     ingredientCol,
@@ -535,7 +584,10 @@ export function groundPremix(
   known: PremixKnown,
   aliases: ReadonlyArray<SpecImportAlias>,
 ): GroundedPremix {
-  const guess = splitPremixName(parsed.name, parsed.sheetName, known.brands);
+  const guess =
+    parsed.productMarked
+      ? { brand: parsed.productBrand ?? "", flavor: parsed.productFlavor ?? "" }
+      : splitPremixName(parsed.name, parsed.sheetName, known.brands);
   let brandRes = canonicalize(guess.brand, known.brands, aliases, "brand");
   let brand = brandRes.value;
   let brandFlavors = known.flavorsByBrand[brand] ?? [];

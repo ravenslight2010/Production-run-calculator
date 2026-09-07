@@ -3329,6 +3329,20 @@ export type SheetGrid = {
    * Optional — callers that don't need styling omit it.
    */
   boldRows?: number[];
+  /** Zero-based rows rendered with the workbook's accent treatment. */
+  accentRows?: number[];
+  /** Zero-based table-header rows rendered with neutral header styling. */
+  headerRows?: number[];
+  /** Practical Excel widths, in characters, by zero-based column index. */
+  columnWidths?: number[];
+  /** Wrap long cell text across the used range. */
+  wrapText?: boolean;
+  /** Number of top rows to freeze in the worksheet. */
+  freezeRows?: number;
+  /** Optional safe filter range, expressed as zero-based row indices. */
+  autoFilter?: { startRow: number; endRow: number };
+  /** Numeric display formats applied to selected zero-based columns. */
+  numberFormats?: Array<{ columns: number[]; format: string }>;
 };
 
 export type GridTextLimits = {
