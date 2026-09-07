@@ -117,7 +117,7 @@ describe("recipe row raw-unit contract", () => {
     expect(user).toContain('"rowsUnit":"lbs"|"oz"');
   });
 
-  it("preserves dough and sauce row numbers regardless of reported unit", () => {
+  it("preserves dough, sauce, and cheese row numbers and their reported unit", () => {
     const out = sanitizeParseSpecSheet(
       {
         profiles: [],
@@ -134,6 +134,12 @@ describe("recipe row raw-unit contract", () => {
             rowsUnit: "lbs",
             rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
           },
+          {
+            kind: "cheese",
+            name: "House Blend",
+            rowsUnit: "oz",
+            rows: [{ ingredient: "Mozzarella", lbs: 2.5 }],
+          },
         ],
       },
       input(),
@@ -143,12 +149,20 @@ describe("recipe row raw-unit contract", () => {
         expect.objectContaining({
           kind: "dough",
           name: "Large Dough",
+          rowsUnit: "oz",
           rows: [{ ingredient: "Flour", lbs: 48 }],
         }),
         expect.objectContaining({
           kind: "sauce",
           name: "Large Sauce",
+          rowsUnit: "lbs",
           rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+        }),
+        expect.objectContaining({
+          kind: "cheese",
+          name: "House Blend",
+          rowsUnit: "oz",
+          rows: [{ ingredient: "Mozzarella", lbs: 2.5 }],
         }),
       ]),
     );

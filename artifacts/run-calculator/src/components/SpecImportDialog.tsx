@@ -15,6 +15,7 @@ import {
   recipeLinkSuggestionKey,
   crossFamilyRoutingSuggestionKey,
   repointProfileNamedRecipes,
+  reviewRecipeRowsUnit,
   specImportNameMatchKey,
   type NamedRecipeRename,
   type ParsedProfile,
@@ -1723,6 +1724,7 @@ function RecipeRow({
     item.orig,
     item.kind === "mix" ? "oz/pizza" : "lb",
   );
+  const rowsUnitReview = reviewRecipeRowsUnit(item.orig);
   // SPEC-WINS: a linked Dough/Sauce pick with parsed rows always replaces the
   // existing recipe's ingredients on Apply — no opt-in checkbox. Linked mixes
   // follow the same explicit update decision: sheet components and per-pizza
@@ -1872,6 +1874,33 @@ function RecipeRow({
           {!linked && rowsPreview && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Read: {rowsPreview}
+            </div>
+          )}
+          {rowsUnitReview.clarity === "clear" ? (
+            <div
+              className="mt-1.5 text-xs text-muted-foreground"
+              data-testid={`spec-recipe-rows-unit-${item.key}`}
+            >
+              Reported row unit:{" "}
+              <span className="font-medium text-foreground">
+                {rowsUnitReview.reportedUnit}
+              </span>
+            </div>
+          ) : (
+            <div
+              className="mt-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+              data-testid={`spec-recipe-rows-unit-warning-${item.key}`}
+            >
+              <div className="flex items-center gap-1.5 text-amber-600">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-xs font-semibold">Check recipe row units</span>
+              </div>
+              <p className="mt-0.5 text-xs text-amber-700">
+                {rowsUnitReview.clarity === "missing"
+                  ? "The workbook did not clearly state whether these row values are pounds or ounces."
+                  : `The reported row unit “${rowsUnitReview.reportedUnit}” is ambiguous.`}{" "}
+                Review before applying; the values will stay exactly as reported.
+              </p>
             </div>
           )}
           {!linked && !item.orig.referenceOnly && (

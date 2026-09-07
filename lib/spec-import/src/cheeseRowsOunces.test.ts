@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { mergeParsedSpecImports, sanitizeParsedSpecImport } from "./index";
+import {
+  mergeParsedSpecImports,
+  reviewRecipeRowsUnit,
+  sanitizeParsedSpecImport,
+} from "./index";
 
 // Recipe rows preserve the source workbook's raw number in the shared `lbs`
 // field. `rowsUnit` is descriptive provenance for the AI response only; it
@@ -64,6 +68,21 @@ describe("sanitizeParsedSpecImport recipe row raw units", () => {
     });
     expect(parsed.recipes[0]?.rows).toEqual([{ ingredient: "Flour", lbs: 3.25 }]);
     expect(parsed.recipes[1]?.rows).toEqual([{ ingredient: "Tomato Paste", lbs: 18.5 }]);
+    expect(parsed.recipes[0]?.rowsUnit).toBe("oz");
+    expect(parsed.recipes[1]?.rowsUnit).toBe("lbs");
+  });
+
+  it("classifies reported, omitted, and ambiguous units without touching values", () => {
+    expect(reviewRecipeRowsUnit({ rowsUnit: "POUNDS" })).toEqual({
+      clarity: "clear",
+      reportedUnit: "POUNDS",
+      normalizedUnit: "lbs",
+    });
+    expect(reviewRecipeRowsUnit({})).toEqual({ clarity: "missing" });
+    expect(reviewRecipeRowsUnit({ rowsUnit: "lbs or oz" })).toEqual({
+      clarity: "ambiguous",
+      reportedUnit: "lbs or oz",
+    });
   });
 
   it("preserves raw dough and sauce values after per-chunk sanitizing and merging", () => {
@@ -106,5 +125,30 @@ describe("sanitizeParsedSpecImport recipe row raw units", () => {
         }),
       ]),
     );
+  });
+
+  it("does not carry an earlier unit onto later replacement rows that omit it", () => {
+    const merged = mergeParsedSpecImports([
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Shared Dough",
+          rowsUnit: "lbs",
+          rows: [{ ingredient: "Flour", lbs: 48 }],
+        }],
+      }),
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Shared Dough",
+          rows: [{ ingredient: "Flour", lbs: 52 }],
+        }],
+      }),
+    ]);
+
+    expect(merged.recipes[0]?.rows).toEqual([{ ingredient: "Flour", lbs: 52 }]);
+    expect(reviewRecipeRowsUnit(merged.recipes[0]!)).toEqual({ clarity: "missing" });
   });
 });

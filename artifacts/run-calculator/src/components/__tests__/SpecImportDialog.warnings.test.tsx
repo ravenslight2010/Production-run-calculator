@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import type {
   ParsedProfile,
+  ParsedRecipe,
   ParsedSpecImport,
   SpecImportWarning,
 } from "@workspace/spec-import";
@@ -32,18 +33,19 @@ function profile(brand: string, flavor: string): ParsedProfile {
 function makePrepared(
   profiles: ParsedProfile[],
   warnings?: SpecImportWarning[],
+  recipes: ParsedRecipe[] = [],
 ): SpecImportPrepared {
-  const parsed: ParsedSpecImport = { profiles, recipes: [] };
+  const parsed: ParsedSpecImport = { profiles, recipes };
   if (warnings?.length) parsed.warnings = warnings;
   return {
     parsed,
     summary: {
       profilesNew: profiles.length,
       profilesUpdated: 0,
-      recipesNew: 0,
+      recipesNew: recipes.length,
       recipesUpdated: 0,
       totalProfiles: profiles.length,
-      totalRecipes: 0,
+      totalRecipes: recipes.length,
     },
     newAliases: [],
     flagged: [],
@@ -179,5 +181,49 @@ describe("SpecImportDialog flavor-correction warnings", () => {
 
     expect(screen.queryByTestId("spec-import-warnings")).toBeNull();
     expect(screen.queryByTestId("spec-profile-warning-pk0")).toBeNull();
+  });
+});
+
+describe("SpecImportDialog recipe row unit review", () => {
+  it("shows reported units and advisory warnings for dough, sauce, and cheese", () => {
+    const recipes: ParsedRecipe[] = [
+      {
+        kind: "dough",
+        name: "Clear Dough",
+        rowsUnit: "lbs",
+        rows: [{ ingredient: "Flour", lbs: 48 }],
+      },
+      {
+        kind: "sauce",
+        name: "Missing Unit Sauce",
+        rows: [{ ingredient: "Tomato", lbs: 24 }],
+      },
+      {
+        kind: "cheese",
+        name: "Ambiguous Cheese",
+        rowsUnit: "weight",
+        rows: [{ ingredient: "Mozzarella", lbs: 2.5 }],
+      },
+    ];
+    renderDialog(makePrepared([], undefined, recipes));
+
+    fireEvent.click(screen.getByText("Next"));
+
+    expect(
+      within(screen.getByTestId("spec-recipe-rows-unit-rk0")).getByText("lbs"),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("spec-recipe-rows-unit-warning-rk1")).getByText(
+        /did not clearly state whether these row values are pounds or ounces/i,
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("spec-recipe-rows-unit-warning-rk2")).getByText(
+        /reported row unit “weight” is ambiguous/i,
+      ),
+    ).toBeTruthy();
+
+    const apply = screen.getByText(/^Apply/).closest("button") as HTMLButtonElement;
+    expect(apply.disabled).toBe(false);
   });
 });
