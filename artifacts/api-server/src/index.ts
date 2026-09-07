@@ -7,7 +7,8 @@ import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observabilit
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
 import { startAutoTrackServerTicks } from "./routes/sync";
-import { startWebPushAlertWorker } from "./lib/webPush";
+import { startWebPushAlertScheduler } from "./lib/webPush";
+import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import {
@@ -29,6 +30,8 @@ if (!rawPort) {
 }
 
 const port = Number(rawPort);
+let stopServerJobWorker: (() => void) | undefined;
+let stopWebPushAlertScheduler: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -63,6 +66,12 @@ async function startServer(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, "Stopping API server");
+    // Prevent another poll while HTTP drains. A running handler keeps its
+    // lease and will be reclaimed after expiry if the process exits first.
+    stopServerJobWorker?.();
+    stopServerJobWorker = undefined;
+    stopWebPushAlertScheduler?.();
+    stopWebPushAlertScheduler = undefined;
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -163,7 +172,15 @@ async function initializeStartup(startedAt: number): Promise<void> {
   // Best-effort, bounded ownership for live automatic production tracking.
   // The runner shares the claim transaction path with connected clients.
   startAutoTrackServerTicks();
-  startWebPushAlertWorker();
+  stopWebPushAlertScheduler = startWebPushAlertScheduler().stop;
+  stopServerJobWorker = startServerJobWorkerLoop({
+    onError(error, operation) {
+      logger.error(
+        { err: error, operation, outcome: "degraded", errorCode: `server_job_${operation}_failed` },
+        "Server job background task failed",
+      );
+    },
+  }).stop;
 
   // Ensure the seeded sandbox account exists with a known password + manager
   // role on every boot. Best-effort and non-production only.

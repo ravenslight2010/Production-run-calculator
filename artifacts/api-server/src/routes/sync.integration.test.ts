@@ -251,6 +251,7 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     const firstBody = await first.json() as any;
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
+    expect(firstBody.cursor).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
     // Completed history is the retained daily document flow: the canonical ended
@@ -270,8 +271,18 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
       .toBe(completion.completedAt.getTime());
 
+    // A later materialized document must not change the original duplicate
+    // receipt. Retried offline commands adopt the snapshot they actually
+    // committed, not an unrelated later writer's state.
+    await db.update(dailySyncTable).set({
+      data: { dayState: { date: DATE, runs: [{ id: "later-run", startedAt: 999 }] }, runValues: {} },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
     const replay = await postFinalization(finalization("offline:final-one"));
-    expect(await replay.json()).toMatchObject({ outcome: "accepted", duplicate: true });
+    const replayBody = await replay.json() as any;
+    expect(replayBody).toMatchObject({ outcome: "accepted", duplicate: true, cursor: firstBody.cursor });
+    expect(replayBody.data.dayState.runs.find((run: any) => run.id === RUN)?.endedAt)
+      .toBe(firstBody.data.dayState.runs.find((run: any) => run.id === RUN).endedAt);
+    expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(false);
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
@@ -370,6 +381,127 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(await (await pending).json()).toMatchObject({ outcome: "review-required" });
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+});
+
+describe("GET /sync/operational-intents/cursor", () => {
+  it("pages materialized receipts and never leaks another scope", async () => {
+    await db.insert(operationalIntentLedgerTable).values([
+      ...Array.from({ length: 101 }, (_, index) => ({
+        scope: "live",
+        date: "2030-03-10",
+        intentId: `cursor-live-${index}`,
+        outcome: "accepted",
+        snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `live-${index}` }] }, runValues: {} },
+      })),
+      {
+        scope: "sandbox",
+        date: "2030-03-10",
+        intentId: "cursor-sandbox",
+        outcome: "accepted",
+        snapshot: { dayState: { date: "2030-03-10", runs: [{ id: "sandbox-only" }] }, runValues: {} },
+      },
+    ]);
+
+    const first = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, {
+      headers: authHeaders(),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as any;
+    expect(firstBody).toMatchObject({ hasMore: true });
+    expect(firstBody.mutations).toHaveLength(100);
+    expect(firstBody.mutations.every((item: any) => item.snapshot.dayState.runs[0].id !== "sandbox-only")).toBe(true);
+    expect(firstBody.mutations.every((item: any) => typeof item.cursor === "number")).toBe(true);
+
+    const second = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=${firstBody.cursor}`, {
+      headers: authHeaders(),
+    });
+    const secondBody = await second.json() as any;
+    expect(secondBody).toMatchObject({ hasMore: false });
+    expect(secondBody.mutations).toHaveLength(1);
+    expect(secondBody.mutations[0].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+  });
+
+  it("compacts old heavy snapshots while cursor recovery uses the materialized day", async () => {
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 201 }, (_, index) => ({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: `compact-${index}`,
+      outcome: "accepted",
+      snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `historic-${index}` }] }, runValues: {} },
+    })));
+    const { compactOperationalIntentSnapshots } = await import("../lib/mutationCompaction");
+    expect(await compactOperationalIntentSnapshots("live")).toMatchObject({ compacted: 1, retained: 200 });
+
+    const response = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, { headers: authHeaders() });
+    const body = await response.json() as any;
+    expect(body.mutations[0].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+    expect(body.mutations[1].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+  });
+
+  it("converges across multiple cursor pages without adopting retained history", async () => {
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 205 }, (_, index) => ({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: `multi-page-${index}`,
+      outcome: index === 150 ? "review-required" : "accepted",
+      snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `historical-${index}` }] }, runValues: {} },
+    })));
+    const canonical = {
+      dayState: { date: "2030-03-10", runs: [{ id: "canonical-current", metaUpdatedAt: 999 }] },
+      runValues: { "canonical-current": { casesNeeded: 12 } },
+    };
+    await db.update(dailySyncTable).set({ data: canonical })
+      .where(and(eq(dailySyncTable.date, "2030-03-10"), eq(dailySyncTable.scope, "live")));
+    const { compactOperationalIntentSnapshots } = await import("../lib/mutationCompaction");
+    await compactOperationalIntentSnapshots("live");
+
+    let cursor = 0;
+    let adopted: unknown;
+    let pages = 0;
+    for (;;) {
+      const response = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=${cursor}`, {
+        headers: authHeaders(),
+      });
+      const body = await response.json() as any;
+      pages++;
+      for (const mutation of body.mutations) {
+        if (mutation.snapshot) adopted = mutation.snapshot;
+        cursor = mutation.cursor;
+      }
+      if (!body.hasMore) break;
+    }
+    expect(pages).toBe(3);
+    expect(adopted).toEqual(canonical);
+  });
+
+  it("preserves old review evidence while compacting old materialized accepted receipts", async () => {
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 202 }, (_, index) => ({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: index === 0 ? "preserve-review" : index === 1 ? "compact-accepted" : `keep-${index}`,
+      outcome: index === 0 ? "review-required" : "accepted",
+      snapshot: { dayState: { date: "2030-03-10", runs: [{ id: `receipt-${index}` }] }, runValues: {} },
+    })));
+    const { compactOperationalIntentSnapshots } = await import("../lib/mutationCompaction");
+    expect(await compactOperationalIntentSnapshots("live")).toMatchObject({ compacted: 1, retained: 200 });
+    const evidence = await db.select({
+      intentId: operationalIntentLedgerTable.intentId,
+      snapshot: operationalIntentLedgerTable.snapshot,
+    }).from(operationalIntentLedgerTable).where(and(
+      eq(operationalIntentLedgerTable.scope, "live"),
+      sql`${operationalIntentLedgerTable.intentId} IN ('preserve-review', 'compact-accepted')`,
+    ));
+    expect(evidence.find((row) => row.intentId === "preserve-review")?.snapshot).toEqual(
+      { dayState: { date: "2030-03-10", runs: [{ id: "receipt-0" }] }, runValues: {} },
+    );
+    expect(evidence.find((row) => row.intentId === "compact-accepted")?.snapshot).toBeNull();
+
+    const page = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, { headers: authHeaders() });
+    const body = await page.json() as any;
+    expect(body.mutations[0].snapshot).toBeNull();
+    expect(body.mutations[1].snapshot).toEqual((await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, "2030-03-10"))))[0].data);
   });
 });
 

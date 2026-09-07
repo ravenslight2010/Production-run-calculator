@@ -46,6 +46,7 @@ import type {
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
   CreateRole,
+  CreateServerJobInput,
   CycleCountScheduleList,
   DeleteBrandProfilesInput,
   DeleteCheeseRecipesInput,
@@ -62,6 +63,7 @@ import type {
   DeniedMergeList,
   DieLineDefaultsList,
   DieTypeList,
+  DownloadCanonicalOperationalReportParams,
   DuplicateReviewList,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
@@ -199,6 +201,7 @@ import type {
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
   SearchFinalizedOperationalReportsParams,
+  ServerJob,
   SetFloorMode,
   SetNotificationPrefs,
   ShiftHandoffDigest,
@@ -3922,6 +3925,96 @@ export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<type
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFinalizedOperationalReportQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDownloadCanonicalOperationalReportUrl = (id: string,
+    params: DownloadCanonicalOperationalReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational/finalized/${id}/export?${stringifiedParams}` : `/api/reports/operational/finalized/${id}/export`
+}
+
+/**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
+export const downloadCanonicalOperationalReport = async (id: string,
+    params: DownloadCanonicalOperationalReportParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getDownloadCanonicalOperationalReportUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadCanonicalOperationalReportQueryKey = (id: string,
+    params?: DownloadCanonicalOperationalReportParams,) => {
+    return [
+    `/api/reports/operational/finalized/${id}/export`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getDownloadCanonicalOperationalReportQueryOptions = <TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(id: string,
+    params: DownloadCanonicalOperationalReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadCanonicalOperationalReportQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>> = ({ signal }) => downloadCanonicalOperationalReport(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadCanonicalOperationalReportQueryResult = NonNullable<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>>
+export type DownloadCanonicalOperationalReportQueryError = ErrorType<void>
+
+
+/**
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
+
+export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(
+ id: string,
+    params: DownloadCanonicalOperationalReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadCanonicalOperationalReportQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -11307,6 +11400,310 @@ export const useDeletePremixSheet = <TError = ErrorType<unknown>,
       return useMutation(getDeletePremixSheetMutationOptions(options));
     }
 
+export const getListServerJobsUrl = () => {
+
+
+
+
+  return `/api/server-jobs`
+}
+
+/**
+ * @summary List the authenticated user's retained server jobs
+ */
+export const listServerJobs = async ( options?: Parameters<typeof customFetch>[1]): Promise<ServerJob[]> => {
+
+  return customFetch<ServerJob[]>(getListServerJobsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListServerJobsQueryKey = () => {
+    return [
+    `/api/server-jobs`
+    ] as const;
+    }
+
+
+export const getListServerJobsQueryOptions = <TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListServerJobsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listServerJobs>>> = ({ signal }) => listServerJobs({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListServerJobsQueryResult = NonNullable<Awaited<ReturnType<typeof listServerJobs>>>
+export type ListServerJobsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the authenticated user's retained server jobs
+ */
+
+export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListServerJobsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateServerJobUrl = () => {
+
+
+
+
+  return `/api/server-jobs`
+}
+
+/**
+ * @summary Enqueue a bounded, idempotent server job
+ */
+export const createServerJob = async (createServerJobInput: CreateServerJobInput, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<ServerJob>(getCreateServerJobUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createServerJobInput)
+  }
+);}
+
+
+
+
+
+export const getCreateServerJobMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext> => {
+
+const mutationKey = ['createServerJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createServerJob>>, CreateServerJobMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createServerJob(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateServerJobMutationResult = NonNullable<Awaited<ReturnType<typeof createServerJob>>>
+    export type CreateServerJobMutationBody = BodyType<CreateServerJobInput>
+    export type CreateServerJobMutationError = ErrorType<void>
+    export type CreateServerJobMutationVariables = {data: BodyType<CreateServerJobInput>}
+
+    /**
+ * @summary Enqueue a bounded, idempotent server job
+ */
+export const useCreateServerJob = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createServerJob>>,
+        TError,
+        CreateServerJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateServerJobMutationOptions(options));
+    }
+
+export const getGetServerJobUrl = (id: string,) => {
+
+
+
+
+  return `/api/server-jobs/${id}`
+}
+
+/**
+ * @summary Read an owned server job
+ */
+export const getServerJob = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
+
+  return customFetch<ServerJob>(getGetServerJobUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetServerJobQueryKey = (id: string,) => {
+    return [
+    `/api/server-jobs/${id}`
+    ] as const;
+    }
+
+
+export const getGetServerJobQueryOptions = <TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetServerJobQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getServerJob>>> = ({ signal }) => getServerJob(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetServerJobQueryResult = NonNullable<Awaited<ReturnType<typeof getServerJob>>>
+export type GetServerJobQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read an owned server job
+ */
+
+export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetServerJobQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCancelServerJobUrl = (id: string,) => {
+
+
+
+
+  return `/api/server-jobs/${id}/cancel`
+}
+
+/**
+ * @summary Request cancellation of an owned running or queued server job
+ */
+export const cancelServerJob = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
+
+  return customFetch<ServerJob>(getCancelServerJobUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelServerJobMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext> => {
+
+const mutationKey = ['cancelServerJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelServerJob>>, CancelServerJobMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  cancelServerJob(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelServerJobMutationResult = NonNullable<Awaited<ReturnType<typeof cancelServerJob>>>
+
+    export type CancelServerJobMutationError = ErrorType<void>
+    export type CancelServerJobMutationVariables = {id: string}
+
+    /**
+ * @summary Request cancellation of an owned running or queued server job
+ */
+export const useCancelServerJob = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelServerJob>>,
+        TError,
+        CancelServerJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCancelServerJobMutationOptions(options));
+    }
+
 export const getListImportHistoryUrl = (params?: ListImportHistoryParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -14670,4 +15067,3 @@ export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
       > => {
       return useMutation(getClaimAutoTrackEventMutationOptions(options));
     }
-

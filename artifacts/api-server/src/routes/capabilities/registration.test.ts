@@ -10,6 +10,7 @@ describe("capability route registration", () => {
       "inventory-operations",
       "administration",
       "retained-ai",
+      "server-jobs",
     ]);
     expect(new Set(authenticatedCapabilityFamilies.map(({ router }) => router)).size).toBe(
       authenticatedCapabilityFamilies.length,

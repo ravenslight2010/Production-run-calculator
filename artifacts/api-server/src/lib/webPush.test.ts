@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { getServerJobDefinition } from "./serverJobs";
 
 const mocks = vi.hoisted(() => ({
   calc: vi.fn(),
@@ -13,7 +14,13 @@ vi.mock("@workspace/live-calc", () => ({ computeServerCalc: mocks.calc, computeA
 vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn() } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
 
-const { alertCandidates, freezerCandidates, pendingFreezerArms } = await import("./webPush");
+const {
+  alertCandidates,
+  deferredCandidate,
+  freezerCandidates,
+  pendingFreezerArms,
+  scheduledEvaluationIdempotencyKey,
+} = await import("./webPush");
 
 describe("server web-push alert candidates", () => {
   it("does not emit live timing alerts while paused or ended", () => {
@@ -66,5 +73,27 @@ describe("server web-push alert candidates", () => {
       kind: "freezerEmpty",
       dueAt: 61_000,
     });
+  });
+
+  it("deduplicates scheduled evaluation by date and time bucket", () => {
+    const first = scheduledEvaluationIdempotencyKey("2026-01-01", 120_001, 60_000);
+    expect(scheduledEvaluationIdempotencyKey("2026-01-01", 179_999, 60_000)).toBe(first);
+    expect(scheduledEvaluationIdempotencyKey("2026-01-01", 180_000, 60_000)).not.toBe(first);
+    expect(scheduledEvaluationIdempotencyKey("2026-01-02", 120_001, 60_000)).not.toBe(first);
+  });
+
+  it("registers scheduled evaluation as an executable bounded server job", () => {
+    const definition = getServerJobDefinition("scheduled-evaluation");
+    expect(definition?.handler).toBeTypeOf("function");
+    expect(definition).toMatchObject({ maxAttempts: 3, timeoutMs: 60_000 });
+  });
+
+  it("preserves a quiet-hour alert's deliverable identity for later delivery", () => {
+    expect(deferredCandidate({
+      alertId: "opaque-alert",
+      alertKind: "freezerEmpty",
+      dueAt: new Date(123_000),
+    })).toEqual({ id: "opaque-alert", kind: "freezerEmpty", dueAt: 123_000 });
+    expect(deferredCandidate({ alertId: "opaque-alert", alertKind: "unknown", dueAt: null })).toBeNull();
   });
 });

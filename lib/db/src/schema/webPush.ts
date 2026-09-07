@@ -55,3 +55,36 @@ export const webPushAlertArmsTable = pgTable(
   },
   (t) => [uniqueIndex("web_push_alert_arm_scope_run_kind_idx").on(t.scope, t.runKey, t.alertKind)],
 );
+
+// Logical alert evidence is separate from per-device delivery claims.  It is
+// retained even with no subscriptions/VAPID configuration, making scheduled
+// evaluation auditable and independently deduplicated.
+export const scheduledAlertRecordsTable = pgTable(
+  "scheduled_alert_records",
+  {
+    id: text("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
+    alertId: text("alert_id").notNull(),
+    alertKind: text("alert_kind").notNull(),
+    date: text("date").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    status: text("status").notNull().default("pending"),
+    evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("scheduled_alert_record_scope_alert_idx").on(t.scope, t.alertId)],
+);
+
+// Multiple API instances may start the in-process scheduler.  This expiring
+// DB lease makes one instance the evaluator without requiring a browser or a
+// separate worker process.
+export const scheduledJobLeasesTable = pgTable(
+  "scheduled_job_leases",
+  {
+    job: text("job").primaryKey(),
+    owner: text("owner").notNull(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);

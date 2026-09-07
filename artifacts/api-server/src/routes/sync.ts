@@ -45,7 +45,7 @@ import {
   operationalIntentLedgerTable,
   completedRunHistoryTable,
 } from "@workspace/db";
-import { and, eq, gt, gte, lte, asc, sql } from "drizzle-orm";
+import { and, eq, gt, gte, lte, asc, sql, inArray } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
@@ -647,7 +647,7 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
   }
   const scope = currentScope();
   try {
-    let result: ReturnType<typeof applyOperationalIntent> | undefined;
+    let result: (ReturnType<typeof applyOperationalIntent> & { cursor?: number }) | undefined;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         result = await db.transaction(async (tx) => {
@@ -663,15 +663,26 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
           const [seen] = await tx.select().from(operationalIntentLedgerTable)
             .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, intent.date), eq(operationalIntentLedgerTable.intentId, intent.id)))
             .for("update");
-          if (seen) return { data: existing?.data ?? emptySyncData(intent.date), outcome: seen.outcome as any, duplicate: true };
+          // A duplicate must return the snapshot produced by its original
+          // transaction, rather than whichever later command currently owns
+          // the daily document. This is the idempotency boundary clients use
+          // after a timeout or a process restart.
+          if (seen) return {
+            data: seen.snapshot ?? existing?.data ?? emptySyncData(intent.date),
+            outcome: seen.outcome as any,
+            duplicate: true,
+            cursor: seen.sequence,
+          };
           if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
-            await tx.insert(operationalIntentLedgerTable).values({
+            const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
               scope, date: intent.date, intentId: intent.id, outcome: "review-required",
-            });
+              snapshot: (existing?.data ?? emptySyncData(intent.date)) as any,
+            }).returning({ sequence: operationalIntentLedgerTable.sequence });
             return {
               data: existing?.data ?? emptySyncData(intent.date),
               outcome: "review-required" as const,
               duplicate: false,
+              cursor: receipt!.sequence,
             };
           }
           const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
@@ -724,43 +735,44 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
             }
             if (applied.outcome === "accepted") {
               const snapshot = JSON.parse(JSON.stringify(applied.data, (_key, value) => value)) as Record<string, unknown>;
-            const stable = (value: unknown): unknown => {
-              if (Array.isArray(value)) return value.map(stable);
-              if (value && typeof value === "object") {
-                return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([key, child]) => [key, stable(child)]));
+              const stable = (value: unknown): unknown => {
+                if (Array.isArray(value)) return value.map(stable);
+                if (value && typeof value === "object") {
+                  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([key, child]) => [key, stable(child)]));
+                }
+                return value;
+              };
+              const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
+              const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
+              const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
+                .find((run) => run.id === intent.runId);
+              const completedAt = Number(canonicalRun?.endedAt);
+              if (!compatibleLegacyCompletion) {
+                await tx.insert(completedRunHistoryTable).values({
+                  id: randomUUID(),
+                  scope,
+                  operationId: intent.id,
+                  runId: intent.runId,
+                  date: intent.date,
+                  completedAt: new Date(completedAt),
+                  snapshot: canonicalSnapshot,
+                  snapshotHash,
+                  actorId: req.userId ?? "unknown",
+                });
               }
-              return value;
-            };
-            const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
-            const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
-            const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
-              .find((run) => run.id === intent.runId);
-            const completedAt = Number(canonicalRun?.endedAt);
-            if (!compatibleLegacyCompletion) {
-              await tx.insert(completedRunHistoryTable).values({
-                id: randomUUID(),
-                scope,
-                operationId: intent.id,
-                runId: intent.runId,
-                date: intent.date,
-                completedAt: new Date(completedAt),
-                snapshot: canonicalSnapshot,
-                snapshotHash,
-                actorId: req.userId ?? "unknown",
-              });
-            }
-            await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
+              await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
             }
           }
           if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
           else await tx.insert(dailySyncTable).values({ date: intent.date, scope, data: applied.data as any, updatedAt: new Date() });
-          await tx.insert(operationalIntentLedgerTable).values({
+          const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
             scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
-          });
-          return applied;
+            snapshot: applied.data as any,
+          }).returning({ sequence: operationalIntentLedgerTable.sequence });
+          return { ...applied, cursor: receipt!.sequence };
         });
         break;
       } catch (error) {
@@ -770,10 +782,62 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     }
     if (!result) throw new Error("Operational intent did not complete");
     if (!result.duplicate) broadcast(result.data, typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "", scope, intent.date);
-    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, data: result.data, snapshotId: syncSnapshotId(result.data) });
+    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, cursor: result.cursor, data: result.data, snapshotId: syncSnapshotId(result.data) });
   } catch (error) {
     req.log.error({ err: error, event: "operational_intent" }, "Operational intent reconciliation failed");
     res.status(500).json({ error: "Operational intent could not sync. Please retry." });
+  }
+});
+
+// Compact accepted command history for clients that have a cursor. The payload
+// is intentionally materialized snapshots, not executable operations: replay
+// cannot re-consume inventory or re-run a lifecycle transition. The existing
+// POST endpoint remains synchronous for older clients.
+router.get("/sync/operational-intents/cursor", async (req: Request, res: Response): Promise<void> => {
+  const raw = req.query.after;
+  const after = raw === undefined ? 0 : Number(raw);
+  if (!Number.isSafeInteger(after) || after < 0) {
+    res.status(400).json({ error: "Invalid mutation cursor" });
+    return;
+  }
+  const scope = currentScope();
+  try {
+    const rows = await db.select({
+      cursor: operationalIntentLedgerTable.sequence,
+      date: operationalIntentLedgerTable.date,
+      outcome: operationalIntentLedgerTable.outcome,
+      snapshot: operationalIntentLedgerTable.snapshot,
+      createdAt: operationalIntentLedgerTable.createdAt,
+    }).from(operationalIntentLedgerTable)
+      .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
+      .orderBy(asc(operationalIntentLedgerTable.sequence))
+      .limit(100);
+    // Cursor recovery must be monotonic across pages. Never mix a compacted
+    // receipt's current materialization with a later retained historical
+    // snapshot: every adoptable receipt in this page points at the current
+    // scoped materialization for its date.
+    const dates = [...new Set(rows.map((row) => row.date))];
+    const materialized = dates.length
+      ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data }).from(dailySyncTable)
+        .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
+      : [];
+    const byDate = new Map(materialized.map((row) => [row.date, row.data]));
+    res.json({
+      cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
+      hasMore: rows.length === 100,
+      mutations: rows.map(({ snapshot: _historical, ...row }) => {
+        const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
+        const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
+        return {
+          ...row,
+          snapshot,
+          materializedSnapshotId: snapshot ? syncSnapshotId(snapshot) : null,
+        };
+      }),
+    });
+  } catch (error) {
+    req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
+    res.status(500).json({ error: "Mutation cursor could not sync" });
   }
 });
 

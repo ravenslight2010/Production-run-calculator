@@ -13,6 +13,7 @@
 
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import type { Discrepancy, ReconcileRecipe, ReconcileProfile } from "@workspace/spec-reconcile";
+import { submitAndWaitForServerJob } from "./serverJobs";
 import { inventoryClientId } from "./inventoryShared";
 import {
   loadDoughRecipePresets,
@@ -268,14 +269,25 @@ export function loadCurrentReconcileProfiles(
  */
 export async function reconcileSpecSheet(sheet: SavedSpecSheet): Promise<SpecReconcileResult> {
   const specProfiles = Array.isArray(sheet.data?.profiles) ? sheet.data.profiles : [];
+  const input = {
+    specSheetId: sheet.id,
+    currentRecipes: loadCurrentReconcileRecipes(),
+    currentProfiles: loadCurrentReconcileProfiles(specProfiles),
+  };
+  // Large current-library comparisons are server-job-backed. The returned diff
+  // remains review-only; the direct endpoint below is retained for small/offline
+  // compatibility and job-framework rollout failures.
+  if (input.currentRecipes.length >= 100 || input.currentProfiles.length >= 100) {
+    try {
+      return await submitAndWaitForServerJob<SpecReconcileResult>({
+        type: "workbook-reconcile", input, snapshotId: `saved-spec-sheet:${sheet.id}`,
+      });
+    } catch {}
+  }
   const res = await fetch("/api/operations-insights/spec-reconciliation", {
     method: "POST",
     headers: authHeaders(true),
-    body: JSON.stringify({
-      specSheetId: sheet.id,
-      currentRecipes: loadCurrentReconcileRecipes(),
-      currentProfiles: loadCurrentReconcileProfiles(specProfiles),
-    }),
+    body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(`Spec cross-reference failed (${res.status})`);
   return (await res.json()) as SpecReconcileResult;

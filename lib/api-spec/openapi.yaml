@@ -1178,6 +1178,53 @@ paths:
         "403": { description: Manager capability required }
         "404": { description: Report absent from this scope }
 
+  /reports/operational/finalized/{id}/export:
+    get:
+      # Keep this distinct from its generated query-parameter type
+      # (DownloadCanonicalOperationalReportExportParams).
+      operationId: downloadCanonicalOperationalReport
+      tags: [audit]
+      summary: Download an export from one identified canonical finalized snapshot
+      description: >-
+        Produces CSV, XLSX, or print-ready HTML solely from the immutable
+        finalized report in the authenticated facility. Responses include
+        X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded
+        artifact remains attributable to the canonical audit snapshot. This
+        endpoint never accepts browser report data.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [csv, xlsx, print] }
+        - name: jobId
+          in: query
+          required: false
+          description: Completed export-package job whose pre-generated retained artifact should be served.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Canonical snapshot export
+          headers:
+            X-Canonical-Snapshot-Id:
+              schema: { type: string }
+              description: Stable finalized-report and content-hash identity.
+            X-Canonical-Content-Hash:
+              schema: { type: string }
+            X-Export-Artifact-Source:
+              description: job-cache, canonical-regenerated when another instance lacks the cache entry, or canonical-direct for the synchronous compatibility path.
+              schema: { type: string, enum: [job-cache, canonical-regenerated, canonical-direct] }
+          content:
+            text/csv: {}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {}
+            text/html: {}
+        "400": { description: Invalid report id or export format }
+        "403": { description: Manager capability required }
+        "404": { description: Report absent from this scope }
+
   /reports/operational-view:
     get:
       operationId: getOperationalRunView
@@ -3407,6 +3454,79 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SavedPremixSheetList"
+
+  /server-jobs:
+    get:
+      operationId: listServerJobs
+      tags: [serverJobs]
+      summary: List the authenticated user's retained server jobs
+      responses:
+        "200":
+          description: Jobs in newest-first order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ServerJob" }
+    post:
+      operationId: createServerJob
+      tags: [serverJobs]
+      summary: Enqueue a bounded, idempotent server job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateServerJobInput" }
+      responses:
+        "202":
+          description: Job was accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "200":
+          description: Idempotent replay of an existing job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "400": { description: Invalid job type or bounded input }
+        "403": { description: Capability required }
+
+  /server-jobs/{id}:
+    get:
+      operationId: getServerJob
+      tags: [serverJobs]
+      summary: Read an owned server job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Job state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "404": { description: Job is not in this actor's scope }
+
+  /server-jobs/{id}/cancel:
+    post:
+      operationId: cancelServerJob
+      tags: [serverJobs]
+      summary: Request cancellation of an owned running or queued server job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202":
+          description: Cancellation was requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "403": { description: Capability required }
+        "404": { description: Job is not cancelable in this actor's scope }
 
   /import-history:
     get:
@@ -10528,6 +10648,42 @@ components:
       properties:
         count:
           type: integer
+
+    CreateServerJobInput:
+      type: object
+      additionalProperties: false
+      required: [type, idempotencyKey]
+      properties:
+        type:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,63}$"
+        idempotencyKey: { type: string, minLength: 8, maxLength: 128 }
+        input: {}
+        snapshotId: { type: string, maxLength: 200 }
+
+    ServerJob:
+      type: object
+      required: [id, type, status, progress, attempt, maxAttempts, cancelRequested, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        snapshotId: { type: [string, "null"] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        progressMessage: { type: [string, "null"] }
+        attempt: { type: integer }
+        maxAttempts: { type: integer }
+        cancelRequested: { type: boolean }
+        result: {}
+        error:
+          type: [object, "null"]
+          properties:
+            code: { type: string }
+            message: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        expiresAt: { type: string, format: date-time }
 
     ManagerActionItem:
       type: object

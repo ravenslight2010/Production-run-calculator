@@ -17,6 +17,7 @@ import {
   syncConflictLogsTable,
   qualityChecksTable,
   finalizedOperationalReportsTable,
+  serverJobsTable,
 } from "@workspace/db";
 import {
   deriveOperationalRunView,
@@ -28,6 +29,15 @@ import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { dataHealthWorkspace } from "./profileDataHealth";
 import { Router, type IRouter } from "express";
+import {
+  canonicalExportFilename,
+  canonicalReportCsv,
+  canonicalReportPrintHtml,
+  canonicalReportSnapshotId,
+  canonicalReportXlsx,
+  type CanonicalReportExportFormat,
+} from "../lib/canonicalReportExport";
+import { readServerJobArtifact } from "../lib/serverJobArtifactCache";
 
 const router: IRouter = Router();
 
@@ -72,6 +82,11 @@ const RangeFinalizedReportQuery = z.object({
   message: "Date range cannot exceed 366 inclusive days",
 });
 const FinalizedReportId = z.object({ id: z.string().uuid() });
+
+const FinalizedReportExportQuery = z.object({
+  format: z.enum(["csv", "xlsx", "print"]),
+  jobId: z.string().uuid().optional(),
+}).strict();
 
 const LEGACY_JSON_HASH_CONTRACT = "json-v1" as const;
 const CURRENT_HASH_CONTRACT = "canonical-json-v2" as const;
@@ -325,6 +340,23 @@ function operationalError(res: import("express").Response, status: number, code:
   res.status(status).json({ error: { code, message } });
 }
 
+/** Capability middleware authenticates the caller; this binds a retained file
+ * to that caller's facility, completed job, report snapshot, and format. */
+export function retainedExportIsAuthorized(
+  job: { scope: string; type: string; status: string; input: unknown; result?: unknown } | undefined,
+  scope: string,
+  finalizedReportId: string,
+  format: CanonicalReportExportFormat,
+  canonicalSnapshotId: string,
+  contentHash: string,
+): boolean {
+  const input = job?.input as { finalizedReportId?: unknown; format?: unknown } | undefined;
+  const result = job?.result as { canonicalSnapshotId?: unknown; contentHash?: unknown; artifactSha256?: unknown } | undefined;
+  return job?.scope === scope && job.type === "export-package" && job.status === "succeeded"
+    && input?.finalizedReportId === finalizedReportId && input.format === format
+    && result?.canonicalSnapshotId === canonicalSnapshotId && result.contentHash === contentHash
+    && typeof result.artifactSha256 === "string" && /^[a-f0-9]{64}$/.test(result.artifactSha256);
+}
 function viewToSummaryRun(view: ReturnType<typeof deriveOperationalRunView>): DaySummaryInput["runs"][number] {
   return {
     brand: view.observed.brand,
@@ -1010,6 +1042,83 @@ router.get("/reports/operational/finalized/:id", requireCapability("review-incid
     return;
   }
   res.json(finalizedReportResponse(rows[0], integrity));
+});
+
+export function resolveRetainedArtifact(
+  cached: Buffer | null,
+  expectedSha256: string,
+  regenerate: () => Buffer,
+): { bytes: Buffer; source: "job-cache" | "canonical-regenerated" } {
+  if (cached && createHash("sha256").update(cached).digest("hex") === expectedSha256) {
+    return { bytes: cached, source: "job-cache" };
+  }
+  return { bytes: regenerate(), source: "canonical-regenerated" };
+}
+
+router.get("/reports/operational/finalized/:id/export", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const id = FinalizedReportId.safeParse(req.params);
+  const query = FinalizedReportExportQuery.safeParse(req.query);
+  if (!id.success || !query.success) {
+    operationalError(res, 400, "invalid-export-request", "A valid finalized report id and export format are required.");
+    return;
+  }
+  const scope = currentScope();
+  const row = (await db.select().from(finalizedOperationalReportsTable).where(and(
+    eq(finalizedOperationalReportsTable.id, id.data.id),
+    eq(finalizedOperationalReportsTable.scope, scope),
+  )).limit(1))[0];
+  if (!row) {
+    operationalError(res, 404, "finalized-report-not-found", "Finalized report not found.");
+    return;
+  }
+  const integrity = finalizedReportIntegrity(row);
+  if (!integrity.ok) {
+    sendFinalizedReportIntegrityError(req, res, row, integrity);
+    return;
+  }
+
+  const format = query.data.format as CanonicalReportExportFormat;
+  const snapshot = {
+    id: row.id,
+    contentHash: row.contentHash,
+    finalizedAt: row.finalizedAt,
+    report: row.payload as OperationalReport,
+  };
+  const snapshotId = canonicalReportSnapshotId(snapshot);
+  const regenerate = () => format === "csv" ? Buffer.from(canonicalReportCsv(snapshot))
+    : format === "print" ? Buffer.from(canonicalReportPrintHtml(snapshot))
+      : Buffer.from(canonicalReportXlsx(snapshot));
+  let bytes: Buffer;
+  let artifactSource: "job-cache" | "canonical-regenerated" | "canonical-direct";
+
+  if (query.data.jobId) {
+    const job = (await db.select().from(serverJobsTable).where(
+      eq(serverJobsTable.id, query.data.jobId),
+    ).limit(1))[0];
+    if (!retainedExportIsAuthorized(job, scope, row.id, format, snapshotId, row.contentHash)) {
+      operationalError(res, 404, "export-artifact-not-found", "The requested export artifact was not found.");
+      return;
+    }
+    const retained = await readServerJobArtifact(query.data.jobId, format);
+    const expectedArtifactHash = (job.result as { artifactSha256: string }).artifactSha256;
+    const resolved = resolveRetainedArtifact(retained, expectedArtifactHash, regenerate);
+    bytes = resolved.bytes;
+    artifactSource = resolved.source;
+  } else {
+    bytes = regenerate();
+    artifactSource = "canonical-direct";
+  }
+
+  res.setHeader("Content-Type", format === "csv"
+    ? "text/csv; charset=utf-8"
+    : format === "print"
+      ? "text/html; charset=utf-8"
+      : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${canonicalExportFilename(snapshot, format)}"`);
+  res.setHeader("X-Canonical-Snapshot-Id", snapshotId);
+  res.setHeader("X-Canonical-Content-Hash", row.contentHash);
+  res.setHeader("X-Export-Artifact-Source", artifactSource);
+  res.send(bytes);
 });
 
 export default router;

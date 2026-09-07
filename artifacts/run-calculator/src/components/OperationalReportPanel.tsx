@@ -11,6 +11,7 @@ import {
   shareOperationalReport,
 } from "../reportShare";
 import { useMe } from "../useRole";
+import { submitAndWaitForServerJob } from "../serverJobs";
 
 type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput };
 export type OperationalReportDetailRange = { start: string; end: string; scope: "day" | "week" };
@@ -120,6 +121,9 @@ export default function OperationalReportPanel({
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [report, setReport] = useState<OperationalReport | null>(null);
   const [reportSource, setReportSource] = useState<"authoritative" | "local-offline">("authoritative");
+  // Only a finalized archive record is an immutable canonical export snapshot.
+  // Preview/local reports retain the existing synchronous browser export path.
+  const [finalizedSnapshotId, setFinalizedSnapshotId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
@@ -150,6 +154,7 @@ export default function OperationalReportPanel({
       const authoritative = (await response.json()) as OperationalReport;
       setReport(authoritative);
       setReportSource("authoritative");
+      setFinalizedSnapshotId(null);
       setStatus("Report ready. Statistics are authoritative and deterministic.");
     } catch {
       setReport(localOfflineReport(input, scope, date));
@@ -175,6 +180,7 @@ export default function OperationalReportPanel({
       const finalized = await response.json() as { id: string; report: OperationalReport; idempotent?: boolean };
       setReport(finalized.report);
       setReportSource("authoritative");
+      setFinalizedSnapshotId(finalized.id);
       await loadHistory();
       setStatus(finalized.idempotent
         ? `Finalized report already exists (${finalized.id}). The original snapshot was retained.`
@@ -215,9 +221,10 @@ export default function OperationalReportPanel({
     try {
       const response = await fetch(`/api/reports/operational/finalized/${encodeURIComponent(id)}`);
       if (!response.ok) throw new Error("Finalized report request failed");
-      const finalized = await response.json() as { report: OperationalReport };
+      const finalized = await response.json() as { id: string; report: OperationalReport };
       setReport(finalized.report);
       setReportSource("authoritative");
+      setFinalizedSnapshotId(finalized.id);
       setStatus("Viewing immutable finalized report.");
     } catch {
       setError("Could not retrieve the finalized report.");
@@ -225,8 +232,43 @@ export default function OperationalReportPanel({
       setHistoryBusy(false);
     }
   }
-  function download(kind: "csv" | "xlsx") {
+  async function download(kind: "csv" | "xlsx" | "print") {
     if (!report) return;
+    if (reportSource === "authoritative" && finalizedSnapshotId) {
+      try {
+        const directUrl = `/api/reports/operational/finalized/${encodeURIComponent(finalizedSnapshotId)}/export?format=${kind}`;
+        // Package large artifacts in the durable workload first. Small exports
+        // retain the direct canonical endpoint as their compatibility path.
+        const packaged = (report.productionRows?.length ?? 0) >= 100
+          ? await submitAndWaitForServerJob<{ downloadUrl: string }>({
+            type: "export-package",
+            input: { finalizedReportId: finalizedSnapshotId, format: kind },
+            snapshotId: finalizedSnapshotId,
+          })
+          : null;
+        const response = await fetch(packaged?.downloadUrl ?? directUrl);
+        if (!response.ok) throw new Error("Canonical export request failed");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1]
+          ?? reportFilename(report, kind === "print" ? "csv" : kind);
+        anchor.click();
+        URL.revokeObjectURL(url);
+        setStatus(`Downloaded canonical snapshot ${response.headers.get("X-Canonical-Snapshot-Id") ?? finalizedSnapshotId}.`);
+        return;
+      } catch {
+        // The old browser builder remains available while job/server exports are
+        // rolling out or temporarily unavailable.
+        setStatus("Canonical download was unavailable; downloaded the current synchronous compatibility export.");
+      }
+    }
+    if (kind === "print") {
+      // Previews and offline reports have no immutable server snapshot.
+      window.print();
+      return;
+    }
     if (kind === "xlsx") {
       XLSX.writeFile(operationalReportWorkbook(report), reportFilename(report, "xlsx"));
       return;
@@ -297,14 +339,14 @@ export default function OperationalReportPanel({
               {finalizeBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Lock className="w-4 h-4 inline mr-1" />}
               Finalize
             </button>
-            <button type="button" onClick={() => download("csv")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
+            <button type="button" onClick={() => void download("csv")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
               <Download className="w-4 h-4 inline mr-1" /> CSV
             </button>
-            <button type="button" onClick={() => download("xlsx")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
+            <button type="button" onClick={() => void download("xlsx")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
               <FileSpreadsheet className="w-4 h-4 inline mr-1" /> Excel
             </button>
-            <button type="button" onClick={() => window.print()} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
-              <Printer className="w-4 h-4 inline mr-1" /> Print / PDF
+            <button type="button" onClick={() => void download("print")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
+              <Printer className="w-4 h-4 inline mr-1" /> Print-ready
             </button>
             <button type="button" onClick={() => void share()} disabled={shareBusy} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50">
               {shareBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Share2 className="w-4 h-4 inline mr-1" />}

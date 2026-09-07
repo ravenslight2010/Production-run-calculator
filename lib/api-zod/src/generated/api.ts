@@ -1438,6 +1438,22 @@ export const GetFinalizedOperationalReportResponse = zod.object({
 
 
 /**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
+export const DownloadCanonicalOperationalReportParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const DownloadCanonicalOperationalReportQueryParams = zod.object({
+  "format": zod.enum(['csv', 'xlsx', 'print']),
+  "jobId": zod.coerce.string().uuid().optional().describe('Completed export-package job whose pre-generated retained artifact should be served.')
+})
+
+export const DownloadCanonicalOperationalReportResponse = zod.unknown()
+
+
+/**
  * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
  * @summary Read one manager-only server-derived operational run view
  */
@@ -4531,6 +4547,150 @@ export const DeletePremixSheetResponse = zod.object({
 
 
 /**
+ * @summary List the authenticated user's retained server jobs
+ */
+export const listServerJobsResponseProgressMin = 0;
+export const listServerJobsResponseProgressMax = 100;
+
+
+
+export const ListServerJobsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(listServerJobsResponseProgressMin).max(listServerJobsResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+export const ListServerJobsResponse = zod.array(ListServerJobsResponseItem)
+
+
+/**
+ * @summary Enqueue a bounded, idempotent server job
+ */
+export const createServerJobBodyTypeRegExp = new RegExp('^[a-z][a-z0-9-]{1,63}$');
+export const createServerJobBodyIdempotencyKeyMin = 8;
+export const createServerJobBodyIdempotencyKeyMax = 128;
+
+export const createServerJobBodySnapshotIdMax = 200;
+
+
+
+export const CreateServerJobBody = zod.object({
+  "type": zod.string().regex(createServerJobBodyTypeRegExp),
+  "idempotencyKey": zod.string().min(createServerJobBodyIdempotencyKeyMin).max(createServerJobBodyIdempotencyKeyMax),
+  "input": zod.unknown().optional(),
+  "snapshotId": zod.string().max(createServerJobBodySnapshotIdMax).optional()
+})
+
+export const createServerJobResponseProgressMin = 0;
+export const createServerJobResponseProgressMax = 100;
+
+
+
+export const CreateServerJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(createServerJobResponseProgressMin).max(createServerJobResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Read an owned server job
+ */
+export const GetServerJobParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const getServerJobResponseProgressMin = 0;
+export const getServerJobResponseProgressMax = 100;
+
+
+
+export const GetServerJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(getServerJobResponseProgressMin).max(getServerJobResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Request cancellation of an owned running or queued server job
+ */
+export const CancelServerJobParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const cancelServerJobResponseProgressMin = 0;
+export const cancelServerJobResponseProgressMax = 100;
+
+
+
+export const CancelServerJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(cancelServerJobResponseProgressMin).max(cancelServerJobResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List recent workbook import review records
  */
 export const ListImportHistoryQueryParams = zod.object({
@@ -5769,5 +5929,3 @@ export const ClaimAutoTrackEventResponse = zod.object({
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp)
 })
-
-

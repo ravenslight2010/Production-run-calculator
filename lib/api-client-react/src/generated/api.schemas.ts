@@ -4486,6 +4486,66 @@ export interface UnreviewedIncidentCount {
   count: number;
 }
 
+export interface CreateServerJobInput {
+  /** @pattern ^[a-z][a-z0-9-]{1,63}$ */
+  type: string;
+  /**
+     * @minLength 8
+     * @maxLength 128
+     */
+  idempotencyKey: string;
+  input?: unknown;
+  /** @maxLength 200 */
+  snapshotId?: string;
+}
+
+export type ServerJobStatus = typeof ServerJobStatus[keyof typeof ServerJobStatus];
+
+
+export const ServerJobStatus = {
+  queued: 'queued',
+  running: 'running',
+  succeeded: 'succeeded',
+  failed: 'failed',
+  cancelled: 'cancelled',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ServerJobError = {
+  code?: string;
+  /** @nullable */
+  message?: string | null;
+} | null;
+
+export interface ServerJob {
+  id: string;
+  type: string;
+  status: ServerJobStatus;
+  /** @nullable */
+  snapshotId?: string | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  progress: number;
+  /** @nullable */
+  progressMessage?: string | null;
+  attempt: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  result?: unknown;
+  /** @nullable */
+  error?: ServerJobError;
+  createdAt: string;
+  /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
+  finishedAt?: string | null;
+  expiresAt: string;
+}
+
 export type ManagerActionItemCategory = typeof ManagerActionItemCategory[keyof typeof ManagerActionItemCategory];
 
 
@@ -4648,6 +4708,23 @@ export type SearchFinalizedOperationalReportsScope = typeof SearchFinalizedOpera
 export const SearchFinalizedOperationalReportsScope = {
   day: 'day',
   week: 'week',
+} as const;
+
+export type DownloadCanonicalOperationalReportParams = {
+format: DownloadCanonicalOperationalReportFormat;
+/**
+ * Completed export-package job whose pre-generated retained artifact should be served.
+ */
+jobId?: string;
+};
+
+export type DownloadCanonicalOperationalReportFormat = typeof DownloadCanonicalOperationalReportFormat[keyof typeof DownloadCanonicalOperationalReportFormat];
+
+
+export const DownloadCanonicalOperationalReportFormat = {
+  csv: 'csv',
+  xlsx: 'xlsx',
+  print: 'print',
 } as const;
 
 export type GetOperationalRunViewParams = {
@@ -4825,4 +4902,3 @@ today?: ClientTodayParameter;
  */
 epoch?: number;
 };
-

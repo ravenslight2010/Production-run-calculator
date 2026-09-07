@@ -10,6 +10,7 @@ import masterDataImportsRouter from "./capabilities/masterDataImports";
 import inventoryOperationsRouter from "./capabilities/inventoryOperations";
 import administrationRouter from "./capabilities/administration";
 import retainedAiRouter from "./capabilities/retainedAi";
+import serverJobsRouter from "./serverJobs";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
   getRequiredCapabilities,
@@ -19,6 +20,9 @@ import {
 import { noStoreMiddleware } from "../lib/cacheControl";
 import { startupGate } from "../lib/startupGate";
 import type { Capability } from "../lib/roles";
+// Domain handlers register against the generic lifecycle without making that
+// lifecycle import its workloads (which would create an initialization cycle).
+import "../lib/serverJobWorkloads";
 
 const router: IRouter = Router();
 
@@ -65,6 +69,7 @@ export const mutationAuthorizationRouters = [
   { name: "inventory-operations", router: inventoryOperationsRouter },
   { name: "administration", router: administrationRouter },
   { name: "retained-ai", router: retainedAiRouter },
+  { name: "server-jobs", router: serverJobsRouter },
 ] as const;
 
 /**
@@ -78,6 +83,7 @@ export const authenticatedCapabilityFamilies = [
   { name: "inventory-operations", router: inventoryOperationsRouter },
   { name: "administration", router: administrationRouter },
   { name: "retained-ai", router: retainedAiRouter },
+  { name: "server-jobs", router: serverJobsRouter },
 ] as const;
 
 // Stale-data protection runs first, including public health/auth routes.
@@ -218,6 +224,16 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("floor-operational", "scoped", "allowed", undefined, ["POST /run-templates", "DELETE /run-templates", "POST /sandbox/reset"]),
   ...writes("capability-gated", "scoped", "allowed", "manage-inventory", ["POST /duplicate-reviews", "POST /duplicate-reviews/resolve"]),
   ...writes("capability-gated", "scoped", "allowed", "manage-staff", ["PUT /supervisor-pin"]),
+  {
+    method: "POST", path: "/server-jobs", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
+      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/server-jobs/:id/cancel", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
+      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+  },
 ];
 
 /**

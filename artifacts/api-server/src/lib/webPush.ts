@@ -3,18 +3,21 @@ import webpush from "web-push";
 import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
-  dailySyncTable,
+  dailySyncTable, scheduledAlertRecordsTable,
 } from "@workspace/db";
 import { computeServerCalc } from "@workspace/live-calc";
 import { logger } from "./logger";
 import type { Scope } from "./requestScope";
 import { getUserCapabilities } from "./roles";
 import { computeAutoTrackElapsedMs } from "@workspace/live-calc";
+import { enqueueServerJob, registerServerJob } from "./serverJobs";
 
 export const WEB_PUSH_KINDS = ["fifteenMin", "batchDue", "warehouseStaging", "runComplete", "freezerEmpty"] as const;
 export type WebPushKind = (typeof WEB_PUSH_KINDS)[number];
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_ENDPOINT = 2048;
+const SCHEDULED_EVALUATION_ACTOR = "system:scheduled-alert-scheduler";
+const DEFAULT_ALERT_INTERVAL_MS = 60_000;
 
 export function vapidPublicKey(): string | null {
   const key = process.env.WEB_PUSH_VAPID_PUBLIC_KEY;
@@ -139,7 +142,10 @@ function fifteenArm(data: unknown, nowMs: number): string | null {
   } catch { return null; }
 }
 
-async function deliver(scope: Scope, candidate: Candidate, nowMs: number): Promise<void> {
+type DeliveryStatus = "no-subscriptions" | "vapid-unconfigured" | "delivered" | "failed";
+const DEFERRED_DELIVERY_CLAIM_MS = 90_000;
+
+async function deliver(scope: Scope, candidate: Candidate, nowMs: number, signal?: AbortSignal): Promise<DeliveryStatus> {
   const rows = await db.select({
     id: webPushSubscriptionsTable.id, userId: webPushSubscriptionsTable.userId, endpoint: webPushSubscriptionsTable.endpoint, p256dh: webPushSubscriptionsTable.p256dh,
     auth: webPushSubscriptionsTable.auth, contentEncoding: webPushSubscriptionsTable.contentEncoding,
@@ -157,9 +163,14 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number): Promi
         gt(webPushSubscriptionsTable.expiresAt, new Date(nowMs)),
       ),
     ));
+  if (!rows.length) return "no-subscriptions";
   const sendable = configuredSender();
+  let claimed = 0;
+  let delivered = 0;
+  let failed = 0;
   const capabilities = new Map<string, boolean>();
   for (const s of rows) {
+    if (signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
     if (candidate.dueAt && s.createdAt.getTime() > candidate.dueAt) continue;
     // A missing preference means enabled, matching /me/notification-prefs.
     if (s.notificationPrefs?.[candidate.kind] === false) continue;
@@ -179,6 +190,7 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number): Promi
       expiresAt: new Date(Date.now() + RETENTION_MS),
     }).onConflictDoNothing().returning({ id: webPushDeliveriesTable.id });
     if (!claim) continue;
+    claimed++;
     if (!sendable) {
       await db.update(webPushDeliveriesTable).set({ status: "skipped", lastErrorCode: "vapid_not_configured", attempts: 1 })
         .where(eq(webPushDeliveriesTable.id, claim.id));
@@ -189,19 +201,93 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number): Promi
       const payload = JSON.stringify({ id: candidate.id.slice(0, 96), kind: candidate.kind, title: "Production alert", body: "A production timing alert needs attention." });
       await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 300, urgency: "high" });
       await db.update(webPushDeliveriesTable).set({ status: "delivered", attempts: 1, deliveredAt: new Date() }).where(eq(webPushDeliveriesTable.id, claim.id));
+      delivered++;
     } catch (error) {
       const statusCode = typeof error === "object" && error ? Number((error as { statusCode?: unknown }).statusCode) : 0;
       await db.update(webPushDeliveriesTable).set({ status: "failed", attempts: 1, lastErrorCode: statusCode ? `http_${statusCode}` : "send_failed" }).where(eq(webPushDeliveriesTable.id, claim.id));
+      failed++;
       if (statusCode === 404 || statusCode === 410) await db.update(webPushSubscriptionsTable).set({ enabled: false, updatedAt: new Date() }).where(eq(webPushSubscriptionsTable.id, s.id));
       logger.warn({ event: "web_push_delivery", outcome: "failed", safeCounts: { statusCode, alertKind: candidate.kind.length } }, "Web push delivery failed");
     }
   }
+  if (!claimed) return "no-subscriptions";
+  if (!sendable) return "vapid-unconfigured";
+  return delivered ? "delivered" : failed ? "failed" : "no-subscriptions";
 }
 
-export async function runWebPushAlerts(nowMs = Date.now()): Promise<{ examined: number; candidates: number }> {
-  const rows = await db.select().from(dailySyncTable);
+export function deferredCandidate(record: {
+  alertId: string; alertKind: string; dueAt: Date | null;
+}): Candidate | null {
+  if (!(WEB_PUSH_KINDS as readonly string[]).includes(record.alertKind)) return null;
+  return {
+    id: record.alertId,
+    kind: record.alertKind as WebPushKind,
+    dueAt: record.dueAt?.getTime(),
+  };
+}
+
+/**
+ * Deferred logical records are claimed separately from their original insert.
+ * A short expiry on the claim makes a process crash recoverable; delivery's
+ * own insert-winner table remains the final per-device duplicate fence.
+ */
+async function deliverDeferredAlerts(scope: Scope, date: string, nowMs: number, signal?: AbortSignal): Promise<void> {
+  const records = await db.select({
+    id: scheduledAlertRecordsTable.id,
+    alertId: scheduledAlertRecordsTable.alertId,
+    alertKind: scheduledAlertRecordsTable.alertKind,
+    dueAt: scheduledAlertRecordsTable.dueAt,
+  }).from(scheduledAlertRecordsTable).where(and(
+    eq(scheduledAlertRecordsTable.scope, scope),
+    eq(scheduledAlertRecordsTable.date, date),
+    or(
+      eq(scheduledAlertRecordsTable.status, "deferred"),
+      and(
+        eq(scheduledAlertRecordsTable.status, "delivering"),
+        lt(scheduledAlertRecordsTable.evaluatedAt, new Date(nowMs - DEFERRED_DELIVERY_CLAIM_MS)),
+      ),
+    ),
+  ));
+  for (const record of records) {
+    if (signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
+    const candidate = deferredCandidate(record);
+    if (!candidate) continue;
+    const [claim] = await db.update(scheduledAlertRecordsTable).set({
+      status: "delivering",
+      evaluatedAt: new Date(nowMs),
+    }).where(and(
+      eq(scheduledAlertRecordsTable.id, record.id),
+      eq(scheduledAlertRecordsTable.scope, scope),
+      or(
+        eq(scheduledAlertRecordsTable.status, "deferred"),
+        and(
+          eq(scheduledAlertRecordsTable.status, "delivering"),
+          lt(scheduledAlertRecordsTable.evaluatedAt, new Date(nowMs - DEFERRED_DELIVERY_CLAIM_MS)),
+        ),
+      ),
+    )).returning({ id: scheduledAlertRecordsTable.id });
+    if (!claim) continue;
+    const status = await deliver(scope, candidate, nowMs, signal);
+    await db.update(scheduledAlertRecordsTable)
+      .set({ status, ...(status === "delivered" ? { deliveredAt: new Date(nowMs) } : {}) })
+      .where(eq(scheduledAlertRecordsTable.id, record.id));
+  }
+}
+
+export async function runWebPushAlerts(
+  nowMs = Date.now(),
+  target?: { scope: Scope; date: string; signal?: AbortSignal },
+): Promise<{ examined: number; candidates: number }> {
+  const query = db.select().from(dailySyncTable);
+  const rows = target
+    ? await query.where(and(eq(dailySyncTable.scope, target.scope), eq(dailySyncTable.date, target.date)))
+    : await query;
   let candidates = 0;
   for (const row of rows) {
+    if (target?.signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
+    // A quiet-time record is durable evidence, not a terminal suppression.
+    // Once eligible, exactly one evaluator transitions it to delivering.
+    if (!quietHours(nowMs)) await deliverDeferredAlerts(row.scope as Scope, row.date, nowMs, target?.signal);
     const arm = fifteenArm(row.data, nowMs);
     if (arm) await db.insert(webPushAlertArmsTable).values({
       scope: row.scope, runKey: arm, alertKind: "fifteenMin", expiresAt: new Date(nowMs + RETENTION_MS),
@@ -239,12 +325,43 @@ export async function runWebPushAlerts(nowMs = Date.now()): Promise<{ examined: 
       if (armed) filtered.push(candidate);
     }
     candidates += filtered.length;
-    for (const candidate of filtered) await deliver(row.scope as Scope, candidate, nowMs);
+    for (const candidate of filtered) {
+      if (target?.signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
+      // The logical record is claimed before notification delivery. Unlike the
+      // per-subscription table this remains useful when nobody is subscribed,
+      // and gives operators durable evidence of scheduled evaluation.
+      const [record] = await db.insert(scheduledAlertRecordsTable).values({
+        id: randomUUID(),
+        scope: row.scope,
+        alertId: candidate.id,
+        alertKind: candidate.kind,
+        date: row.date,
+        dueAt: candidate.dueAt ? new Date(candidate.dueAt) : null,
+        expiresAt: new Date(nowMs + RETENTION_MS),
+      }).onConflictDoNothing().returning({ id: scheduledAlertRecordsTable.id });
+      // This insert is the cross-instance logical alert claim. Only its winner
+      // may evaluate/deliver; a concurrent/restarted scheduler cannot turn one
+      // canonical milestone into duplicate notification attempts.
+      if (!record) continue;
+      if (quietHours(nowMs)) {
+        // Quiet hours defer disruptive delivery rather than permanently losing
+        // it to the logical alert unique key.
+        await db.update(scheduledAlertRecordsTable)
+          .set({ status: "deferred" })
+          .where(eq(scheduledAlertRecordsTable.id, record.id));
+        continue;
+      }
+      const status = await deliver(row.scope as Scope, candidate, nowMs, target?.signal);
+      await db.update(scheduledAlertRecordsTable)
+        .set({ status, ...(status === "delivered" ? { deliveredAt: new Date(nowMs) } : {}) })
+        .where(eq(scheduledAlertRecordsTable.id, record.id));
+    }
   }
   const cutoff = new Date(nowMs);
   await Promise.all([
     db.delete(webPushDeliveriesTable).where(lt(webPushDeliveriesTable.expiresAt, cutoff)),
     db.delete(webPushAlertArmsTable).where(lt(webPushAlertArmsTable.expiresAt, cutoff)),
+    db.delete(scheduledAlertRecordsTable).where(lt(scheduledAlertRecordsTable.expiresAt, cutoff)),
     db.delete(webPushSubscriptionsTable).where(and(
       eq(webPushSubscriptionsTable.enabled, true),
       lt(webPushSubscriptionsTable.expiresAt, cutoff),
@@ -254,15 +371,96 @@ export async function runWebPushAlerts(nowMs = Date.now()): Promise<{ examined: 
   return { examined: rows.length, candidates };
 }
 
-export function startWebPushAlertWorker(): NodeJS.Timeout {
-  const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || 60_000);
-  let running = false;
-  const timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void runWebPushAlerts().catch(() => logger.error({ event: "web_push_alert_worker", outcome: "failed" }, "Web push alert worker failed"))
-      .finally(() => { running = false; });
-  }, interval);
+/**
+ * Optional UTC quiet period, e.g. WEB_PUSH_QUIET_HOURS=22-06. Evaluation and
+ * durable recording continue during quiet time; only external delivery waits.
+ * UTC is deliberate: server scheduling has no trustworthy browser timezone.
+ */
+function quietHours(nowMs: number): boolean {
+  const match = /^([01]?\d|2[0-3])-([01]?\d|2[0-3])$/.exec(process.env.WEB_PUSH_QUIET_HOURS ?? "");
+  if (!match || match[1] === match[2]) return false;
+  const start = Number(match[1]), end = Number(match[2]), hour = new Date(nowMs).getUTCHours();
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end;
+}
+
+export function scheduledEvaluationIdempotencyKey(date: string, nowMs: number, bucketMs = DEFAULT_ALERT_INTERVAL_MS): string {
+  const bucket = Math.floor(nowMs / bucketMs) * bucketMs;
+  return `scheduled-evaluation:${date}:${bucket}`;
+}
+
+/**
+ * Enqueues one durable workload per canonical scope/date/time bucket. The
+ * server_jobs unique key elects the insert winner across API instances; actual
+ * evaluation is performed only by the shared bounded ServerJobWorker.
+ */
+export async function enqueueScheduledWebPushAlerts(
+  nowMs = Date.now(),
+  bucketMs = DEFAULT_ALERT_INTERVAL_MS,
+): Promise<{ examined: number; enqueued: number }> {
+  const rows = await db.select({ scope: dailySyncTable.scope, date: dailySyncTable.date }).from(dailySyncTable);
+  let enqueued = 0;
+  for (const row of rows) {
+    const result = await enqueueServerJob({
+      scope: row.scope as Scope,
+      actorId: SCHEDULED_EVALUATION_ACTOR,
+      type: "scheduled-evaluation",
+      idempotencyKey: scheduledEvaluationIdempotencyKey(row.date, nowMs, bucketMs),
+      input: { date: row.date, scheduledFor: nowMs },
+    });
+    if (result.created) enqueued++;
+  }
+  return { examined: rows.length, enqueued };
+}
+
+registerServerJob("scheduled-evaluation", {
+  capability: "review-incidents",
+  maxAttempts: 3,
+  timeoutMs: 60_000,
+  handler: async (context) => {
+    const input = context.job.input as { date?: unknown; scheduledFor?: unknown };
+    if (typeof input?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)
+      || typeof input.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
+      throw new Error("scheduled-evaluation requires a date and scheduledFor timestamp");
+    }
+    if (await context.isCancellationRequested()) throw new Error("Cancelled");
+    await context.reportProgress(10, "Evaluating scheduled production alerts");
+    // Evaluate at execution time rather than the enqueue timestamp so a queued
+    // job cannot emit an alert before its canonical milestone is actually due.
+    const result = await runWebPushAlerts(Date.now(), {
+      scope: context.job.scope as Scope,
+      date: input.date,
+      signal: context.signal,
+    });
+    if (await context.isCancellationRequested()) throw new Error("Cancelled");
+    await context.reportProgress(100, "Scheduled production alerts evaluated");
+    return result;
+  },
+});
+
+export type WebPushAlertScheduler = { stop(): void };
+
+export function startWebPushAlertScheduler(): WebPushAlertScheduler {
+  const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
+  let stopped = false;
+  let scheduling = false;
+  const execute = () => {
+    if (stopped || scheduling) return;
+    scheduling = true;
+    void enqueueScheduledWebPushAlerts(Date.now(), interval)
+      .catch(() => logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed"))
+      .finally(() => { scheduling = false; });
+  };
+  // Enqueue promptly after startup and recurringly without a foreground
+  // browser. This timer is only a producer, never a second execution loop.
+  const first = setTimeout(execute, 0);
+  first.unref();
+  const timer = setInterval(execute, interval);
   timer.unref();
-  return timer;
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(first);
+      clearInterval(timer);
+    },
+  };
 }

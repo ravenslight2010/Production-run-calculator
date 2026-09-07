@@ -519,6 +519,7 @@ import {
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
 import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
+import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
@@ -7773,6 +7774,24 @@ export default function Home() {
       window.removeEventListener("online", flush);
     };
   }, []);
+  // Cursor recovery complements the normal snapshot/SSE paths for a device
+  // that missed accepted offline commands. It adopts canonical materialized
+  // snapshots only; commands themselves are never replayed in the browser.
+  useEffect(() => {
+    if (!me) return;
+    const identity: { scope: "live" | "sandbox"; userId: string } = {
+      scope: me.sandbox ? "sandbox" : "live",
+      userId: me.userId,
+    };
+    const pull = () => {
+      void consumeOperationalMutationCursor(identity, (snapshot) =>
+        applySyncCallbackRef.current(snapshot as SyncPayload),
+      );
+    };
+    pull();
+    window.addEventListener("online", pull);
+    return () => window.removeEventListener("online", pull);
+  }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
