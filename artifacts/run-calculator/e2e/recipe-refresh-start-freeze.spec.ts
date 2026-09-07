@@ -9,6 +9,9 @@ const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
 const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const TODAY = new Date().toISOString().slice(0, 10);
+const TOMORROW = new Date(Date.parse(`${TODAY}T00:00:00Z`) + 86_400_000)
+  .toISOString()
+  .slice(0, 10);
 
 let fixtures: AuthorizedBrowserFixtures;
 
@@ -17,11 +20,11 @@ test.beforeAll(async ({ playwright }) => {
 });
 
 test.beforeEach(async () => {
-  await fixtures.removeTodaySync([TODAY]);
+  await fixtures.removeTodaySync([TODAY, TOMORROW]);
 });
 
 test.afterAll(async () => {
-  await fixtures?.cleanup({ syncDates: [TODAY] });
+  await fixtures?.cleanup({ syncDates: [TODAY, TOMORROW] });
 });
 
 async function openSettings(page: Page): Promise<Locator> {
@@ -173,6 +176,21 @@ async function expectIngredientDetailStable(
   await expect(detail).toBeHidden();
 }
 
+async function readScheduledRunValues(
+  page: Page,
+  date: string,
+  runId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const response = await page.request.get(
+    `/api/sync/${date}?today=${TODAY}`,
+    { failOnStatusCode: true },
+  );
+  const payload = await response.json() as {
+    runValues?: Record<string, Record<string, unknown>>;
+  };
+  return payload.runValues?.[runId];
+}
+
 test("pending recipes refresh while Start freezes the running snapshot", async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -184,6 +202,7 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
   const recipeName = `Shared Cheese ${uniqueTestId("recipe")}`;
   const currentRunId = uniqueTestId("current-run");
   const upcomingRunId = uniqueTestId("upcoming-run");
+  const scheduledRunId = uniqueTestId("scheduled-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
     username,
@@ -247,6 +266,31 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
       packagingProgress: {},
     },
   });
+  await fixtures.seedScheduledSync({
+    token: account.token,
+    date: TOMORROW,
+    today: TODAY,
+    payload: {
+      dayState: {
+        date: TOMORROW,
+        runs: [
+          { id: scheduledRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
+        ],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+      },
+      runValues: {
+        [scheduledRunId]: values,
+      },
+      runValuesUpdatedAt: {
+        [scheduledRunId]: now,
+      },
+      packagingProgress: {},
+    },
+  });
 
   await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -260,6 +304,13 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
 
   await setRecipeBatchLbs(page, recipeName, "20");
   await expect(upcoming).toContainText("6.00 batches");
+  await expect.poll(
+    async () => {
+      const scheduled = await readScheduledRunValues(page, TOMORROW, scheduledRunId);
+      return scheduled?.app1CheeseRecipe;
+    },
+    { timeout: 20_000 },
+  ).toEqual([{ ingredient: "Cheese", lbs: 20 }]);
   await page.getByTestId("tab-frontline").click();
   await expect(page.getByTestId("output-app1-batches")).toContainText("6.00");
 
@@ -270,6 +321,16 @@ test("pending recipes refresh while Start freezes the running snapshot", async (
   await setRecipeBatchLbs(page, recipeName, "40");
   await openSummary(page);
   await expect(upcoming).toContainText("3.00 batches");
+  await expect.poll(
+    async () => {
+      const scheduled = await readScheduledRunValues(page, TOMORROW, scheduledRunId);
+      return scheduled?.app1CheeseRecipe;
+    },
+    { timeout: 20_000 },
+  ).toEqual([{ ingredient: "Cheese", lbs: 40 }]);
+  // The future-day propagation writes immediately, while today's pending
+  // snapshot follows the normal debounced live-day save.
+  await page.waitForTimeout(1_000);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();

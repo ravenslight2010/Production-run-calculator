@@ -46,6 +46,13 @@ export interface TodaySyncFixture {
   date?: string;
 }
 
+export interface ScheduledSyncFixture {
+  token: string;
+  date: string;
+  today: string;
+  payload: JsonRecord;
+}
+
 export interface AuthorizedFixtureCleanupOptions {
   profileKeys?: Iterable<string>;
   syncDates?: Iterable<string>;
@@ -374,6 +381,33 @@ export class AuthorizedBrowserFixtures {
     }
     this.syncDates.add(date);
     return date;
+  }
+
+  async seedScheduledSync(fixture: ScheduledSyncFixture): Promise<string> {
+    await this.start();
+    const headers = { Cookie: `rc_auth=${fixture.token}` };
+    const epochResponse = await this.request.get(
+      `${this.apiBase}/api/sync/reset-epoch`,
+      { headers },
+    );
+    if (!epochResponse.ok()) {
+      throw new Error(`Fixture reset epoch failed: ${await responseFailure(epochResponse)}`);
+    }
+    const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
+    const response = await this.request.put(
+      `${this.apiBase}/api/sync/${fixture.date}?today=${fixture.today}&epoch=${epoch}`,
+      {
+        headers,
+        data: { payload: fixture.payload },
+      },
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Fixture scheduled sync seed failed: ${await responseFailure(response)}`,
+      );
+    }
+    this.syncDates.add(fixture.date);
+    return fixture.date;
   }
 
   async seedCheeseRecipe(

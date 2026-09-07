@@ -8,7 +8,7 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: "recipe-refresh-start-freeze.spec.ts",
   timeout: 90_000,
-  globalTimeout: 120_000,
+  globalTimeout: 240_000,
   retries: 0,
   workers: 1,
   reporter: "list",
