@@ -13,6 +13,7 @@ import retainedAiRouter from "./capabilities/retainedAi";
 import serverJobsRouter from "./serverJobs";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
+  getCapabilityMatch,
   getRequiredCapabilities,
   isRequireLiveScope,
   isRequireManagerRole,
@@ -76,6 +77,67 @@ export const mutationAuthorizationRouters = [
   { name: "retained-ai", router: retainedAiRouter },
   { name: "server-jobs", router: serverJobsRouter },
 ] as const;
+
+export type ReadAuthorization = {
+  method: "GET";
+  path: string;
+  capabilities: readonly Capability[];
+  capabilityMatch: "all" | "any";
+  scope: "scoped" | "live-only";
+};
+
+const reads = (
+  capabilities: readonly Capability[],
+  capabilityMatch: ReadAuthorization["capabilityMatch"],
+  scope: ReadAuthorization["scope"],
+  routes: readonly string[],
+): ReadAuthorization[] => routes.map((path) => ({
+  method: "GET",
+  path,
+  capabilities,
+  capabilityMatch,
+  scope,
+}));
+
+/**
+ * The read-side authorization contract. Unlike ordinary authenticated reads,
+ * these routes expose manager, diagnostic, or other capability-owned data.
+ * Keeping the expected capability and scope here makes a new protected GET
+ * fail the registration check until its policy is explicitly recorded.
+ */
+export const readAuthorizationInventory: readonly ReadAuthorization[] = [
+  ...reads(["manage-staff"], "all", "scoped", [
+    "/sync/conflict-stats", "/manager-action-queue",
+    "/profile-data/health-check", "/profile-data/health-workspace",
+    "/ai-memory/health-check",
+  ]),
+  ...reads(["manage-inventory"], "all", "scoped", [
+    "/duplicate-reviews",
+    "/inventory/count-observations/:id", "/inventory/count-observations",
+    "/inventory/quality-checks",
+  ]),
+  ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
+    "/import-history",
+  ]),
+  ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
+  ...reads(["review-incidents"], "all", "scoped", [
+    "/incidents", "/incidents/unreviewed-count", "/incidents/actionable-count",
+    "/incidents/assignees", "/incidents/:id", "/field-checks",
+    "/reports/handoff", "/reports/operational-view",
+    "/reports/operational/finalized", "/reports/operational/finalized/search",
+    "/reports/operational/finalized/proof-key-health",
+    "/reports/operational/finalized/:id", "/reports/operational/finalized/:id/export",
+  ]),
+  ...reads(["manage-staff"], "all", "live-only", ["/roles", "/users"]),
+  ...reads(["approve-password-resets"], "all", "live-only", ["/password-reset-requests"]),
+  ...reads(["manage-profiles"], "all", "scoped", [
+    "/master-data/health", "/master-data/health/history",
+  ]),
+  ...reads(["manage-staff"], "all", "live-only", [
+    "/audit-logs/profile-name-link-cleanup", "/audit-logs",
+  ]),
+  ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
+];
 
 /**
  * The authenticated composition point. Family order is explicit, while every
@@ -314,4 +376,68 @@ export function validateMutationAuthorizationInventory(
   for (const owned of routers) {
     validateStack(owned.router.stack, owned, owned.router === authRouter);
   }
+}
+
+/**
+ * Assert that every capability- or live-scope-gated GET in the assembled
+ * application router has an explicit read policy. This walks mounted routers
+ * rather than source files, so nested capability families and alternate route
+ * path arrays are checked as Express registered them.
+ */
+export function validateReadAuthorizationInventory(
+  router: { stack: unknown[] },
+): void {
+  const byRoute = new Map<string, ReadAuthorization[]>();
+  for (const entry of readAuthorizationInventory) {
+    byRoute.set(entry.path, [...(byRoute.get(entry.path) ?? []), entry]);
+  }
+
+  const validateStack = (stack: readonly unknown[], owner: string): void => {
+    for (const rawLayer of stack) {
+      const layer = rawLayer as RouteLayer;
+      if (!layer.route) {
+        const nestedStack = (layer.handle as { stack?: unknown[] } | undefined)?.stack;
+        if (Array.isArray(nestedStack)) validateStack(nestedStack, owner);
+        continue;
+      }
+
+      const methods = layer.route.methods;
+      if (!methods.get && !methods._all && !methods.all) continue;
+      const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+      const capabilityMiddleware = layer.route.stack
+        .map(({ handle }) => ({
+          capabilities: getRequiredCapabilities(handle),
+          match: getCapabilityMatch(handle),
+        }))
+        .filter((item): item is {
+          capabilities: readonly Capability[];
+          match: "all" | "any";
+        } => !!item.capabilities && !!item.match);
+      const liveScope = layer.route.stack.some(({ handle }) => isRequireLiveScope(handle));
+
+      // Ordinary authenticated GETs are intentionally outside this inventory.
+      if (capabilityMiddleware.length === 0 && !liveScope) continue;
+
+      for (const path of paths) {
+        const entries = byRoute.get(path) ?? [];
+        if (entries.length === 0) {
+          throw new Error(`${owner} protected read GET ${path} is missing from readAuthorizationInventory`);
+        }
+        const matches = entries.some((entry) => {
+          const actual = capabilityMiddleware[0];
+          const capabilityMatches = capabilityMiddleware.length === 1 && !!actual &&
+            actual.match === entry.capabilityMatch &&
+            actual.capabilities.length === entry.capabilities.length &&
+            entry.capabilities.every((capability) => actual.capabilities.includes(capability));
+          const scopeMatches = entry.scope === "live-only" ? liveScope : !liveScope;
+          return capabilityMatches && scopeMatches;
+        });
+        if (!matches) {
+          throw new Error(`${owner} protected read GET ${path} does not match its inventory authorization middleware`);
+        }
+      }
+    }
+  };
+
+  validateStack(router.stack, "assembled API router");
 }

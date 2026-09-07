@@ -4,6 +4,7 @@ import { currentScope } from "../lib/requestScope";
 
 type CapabilityMiddleware = ReturnType<typeof requireCapabilities>;
 const requiredCapabilitiesByMiddleware = new WeakMap<CapabilityMiddleware, readonly Capability[]>();
+const capabilityMatchByMiddleware = new WeakMap<CapabilityMiddleware, "all" | "any">();
 const liveScopeMiddlewares = new WeakSet<Function>();
 const managerRoleMiddlewares = new WeakSet<Function>();
 
@@ -81,6 +82,7 @@ function requireCapabilities(capabilitiesRequired: readonly Capability[], match:
 export function requireCapability(capability: Capability) {
   const middleware = requireCapabilities([capability], "all");
   requiredCapabilitiesByMiddleware.set(middleware, [capability]);
+  capabilityMatchByMiddleware.set(middleware, "all");
   return middleware;
 }
 
@@ -103,6 +105,7 @@ export function requireCapabilityWhen(
     await capabilityMiddleware(req, res, next);
   };
   requiredCapabilitiesByMiddleware.set(middleware, [capability]);
+  capabilityMatchByMiddleware.set(middleware, "all");
   return middleware;
 }
 
@@ -116,6 +119,14 @@ export function getRequiredCapabilities(
 ): readonly Capability[] | undefined {
   return typeof middleware === "function"
     ? requiredCapabilitiesByMiddleware.get(middleware as CapabilityMiddleware)
+    : undefined;
+}
+
+export function getCapabilityMatch(
+  middleware: unknown,
+): "all" | "any" | undefined {
+  return typeof middleware === "function"
+    ? capabilityMatchByMiddleware.get(middleware as CapabilityMiddleware)
     : undefined;
 }
 
@@ -144,5 +155,6 @@ export function isRequireManagerRole(middleware: unknown): boolean {
 export function requireAnyCapability(capabilities: readonly Capability[]) {
   const middleware = requireCapabilities(capabilities, "any");
   requiredCapabilitiesByMiddleware.set(middleware, capabilities);
+  capabilityMatchByMiddleware.set(middleware, "any");
   return middleware;
 }
