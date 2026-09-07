@@ -26,9 +26,8 @@ import {
   resolveUnresolvedData,
   resolveUnresolvedDataWithEnrichment,
 } from "../lib/unresolvedDataResolution";
-import { rateLimit } from "../middlewares/rateLimit";
-import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { aiCostLimit, chargeAiCost } from "../middlewares/costLimitMiddleware";
+import { fixedWindowPerUserPolicy } from "../lib/fixedWindowPolicy";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
   buildFillMissingPrompt,
@@ -201,94 +200,6 @@ async function cachedAiResponse<T>(
   });
 }
 
-// Same posture for the setup "fill in missing data" assistant: per-user fixed
-// window, Postgres-backed in production so the cap holds across instances.
-const FILL_MISSING_RATE_WINDOW_MS = 60_000;
-const FILL_MISSING_RATE_MAX = 10;
-const fillMissingRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(FILL_MISSING_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the Excel-import brand/flavor matcher: per-user fixed window,
-// Postgres-backed in production so the cap holds across instances.
-const MATCH_IMPORT_RATE_WINDOW_MS = 60_000;
-const MATCH_IMPORT_RATE_MAX = 10;
-const matchImportRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(MATCH_IMPORT_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the Excel spec-sheet / recipe parser: per-user fixed window,
-// Postgres-backed in production so the cap holds across instances.
-const PARSE_SPEC_RATE_WINDOW_MS = 60_000;
-const PARSE_SPEC_RATE_MAX = 10;
-const parseSpecRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(PARSE_SPEC_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the premix-sheet product-name matcher: per-user fixed window,
-// Postgres-backed in production so the cap holds across instances.
-const MATCH_PREMIX_RATE_WINDOW_MS = 60_000;
-const MATCH_PREMIX_RATE_MAX = 10;
-const matchPremixRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(MATCH_PREMIX_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the ingredient merge suggester: per-user fixed window,
-// Postgres-backed in production so the cap holds across instances.
-const SUGGEST_MERGES_RATE_WINDOW_MS = 60_000;
-const SUGGEST_MERGES_RATE_MAX = 10;
-const suggestMergesRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(SUGGEST_MERGES_RATE_WINDOW_MS)
-    : undefined;
-
-const SUMMARY_RATE_WINDOW_MS = 60_000;
-const SUMMARY_RATE_MAX = 10;
-const summaryRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(SUMMARY_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the anomaly-flag narrator: per-user fixed window,
-// Postgres-backed in production so the cost cap holds across instances.
-const ANOMALY_RATE_WINDOW_MS = 60_000;
-const ANOMALY_RATE_MAX = 10;
-const anomalyRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(ANOMALY_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the schedule-order narrator: per-user fixed window,
-// Postgres-backed in production so the cost cap holds across instances.
-const SCHEDULE_RATE_WINDOW_MS = 60_000;
-const SCHEDULE_RATE_MAX = 10;
-const scheduleRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(SCHEDULE_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the saved spec-sheet cross-reference: per-user fixed window,
-// Postgres-backed in production so the cost cap holds across instances.
-const SPEC_RECONCILE_RATE_WINDOW_MS = 60_000;
-const SPEC_RECONCILE_RATE_MAX = 10;
-const specReconcileRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(SPEC_RECONCILE_RATE_WINDOW_MS)
-    : undefined;
-
-// Same posture for the mix-reconcile narration: per-user fixed window,
-// Postgres-backed in production so the cost cap holds across instances.
-const MIX_RECONCILE_RATE_WINDOW_MS = 60_000;
-const MIX_RECONCILE_RATE_MAX = 10;
-const mixReconcileRateStore =
-  process.env.NODE_ENV === "production"
-    ? new PostgresRateLimitStore(MIX_RECONCILE_RATE_WINDOW_MS)
-    : undefined;
-
 // Cross-reference a saved spec sheet against the current recipe library. The
 // diff is deterministic (the shared @workspace/spec-reconcile lib runs here AND
 // on both clients), so the discrepancy list is authoritative. The stable
@@ -297,13 +208,7 @@ const mixReconcileRateStore =
 // manager-gated.
 router.post(
   ["/operations-insights/spec-reconciliation", "/ai/spec-reconcile"],
-  rateLimit({
-    windowMs: SPEC_RECONCILE_RATE_WINDOW_MS,
-    max: SPEC_RECONCILE_RATE_MAX,
-    keyGenerator: (req) =>
-      `operations-spec-reconciliation:${req.userId ?? req.ip ?? "unknown"}`,
-    store: specReconcileRateStore,
-  }),
+  fixedWindowPerUserPolicy("operations-spec-reconciliation"),
   async (req, res): Promise<void> => {
     const validation = validateSpecReconcileBody(req.body);
     if (!validation.ok) {
@@ -379,13 +284,7 @@ router.post(
 // user).
 router.post(
   ["/operations-insights/mix-reconciliation", "/ai/mix-reconcile"],
-  rateLimit({
-    windowMs: MIX_RECONCILE_RATE_WINDOW_MS,
-    max: MIX_RECONCILE_RATE_MAX,
-    keyGenerator: (req) =>
-      `operations-mix-reconciliation:${req.userId ?? req.ip ?? "unknown"}`,
-    store: mixReconcileRateStore,
-  }),
+  fixedWindowPerUserPolicy("operations-mix-reconciliation"),
   async (req, res): Promise<void> => {
     const validation = validateMixReconcileBody(req.body);
     if (!validation.ok) {
@@ -419,12 +318,7 @@ router.post(
 // metadata. This endpoint never calls a model or writes run data.
 router.post(
   ["/operations-insights/recap", "/ai/summary"],
-  rateLimit({
-    windowMs: SUMMARY_RATE_WINDOW_MS,
-    max: SUMMARY_RATE_MAX,
-    keyGenerator: (req) => `operations-recap:${req.userId ?? req.ip ?? "unknown"}`,
-    store: summaryRateStore,
-  }),
+  fixedWindowPerUserPolicy("operations-recap"),
   async (req, res): Promise<void> => {
     const validation = validateSummaryBody(req.body);
     if (!validation.ok) {
@@ -454,12 +348,7 @@ router.post(
 // compatibility metadata.
 router.post(
   ["/operations-insights/anomalies", "/ai/anomalies"],
-  rateLimit({
-    windowMs: ANOMALY_RATE_WINDOW_MS,
-    max: ANOMALY_RATE_MAX,
-    keyGenerator: (req) => `operations-anomalies:${req.userId ?? req.ip ?? "unknown"}`,
-    store: anomalyRateStore,
-  }),
+  fixedWindowPerUserPolicy("operations-anomalies"),
   async (req, res): Promise<void> => {
     const validation = validateAnomalyBody(req.body);
     if (!validation.ok) {
@@ -510,12 +399,7 @@ router.post(
 router.post(
   ["/operations-insights/schedule-order", "/ai/schedule-optimize"],
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: SCHEDULE_RATE_WINDOW_MS,
-    max: SCHEDULE_RATE_MAX,
-    keyGenerator: (req) => `operations-schedule-order:${req.userId ?? req.ip ?? "unknown"}`,
-    store: scheduleRateStore,
-  }),
+  fixedWindowPerUserPolicy("operations-schedule-order"),
   async (req, res): Promise<void> => {
     const validation = validateScheduleBody(req.body);
     if (!validation.ok) {
@@ -576,12 +460,7 @@ router.post(
 router.post(
   "/ai/fill-missing",
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: FILL_MISSING_RATE_WINDOW_MS,
-    max: FILL_MISSING_RATE_MAX,
-    keyGenerator: (req) => `ai-fill-missing:${req.userId ?? req.ip ?? "unknown"}`,
-    store: fillMissingRateStore,
-  }),
+  fixedWindowPerUserPolicy("ai-fill-missing"),
   async (req, res): Promise<void> => {
     const validation = validateFillMissingBody(req.body);
     if (!validation.ok) {
@@ -673,12 +552,7 @@ router.post(
 router.post(
   "/ai/match-import",
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: MATCH_IMPORT_RATE_WINDOW_MS,
-    max: MATCH_IMPORT_RATE_MAX,
-    keyGenerator: (req) => `ai-match-import:${req.userId ?? req.ip ?? "unknown"}`,
-    store: matchImportRateStore,
-  }),
+  fixedWindowPerUserPolicy("ai-match-import"),
   async (req, res): Promise<void> => {
     const validation = validateMatchImportBody(req.body);
     if (!validation.ok) {
@@ -892,12 +766,7 @@ router.post(
 router.post(
   "/ai/parse-spec-sheet",
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: PARSE_SPEC_RATE_WINDOW_MS,
-    max: PARSE_SPEC_RATE_MAX,
-    keyGenerator: (req) => `ai-parse-spec-sheet:${req.userId ?? req.ip ?? "unknown"}`,
-    store: parseSpecRateStore,
-  }),
+  fixedWindowPerUserPolicy("ai-parse-spec-sheet"),
   async (req, res): Promise<void> => {
     const validation = validateParseSpecSheetBody(req.body);
     if (!validation.ok) {
@@ -1017,12 +886,7 @@ router.post(
 router.post(
   "/ai/parse-spec-images",
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: PARSE_SPEC_RATE_WINDOW_MS,
-    max: PARSE_SPEC_RATE_MAX,
-    keyGenerator: (req) => `ai-parse-spec-images:${req.userId ?? req.ip ?? "unknown"}`,
-    store: parseSpecRateStore,
-  }),
+  fixedWindowPerUserPolicy("ai-parse-spec-images"),
   async (req, res): Promise<void> => {
     const validation = validateParseSpecImagesBody(req.body);
     if (!validation.ok) {
@@ -1144,12 +1008,7 @@ router.post(
 router.post(
   "/ai/match-premix",
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: MATCH_PREMIX_RATE_WINDOW_MS,
-    max: MATCH_PREMIX_RATE_MAX,
-    keyGenerator: (req) => `ai-match-premix:${req.userId ?? req.ip ?? "unknown"}`,
-    store: matchPremixRateStore,
-  }),
+  fixedWindowPerUserPolicy("ai-match-premix"),
   async (req, res): Promise<void> => {
     const validation = validateMatchPremixBody(req.body);
     if (!validation.ok) {
@@ -1273,12 +1132,7 @@ router.post(
 router.post(
   "/ai/suggest-merges",
   requireCapability("use-ai-tools"),
-  rateLimit({
-    windowMs: SUGGEST_MERGES_RATE_WINDOW_MS,
-    max: SUGGEST_MERGES_RATE_MAX,
-    keyGenerator: (req) => `ai-suggest-merges:${req.userId ?? req.ip ?? "unknown"}`,
-    store: suggestMergesRateStore,
-  }),
+  fixedWindowPerUserPolicy("ai-suggest-merges"),
   async (req, res): Promise<void> => {
     const validation = validateSuggestMergesBody(req.body);
     if (!validation.ok) {

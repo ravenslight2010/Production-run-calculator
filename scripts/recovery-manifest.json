@@ -78,7 +78,7 @@
       ],
       "wiring": [
         {
-          "file": "artifacts/api-server/src/routes/index.ts",
+          "file": "artifacts/api-server/src/routes/capabilities/masterDataImports.ts",
           "contains": "router.use(importHistoryRouter)"
         },
         {
@@ -112,7 +112,7 @@
       ],
       "wiring": [
         {
-          "file": "artifacts/api-server/src/routes/index.ts",
+          "file": "artifacts/api-server/src/routes/capabilities/administration.ts",
           "contains": "router.use(profileDataHealthRouter)"
         },
         {
@@ -142,7 +142,7 @@
       ],
       "wiring": [
         {
-          "file": "artifacts/api-server/src/routes/index.ts",
+          "file": "artifacts/api-server/src/routes/capabilities/inventoryOperations.ts",
           "contains": "router.use(operationalReportsRouter)"
         },
         {
