@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Lock,
   History,
-  Network,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,101 +20,14 @@ import {
   confirmHardwareFieldCheck,
   markIncidentReviewed,
   markIncidentResolved,
-  requestIncidentClusters,
   fetchIncidentAssignees,
   updateIncidentWorkflow,
   type Incident,
-  type IncidentCluster,
-  type IncidentClustersResult,
   type FieldCheckSummary,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
-
-const SEVERITY_STYLE: Record<IncidentCluster["severity"], string> = {
-  high: "bg-red-500/15 text-red-400",
-  medium: "bg-amber-500/15 text-amber-400",
-  low: "bg-sky-500/15 text-sky-400",
-};
-
-// Manager-only incident grouping. On demand, groups the incident log by the
-// deterministic platform/screen key; advisory and read-only. Mirrors the mobile
-// ClustersPanel (replit.md parity).
-function ClustersPanel({ disabled }: { disabled: boolean }) {
-  const [result, setResult] = useState<IncidentClustersResult | null>(null);
-  const find = useMutation({
-    mutationFn: () => requestIncidentClusters(),
-    onSuccess: setResult,
-  });
-
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Network className="w-4 h-4 text-primary shrink-0" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Find patterns</p>
-            <p className="text-xs text-muted-foreground">
-              Group recurring reports & crashes by screen and platform. Advisory only.
-            </p>
-          </div>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => find.mutate()}
-          disabled={disabled || find.isPending}
-        >
-          {find.isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Network className="w-4 h-4 mr-2" />
-          )}
-          {result ? "Refresh" : "Analyze"}
-        </Button>
-      </div>
-
-          {find.isError && (
-        <p className="flex items-center gap-2 text-sm text-red-400">
-              <AlertTriangle className="w-4 h-4" /> Couldn't group the incident log.
-        </p>
-      )}
-
-      {result && (
-        <div className="space-y-2" data-testid="incident-clusters-result">
-          {result.note ? (
-            <p className="text-sm text-muted-foreground">{result.note}</p>
-          ) : (
-            result.clusters.map((c, i) => (
-              <div key={i} className="rounded-md border border-border bg-card p-3 space-y-1.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${SEVERITY_STYLE[c.severity]}`}
-                  >
-                    {c.severity}
-                  </span>
-                  <span className="text-sm font-medium text-foreground">{c.theme}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {c.incidentCount} {c.incidentCount === 1 ? "incident" : "incidents"}
-                  </span>
-                </div>
-                {c.rootCauseHypothesis && (
-                  <p className="text-sm text-muted-foreground">{c.rootCauseHypothesis}</p>
-                )}
-                {c.recommendedAction && (
-                  <p className="text-sm text-foreground">
-                    <span className="font-medium">Next step: </span>
-                    {c.recommendedAction}
-                  </p>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
 type PlatformFilter = "all" | "web" | "mobile";
@@ -629,9 +541,13 @@ export default function IncidentsTab() {
           error={fieldChecksError}
           canConfirmHardware={canConfirmHardware}
         />
-        {hasIncidents && source !== "field_check" && <ClustersPanel disabled={isLoading} />}
-        {hasAnyIssues && (
-          <div className="space-y-2 pb-1">
+        {hasIncidents && <IncidentPatternsPanel disabled={isLoading} />}
+        <section aria-labelledby="incident-list-heading" className="space-y-3">
+          <h2 id="incident-list-heading" className="text-sm font-semibold text-foreground">
+            Incident list
+          </h2>
+          {hasAnyIssues && (
+            <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
             <FilterRow
               label="Status"
               value={status}
@@ -666,8 +582,8 @@ export default function IncidentsTab() {
                 ["field_check", "Field checks"],
               ] as [SourceFilter, string][]}
             />
-          </div>
-        )}
+            </div>
+          )}
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -698,15 +614,18 @@ export default function IncidentsTab() {
             No issues match these filters.
           </p>
         ) : (
-          filtered.map((incident) => (
+          <div className="space-y-3">
+          {filtered.map((incident) => (
             <IncidentRow
               key={incident.id}
               incident={incident}
               assignees={assignees}
               initiallyExpanded={incident.id === selectedIncidentId}
             />
-          ))
+          ))}
+          </div>
         )}
+        </section>
       </CardContent>
     </Card>
   );
