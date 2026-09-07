@@ -21,10 +21,12 @@ import {
   saveDoughRecipePresets,
   loadDoughRecipePresets,
   loadDeletedItems,
+  saveDayState,
 } from "./storage";
 import {
   DEFAULT_VALUES,
   DOUGH_RECIPE_NAMES_KEY,
+  HISTORY_KEY,
   RUN_KEY,
   type FormValues,
 } from "./types";
@@ -43,6 +45,23 @@ describe("applyRecipeNameMerge (dough)", () => {
     saveRunValues("b", run("Old Dough"));
     saveRunValues("c", run("Keep Dough"));
     saveRunValues("d", run("Other Dough"));
+    saveRunValues("started", run("Old Dough"));
+    saveRunValues("ended", run("Old Dough"));
+    saveRunValues("unknown", run("Old Dough"));
+    saveDayState({
+      runs: [
+        { id: "a", brand: "Brand", flavor: "A" },
+        { id: "b", brand: "Brand", flavor: "B" },
+        { id: "c", brand: "Brand", flavor: "C" },
+        { id: "d", brand: "Brand", flavor: "D" },
+        { id: "started", brand: "Brand", flavor: "Started", startedAt: 1 },
+        { id: "ended", brand: "Brand", flavor: "Ended", startedAt: 1, endedAt: 2 },
+      ],
+      currentIndex: 0,
+    });
+    localStorage.setItem(HISTORY_KEY, JSON.stringify([
+      { date: "2026-09-06", runs: [], runValues: { historical: run("Old Dough") } },
+    ]));
     localStorage.setItem(
       DOUGH_RECIPE_NAMES_KEY,
       JSON.stringify(["Keep Dough", "Old Dough", "Other Dough"]),
@@ -60,6 +79,11 @@ describe("applyRecipeNameMerge (dough)", () => {
     expect(loadRunValues("b").doughRecipeName).toBe("Keep Dough");
     expect(loadRunValues("c").doughRecipeName).toBe("Keep Dough");
     expect(loadRunValues("d").doughRecipeName).toBe("Other Dough");
+    expect(loadRunValues("started").doughRecipeName).toBe("Old Dough");
+    expect(loadRunValues("ended").doughRecipeName).toBe("Old Dough");
+    expect(loadRunValues("unknown").doughRecipeName).toBe("Old Dough");
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    expect(history[0].runValues.historical.doughRecipeName).toBe("Old Dough");
 
     // Source name is dropped from the list and tombstoned so the additive union
     // can't bring it back from a stale peer.

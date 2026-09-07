@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { saveProfile, loadProfile } from "./storage";
+import {
+  isRunRecipeRefreshEligible,
+  loadProfile,
+  mergeProfileIntoOpenForm,
+  saveProfile,
+} from "./storage";
 import { DEFAULT_VALUES, PROFILE_KEY, CRUST_PROFILE_KEY } from "./types";
 import type { FormValues } from "./types";
 
@@ -71,5 +76,145 @@ describe("saveProfile stale-form snapshot guard", () => {
     localStorage.removeItem(CRUST_PROFILE_KEY(BRAND, FLAVOR));
     saveProfile(BRAND, FLAVOR, openForm);
     expect(storedDoughName()).toBe("V1");
+  });
+});
+
+describe("shared recipe snapshot boundary", () => {
+  it("refreshes only runs that have never started", () => {
+    expect(isRunRecipeRefreshEligible({})).toBe(true);
+    expect(isRunRecipeRefreshEligible({ startedAt: 1 })).toBe(false);
+    expect(isRunRecipeRefreshEligible({ pausedAt: 1 })).toBe(false);
+    expect(isRunRecipeRefreshEligible({ startedAt: 1, endedAt: 2 })).toBe(false);
+    expect(isRunRecipeRefreshEligible({ endedAt: 2 })).toBe(false);
+  });
+
+  it("refreshes every shared recipe family for pending runs and freezes production snapshots", () => {
+    const v1 = form({
+      doughRecipeName: "Dough V1",
+      doughRecipe: [{ ingredient: "Flour", lbs: 40 }],
+      frontlineRecipeName: "Sauce V1",
+      frontlineRecipe: [{ ingredient: "Tomato", lbs: 20 }],
+      app1Type: "Cheese",
+      app1CheeseRecipeName: "Cheese V1",
+      app1CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 10 }],
+      app2Type: "Mix",
+      app2CheeseRecipeName: "Mix V1",
+      app2CheeseRecipe: [{ ingredient: "Spice", lbs: 2 }],
+      casesNeeded: 80,
+      sauceBarrelsMade: 1,
+      app1BatchesMade: 2,
+    });
+    const v2 = form({
+      doughRecipeName: "Dough V2",
+      doughRecipe: [{ ingredient: "Flour", lbs: 44 }],
+      frontlineRecipeName: "Sauce V2",
+      frontlineRecipe: [{ ingredient: "Tomato", lbs: 24 }],
+      app1Type: "Cheese",
+      app1CheeseRecipeName: "Cheese V2",
+      app1CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 12 }],
+      app2Type: "Mix",
+      app2CheeseRecipeName: "Mix V2",
+      app2CheeseRecipe: [{ ingredient: "Spice", lbs: 3 }],
+      casesNeeded: 999,
+      sauceBarrelsMade: 9,
+      app1BatchesMade: 9,
+    });
+    const refresh = (
+      run: Parameters<typeof isRunRecipeRefreshEligible>[0],
+      values: FormValues,
+    ) => isRunRecipeRefreshEligible(run) ? mergeProfileIntoOpenForm(values, v2) : values;
+
+    const currentPending = refresh({}, v1);
+    const futurePending = refresh({}, v1);
+    const running = refresh({ startedAt: 1 }, v1);
+    const paused = refresh({ startedAt: 1, pausedAt: 2 }, v1);
+    const ended = refresh({ startedAt: 1, endedAt: 3 }, v1);
+
+    for (const pending of [currentPending, futurePending]) {
+      expect(pending.doughRecipeName).toBe("Dough V2");
+      expect(pending.doughRecipe[0].lbs).toBe(44);
+      expect(pending.frontlineRecipeName).toBe("Sauce V2");
+      expect(pending.frontlineRecipe[0].lbs).toBe(24);
+      expect(pending.app1CheeseRecipeName).toBe("Cheese V2");
+      expect(pending.app1CheeseRecipe[0].lbs).toBe(12);
+      expect(pending.app2CheeseRecipeName).toBe("Mix V2");
+      expect(pending.app2CheeseRecipe[0].lbs).toBe(3);
+      expect(pending.casesNeeded).toBe(80);
+      expect(pending.sauceBarrelsMade).toBe(1);
+      expect(pending.app1BatchesMade).toBe(2);
+    }
+    for (const frozen of [running, paused, ended]) {
+      expect(frozen).toBe(v1);
+      expect(frozen.doughRecipeName).toBe("Dough V1");
+      expect(frozen.frontlineRecipeName).toBe("Sauce V1");
+      expect(frozen.app1CheeseRecipeName).toBe("Cheese V1");
+      expect(frozen.app2CheeseRecipeName).toBe("Mix V1");
+    }
+  });
+
+  it("does not copy production progress or run-specific targets from a profile", () => {
+    const current = form({
+      casesNeeded: 80,
+      tempCycleSpeed: 7.5,
+      skidsCompleted: 2,
+      sauceBarrelsMade: 3,
+      sauceBarrelAnchorNetSec: 120,
+      sauceBarrelCorrectionGeneration: 4,
+      app1BatchesMade: 5,
+      app1BatchAnchorNetSec: 240,
+      app1BatchCorrectionGeneration: 6,
+      frontlineRecipeName: "Sauce V1",
+    });
+    const profile = form({
+      casesNeeded: 999,
+      tempCycleSpeed: 99,
+      skidsCompleted: 99,
+      sauceBarrelsMade: 99,
+      sauceBarrelAnchorNetSec: 999,
+      sauceBarrelCorrectionGeneration: 99,
+      app1BatchesMade: 99,
+      app1BatchAnchorNetSec: 999,
+      app1BatchCorrectionGeneration: 99,
+      frontlineRecipeName: "Sauce V2",
+    });
+
+    const merged = mergeProfileIntoOpenForm(current, profile);
+
+    expect(merged.frontlineRecipeName).toBe("Sauce V2");
+    expect(merged.casesNeeded).toBe(80);
+    expect(merged.tempCycleSpeed).toBe(7.5);
+    expect(merged.skidsCompleted).toBe(2);
+    expect(merged.sauceBarrelsMade).toBe(3);
+    expect(merged.sauceBarrelAnchorNetSec).toBe(120);
+    expect(merged.sauceBarrelCorrectionGeneration).toBe(4);
+    expect(merged.app1BatchesMade).toBe(5);
+    expect(merged.app1BatchAnchorNetSec).toBe(240);
+    expect(merged.app1BatchCorrectionGeneration).toBe(6);
+  });
+
+  it("strips legacy production registers when loading or saving profiles", () => {
+    localStorage.setItem(PROFILE_KEY(BRAND, FLAVOR), JSON.stringify({
+      frontlineRecipeName: "Sauce",
+      sauceBarrelsMade: 7,
+      app1BatchesMade: 8,
+      app1BatchAnchorNetSec: 90,
+      app1BatchCorrectionGeneration: 9,
+    }));
+
+    const loaded = loadProfile(BRAND, FLAVOR)!;
+    expect(loaded.sauceBarrelsMade).toBe(0);
+    expect(loaded.app1BatchesMade).toBe(0);
+    expect(loaded.app1BatchAnchorNetSec).toBe(0);
+    expect(loaded.app1BatchCorrectionGeneration).toBe(0);
+
+    localStorage.clear();
+    saveProfile(BRAND, FLAVOR, form({
+      frontlineRecipeName: "Sauce",
+      sauceBarrelsMade: 7,
+      app1BatchesMade: 8,
+    }));
+    const stored = JSON.parse(localStorage.getItem(PROFILE_KEY(BRAND, FLAVOR)) ?? "{}");
+    expect(stored).not.toHaveProperty("sauceBarrelsMade");
+    expect(stored).not.toHaveProperty("app1BatchesMade");
   });
 });

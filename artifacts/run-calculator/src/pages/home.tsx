@@ -131,6 +131,8 @@ import {
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
+import { deriveFrontlineNeedRows } from "../frontlineRows";
+import { refreshNamedRecipeProfilesAndPropagate } from "../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
@@ -160,6 +162,7 @@ import {
   backfillFromProfile,
   saveProfile,
   mergeProfileIntoOpenForm,
+  isRunRecipeRefreshEligible,
   markProfileRemotelyDeleted,
   recipeRowsEqual,
   normalizeRecipeRowsForCompare,
@@ -9849,6 +9852,9 @@ export default function Home() {
     ) {
       return;
     }
+    // Start is the immutable snapshot boundary. Shared setup/profile changes
+    // continue updating future work, but never rewrite production or history.
+    if (!isRunRecipeRefreshEligible(liveRun)) return;
     const profile = loadProfile(liveRun.brand, liveRun.flavor);
     if (!profile) return;
     // Same guard as the spec-import reload: a mix recipe name must never land
@@ -9944,7 +9950,7 @@ export default function Home() {
     const now = Date.now();
     let todayChanged = false;
     for (const r of ds.runs) {
-      if (r.id === openId || r.startedAt || r.endedAt) continue;
+      if (r.id === openId || !isRunRecipeRefreshEligible(r)) continue;
       if (!matches(r)) continue;
       const stored = loadRunValues(r.id);
       const merged = mergeProfileIntoOpenForm(stored, profile);
@@ -9978,7 +9984,7 @@ export default function Home() {
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
         for (const run of payload.dayState.runs) {
-          if (!matches(run) || run.startedAt || run.endedAt) continue;
+          if (!matches(run) || !isRunRecipeRefreshEligible(run)) continue;
           const stored = rv[run.id];
           const merged = mergeProfileIntoOpenForm(stored ?? { ...DEFAULT_VALUES }, profile);
           if (stored && merged === stored) continue;
@@ -10057,10 +10063,20 @@ export default function Home() {
       if (patches.length > 0) {
         const markerKey = `run-calc-${kind}-row-heal-v1`;
         if (!localStorage.getItem(markerKey)) {
-          refreshProfilesFromNamedRecipes(kind, patches);
+          refreshNamedRecipeProfilesAndPropagate(
+            kind,
+            patches,
+            undefined,
+            handleSetupProfileSaved,
+          );
           localStorage.setItem(markerKey, "1");
         } else {
-          refreshProfilesFromNamedRecipes(kind, patches, { emptyRowsOnly: true });
+          refreshNamedRecipeProfilesAndPropagate(
+            kind,
+            patches,
+            { emptyRowsOnly: true },
+            handleSetupProfileSaved,
+          );
         }
       }
       return;
@@ -10070,10 +10086,18 @@ export default function Home() {
       if (prev.get(key) !== undefined && prev.get(key) !== sig) changed.push(byKey.get(key)!);
     }
     if (changed.length === 0) return;
-    const touched = refreshProfilesFromNamedRecipes(kind, changed);
+    const touched = refreshNamedRecipeProfilesAndPropagate(
+      kind,
+      changed,
+      undefined,
+      handleSetupProfileSaved,
+    );
     const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
     const linked = String(linkedRaw ?? "").trim().toLowerCase();
-    const hit = linked ? changed.find((c) => c.name.trim().toLowerCase() === linked) : undefined;
+    const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+    const hit = isRunRecipeRefreshEligible(liveRun) && linked
+      ? changed.find((c) => c.name.trim().toLowerCase() === linked)
+      : undefined;
     let formUpdated = false;
     if (hit) {
       const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
@@ -10150,19 +10174,26 @@ export default function Home() {
         .filter((c) => c.ingredient);
     }
 
+    const touched = new Map<string, { brand: string; flavor: string }>();
+    const remember = (profiles: { brand: string; flavor: string }[]) => {
+      for (const profile of profiles) {
+        touched.set(`${profile.brand.toLowerCase()}::${profile.flavor.toLowerCase()}`, profile);
+      }
+    };
     if (markerSet) {
-      // Ongoing pass — runs on every dep change without a ref guard.
+      // Ongoing pass — recipe edits are authoritative for linked pending work,
+      // not just for profiles whose rows happened to be empty.
       for (const r of cheeseRecipesList) {
         if (r.enabled === false || !r.name.trim()) continue;
         const rows = normalizeRecipeRowsForCompare(r.components);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(r.name, rows, { emptyRowsOnly: true });
+        remember(refreshCheeseOrMixProfileRows(r.name, rows));
       }
       for (const m of mixes) {
         if (!m.name.trim()) continue;
         const rows = mixRows(m);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(m.name, rows, { emptyRowsOnly: true });
+        remember(refreshCheeseOrMixProfileRows(m.name, rows));
       }
     } else {
       // First-time full heal — wait for pool data, run once per mount.
@@ -10173,15 +10204,18 @@ export default function Home() {
         if (r.enabled === false || !r.name.trim()) continue;
         const rows = normalizeRecipeRowsForCompare(r.components);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(r.name, rows);
+        remember(refreshCheeseOrMixProfileRows(r.name, rows));
       }
       for (const m of mixes) {
         if (!m.name.trim()) continue;
         const rows = mixRows(m);
         if (rows.length === 0) continue;
-        refreshCheeseOrMixProfileRows(m.name, rows);
+        remember(refreshCheeseOrMixProfileRows(m.name, rows));
       }
       localStorage.setItem(markerKey, "1");
+    }
+    for (const profile of touched.values()) {
+      handleSetupProfileSaved(profile.brand, profile.flavor);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cheeseRecipesList, mixes]);
@@ -10191,6 +10225,8 @@ export default function Home() {
   // recipe rows. Covers: page load before mixes arrive from the server, and
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
+    const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+    if (!isRunRecipeRefreshEligible(liveRun)) return;
     if (serverMixRowsByName.size === 0) return;
     const mixFormSlots = [
       { typeField: "app1Type", nameField: "app1CheeseRecipeName", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza", replace: replaceCheese1 },
@@ -21499,6 +21535,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
+  const frontlineRows = deriveFrontlineNeedRows(v, {
+    ...calc,
+    sauceLbs: Math.max(0, calc.casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase)
+      * v.sauceOzPerPizza / 16 + 30,
+  });
 
   return (
     <>
@@ -21522,145 +21563,42 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       pizzas/case
                     </p>
                     {(() => {
-                      const bd = calc.sauceBatches > 0 ? sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel) : null;
-                      return (
-                        <StatRow
-                          label="Sauce"
-                          value={bd ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(calc.sauceBatches, 2) + " batches"}
-                          testId="output-sauce-batches"
-                          highlight={calc.sauceBatches > 0}
-                          sub={v.frontlineRecipeName?.trim() || undefined}
-                        />
-                      );
-                    })()}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app1Type.trim().toLowerCase().includes("mix") ? (
-                      <StatRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        value={fmtNum(calc.app1Lbs, 1) + " lbs"}
-                        testId="output-app1-batches"
-                        highlight={calc.app1Lbs > 0}
-                        sub={v.app1CheeseRecipeName?.trim() || undefined}
-                      />
-                    ) : (
-                      <BatchMadeRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        totalBatches={calc.app1Batches}
-                        made={Math.max(0, Number(v.app1BatchesMade) || 0)}
-                        onIncrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) + 1)}
-                        onDecrement={() => setManualAppProgress("app1", (Number(v.app1BatchesMade) || 0) - 1)}
-                        isLive={isLive}
-                        testId="output-app1-batches"
-                        sub={v.app1CheeseRecipeName?.trim() || undefined}
-                      />
-                    )}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app2Type.trim().toLowerCase().includes("mix") ? (
-                      <StatRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        value={fmtNum(calc.app2Lbs, 1) + " lbs"}
-                        testId="output-app2-batches"
-                        highlight={calc.app2Lbs > 0}
-                        sub={v.app2CheeseRecipeName?.trim() || undefined}
-                      />
-                    ) : (
-                      <BatchMadeRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        totalBatches={calc.app2Batches}
-                        made={Math.max(0, Number(v.app2BatchesMade) || 0)}
-                        onIncrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) + 1)}
-                        onDecrement={() => setManualAppProgress("app2", (Number(v.app2BatchesMade) || 0) - 1)}
-                        isLive={isLive}
-                        testId="output-app2-batches"
-                        sub={v.app2CheeseRecipeName?.trim() || undefined}
-                      />
-                    )}
-                    {/* Pep applicators sit between App 2 and App 3, matching
-                        the physical line order (and the Run tab's card order). */}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    <StatRow
-                      label={
-                        v.pep1Type
-                          ? `Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1Type}`
-                          : `Pep Applicator ${v.pep1Combined === true ? "1 & 2" : "1"}`
-                      }
-                      value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
-                      testId="output-pep1-batches"
-                      highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
-                    />
-                    {(v.pep1TypeB ?? "").trim() && (
-                      <StatRow
-                        label={`Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1TypeB}`}
-                        value={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? fmtNum(calc.pep1LbsB, 2) + " lbs" : fmtNum(calc.pep1BatchesB, 2) + " batches"}
-                        testId="output-pep1b-batches"
-                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? calc.pep1LbsB > 0 : calc.pep1BatchesB > 0}
-                      />
-                    )}
-                    {v.pep1Combined !== true && (
-                      <>
-                        <div className="border-t border-border/60" aria-hidden="true" />
-                        <StatRow
-                          label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
-                          value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
-                          testId="output-pep2-batches"
-                          highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
-                        />
-                        {(v.pep2TypeB ?? "").trim() && (
+                      return frontlineRows.map((row) => {
+                        const testId = `output-${row.key}-batches`;
+                        if (row.batchProgressField) {
+                          const slot = row.station as "app1" | "app2" | "app3" | "app4";
+                          const made = Math.max(0, Number(v[row.batchProgressField]) || 0);
+                          return (
+                            <BatchMadeRow
+                              key={row.key}
+                              label={row.label}
+                              totalBatches={row.amount}
+                              made={made}
+                              onIncrement={() => setManualAppProgress(slot, made + 1)}
+                              onDecrement={() => setManualAppProgress(slot, made - 1)}
+                              isLive={isLive}
+                              testId={testId}
+                              sub={row.recipeName}
+                            />
+                          );
+                        }
+                        const bd = row.station === "sauce" && row.unit === "batches"
+                          ? sauceBarrelBreakdown(row.amount, calc.sauceEffBarrel)
+                          : null;
+                        return (
                           <StatRow
-                            label={`Pep 2 — ${v.pep2TypeB}`}
-                            value={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? fmtNum(calc.pep2LbsB, 2) + " lbs" : fmtNum(calc.pep2BatchesB, 2) + " batches"}
-                            testId="output-pep2b-batches"
-                            highlight={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? calc.pep2LbsB > 0 : calc.pep2BatchesB > 0}
+                            key={row.key}
+                            label={row.label}
+                            value={bd
+                              ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
+                              : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`}
+                            testId={testId}
+                            highlight={row.amount > 0}
+                            sub={row.recipeName}
                           />
-                        )}
-                      </>
-                    )}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app3Type.trim() && (v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0) && (
-                      v.app3Type.trim().toLowerCase().includes("mix") ? (
-                        <StatRow
-                          label={`App 3 — ${v.app3Type}`}
-                          value={fmtNum(calc.app3Lbs, 1) + " lbs"}
-                          testId="output-app3-batches"
-                          highlight={calc.app3Lbs > 0}
-                          sub={v.app3CheeseRecipeName?.trim() || undefined}
-                        />
-                      ) : (
-                        <BatchMadeRow
-                          label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                          totalBatches={calc.app3Batches}
-                          made={Math.max(0, Number(v.app3BatchesMade) || 0)}
-                          onIncrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) + 1)}
-                          onDecrement={() => setManualAppProgress("app3", (Number(v.app3BatchesMade) || 0) - 1)}
-                          isLive={isLive}
-                          testId="output-app3-batches"
-                          sub={v.app3CheeseRecipeName?.trim() || undefined}
-                        />
-                      )
-                    )}
-                    <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app4Type.trim() && (v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0) && (
-                      v.app4Type.trim().toLowerCase().includes("mix") ? (
-                        <StatRow
-                          label={`App 4 — ${v.app4Type}`}
-                          value={fmtNum(calc.app4Lbs, 1) + " lbs"}
-                          testId="output-app4-batches"
-                          highlight={calc.app4Lbs > 0}
-                          sub={v.app4CheeseRecipeName?.trim() || undefined}
-                        />
-                      ) : (
-                        <BatchMadeRow
-                          label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                          totalBatches={calc.app4Batches}
-                          made={Math.max(0, Number(v.app4BatchesMade) || 0)}
-                          onIncrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) + 1)}
-                          onDecrement={() => setManualAppProgress("app4", (Number(v.app4BatchesMade) || 0) - 1)}
-                          isLive={isLive}
-                          testId="output-app4-batches"
-                          sub={v.app4CheeseRecipeName?.trim() || undefined}
-                        />
-                      )
-                    )}
+                        );
+                      });
+                    })()}
                   </CardContent>
                 </Card>
                 {[

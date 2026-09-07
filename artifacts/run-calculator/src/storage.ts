@@ -406,12 +406,20 @@ export function saveBrandFlavors(bf: Record<string, string[]>): void {
   notifyKv(BRAND_FLAVORS_KEY, bf);
 }
 
-// Fields that are run-specific and must never carry over via a brand/flavor profile
-const PER_RUN_FIELDS: (keyof FormValues)[] = [
+// Complete set of values owned by one production run. These must never be
+// persisted in a brand/flavor profile or copied from one run snapshot to
+// another when shared setup changes are propagated.
+export const PROFILE_EXCLUDED_FIELDS = [
   "casesNeeded", "carryOverDone",
   // Temporary this-run-only Setup overrides — never part of a profile
   "tempFreezerTime", "tempCrustsPerCycle", "tempCycleSpeed",
-];
+  ...PROGRESS_FIELDS,
+  "sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration",
+  "app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration",
+  "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
+  "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
+  "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
+] as const satisfies readonly (keyof FormValues)[];
 
 // Rename legacy pep-type names ("Pep - Cured"/"Pep - Natural") to the detailed
 // standard names on read, so saved profiles/runs keep their pre-made calc behavior
@@ -556,8 +564,8 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
       if (crustRaw) crustVals = JSON.parse(crustRaw);
     } catch {}
     const result = { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
-    // Strip per-run fields even if they were saved in an old profile
-    PER_RUN_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
+    // Strip per-run fields even if they were saved in an old profile.
+    PROFILE_EXCLUDED_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
     const rawHadCombined = typeof (doughVals as Record<string, unknown>).pep1Combined === "boolean"
       || typeof (crustVals as Record<string, unknown>).pep1Combined === "boolean";
     resolvePep1Combined(result as unknown as Record<string, unknown>, rawHadCombined);
@@ -673,7 +681,7 @@ export function backfillSauceFromProfile(
  * untouched DEFAULT for it (never overwrites data the run already has).
  *
  * Skipped on purpose:
- *   • PER_RUN_FIELDS / PROGRESS_FIELDS — never part of a profile;
+ *   • PROFILE_EXCLUDED_FIELDS — never part of a profile;
  *   • booleans — their default is a meaningful choice, "still default" is
  *     indistinguishable from "deliberately set to the default";
  *   • brand/flavor identity fields (not FormValues fields, but guarded anyway).
@@ -691,8 +699,7 @@ export function backfillFromProfile(
   const profile = loadProfile(brand, flavor ?? "");
   if (!profile) return out;
   const skip = new Set<string>([
-    ...PER_RUN_FIELDS,
-    ...PROGRESS_FIELDS,
+    ...PROFILE_EXCLUDED_FIELDS,
     "brand",
     "flavor",
   ]);
@@ -735,8 +742,7 @@ export function profileHasRealData(brand: string, flavor: string): boolean {
 function extractProfileBlobs(values: FormValues): { dough: string; crust: string } {
   const doughVals = { ...values } as Record<string, unknown>;
   CRUST_FIELDS.forEach((f) => delete doughVals[f]);
-  PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
-  PER_RUN_FIELDS.forEach((f) => delete doughVals[f]);
+  PROFILE_EXCLUDED_FIELDS.forEach((f) => delete doughVals[f]);
   const crustVals: Partial<Record<CrustField, unknown>> = {};
   CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
   return { dough: JSON.stringify(doughVals), crust: JSON.stringify(crustVals) };
@@ -1039,8 +1045,8 @@ export function recipeRowsEqual(
 /**
  * Overlay a freshly saved profile onto the OPEN run form's current values,
  * keeping everything that belongs to the run rather than the profile:
- * PER_RUN_FIELDS (cases needed, temp overrides), PROGRESS_FIELDS (skids/cases/
- * trays/batches progress of a started run) and the brand/flavor identity.
+ * PROFILE_EXCLUDED_FIELDS (targets, temp overrides, production progress and
+ * auto-track registers) and the brand/flavor identity.
  * Returns `current` unchanged (same reference) when nothing differs, so the
  * caller can cheaply skip the reset/stamp/push dance.
  */
@@ -1049,8 +1055,7 @@ export function mergeProfileIntoOpenForm(
   profile: FormValues,
 ): FormValues {
   const skip = new Set<string>([
-    ...PER_RUN_FIELDS,
-    ...PROGRESS_FIELDS,
+    ...PROFILE_EXCLUDED_FIELDS,
     "brand",
     "flavor",
   ]);
@@ -1064,6 +1069,13 @@ export function mergeProfileIntoOpenForm(
     (out as Record<string, unknown>)[field] = prof;
   }
   return out;
+}
+
+/** Shared recipe/profile refreshes stop permanently at the first Start. */
+export function isRunRecipeRefreshEligible(
+  run: Pick<RunMeta, "startedAt" | "pausedAt" | "endedAt"> | undefined,
+): boolean {
+  return !!run && !run.startedAt && !run.pausedAt && !run.endedAt;
 }
 
 /** One changed shared (server-pool) dough/sauce recipe to fan out to profiles. */
@@ -1235,12 +1247,13 @@ export function refreshCheeseOrMixProfileRows(
   targetName: string,
   targetRows: ReadonlyArray<{ ingredient: string; lbs: number }>,
   opts?: { emptyRowsOnly?: boolean },
-): void {
-  if (!profileWritesAllowed) return;
-  if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return;
+): { brand: string; flavor: string }[] {
+  if (!profileWritesAllowed) return [];
+  if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return [];
   const nameLc = targetName.trim().toLowerCase();
   const prefixes = ["run-calc-profile-", "run-calc-crust-profile-"];
   const keys: string[] = [];
+  const touched: { brand: string; flavor: string }[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && prefixes.some((p) => k.startsWith(p))) keys.push(k);
@@ -1274,12 +1287,19 @@ export function refreshCheeseOrMixProfileRows(
       if (changed) {
         localStorage.setItem(k, JSON.stringify(obj));
         const profilePrefix = prefixes.find((p) => k.startsWith(p)) ?? prefixes[0];
-        markProfileEdited(k.slice(profilePrefix.length));
+        const profileKey = k.slice(profilePrefix.length);
+        markProfileEdited(profileKey);
+        const sep = profileKey.indexOf("__");
+        touched.push({
+          brand: sep >= 0 ? profileKey.slice(0, sep) : profileKey,
+          flavor: sep >= 0 ? profileKey.slice(sep + 2) : "",
+        });
       }
     } catch {
       // Skip unreadable profiles — never let one bad entry block the fan-out.
     }
   }
+  return touched;
 }
 
 export function loadDayState(): DayState {
@@ -1812,8 +1832,9 @@ const RECIPE_NAME_MERGE_STORE: Record<
 
 // Persist a user-driven RECIPE-NAME merge across every localStorage surface:
 // the category's name list, its recipe-preset map keys, and the recipe-name
-// selection fields on per-run values, brand/crust profiles, templates, and
-// history. Deletion tombstones stop the additive live-sync union from
+// selection fields on pending current-day run values, brand/crust profiles,
+// and templates. Started/ended/unknown run values and history are immutable.
+// Deletion tombstones stop the additive live-sync union from
 // resurrecting the merged-away names. Pure rewriting lives in ./mergeRecipeNames;
 // this only wires it to storage. Callers refresh React state (refreshAfterMerge)
 // so the merged data shows immediately and the sync push carries it.
@@ -1847,25 +1868,17 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
   if (fields.length === 0) return [];
   const rewrite = <T extends Record<string, unknown>>(obj: T) =>
     mergeRecipeNameSettingsObject(obj, map, fields);
+  const eligibleRunIds = new Set(
+    loadDayState().runs
+      .filter(isRunRecipeRefreshEligible)
+      .map((run) => run.id),
+  );
   // ── Templates ──
   try {
     const templates = loadTemplates().map((t) =>
       t.values ? { ...t, values: rewrite(t.values as unknown as Record<string, unknown>) as unknown as typeof t.values } : t,
     );
     saveTemplates(templates);
-  } catch {}
-  // ── History ──
-  try {
-    const history = loadHistory().map((day) => ({
-      ...day,
-      runValues: Object.fromEntries(
-        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
-          id,
-          rewrite(vals as unknown as Record<string, unknown>) as unknown as FormValues,
-        ]),
-      ),
-    }));
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   } catch {}
   // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
   const runPrefix = RUN_KEY("");
@@ -1884,13 +1897,15 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
   const affectedRunIds: string[] = [];
   for (const k of keysToRewrite) {
     try {
+      const runId = k.startsWith(runPrefix) ? k.slice(runPrefix.length) : undefined;
+      if (runId !== undefined && !eligibleRunIds.has(runId)) continue;
       const raw = localStorage.getItem(k) ?? "null";
       const obj = JSON.parse(raw);
       if (obj && typeof obj === "object") {
         const next = JSON.stringify(rewrite(obj as Record<string, unknown>));
         if (next !== raw) {
           localStorage.setItem(k, next);
-          if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));
+          if (runId !== undefined) affectedRunIds.push(runId);
         }
       }
     } catch {}
@@ -1902,7 +1917,7 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
  * Blank every selection field that still points at a recipe name which is
  * leaving its category (a reclassify/"move to another category", not a merge —
  * there is no target name of the SAME category to re-point to). Walks the same
- * surfaces as applyRecipeNameMerge (templates, history, per-run values,
+ * surfaces as applyRecipeNameMerge (templates, pending current-day run values,
  * brand/crust profiles) and returns the ids of runs it actually changed so the
  * caller can bump their edit stamps before the sync push — otherwise a stale
  * peer at an equal/older stamp resurrects the dangling selection.
@@ -1915,6 +1930,11 @@ export function clearRecipeNameSelections(
   const fields = RECIPE_NAME_FIELDS_BY_CATEGORY[category];
   if (fields.length === 0 || !name.trim()) return [];
   const needle = name.trim().toLowerCase();
+  const eligibleRunIds = new Set(
+    loadDayState().runs
+      .filter(isRunRecipeRefreshEligible)
+      .map((run) => run.id),
+  );
   const clear = <T extends Record<string, unknown>>(obj: T): T => {
     let changed = false;
     const out = { ...obj } as Record<string, unknown>;
@@ -1934,19 +1954,6 @@ export function clearRecipeNameSelections(
     );
     saveTemplates(templates);
   } catch {}
-  // ── History ──
-  try {
-    const history = loadHistory().map((day) => ({
-      ...day,
-      runValues: Object.fromEntries(
-        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
-          id,
-          clear(vals as unknown as Record<string, unknown>) as unknown as FormValues,
-        ]),
-      ),
-    }));
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch {}
   // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
   const runPrefix = RUN_KEY("");
   const keysToRewrite: string[] = [];
@@ -1964,13 +1971,15 @@ export function clearRecipeNameSelections(
   const affectedRunIds: string[] = [];
   for (const k of keysToRewrite) {
     try {
+      const runId = k.startsWith(runPrefix) ? k.slice(runPrefix.length) : undefined;
+      if (runId !== undefined && !eligibleRunIds.has(runId)) continue;
       const raw = localStorage.getItem(k) ?? "null";
       const obj = JSON.parse(raw);
       if (obj && typeof obj === "object") {
         const next = JSON.stringify(clear(obj as Record<string, unknown>));
         if (next !== raw) {
           localStorage.setItem(k, next);
-          if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));
+          if (runId !== undefined) affectedRunIds.push(runId);
         }
       }
     } catch {}

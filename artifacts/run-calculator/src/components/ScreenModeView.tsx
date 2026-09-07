@@ -13,7 +13,8 @@ import {
 } from "../utils";
 import { groupWarehouseNeedRows } from "../warehouseGrouping";
 import { loadRunValues } from "../storage";
-import { withTempOverrides, DEFAULT_VALUES, DEFAULT_PEP_TYPES, type RunMeta } from "../types";
+import { withTempOverrides, DEFAULT_VALUES, type RunMeta } from "../types";
+import { deriveFrontlineNeedRows } from "../frontlineRows";
 import { Factory, ArrowRight, Droplets, Layers, Clock, AlertTriangle, BarChart2, Warehouse } from "lucide-react";
 
 
@@ -237,54 +238,20 @@ export default function ScreenModeView() {
 
   if (screenMode === "frontline") {
     const s = computeSummaryStats(v);
-    const items: { label: string; value: string; sub?: string }[] = [];
-    if (s.sauceBatches > 0) {
-      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-      items.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
-    }
-    if (s.app1Type) {
-      const isMix = s.app1Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0)
-        items.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app1Lbs, 1) + " lbs total" });
-    }
-    if (s.app2Type) {
-      const isMix = s.app2Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0)
-        items.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" });
-    }
-    // Pep applicators sit between App 2 and App 3, matching the physical line
-    // order (and the Run/Frontline tabs' card order).
-    const pep1Label = v.pep1Combined === true ? "Pep 1 & 2" : "Pep 1";
-    if (s.pep1Type) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-      if ((isPepStd ? s.pep1Lbs : s.pep1Batches) > 0)
-        items.push({ label: `${pep1Label} — ${s.pep1Type}`, value: isPepStd ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-    }
-    if (s.pep1TypeB) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
-      if ((isPepStd ? s.pep1LbsB : s.pep1BatchesB) > 0)
-        items.push({ label: `${pep1Label} — ${s.pep1TypeB}`, value: isPepStd ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
-    }
-    if (s.pep2Type) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-      if ((isPepStd ? s.pep2Lbs : s.pep2Batches) > 0)
-        items.push({ label: `Pep 2 — ${s.pep2Type}`, value: isPepStd ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
-    }
-    if (s.pep2TypeB) {
-      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
-      if ((isPepStd ? s.pep2LbsB : s.pep2BatchesB) > 0)
-        items.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: isPepStd ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
-    }
-    if (s.app3Type) {
-      const isMix = s.app3Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0)
-        items.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app3Lbs, 1) + " lbs total" });
-    }
-    if (s.app4Type) {
-      const isMix = s.app4Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
-        items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
-    }
+    const items = deriveFrontlineNeedRows(v, s).map((row) => {
+      const bd = row.station === "sauce" && row.unit === "batches"
+        ? sauceBarrelBreakdown(row.amount, s.sauceEffBarrel)
+        : null;
+      return {
+        label: row.label,
+        value: bd
+          ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
+          : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`,
+        sub: row.unit === "batches" && row.station !== "sauce"
+          ? `${fmtNum(row.totalLbs, 1)} lbs total`
+          : row.recipeName,
+      };
+    });
     const cheeseRecipes: { label: string; rows: { ingredient: string; lbs: number }[] }[] = [];
     if ((v.app1CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 1 Cheese Recipe`, rows: v.app1CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
     if ((v.app2CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 2 Cheese Recipe`, rows: v.app2CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });

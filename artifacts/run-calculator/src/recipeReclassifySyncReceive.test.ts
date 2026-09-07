@@ -24,6 +24,7 @@ import {
   saveList,
   dropDeleted,
   clearRecipeNameSelections,
+  saveDayState,
   saveRunValues,
   loadRunValues,
 } from "./storage";
@@ -112,6 +113,13 @@ describe("clearRecipeNameSelections (dangling selections after a move)", () => {
     const run: FormValues = { ...DEFAULT_VALUES, doughRecipeName: "Old Dough" };
     saveRunValues("a", run);
     saveRunValues("b", { ...DEFAULT_VALUES, doughRecipeName: "Other Dough" });
+    saveDayState({
+      runs: [
+        { id: "a", brand: "Brand", flavor: "A" },
+        { id: "b", brand: "Brand", flavor: "B" },
+      ],
+      currentIndex: 0,
+    });
 
     const affected = clearRecipeNameSelections("dough", "Old Dough");
 
@@ -126,6 +134,10 @@ describe("clearRecipeNameSelections (dangling selections after a move)", () => {
       app1CheeseRecipeName: "gyro meat mix",
       app3CheeseRecipeName: "Gyro Meat Mix",
     } as FormValues);
+    saveDayState({
+      runs: [{ id: "c", brand: "Brand", flavor: "C" }],
+      currentIndex: 0,
+    });
 
     const affected = clearRecipeNameSelections("cheese", "Gyro Meat Mix");
 
