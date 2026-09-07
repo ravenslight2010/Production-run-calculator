@@ -48,6 +48,11 @@ import {
   type PackagingSpeedNudgeFeedbackStatus,
 } from "../packagingSpeedNudge";
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
+import {
+  classifyOperationalDisplay,
+  type OperationalDisplayState,
+  type OperationalSnapshotReceipt,
+} from "../operationalState";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -100,6 +105,9 @@ export interface LiveRunContextValue {
   /** Human-readable pace alert message (rate / shortfall / time remaining). */
   paceAlertMsg: string;
   packagingDrainActive: boolean;
+  /** Local ticking values remain projections until this run has a server receipt. */
+  operationalDisplayState: OperationalDisplayState;
+  operationalSnapshotReceipt: OperationalSnapshotReceipt | null;
 }
 
 // Module-level calcRef is kept as a compatibility export for existing callers.
@@ -133,6 +141,10 @@ export interface LiveRunProviderProps {
   autoTrackRebaseAfterBlock?: boolean;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
+  operationalServerCalc?: Calc | null;
+  operationalOnline?: boolean;
+  operationalSyncConnected?: boolean;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -167,6 +179,10 @@ export function LiveRunProvider({
   autoTrackRebaseAfterBlock = false,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  operationalSnapshotReceipt = null,
+  operationalServerCalc = null,
+  operationalOnline = true,
+  operationalSyncConnected = false,
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus, autoTrackWakeAcknowledgement);
   // A selected pending run must never inherit Packaging, Sauce, or Frontline
@@ -255,6 +271,16 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const operationalDisplayState = classifyOperationalDisplay({
+    online: operationalOnline,
+    syncConnected: operationalSyncConnected,
+    selectedRunId: currentRunId,
+    receipt: operationalSnapshotReceipt,
+  });
+  const operationalCalc =
+    operationalDisplayState === "confirmed" && operationalServerCalc
+      ? operationalServerCalc
+      : calc;
   const packagingAutoTrackActive =
     runStatus !== "running" || linePhases.stage3.state === "active";
   const packagingDrainElapsedSec = computePackagingDrainElapsedSec({
@@ -521,7 +547,7 @@ export function LiveRunProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -535,10 +561,12 @@ export function LiveRunProvider({
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
       packagingDrainActive,
+      operationalDisplayState,
+      operationalSnapshotReceipt,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -551,6 +579,8 @@ export function LiveRunProvider({
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
       packagingDrainActive,
+      operationalDisplayState,
+      operationalSnapshotReceipt,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     ],
   );

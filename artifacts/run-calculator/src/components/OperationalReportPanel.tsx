@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, BarChart2, CheckCircle2, Download, FileSpreadsheet, Lock, Loader2, Printer, RefreshCw, Share2, ShieldAlert } from "lucide-react";
 import * as XLSX from "xlsx";
 import { aggregateDaySummary, type OperationalReport } from "@workspace/day-summary";
@@ -177,6 +177,14 @@ export default function OperationalReportPanel({
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [proofKeyHealth, setProofKeyHealth] = useState<ProofKeyHealthState>({ status: "loading" });
+  const requestGenerationRef = useRef(0);
+  const historyGenerationRef = useRef(0);
+  const selectionKeyRef = useRef("");
+  const historySelectionKeyRef = useRef("");
+  const selectionKey = `${scope}:${date}`;
+  const historySelectionKey = `${historyStart}:${historyEnd}:${historyScope}`;
+  selectionKeyRef.current = selectionKey;
+  historySelectionKeyRef.current = historySelectionKey;
 
   const input = useMemo(() => buildInput(scope, date), [buildInput, scope, date]);
   async function loadProofKeyHealth() {
@@ -210,6 +218,8 @@ export default function OperationalReportPanel({
     if (allowed) void loadProofKeyHealth();
   }, [allowed]);
   async function generate() {
+    const requestGeneration = ++requestGenerationRef.current;
+    const requestedSelection = selectionKey;
     setBusy(true);
     setError("");
     setStatus("");
@@ -221,20 +231,27 @@ export default function OperationalReportPanel({
       });
       if (!response.ok) throw new Error("Report request failed");
       const authoritative = (await response.json()) as OperationalReport;
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setReport(authoritative);
       setReportSource("authoritative");
       setFinalizedSnapshotId(null);
       setStatus("Report ready. Statistics are authoritative and deterministic.");
     } catch {
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setReport(localOfflineReport(input, scope, date));
       setReportSource("local-offline");
       setStatus("Local/offline fallback ready. Statistics are from this device and are not authoritative.");
     } finally {
-      setBusy(false);
+      if (requestGeneration === requestGenerationRef.current
+        && selectionKeyRef.current === requestedSelection) setBusy(false);
     }
   }
   async function finalize() {
     if (!report || reportSource !== "authoritative") return;
+    const requestGeneration = ++requestGenerationRef.current;
+    const requestedSelection = selectionKey;
     setFinalizeBusy(true);
     setError("");
     try {
@@ -247,17 +264,24 @@ export default function OperationalReportPanel({
       });
       if (!response.ok) throw new Error("Finalization failed");
       const finalized = await response.json() as { id: string; report: OperationalReport; idempotent?: boolean };
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setReport(finalized.report);
       setReportSource("authoritative");
       setFinalizedSnapshotId(finalized.id);
       await loadHistory();
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setStatus(finalized.idempotent
         ? `Finalized report already exists (${finalized.id}). The original snapshot was retained.`
         : `Authoritative report finalized (${finalized.id}).`);
     } catch {
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setError("Could not finalize the authoritative report. No report was changed.");
     } finally {
-      setFinalizeBusy(false);
+      if (requestGeneration === requestGenerationRef.current
+        && selectionKeyRef.current === requestedSelection) setFinalizeBusy(false);
     }
   }
   async function loadHistory() {
@@ -265,6 +289,8 @@ export default function OperationalReportPanel({
       setError("Choose an archive start date on or before the end date.");
       return;
     }
+    const historyGeneration = ++historyGenerationRef.current;
+    const requestedHistorySelection = historySelectionKey;
     setHistoryBusy(true);
     setError("");
     try {
@@ -276,29 +302,41 @@ export default function OperationalReportPanel({
       if (historyScope !== "all") params.set("scope", historyScope);
       const response = await fetch(`/api/reports/operational/finalized/search?${params.toString()}`);
       if (!response.ok) throw new Error("History request failed");
+      if (historyGeneration !== historyGenerationRef.current
+        || historySelectionKeyRef.current !== requestedHistorySelection) return;
       setHistory(await response.json() as FinalizedReportListItem[]);
       setStatus("Finalized report archive loaded. Up to 100 matching reports are shown.");
     } catch {
+      if (historyGeneration !== historyGenerationRef.current
+        || historySelectionKeyRef.current !== requestedHistorySelection) return;
       setError("Could not load finalized reports for this date range.");
     } finally {
-      setHistoryBusy(false);
+      if (historyGeneration === historyGenerationRef.current
+        && historySelectionKeyRef.current === requestedHistorySelection) setHistoryBusy(false);
     }
   }
   async function openFinalized(id: string) {
+    const requestGeneration = ++requestGenerationRef.current;
+    const requestedSelection = selectionKey;
     setHistoryBusy(true);
     setError("");
     try {
       const response = await fetch(`/api/reports/operational/finalized/${encodeURIComponent(id)}`);
       if (!response.ok) throw new Error("Finalized report request failed");
       const finalized = await response.json() as { id: string; report: OperationalReport };
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setReport(finalized.report);
       setReportSource("authoritative");
       setFinalizedSnapshotId(finalized.id);
       setStatus("Viewing immutable finalized report.");
     } catch {
+      if (requestGeneration !== requestGenerationRef.current
+        || selectionKeyRef.current !== requestedSelection) return;
       setError("Could not retrieve the finalized report.");
     } finally {
-      setHistoryBusy(false);
+      if (requestGeneration === requestGenerationRef.current
+        && selectionKeyRef.current === requestedSelection) setHistoryBusy(false);
     }
   }
   async function download(kind: "csv" | "xlsx" | "print") {

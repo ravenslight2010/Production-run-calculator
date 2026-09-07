@@ -530,6 +530,9 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
+import {
+  type OperationalSnapshotReceipt,
+} from "../operationalState";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 import {
   DepartmentProvider,
@@ -7659,6 +7662,28 @@ export default function Home() {
   // overwrite local form state or LWW stamps; later server-ownership work can
   // adopt these refs without changing today's client-owned ticking semantics.
   const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
+  const [serverCalc, setServerCalc] = useState<Calc | null>(null);
+  const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
+  const [serverCalcReceipt, setServerCalcReceipt] =
+    useState<OperationalSnapshotReceipt | null>(null);
+  function adoptServerCalcReceipt(
+    serverCalc: { runId: string; calc: Calc } | null | undefined,
+    snapshotId: string | undefined,
+  ) {
+    if (!serverCalc || !snapshotId) return;
+    const receipt: OperationalSnapshotReceipt = {
+      runId: serverCalc.runId,
+      snapshotId,
+      capturedAt: Date.now(),
+    };
+    const previous = serverCalcReceiptRef.current;
+    if (
+      previous?.runId === receipt.runId
+      && previous.snapshotId === receipt.snapshotId
+    ) return;
+    serverCalcReceiptRef.current = receipt;
+    setServerCalcReceipt(receipt);
+  }
   const autoTrackScheduleRef = useRef<AutoTrackSchedule | null>(null);
   useEffect(() => subscribeAutoTrackCoordination((payload) => {
     for (const [runId, channels] of Object.entries(payload.runs ?? {})) {
@@ -8796,7 +8821,16 @@ export default function Home() {
           serverCalc?: { runId: string; calc: Calc } | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
         };
-        if (msg.serverCalc) serverCalcRef.current = msg.serverCalc;
+        if (msg.serverCalc) {
+          serverCalcRef.current = msg.serverCalc;
+          setServerCalc(msg.serverCalc.calc);
+          adoptServerCalcReceipt(msg.serverCalc, msg.snapshotId);
+        } else if (msg.initial && msg.snapshotId) {
+          serverCalcRef.current = null;
+          setServerCalc(null);
+          serverCalcReceiptRef.current = null;
+          setServerCalcReceipt(null);
+        }
         if (msg.autoTrackSchedule) {
           autoTrackScheduleRef.current = msg.autoTrackSchedule;
           publishAutoTrackSchedule(msg.autoTrackSchedule);
@@ -8813,7 +8847,9 @@ export default function Home() {
           return;
         }
         if (msg.unchanged) {
-          if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+          if (typeof msg.snapshotId === "string") {
+            syncSnapshotIdRef.current = msg.snapshotId;
+          }
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
           if (msg.data.doughTimerControls) {
@@ -18311,6 +18347,10 @@ export default function Home() {
         autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        operationalSnapshotReceipt={serverCalcReceipt}
+        operationalServerCalc={serverCalc}
+        operationalOnline={isOnline}
+        operationalSyncConnected={syncConnected}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
@@ -18375,6 +18415,36 @@ function PauseTunnelDecision({
   );
 }
 
+function OperationalStateBadge({
+  overlay = false,
+  displayState,
+  receipt,
+}: {
+  overlay?: boolean;
+  displayState: "confirmed" | "provisional" | "offline";
+  receipt: OperationalSnapshotReceipt | null;
+}) {
+  const copy = displayState === "confirmed"
+    ? "Confirmed server baseline"
+    : displayState === "offline"
+      ? "Offline — local projection"
+      : "Provisional — awaiting server confirmation";
+  const tone = displayState === "confirmed"
+    ? "border-emerald-400/40 bg-emerald-950/40 text-emerald-200"
+    : "border-amber-400/50 bg-amber-950/40 text-amber-100";
+  return (
+    <div
+      className={`${overlay ? "pointer-events-none fixed bottom-3 left-3 z-20" : "w-fit"} rounded-full border px-3 py-1 text-[10px] font-semibold tracking-wide ${tone}`}
+      data-testid="operational-state-badge"
+      title={receipt
+        ? `Server snapshot ${receipt.snapshotId.slice(0, 12)}`
+        : "This device has not adopted a server calculation for the selected run"}
+    >
+      {copy}
+    </div>
+  );
+}
+
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
@@ -18392,6 +18462,7 @@ function FloorModeView() {
     showBatchDue, setShowBatchDue,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
+    operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
   const [confirmComplete, setConfirmComplete] = useState(false);
 
@@ -18424,6 +18495,11 @@ function FloorModeView() {
             className="fixed inset-0 z-[40] flex flex-col overflow-y-auto font-sans select-none"
             style={{ background: bg, color: "white" }}
           >
+            <OperationalStateBadge
+              overlay
+              displayState={operationalDisplayState}
+              receipt={operationalSnapshotReceipt}
+            />
             {/* Header */}
             <header
                 className="sticky top-0 z-10 flex justify-between items-center pb-2 shrink-0"
@@ -18850,6 +18926,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     fireAutoTrackNow, tickDueRefs, packagingDrainActive,
     stallPrompt, setStallPrompt, stallCheck,
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
+    operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
   useAutomaticUpdateReloadBlocker(
     "live-run-operational-alert",
@@ -18888,6 +18965,10 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 
   return (
     <>
+                <OperationalStateBadge
+                  displayState={operationalDisplayState}
+                  receipt={operationalSnapshotReceipt}
+                />
                 {/* Blank-run sweep confirmation dialog */}
                 {confirmRemoveBlanks && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw, Server } from "lucide-react";
 import type { OperationalRunView } from "@workspace/api-client-react";
 import { reportUnauthorized } from "../inventoryShared";
 import { useMe } from "../useRole";
+import { shouldAdoptOperationalSnapshot } from "../operationalState";
 
 type LoadState =
   | { kind: "loading" }
@@ -38,6 +39,8 @@ export default function CanonicalRunViewCard({
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [now, setNow] = useState(() => Date.now());
+  const requestGenerationRef = useRef(0);
+  const adoptedSnapshotRef = useRef<{ runId: string; snapshotId: string; capturedAt: number } | null>(null);
   const { hasCapability } = useMe();
   const allowed = hasCapability("review-incidents");
 
@@ -52,6 +55,8 @@ export default function CanonicalRunViewCard({
 
   useEffect(() => {
     if (!date || !runId || !allowed) return;
+    const requestGeneration = ++requestGenerationRef.current;
+    adoptedSnapshotRef.current = null;
     const controller = new AbortController();
     setState({ kind: "loading" });
     void fetch(
@@ -67,9 +72,24 @@ export default function CanonicalRunViewCard({
       }
       return response.json() as Promise<OperationalRunView>;
     }).then((view) => {
-      if (!controller.signal.aborted) setState({ kind: "ready", view });
+      const candidate = {
+        runId: view.runId,
+        snapshotId: view.freshness.snapshotId,
+        capturedAt: view.freshness.capturedAt,
+      };
+      if (controller.signal.aborted) return;
+      if (!shouldAdoptOperationalSnapshot({
+        requestGeneration,
+        currentRequestGeneration: requestGenerationRef.current,
+        selectedRunId: runId,
+        responseRunId: view.runId,
+        candidate,
+        adopted: adoptedSnapshotRef.current,
+      })) return;
+      adoptedSnapshotRef.current = candidate;
+      setState({ kind: "ready", view });
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && requestGeneration === requestGenerationRef.current) {
         setState({
           kind: "error",
           message: error instanceof Error ? error.message : "Canonical run snapshot is unavailable.",
@@ -134,7 +154,7 @@ export default function CanonicalRunViewCard({
             {isStale && <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />}
             {isStale ? "Stale canonical" : "Canonical"} snapshot as of{" "}
             {new Date(state.view.freshness.capturedAt).toLocaleString()} · revision {state.view.version} ·{" "}
-            source {state.view.formulaProvenance.calculator}
+             server snapshot {state.view.freshness.snapshotId.slice(0, 12)} · source {state.view.formulaProvenance.calculator}
           </p>
         </>
       )}
