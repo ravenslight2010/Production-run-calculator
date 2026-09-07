@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 import type { FormValues, RunMeta } from "../types";
 import { fmtClock, fmtTime } from "../utils";
 
@@ -58,18 +59,25 @@ export type ExportBatchInput = {
 };
 
 /** Planned-total dough & sauce batches. Identical math web + mobile. */
-export function computeExportBatches(i: ExportBatchInput): { doughBatches: number; sauceBatches: number } {
+export function computeExportBatches(i: ExportBatchInput): {
+  doughBatches: number;
+  sauceBatches: number;
+  productionNeedsAvailable: boolean;
+} {
   const totalPizzas = i.casesNeeded * i.pizzasPerCase;
   const totalPizzasForSauce = totalPizzas + i.casesPerLayer * i.pizzasPerCase;
   const sauceEffBarrel = i.frontlineRecipeLbs > 0 ? i.frontlineRecipeLbs : i.sauceBarrelLbs;
-  const sauceLbs = (totalPizzasForSauce * i.sauceOzPerPizza) / 16 + 30;
+  const productionNeedsAvailable = caseBasedProductionNeedsAvailable(i);
+  const sauceLbs = productionNeedsAvailable
+    ? (totalPizzasForSauce * i.sauceOzPerPizza) / 16 + 30
+    : 0;
   const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
   const effYield =
     i.doughRecipeLbs > 0 && i.doughballOz > 0
       ? (i.doughRecipeLbs * 16) / i.doughballOz
       : i.doughBatchYield;
   const doughBatches = effYield > 0 ? totalPizzas / effYield : 0;
-  return { doughBatches, sauceBatches };
+  return { doughBatches, sauceBatches, productionNeedsAvailable };
 }
 
 /** Build one export row object for a single run (identical fields web + mobile). */
@@ -88,7 +96,7 @@ export function buildRunExportRow(date: string, label: string, run: RunMeta, val
   const stopReasons = (run.stoppages ?? [])
     .map((s) => `${s.reason}(${s.endedAt ? fmtTime((s.endedAt - s.startedAt) / 1000) : "open"})`)
     .join("; ");
-  const { doughBatches, sauceBatches } = computeExportBatches({
+  const { doughBatches, sauceBatches, productionNeedsAvailable } = computeExportBatches({
     casesNeeded: vals.casesNeeded,
     pizzasPerCase: vals.pizzasPerCase,
     casesPerLayer: vals.casesPerLayer,
@@ -115,7 +123,7 @@ export function buildRunExportRow(date: string, label: string, run: RunMeta, val
     Downtime: downtimeSec > 0 ? fmtTime(downtimeSec) : "0",
     Stoppages: stopReasons,
     "Dough Batches": Math.round(doughBatches * 100) / 100,
-    "Sauce Batches": Math.round(sauceBatches * 100) / 100,
+    "Sauce Batches": productionNeedsAvailable ? Math.round(sauceBatches * 100) / 100 : "",
     Notes: run.notes ?? "",
   };
 }

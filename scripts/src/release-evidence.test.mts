@@ -16,6 +16,7 @@ import {
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  assertUniqueReleaseSteps,
   PRODUCTION_AUDIT_TIMEOUT_MS,
   PRODUCTION_AUDIT_WARNING_MS,
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
@@ -26,8 +27,10 @@ import {
   releaseGateLabelsForMode,
   runStep,
   resolveReleaseEvidenceDir,
+  sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
   validateReleaseReport,
+  validateWebKitBrowserEvidence,
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
@@ -60,9 +63,24 @@ async function fixture(
       path,
       file === "release-check-report.md"
         ? report
+        : file === "browser-smoke/webkit-result.json"
+          ? `${JSON.stringify({
+              schemaVersion: 1,
+              browser: "webkit",
+              revision: "current-revision",
+              environment: "disposable release test",
+              result: "passed",
+              cases: [{
+                file: "release-webkit-smoke.spec.ts",
+                title: "fixture smoke",
+                status: "passed",
+                durationMs: 100,
+              }],
+            })}\n`
         : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
           ? `${JSON.stringify({
               verifier: "source-library-reconciliation",
+              environment: "development",
               repairBoundary: { fromDate: "2026-08-26" },
               report: {
                 sha256: "a".repeat(64),
@@ -91,6 +109,49 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  const rootPackage = JSON.parse(
+    await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+  ) as { scripts?: Record<string, string> };
+  const ciWorkflow = await readFile(
+    new URL("../../.github/workflows/ci.yml", import.meta.url),
+    "utf8",
+  );
+  const releaseWorkflow = await readFile(
+    new URL("../../.github/workflows/release-check.yml", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    rootPackage.scripts?.["audit:prod:ci"],
+    "pnpm audit --prod --audit-level high --ignore-registry-errors",
+    "informational CI security must report high-severity advisories and tolerate registry failures",
+  );
+  assert.equal(
+    rootPackage.scripts?.["audit:prod:release"],
+    "pnpm audit --prod --audit-level high",
+    "blocking release security must fail on high-severity advisories and registry failures",
+  );
+  assert.equal(
+    rootPackage.scripts?.["audit:prod"],
+    "pnpm run audit:prod:release",
+    "the configured production security workflow must retain its fail-closed compatibility command",
+  );
+  assert.match(
+    ciWorkflow,
+    /name: Informational security audit \(high severity; registry best-effort\)[\s\S]*continue-on-error: true[\s\S]*run: pnpm run audit:prod:ci/,
+    "CI must name and run the informational security policy",
+  );
+  assert.doesNotMatch(
+    releaseWorkflow,
+    /test:source-heal-verify|verify-source-library-reconciliation\.mts/,
+    "the workflow must not invoke source reconciliation outside the release evidence runner",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "source-library reconciliation verification",
+    ).length,
+    1,
+    "the retained release evidence runner must own exactly one source reconciliation gate",
+  );
   const specImportPackage = JSON.parse(
     await readFile(
       new URL("../../lib/spec-import/package.json", import.meta.url),
@@ -102,19 +163,96 @@ async function run(): Promise<void> {
     "vitest run",
     "spec-import must expose its Vitest suite through the package test script",
   );
+  assert.deepEqual(
+    PRODUCTION_DEPENDENCY_AUDIT_STEP.args,
+    ["run", "audit:prod:release"],
+    "the retained release runner must use the blocking release security policy",
+  );
   assert.ok(
     releaseGateLabelsForMode("standard").includes("spec import tests"),
     "the bounded release gate must explicitly cover spec-import",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "spec import tests",
+    ).length,
+    1,
+    "spec-import must be declared exactly once in the release contract",
+  );
+  assert.throws(
+    () =>
+      assertUniqueReleaseSteps([
+        { label: "duplicate gate", args: ["run", "first"] },
+        { label: "duplicate gate", args: ["run", "second"] },
+      ]),
+    /Duplicate labels: duplicate gate/,
+    "duplicate release gate labels must be rejected",
+  );
+  assert.throws(
+    () =>
+      assertUniqueReleaseSteps([
+        { label: "first label", args: ["run", "same"] },
+        { label: "second label", args: ["run", "same"] },
+      ]),
+    /Duplicate command invocations: pnpm run same/,
+    "duplicate release command invocations must be rejected even under different labels",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes("onboarding bypass guard"),
     "standard release checks must include the onboarding bypass guard",
   );
   assert.ok(
+    releaseGateLabelsForMode("standard").includes("browser WebKit smoke"),
+    "standard release checks must include the bounded WebKit browser smoke",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes("browser-smoke/webkit-result.json"),
+    "WebKit smoke evidence must be retained through the release allowlist",
+  );
+  assert.ok(
     releaseGateLabelsForMode("standard").includes(
       "source-library reconciliation verification",
     ),
     "standard release checks must include source-library reconciliation verification",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("standard").includes(
+      "operational report signing-key rotation preflight",
+    ),
+    "standard release checks must block unsafe report signing-key rotation",
+  );
+  assert.equal(
+    sourceLibraryReconciliationRequired({
+      CI: "true",
+      NODE_ENV: "test",
+      E2E_TEST_DB: "1",
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
+    }),
+    false,
+    "a fresh disposable CI database may test the reconciliation gate without claiming production history",
+  );
+  assert.throws(
+    () =>
+      sourceLibraryReconciliationRequired({
+        RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
+      }),
+    /restricted to a disposable CI test database/,
+    "production evidence must fail closed when the CI-only reconciliation bypass is requested",
+  );
+  assert.match(
+    formatReleaseReport(
+      [],
+      "standard",
+      new Set(),
+      {
+        revision: "ci-fixture",
+        decision: "NO-GO",
+        environment: "disposable CI gate test (not production reconciliation evidence)",
+        expectedLabels: [],
+      },
+    ),
+    /Environment: disposable CI gate test \(not production reconciliation evidence\)[\s\S]*Decision: NO-GO/,
+    "disposable CI validation must never be rendered as production-ready evidence",
   );
   assert.deepEqual(
     SOURCE_LIBRARY_RECONCILIATION_STEP.args.slice(0, 5),
@@ -131,8 +269,23 @@ async function run(): Promise<void> {
     SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--report") &&
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--heal-id") &&
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--from-date") &&
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--environment") &&
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.includes("--output"),
     "the source-library gate must pass its report, heal boundary, and evidence output",
+  );
+  assert.equal(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.args[
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.indexOf("--environment") + 1
+    ],
+    "development",
+    "local release evidence must identify the development database explicitly",
+  );
+  assert.match(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.args[
+      SOURCE_LIBRARY_RECONCILIATION_STEP.args.indexOf("--output") + 1
+    ] ?? "",
+    /\.source-library-reconciliation\.json\.pending$/,
+    "failed release gates must not overwrite retained source-library evidence",
   );
   assert.equal(
     defaultReleaseEvidenceDir("standard"),
@@ -252,10 +405,51 @@ async function run(): Promise<void> {
     }),
   );
   assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          browser: "webkit",
+          revision: "current-revision",
+          environment: "disposable release test",
+          result: "passed",
+          cases: [
+            {
+              file: "release-webkit-smoke.spec.ts",
+              title: "auth smoke",
+              status: "passed",
+              durationMs: 100,
+            },
+          ],
+        }),
+      ),
+      { currentRevision: "current-revision", requirePass: true },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            schemaVersion: 1,
+            browser: "webkit",
+            revision: "old-revision",
+            environment: "disposable release test",
+            result: "passed",
+            cases: [],
+          }),
+        ),
+        { currentRevision: "current-revision" },
+      ),
+    /revision is stale/,
+    "stale WebKit evidence must not be accepted",
+  );
+  assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(
       Buffer.from(
         JSON.stringify({
           verifier: "source-library-reconciliation",
+          environment: "development",
           idempotencyFingerprint: {
             algorithm: "sha256",
             value: "c".repeat(64),
@@ -272,6 +466,27 @@ async function run(): Promise<void> {
         Buffer.from(
           JSON.stringify({
             verifier: "source-library-reconciliation",
+            environment: "development",
+            idempotencyFingerprint: {
+              algorithm: "sha256",
+              value: "c".repeat(64),
+            },
+            ok: true,
+            failures: [],
+          }),
+        ),
+        { expectedEnvironment: "release" },
+      ),
+    /targets development, but release evidence was requested/,
+    "evidence from another environment must not be accepted",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify({
+            verifier: "source-library-reconciliation",
+            environment: "development",
             idempotencyFingerprint: {
               algorithm: "sha256",
               value: "c".repeat(64),
@@ -290,6 +505,7 @@ async function run(): Promise<void> {
         Buffer.from(
           JSON.stringify({
             verifier: "source-library-reconciliation",
+            environment: "development",
             idempotencyFingerprint: {
               algorithm: "sha256",
               value: "c".repeat(64),
@@ -402,7 +618,7 @@ async function run(): Promise<void> {
   const partialKnownContractReport = formatReleaseReport(
     [
       {
-        label: "production dependency audit",
+        label: "blocking release security audit (high severity; registry required)",
         status: "FAIL",
         elapsedMs: 100,
       },

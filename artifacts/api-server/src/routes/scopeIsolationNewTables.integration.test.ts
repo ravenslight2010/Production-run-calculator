@@ -1,5 +1,5 @@
 // Integration tests proving scope isolation for the newly scoped tables:
-// factory_kv, production_runs, quality_checks, and proactive_alert_settings.
+// factory_kv, production_runs, quality_checks, and run_templates.
 //
 // Each test DB is created fresh, schema pushed via drizzle-kit push-force, and
 // dropped on teardown — nothing here touches real data.
@@ -29,7 +29,6 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
     pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
   };
 });
-
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
@@ -39,7 +38,7 @@ let rolesTable: DbModule["rolesTable"];
 let factoryKvTable: DbModule["factoryKvTable"];
 let productionRunsTable: DbModule["productionRunsTable"];
 let qualityChecksTable: DbModule["qualityChecksTable"];
-let proactiveAlertSettingsTable: DbModule["proactiveAlertSettingsTable"];
+let runTemplatesTable: DbModule["runTemplatesTable"];
 
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
@@ -53,6 +52,7 @@ let server: Server;
 let baseUrl: string;
 
 const LIVE_MANAGER = "live-mgr-scope-test";
+const LIVE_OPERATOR = "live-op-scope-test";
 let sandboxUserId: string;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -94,7 +94,7 @@ beforeAll(async () => {
   factoryKvTable = dbMod.factoryKvTable;
   productionRunsTable = dbMod.productionRunsTable;
   qualityChecksTable = dbMod.qualityChecksTable;
-  proactiveAlertSettingsTable = dbMod.proactiveAlertSettingsTable;
+  runTemplatesTable = dbMod.runTemplatesTable;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   seedRoles = (await import("../lib/roles")).seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
@@ -120,8 +120,14 @@ beforeAll(async () => {
   if (!sandboxUser) throw new Error("sandbox user was not seeded");
   sandboxUserId = sandboxUser.id;
 
-  await db.insert(usersTable).values({ id: LIVE_MANAGER, username: "live-mgr-scope", passwordHash: "x" });
-  await db.insert(userRolesTable).values({ userId: LIVE_MANAGER, role: "manager" });
+  await db.insert(usersTable).values([
+    { id: LIVE_MANAGER, username: "live-mgr-scope", passwordHash: "x" },
+    { id: LIVE_OPERATOR, username: "live-op-scope", passwordHash: "x" },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: LIVE_MANAGER, role: "manager" },
+    { userId: LIVE_OPERATOR, role: "operator" },
+  ]);
 }, 90_000);
 
 afterAll(async () => {
@@ -143,7 +149,7 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM ${factoryKvTable}`);
   await db.execute(sql`DELETE FROM ${productionRunsTable}`);
   await db.execute(sql`DELETE FROM ${qualityChecksTable}`);
-  await db.execute(sql`DELETE FROM ${proactiveAlertSettingsTable}`);
+  await db.execute(sql`DELETE FROM ${runTemplatesTable}`);
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -195,17 +201,61 @@ async function deleteRun(userId: string, id: number): Promise<Response> {
   });
 }
 
-async function putProactiveSettings(userId: string, enabled: boolean): Promise<Response> {
-  return fetch(`${baseUrl}/api/ai/proactive-settings`, {
-    method: "PUT",
+type RunTemplate = {
+  id: string;
+  name: string;
+  values: Record<string, unknown>;
+  revision?: number;
+  deleted?: boolean;
+};
+
+async function saveTemplate(userId: string, template: RunTemplate): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "POST",
     headers: { "content-type": "application/json", ...authHeader(userId) },
-    body: JSON.stringify({ enabled, pollSeconds: 120, cooldownSeconds: 900 }),
+    body: JSON.stringify({
+      templates: [{
+        ...template,
+        revision: template.revision ?? 1,
+        createdAt: "2026-09-06T00:00:00.000Z",
+      }],
+    }),
   });
 }
 
-async function getProactiveSettings(userId: string): Promise<{ enabled: boolean }> {
-  const res = await fetch(`${baseUrl}/api/ai/proactive-settings`, { headers: authHeader(userId) });
-  return res.json() as Promise<{ enabled: boolean }>;
+async function listTemplates(userId: string): Promise<RunTemplate[]> {
+  const res = await fetch(`${baseUrl}/api/run-templates`, { headers: authHeader(userId) });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { templates: RunTemplate[] }).templates;
+}
+
+async function deleteTemplates(
+  userId: string,
+  items: Array<{ id: string; revision: number }>,
+): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({ items }),
+  });
+}
+
+async function saveLegacyTemplate(userId: string, template: Omit<RunTemplate, "revision">): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({
+      templates: [{ ...template, createdAt: "2026-09-06T00:00:00.000Z" }],
+    }),
+  });
+}
+
+async function deleteLegacyTemplates(userId: string, ids: string[]): Promise<Response> {
+  return fetch(`${baseUrl}/api/run-templates`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...authHeader(userId) },
+    body: JSON.stringify({ ids }),
+  });
 }
 
 // ── factory KV scope isolation ────────────────────────────────────────────────
@@ -260,10 +310,25 @@ describe("factory KV — live/sandbox scope isolation", () => {
     expect(res.status).toBe(403);
   });
 });
-
 // ── production runs scope isolation ──────────────────────────────────────────
 
 describe("production runs — live/sandbox scope isolation", () => {
+  it("rejects anonymous reads and writes, and requires factory-settings capability for mutations", async () => {
+    const anonymousGet = await fetch(`${baseUrl}/api/runs`);
+    const anonymousPost = await fetch(`${baseUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const operatorGet = await fetch(`${baseUrl}/api/runs`, { headers: authHeader(LIVE_OPERATOR) });
+    const operatorPost = await createRun(LIVE_OPERATOR, "operator-run");
+
+    expect(anonymousGet.status).toBe(401);
+    expect(anonymousPost.status).toBe(401);
+    expect(operatorGet.status).toBe(200);
+    expect(operatorPost.status).toBe(403);
+  });
+
   it("a live-scope run is not visible in sandbox list", async () => {
     const r = await createRun(LIVE_MANAGER, "live-run");
     expect(r.status).toBe(201);
@@ -307,30 +372,205 @@ describe("production runs — live/sandbox scope isolation", () => {
   });
 });
 
-// ── proactive alert settings scope isolation ──────────────────────────────────
+// ── run templates auth and scope isolation ───────────────────────────────────
 
-describe("proactive alert settings — live/sandbox scope isolation", () => {
-  it("sandbox changes to alert settings do not affect live settings", async () => {
-    // Set live to enabled=true
-    await putProactiveSettings(LIVE_MANAGER, true);
-    // Set sandbox to enabled=false
-    await putProactiveSettings(sandboxUserId, false);
+describe("run templates — authenticated shared convenience with scope isolation", () => {
+  it("rejects anonymous access to every operation", async () => {
+    const [getRes, postRes, deleteRes] = await Promise.all([
+      fetch(`${baseUrl}/api/run-templates`),
+      fetch(`${baseUrl}/api/run-templates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templates: [] }),
+      }),
+      fetch(`${baseUrl}/api/run-templates`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ items: [] }),
+      }),
+    ]);
 
-    const liveSettings = await getProactiveSettings(LIVE_MANAGER);
-    const sandboxSettings = await getProactiveSettings(sandboxUserId);
-
-    expect(liveSettings.enabled).toBe(true);
-    expect(sandboxSettings.enabled).toBe(false);
+    expect(getRes.status).toBe(401);
+    expect(postRes.status).toBe(401);
+    expect(deleteRes.status).toBe(401);
   });
 
-  it("live changes to alert settings do not affect sandbox settings", async () => {
-    await putProactiveSettings(sandboxUserId, true);
-    await putProactiveSettings(LIVE_MANAGER, false);
+  it("allows an authenticated operator to read, save, and tombstone templates", async () => {
+    const saved = await saveTemplate(LIVE_OPERATOR, {
+      id: "operator-template",
+      name: "Operator Template",
+      values: { casesNeeded: 10 },
+    });
+    expect(saved.status).toBe(200);
+    expect((await listTemplates(LIVE_OPERATOR)).map((template) => template.id))
+      .toContain("operator-template");
 
-    const liveSettings = await getProactiveSettings(LIVE_MANAGER);
-    const sandboxSettings = await getProactiveSettings(sandboxUserId);
+    const deleted = await deleteTemplates(LIVE_OPERATOR, [{ id: "operator-template", revision: 2 }]);
+    expect(deleted.status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "operator-template", revision: 2, deleted: true }),
+    ]));
+  });
 
-    expect(liveSettings.enabled).toBe(false);
-    expect(sandboxSettings.enabled).toBe(true);
+  it("keeps same-id templates independent across live and sandbox scopes", async () => {
+    const id = "shared-template-id";
+    expect((await saveTemplate(LIVE_MANAGER, {
+      id,
+      name: "Live Template",
+      values: { source: "live" },
+    })).status).toBe(200);
+    expect((await saveTemplate(sandboxUserId, {
+      id,
+      name: "Sandbox Template",
+      values: { source: "sandbox" },
+    })).status).toBe(200);
+
+    expect((await listTemplates(LIVE_MANAGER)).map((template) => template.name))
+      .toEqual(["Live Template"]);
+    expect((await listTemplates(sandboxUserId)).map((template) => template.name))
+      .toEqual(["Sandbox Template"]);
+
+    expect((await deleteTemplates(sandboxUserId, [{ id, revision: 2 }])).status).toBe(200);
+    expect(await listTemplates(sandboxUserId)).toEqual([
+      expect.objectContaining({ id, name: "Sandbox Template", revision: 2, deleted: true }),
+    ]);
+    expect((await listTemplates(LIVE_MANAGER)).map((template) => template.name))
+      .toEqual(["Live Template"]);
+  });
+
+  it("keeps the highest revision through stale saves, retries, tombstones, and stale resurrection", async () => {
+    const id = "revisioned-template";
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Version one",
+      values: { version: 1 },
+      revision: 1,
+    })).status).toBe(200);
+
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Version three",
+      values: { version: 3 },
+      revision: 3,
+    })).status).toBe(200);
+
+    // A delayed revision must not overwrite the newer authoritative record.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Stale version",
+      values: { version: 2 },
+      revision: 2,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 3, deleted: false }),
+    ]);
+
+    // Retrying the same mutation is an idempotent no-op.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Conflicting duplicate",
+      values: { version: "wrong" },
+      revision: 3,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 3, deleted: false }),
+    ]);
+
+    expect((await deleteTemplates(LIVE_OPERATOR, [{ id, revision: 4 }])).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 4, deleted: true }),
+    ]);
+
+    // A pre-delete save cannot resurrect a newer deletion tombstone.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id,
+      name: "Stale resurrection",
+      values: { version: 3 },
+      revision: 3,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Version three", values: { version: 3 }, revision: 4, deleted: true }),
+    ]);
+  });
+
+  it("atomically upgrades legacy saves while revisioned duplicates remain idempotent", async () => {
+    const id = "legacy-save-template";
+    expect((await saveLegacyTemplate(LIVE_OPERATOR, {
+      id, name: "Legacy version one", values: { version: 1 },
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Legacy version one", revision: 1, deleted: false }),
+    ]);
+
+    // A cached legacy retry/update has no client revision, so the server assigns
+    // the next revision inside its conflict statement rather than dropping it.
+    expect((await saveLegacyTemplate(LIVE_OPERATOR, {
+      id, name: "Legacy version two", values: { version: 2 },
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Legacy version two", values: { version: 2 }, revision: 2 }),
+    ]);
+
+    // Revision-aware equal-revision retries keep their strict idempotent behavior.
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id, name: "Conflicting duplicate", values: { version: "wrong" }, revision: 2,
+    })).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({ id, name: "Legacy version two", values: { version: 2 }, revision: 2 }),
+    ]);
+  });
+
+  it("turns legacy DELETE ids into retained tombstones", async () => {
+    const id = "legacy-delete-template";
+    expect((await saveTemplate(LIVE_OPERATOR, {
+      id, name: "To tombstone", values: { keep: "envelope" }, revision: 4,
+    })).status).toBe(200);
+
+    expect((await deleteLegacyTemplates(LIVE_OPERATOR, [id])).status).toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({
+        id, name: "To tombstone", values: { keep: "envelope" }, revision: 5, deleted: true,
+      }),
+    ]);
+  });
+
+  it("rejects legacy mutations when the revision is already at the JS-safe limit", async () => {
+    const id = "saturated-legacy-template";
+    await db.insert(runTemplatesTable).values({
+      id,
+      scope: "live",
+      name: "Saturated",
+      values: {},
+      createdAt: "2026-09-06T00:00:00.000Z",
+      revision: Number.MAX_SAFE_INTEGER,
+      deleted: false,
+    });
+
+    expect((await saveLegacyTemplate(LIVE_OPERATOR, {
+      id, name: "Unsafe increment", values: { unsafe: true },
+    })).status).toBe(409);
+    expect((await deleteLegacyTemplates(LIVE_OPERATOR, [id])).status).toBe(409);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({
+        id,
+        name: "Saturated",
+        revision: Number.MAX_SAFE_INTEGER,
+        deleted: false,
+      }),
+    ]);
+  });
+
+  it("creates a complete tombstone envelope for a never-seen deletion", async () => {
+    expect((await deleteTemplates(LIVE_OPERATOR, [{ id: "never-seen-template", revision: 7 }])).status)
+      .toBe(200);
+    expect(await listTemplates(LIVE_OPERATOR)).toEqual([
+      expect.objectContaining({
+        id: "never-seen-template",
+        name: "Deleted template",
+        values: {},
+        revision: 7,
+        deleted: true,
+      }),
+    ]);
   });
 });

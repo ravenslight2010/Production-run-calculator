@@ -13,7 +13,12 @@
 
 export type SummaryScope = "day" | "week";
 
-export type OperationalReportAvailability = "available" | "unavailable";
+export type OperationalReportAvailability =
+  | "available"
+  | "unavailable"
+  | "pending"
+  | "stale"
+  | "offline-only";
 
 export interface OperationalReportSection<T> {
   availability: OperationalReportAvailability;
@@ -27,19 +32,70 @@ export interface OperationalReport {
   periodStart: string;
   periodEnd: string;
   generatedAt: string;
+  attribution?: {
+    generatedBy: string;
+    source: "canonical-server" | "local-device";
+  };
+  freshness?: {
+    status: "current" | "stale" | "offline-only";
+    asOf: string;
+    note: string;
+  };
+  calculation?: {
+    period: string;
+    production: string;
+    quality: string;
+    incidents: string;
+    inventory: string;
+  };
   production: DaySummaryStats;
+  productionRows?: Array<{
+    id: string;
+    date: string;
+    run: string;
+    status: "finished" | "unfinished";
+    casesPlanned: number;
+    casesProduced: number;
+    attainmentPct: number;
+    downtimeMinutes: number;
+    stoppages: number;
+  }>;
   quality: OperationalReportSection<{
     checks: number;
     issues: number;
     failed: number;
     warnings: number;
+    rows?: Array<{
+      id: string;
+      occurredAt: string;
+      product: string;
+      status: string;
+      issues: number;
+      summary: string;
+    }>;
   }>;
   incidents: OperationalReportSection<{
     total: number;
     unresolved: number;
+    rows?: Array<{
+      id: string;
+      occurredAt: string;
+      status: string;
+      priority: string;
+      reporter: string;
+      summary: string;
+    }>;
   }>;
   inventory: OperationalReportSection<{
     flaggedItems: number;
+    rows?: Array<{
+      id: string;
+      item: string;
+      unit: string;
+      onHand: number;
+      reorderThreshold: number;
+      state: string;
+    }>;
     historical?: {
       availability: OperationalReportAvailability;
       value: {
@@ -50,6 +106,16 @@ export interface OperationalReport {
       } | null;
       note?: string;
     };
+  }>;
+  unresolvedActions?: OperationalReportSection<{
+    total: number;
+    rows: Array<{
+      id: string;
+      source: "production" | "quality" | "incident" | "inventory";
+      priority: string;
+      action: string;
+      detail: string;
+    }>;
   }>;
   narrative?: {
     text: string;

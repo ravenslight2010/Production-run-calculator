@@ -108,6 +108,67 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
   });
 });
 
+describe("recipe row raw-unit contract", () => {
+  it("requires exact raw numbers and makes rowsUnit provenance-only", () => {
+    const { system, user } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("never convert, rescale, or reinterpret any number between units");
+    expect(system).toContain("`rowsUnit` is descriptive provenance only");
+    expect(system).toContain("preserves the raw row number exactly");
+    expect(user).toContain('"rowsUnit":"lbs"|"oz"');
+  });
+
+  it("preserves dough, sauce, and cheese row numbers and their reported unit", () => {
+    const out = sanitizeParseSpecSheet(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "dough",
+            name: "Large Dough",
+            rowsUnit: "oz",
+            rows: [{ ingredient: "Flour", lbs: 48 }],
+          },
+          {
+            kind: "sauce",
+            name: "Large Sauce",
+            rowsUnit: "lbs",
+            rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+          },
+          {
+            kind: "cheese",
+            name: "House Blend",
+            rowsUnit: "oz",
+            rows: [{ ingredient: "Mozzarella", lbs: 2.5 }],
+          },
+        ],
+      },
+      input(),
+    );
+    expect(out.recipes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "dough",
+          name: "Large Dough",
+          rowsUnit: "oz",
+          rows: [{ ingredient: "Flour", lbs: 48 }],
+        }),
+        expect.objectContaining({
+          kind: "sauce",
+          name: "Large Sauce",
+          rowsUnit: "lbs",
+          rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+        }),
+        expect.objectContaining({
+          kind: "cheese",
+          name: "House Blend",
+          rowsUnit: "oz",
+          rows: [{ ingredient: "Mozzarella", lbs: 2.5 }],
+        }),
+      ]),
+    );
+  });
+});
+
 // Regression guard for the dough yield table row-type distinction. Customer/
 // product rows in a yield table (e.g. "Lucia's Craft Bacon Burger Supreme")
 // must NOT become the recipe name — the procedure title is the recipe name and
@@ -621,6 +682,16 @@ describe("profile doughName capture + grounding", () => {
     const { system, user } = buildParseSpecSheetPrompt(input({}));
     expect(system).toContain("doughName");
     expect(user).toContain('"doughName":string');
+  });
+
+  it("asks for profile-specific dough metadata and exact applicator recipe links", () => {
+    const { system, user } = buildParseSpecSheetPrompt(input({}));
+    expect(system).toContain("PROFILE-SPECIFIC DOUGH FIELDS");
+    expect(system).toContain("Do not move a product-specific value onto a shared dough recipe");
+    expect(system).toContain("applicator's `recipeName`");
+    expect(user).toContain('"targetDoughballWeight":number');
+    expect(user).toContain('"doughballsPerTray":number');
+    expect(user).toContain('"recipeName":string');
   });
 });
 

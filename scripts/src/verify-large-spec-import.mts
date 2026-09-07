@@ -21,7 +21,7 @@
 // - Per-chunk prompt budget: 4,000 chars
 //   (DEFAULT_LIMITS.maxTotalChars in lib/spec-import/src/index.ts).
 //   4k chunks (~20 profiles or ~15 recipes each) verified correct with zero
-//   loss or unit-conversion errors across smoke (4×3), 4×8, and 10×4 runs.
+//   loss or raw-unit errors across smoke (4×3), 4×8, and 10×4 runs.
 // - max_completion_tokens: 65,536 on POST /ai/parse-spec-sheet
 //   (artifacts/api-server/src/routes/ai.ts). A chunk carrying ~240 profiles
 //   overflowed 32,768 output tokens, so the route uses the model's full 64k
@@ -30,9 +30,9 @@
 //   lib/spec-import/src/index.ts). Unchanged — 4k chunks carry at most ~20
 //   profiles so this limit is never reached.
 // - Test data: harness ingredient weights use realistic per-ingredient bases
-//   (Flour ~50 lbs, Yeast ~0.5 lbs, etc.) so the model does not "correct"
-//   them from oz to lbs. Unrealistic values (10–22 lbs of yeast) triggered
-//   model grounding that divided all weights by 16.
+//   (Flour ~50, Yeast ~0.5, etc.) and the assertions compare every returned
+//   recipe row with the raw generated number. This catches any model or
+//   sanitizer behavior that silently rescales values.
 //
 // WHAT IT DOES
 // ────────────
@@ -63,7 +63,8 @@
 //      ALWAYS run the full size after an AI model change.
 //
 //   Env:
-//     API_BASE          default http://localhost:5000/api
+//     API_BASE          default http://localhost:8080/api (the API artifact's
+//                       configured local port)
 //     BRANDS / FLAVORS  dataset size (default 30 × 8 — the verified full size)
 //     VERIFY_USERNAME / VERIFY_PASSWORD
 //                       existing account with the use-ai-tools capability.
@@ -90,7 +91,10 @@ import {
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const API_BASE = (process.env.API_BASE ?? "http://localhost:5000/api").replace(/\/$/, "");
+const API_BASE = (process.env.API_BASE ?? "http://localhost:8080/api").replace(/\/$/, "");
+const API_HEALTH_URL = API_BASE.endsWith("/api")
+  ? `${API_BASE}/healthz`
+  : `${API_BASE}/api/healthz`;
 const BRAND_COUNT = clampInt(process.env.BRANDS, 30, 1, 60);
 const FLAVOR_COUNT = clampInt(process.env.FLAVORS, 8, 1, 8);
 // Cap on parse calls; generous so the full 30×8 export never drops rows. The
@@ -212,6 +216,28 @@ function buildDataset(brandCount: number, flavorCount: number): Dataset {
 
 // ── API client ───────────────────────────────────────────────────────────────
 
+async function assertApiReady(): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(API_HEALTH_URL, {
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `API readiness failure — cannot reach ${API_BASE} (${API_HEALTH_URL}). ` +
+        `No AI parse was attempted. ${detail}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `API readiness failure — ${API_HEALTH_URL} returned HTTP ${response.status}. ` +
+        "No AI parse was attempted.",
+    );
+  }
+}
+
 async function api(path: string, body: unknown, token?: string): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
     method: "POST",
@@ -309,7 +335,7 @@ function checkResult(dataset: Dataset, merged: ParsedSpecImport): string[] {
         failures.push(`MISSING RECIPE: [${kind}] ${expected.name}`);
         continue;
       }
-      // Rows: every generated ingredient present with the exact lbs.
+      // Rows: every generated ingredient present with the exact raw number.
       const gotRows = new Map((got.rows ?? []).map((r) => [norm(r.ingredient), r.lbs]));
       for (const row of expected.rows) {
         const lbs = gotRows.get(norm(row.ingredient));
@@ -317,7 +343,7 @@ function checkResult(dataset: Dataset, merged: ParsedSpecImport): string[] {
           failures.push(`MISSING ROW: [${kind}] ${expected.name} → ${row.ingredient}`);
         } else if (Math.abs(lbs - row.lbs) > 1e-9) {
           failures.push(
-            `WRONG LBS: [${kind}] ${expected.name} → ${row.ingredient}: got ${lbs}, expected ${row.lbs}`,
+            `WRONG RAW ROW VALUE: [${kind}] ${expected.name} → ${row.ingredient}: got ${lbs}, expected ${row.lbs}`,
           );
         }
       }
@@ -347,6 +373,8 @@ function checkResult(dataset: Dataset, merged: ParsedSpecImport): string[] {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  await assertApiReady();
+  console.log(`API server ready at ${API_BASE}.`);
   console.log(`Dataset: ${BRAND_COUNT} brands × ${FLAVOR_COUNT} flavors`);
   const dataset = buildDataset(BRAND_COUNT, FLAVOR_COUNT);
   const { input } = dataset;

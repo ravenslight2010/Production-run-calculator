@@ -23,6 +23,7 @@ import {
   type FreezerSurplusLot,
 } from "@workspace/freezer-pull";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -98,7 +99,7 @@ router.get("/freezer-surplus", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/freezer-surplus", async (req: Request, res: Response) => {
+router.post("/freezer-surplus", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const rawProductionDate =
     req.body && typeof req.body === "object" ? (req.body as { productionDate?: unknown }).productionDate : undefined;
   if (!isValidSurplusDate(rawProductionDate)) {
@@ -149,6 +150,7 @@ router.post("/freezer-surplus", async (req: Request, res: Response) => {
 
 router.put(
   "/freezer-surplus/allocations/:runId",
+  requireCapability("manage-inventory"),
   async (req: Request, res: Response) => {
     const rawRunDate =
       req.body && typeof req.body === "object" ? (req.body as { runDate?: unknown }).runDate : undefined;

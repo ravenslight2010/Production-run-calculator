@@ -94,6 +94,9 @@ let passwordResetRequestsTable: DbModule["passwordResetRequestsTable"];
 
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
+let getRequiredCapabilities: (
+  middleware: unknown,
+) => readonly Capability[] | undefined;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -108,6 +111,7 @@ const QC_OPERATOR = "qc-operator-1";
 const QC_MANAGER = "qc-manager-1";
 const WAREHOUSE = "warehouse-1";
 const INVENTORY = "inventory-1";
+const SANDBOX = "sandbox-1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -159,6 +163,8 @@ beforeAll(async () => {
   passwordResetRequestsTable = dbMod.passwordResetRequestsTable;
   const rolesMod = await import("../lib/roles");
   seedRoles = rolesMod.seedRoles;
+  const capabilityMod = await import("../middlewares/requireCapability");
+  getRequiredCapabilities = capabilityMod.getRequiredCapabilities;
 
   // Minimal app: the real router, behind a no-op req.log so handlers that log
   // don't crash without pino-http. Mounted at /api to match production paths.
@@ -218,6 +224,7 @@ async function resetRoleFixture(): Promise<void> {
     { id: QC_MANAGER, username: "qc-manager", passwordHash: "x" },
     { id: WAREHOUSE, username: "warehouse", passwordHash: "x" },
     { id: INVENTORY, username: "inventory", passwordHash: "x" },
+    { id: SANDBOX, username: "sandbox", passwordHash: "x", sandbox: true },
   ]);
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
@@ -227,6 +234,7 @@ async function resetRoleFixture(): Promise<void> {
     { userId: QC_MANAGER, role: "qc-manager" },
     { userId: WAREHOUSE, role: "warehouse" },
     { userId: INVENTORY, role: "inventory" },
+    { userId: SANDBOX, role: "operator" },
   ]);
 }
 
@@ -351,6 +359,13 @@ const ROUTES: GatedRoute[] = [
     body: { expirySoonDays: 14 },
     okStatus: 200,
   },
+  {
+    name: "GET /duplicate-reviews",
+    capability: "manage-inventory",
+    method: "GET",
+    path: () => "/api/duplicate-reviews",
+    okStatus: 200,
+  },
   // --- use-ai-tools ---
   {
     name: "POST /inventory/identify-photo",
@@ -391,6 +406,56 @@ const ROUTES: GatedRoute[] = [
     method: "POST",
     path: () => "/api/freezer-pull-items",
     body: { items: [] },
+    okStatus: 200,
+  },
+  // Shared learned/master records must be protected on the API, not merely
+  // hidden in the importer/setup UI.
+  {
+    name: "POST /import-aliases",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/import-aliases",
+    body: { aliases: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /fill-missing-values",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/fill-missing-values",
+    body: { values: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /ingredient-batch-weights",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/ingredient-batch-weights",
+    body: { weights: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /photo-aliases",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/photo-aliases",
+    body: { aliases: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /spec-import-aliases",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/spec-import-aliases",
+    body: { aliases: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /die-types",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/die-types",
+    body: { names: [] },
     okStatus: 200,
   },
   {
@@ -447,6 +512,13 @@ const ROUTES: GatedRoute[] = [
     capability: "manage-staff",
     method: "GET",
     path: () => "/api/audit-logs",
+    okStatus: 200,
+  },
+  {
+    name: "GET /audit-logs/profile-name-link-cleanup",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/audit-logs/profile-name-link-cleanup",
     okStatus: 200,
   },
   {
@@ -696,6 +768,31 @@ const ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    name: "POST /runs",
+    capability: "manage-factory-settings",
+    method: "POST",
+    path: () => "/api/runs",
+    body: {
+      label: "capability-run",
+      casesNeeded: 100,
+      casesLeft: 100,
+      skidsCompleted: 0,
+      pizzasPerMin: "5.00",
+      totalTimeSec: 1200,
+      batchesNeeded: "2.50",
+      inputs: {},
+    },
+    okStatus: 201,
+  },
+  {
+    name: "DELETE /runs/:id",
+    capability: "manage-factory-settings",
+    method: "DELETE",
+    path: () => "/api/runs/2147483647",
+    // A missing run proves the request reached the scope-filtered handler.
+    okStatus: 404,
+  },
+  {
     name: "GET /manager-action-queue",
     capability: "manage-staff",
     method: "GET",
@@ -726,6 +823,13 @@ const ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    name: "POST /profile-data/ai-retention/apply",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/profile-data/ai-retention/apply",
+    okStatus: 200,
+  },
+  {
     name: "POST /profile-data/health-check/apply",
     capability: "manage-staff",
     method: "POST",
@@ -740,23 +844,111 @@ const ROUTES: GatedRoute[] = [
     okStatus: 404,
   },
   {
+    name: "GET /master-data/health",
+    capability: "manage-profiles",
+    method: "GET",
+    path: () => "/api/master-data/health",
+    okStatus: 200,
+  },
+  {
+    name: "GET /master-data/health/history",
+    capability: "manage-profiles",
+    method: "GET",
+    path: () => "/api/master-data/health/history",
+    okStatus: 200,
+  },
+  {
+    name: "GET /reports/handoff",
+    capability: "review-incidents",
+    method: "GET",
+    path: () => "/api/reports/handoff?date=2026-09-06",
+    okStatus: 200,
+  },
+  {
+    name: "GET /reports/operational-view",
+    capability: "review-incidents",
+    method: "GET",
+    path: () => "/api/reports/operational-view?date=2026-09-06&runId=missing",
+    // The capability check must run before the handler's canonical-snapshot
+    // lookup.  A 404 here proves the authorized request reached that lookup.
+    okStatus: 404,
+  },
+  {
+    name: "POST /master-data/health/scan",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/master-data/health/scan",
+    okStatus: 200,
+  },
+  {
+    name: "POST /master-data/health/repair",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/master-data/health/repair",
+    body: {},
+    okStatus: 200,
+  },
+  {
     name: "GET /ai-memory/health-check",
     capability: "manage-staff",
     method: "GET",
     path: () => "/api/ai-memory/health-check",
     okStatus: 200,
   },
-  // AI diagnostics/tools deliberately use a cheap request that does not require
-  // an external model call; it still proves the capability guard runs first.
-  {
-    name: "PUT /ai/proactive-settings",
-    capability: "use-ai-tools",
-    method: "PUT",
-    path: () => "/api/ai/proactive-settings",
-    body: { enabled: false, pollSeconds: 60, cooldownSeconds: 300 },
-    okStatus: 200,
-  },
 ];
+
+type ExpressRouteLayer = {
+  route?: {
+    path: string;
+    methods: Record<string, boolean>;
+    stack: Array<{ handle: unknown }>;
+  };
+};
+
+function declaredAuthorizationRoutes(
+  ownedRouters: readonly {
+    name: string;
+    router: { stack: Array<{ route?: unknown }> };
+    authOnlyRoutes?: readonly string[];
+  }[],
+) {
+  const capabilityRoutes: Array<{ name: string; capability: Capability }> = [];
+  const authOnlyRoutes: string[] = [];
+
+  for (const owned of ownedRouters) {
+    const declaredAuthOnly = new Set(owned.authOnlyRoutes ?? []);
+    for (const rawLayer of owned.router.stack) {
+      const layer = rawLayer as ExpressRouteLayer;
+      if (!layer.route) continue;
+      const methods = Object.entries(layer.route.methods)
+        .filter(([, enabled]) => enabled)
+        .map(([method]) => method.toUpperCase());
+      for (const method of methods) {
+        const name = `${method} ${layer.route.path}`;
+        const required = layer.route.stack.flatMap(
+          ({ handle }) => getRequiredCapabilities(handle) ?? [],
+        );
+        if (required.length > 0) {
+          for (const capability of required) capabilityRoutes.push({ name, capability });
+        } else if (declaredAuthOnly.has(name)) {
+          authOnlyRoutes.push(name);
+          declaredAuthOnly.delete(name);
+        } else {
+          throw new Error(
+            `${owned.name} route ${name} has no direct authorization coverage classification`,
+          );
+        }
+      }
+    }
+    if (declaredAuthOnly.size > 0) {
+      throw new Error(
+        `${owned.name} has stale auth-only classifications: ${[...declaredAuthOnly].join(", ")}`,
+      );
+    }
+  }
+
+  return { capabilityRoutes, authOnlyRoutes };
+}
 
 const USER_BY_ROLE: Record<string, string> = {
   manager: MANAGER,
@@ -769,12 +961,112 @@ const USER_BY_ROLE: Record<string, string> = {
 };
 
 describe("capability-based access control", () => {
+  it("keeps owned operations routes in the direct authorization inventory", async () => {
+    const { directAuthorizationCoverageRouters } = await import("./index");
+    const declared = declaredAuthorizationRoutes(directAuthorizationCoverageRouters);
+    const covered = ROUTES.map(({ name, capability }) => ({ name, capability }));
+
+    for (const route of declared.capabilityRoutes) {
+      expect(covered, `${route.name} direct capability coverage`).toContainEqual(route);
+    }
+    expect(declared.authOnlyRoutes.sort()).toEqual([
+      "DELETE /run-templates",
+      "GET /run-templates",
+      "GET /runs",
+      "POST /run-templates",
+    ]);
+  });
+
+  it("keeps every registered application write in the mutation authorization matrix", async () => {
+    const {
+      directAuthorizationCoverageRouters,
+      mutationAuthorizationInventory,
+      mutationAuthorizationRouters,
+      validateMutationAuthorizationInventory,
+    } = await import("./index");
+    // This is intentionally route-stack based, not a list of test requests:
+    // every mounted API router (including public auth endpoints) is checked, so
+    // a new write fails unless it is classified and its gate precedes its handler.
+    validateMutationAuthorizationInventory(mutationAuthorizationRouters);
+    expect(
+      directAuthorizationCoverageRouters.every(({ router }) =>
+        mutationAuthorizationRouters.some((entry) => entry.router === router),
+      ),
+    ).toBe(true);
+    expect(mutationAuthorizationInventory).toContainEqual({
+      method: "POST",
+      path: "/auth/change-password",
+      ownership: "per-user",
+      scope: "per-user",
+      sandbox: "allowed",
+    });
+  });
+
+  it("allows sandbox users to reach their own password-change validation", async () => {
+    const res = await req(SANDBOX, "POST", "/api/auth/change-password", {});
+    // Invalid input proves direct requireAuth and sandbox scope both passed; a
+    // live-only regression would return the safe sandbox denial (403) instead.
+    expect(res.status).toBe(400);
+  });
+
   it("rejects every protected route with 401 when signed out", async () => {
     const itemId = await makeItem("ingredient:Target:lbs");
     for (const route of ROUTES) {
       const res = await req(null, route.method, route.path({ itemId }), route.body);
       expect(res.status, `${route.name} signed-out status`).toBe(401);
     }
+  });
+
+  it("limits operators to explicit current-day sync and rejects dated scheduling bypasses", async () => {
+    const body = { senderId: "coverage", payload: {} };
+    const anonymous = await req(null, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
+    expect(anonymous.status).toBe(401);
+
+    const futureDenied = await req(OPERATOR, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
+    expect(futureDenied.status).toBe(403);
+
+    const forgedTodayDenied = await req(OPERATOR, "PUT", "/api/sync/2099-01-01?today=2099-01-01", body);
+    expect(forgedTodayDenied.status).toBe(403);
+
+    const currentAllowed = await req(OPERATOR, "PUT", "/api/sync/today?today=2025-01-01", body);
+    expect(currentAllowed.status).toBe(200);
+
+    const scheduledAllowed = await req(MANAGER, "PUT", "/api/sync/2099-01-01?today=2025-01-01", body);
+    expect(scheduledAllowed.status).toBe(200);
+  });
+
+  it("keeps scheduled-day read variants authenticated and scope-bound without weakening scheduled writes", async () => {
+    const scheduledPayload = {
+      dayState: {
+        runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Future" }],
+        resetAt: 0,
+      },
+      runValues: {},
+    };
+    const scheduledWrite = await req(
+      MANAGER,
+      "PUT",
+      "/api/sync/2099-01-02?today=2025-01-01",
+      { senderId: "scheduled-read-coverage", payload: scheduledPayload },
+    );
+    expect(scheduledWrite.status).toBe(200);
+
+    // The scheduled GETs are shared day-state reads, so an operator may read
+    // them after authentication. The write variant above remains manager-only.
+    const scheduledDay = await req(OPERATOR, "GET", "/api/sync/2099-01-02");
+    expect(scheduledDay.status).toBe(200);
+    const scheduledDayBody = await scheduledDay.json() as {
+      dayState: { runs: Array<{ id: string }> };
+    };
+    expect(scheduledDayBody.dayState.runs[0].id).toBe("scheduled-run");
+
+    const scheduledList = await req(OPERATOR, "GET", "/api/sync/scheduled?today=2025-01-01&include=runs");
+    expect(scheduledList.status).toBe(200);
+    const scheduledRows = await scheduledList.json() as Array<{ date: string }>;
+    expect(scheduledRows.some((row) => row.date === "2099-01-02")).toBe(true);
+
+    expect((await req(null, "GET", "/api/sync/2099-01-02")).status).toBe(401);
+    expect((await req(null, "GET", "/api/sync/scheduled")).status).toBe(401);
   });
 
   it("resolves the expected capabilities for every seeded role", async () => {

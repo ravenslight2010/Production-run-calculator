@@ -148,7 +148,7 @@ jobs:
 
 
   security-audit:
-    name: Security audit (prod deps)
+    name: Informational security audit (high severity; registry best-effort)
     runs-on: ubuntu-latest
     # Includes dependency installation and a network-bound audit with a
     # bounded cap so registry stalls cannot hold a runner indefinitely.
@@ -162,11 +162,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Audit production dependencies
+      - name: Report high-severity production dependency advisories
         # Reports known advisories without blocking: what remains is Expo/Metro
-        # (mobile) dev tooling only. Web app + API production paths are clean.
+        # (mobile) dev tooling only. Registry failures are ignored in this
+        # informational CI lane; the release gate fails closed on either.
         continue-on-error: true
-        run: pnpm audit --prod --audit-level high --ignore-registry-errors
+        run: pnpm run audit:prod:ci
 
 
   docker:

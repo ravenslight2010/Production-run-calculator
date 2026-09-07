@@ -11,7 +11,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
-import { signUpAndHandleOnboarding } from "./onboarding";
+import {
+  reloadThroughSettlingSession,
+  signUpAndHandleOnboarding,
+} from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -25,6 +28,7 @@ function uid(): string {
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase();
 });
+
 
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
@@ -62,6 +66,26 @@ async function expectSelected(page: Page, tab: string): Promise<void> {
   );
 }
 
+async function expectNoLegacyDepartmentLabels(page: Page): Promise<void> {
+  await expect(page.getByText("Stock", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Whse", { exact: true })).toHaveCount(0);
+}
+
+async function expectInventoryDestination(page: Page): Promise<void> {
+  await expect(page.getByTestId("inventory-page-heading")).toContainText(
+    "Inventory",
+  );
+  // "stock" is valid as sentence-level explanatory copy, but not as the
+  // destination's heading or navigation label.
+  await expect(
+    page.getByText(
+      "Review stock, lots, alerts, transfers, and substitutions.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expectNoLegacyDepartmentLabels(page);
+}
+
 async function pressBrowserBack(page: Page): Promise<void> {
   await page.evaluate(() => history.back());
 }
@@ -76,8 +100,7 @@ test.describe("Home navigation persistence", () => {
     await expectSelected(page, "dough");
     await expect(page).toHaveURL(/\/$/);
 
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await reloadThroughSettlingSession(page);
     await expectSelected(page, "dough");
   });
 
@@ -123,5 +146,74 @@ test.describe("Home navigation persistence", () => {
     await expect
       .poll(() => page.evaluate((key) => localStorage.getItem(key), ACTIVE_TAB_KEY))
       .toBe("run");
+  });
+
+  test("keeps the Warehouse label on its direct screen after hydration and reload", async ({
+    page,
+  }) => {
+    const username = uid();
+    testUsernames.add(username);
+    await signUp(page, username);
+
+    await page.goto("/?screen=warehouse", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
+    await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
+    await expectNoLegacyDepartmentLabels(page);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
+    await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
+    await expectNoLegacyDepartmentLabels(page);
+  });
+
+  test("keeps the Inventory label after its supported menu path and reload", async ({
+    page,
+  }) => {
+    const username = uid();
+    testUsernames.add(username);
+    await signUp(page, username);
+
+    await page.getByRole("button", { name: "More" }).click();
+    const inventoryMenuItem = page.getByRole("menuitem", {
+      name: "Inventory",
+      exact: true,
+    });
+    await expect(inventoryMenuItem).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: /^(Stock|Whse)$/ }),
+    ).toHaveCount(0);
+    // Radix positions the desktop menu after opening; wait for that transition
+    // before selecting so this remains reliable in the full browser suite.
+    await page.waitForTimeout(300);
+    await inventoryMenuItem.click();
+    await expect(page.getByRole("menu")).toBeHidden();
+    await expectInventoryDestination(page);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("inventory-page-heading").waitFor({
+      state: "visible",
+      timeout: 25_000,
+    });
+    await expect
+      .poll(() => page.evaluate((key) => localStorage.getItem(key), ACTIVE_TAB_KEY))
+      .toBe("inventory");
+    await expectInventoryDestination(page);
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(
+      page.getByRole("menuitem", { name: "Inventory", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: /^(Stock|Whse)$/ }),
+    ).toHaveCount(0);
   });
 });

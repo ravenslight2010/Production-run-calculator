@@ -5,8 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiModelStatus } from './aiModelStatus';
 import type { AiStatus } from './aiStatus';
 import type { MatchPremixMatch } from './matchPremixMatch';
+import type { MatchPremixResultDecision } from './matchPremixResultDecision';
 
 export interface MatchPremixResult {
   matches: MatchPremixMatch[];
@@ -16,4 +18,6 @@ export interface MatchPremixResult {
   aiStatus: AiStatus;
   /** Optional message when no matches could be made */
   note?: string;
+  decision: MatchPremixResultDecision;
+  modelStatus?: AiModelStatus;
 }

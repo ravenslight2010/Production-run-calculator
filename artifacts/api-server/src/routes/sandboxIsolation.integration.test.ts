@@ -382,6 +382,35 @@ describe("POST /sandbox/reset re-copies live → sandbox", () => {
   });
 });
 
+describe("sandbox sessions cannot cross the live-only staff boundary", () => {
+  it("rejects protected staff reads and writes even for a sandbox manager", async () => {
+    // seedSandboxUser assigns the manager role so these requests prove the
+    // live-scope fence, rather than merely proving a missing capability.
+    const protectedReads = [
+      ["GET", "/api/roles"],
+      ["GET", "/api/users"],
+      ["GET", "/api/audit-logs"],
+      ["GET", "/api/password-reset-requests"],
+    ] as const;
+    for (const [method, pathname] of protectedReads) {
+      expect((await req(sandboxUserId, method, pathname)).status, `${method} ${pathname}`).toBe(403);
+    }
+
+    expect((await req(sandboxUserId, "POST", "/api/roles", {
+      name: "sandbox-must-not-create",
+      capabilities: [],
+    })).status).toBe(403);
+    expect((await req(sandboxUserId, "PUT", `/api/users/${LIVE_MANAGER}/role`, {
+      role: "operator",
+    })).status).toBe(403);
+
+    // A live manager still has the expected access, proving the boundary did
+    // not accidentally turn the global staff surface off for every session.
+    expect((await req(LIVE_MANAGER, "GET", "/api/roles")).status).toBe(200);
+    expect((await req(LIVE_MANAGER, "GET", "/api/users")).status).toBe(200);
+  });
+});
+
 describe("daily-reset / auth boundary stays pinned to live", () => {
   it("a sandbox-scope reset boundary fences nobody", async () => {
     // The sandbox writes a far-future reset boundary onto ITS today row. Because

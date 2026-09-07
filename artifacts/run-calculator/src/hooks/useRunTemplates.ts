@@ -1,57 +1,52 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RunTemplate } from "../types";
+import {
+  deleteRunTemplate,
+  localRunTemplates,
+  reconcileRunTemplates,
+  saveRunTemplate,
+  getRunTemplatesScope,
+  setRunTemplatesScope,
+  startRunTemplatesRepository,
+  type RunTemplateScope,
+} from "../runTemplatesRepository";
+import { useAuth } from "../useAuth";
 
-// ── Run templates API helpers ─────────────────────────────────────────────────
-// The server is the source of truth for run templates (facility-wide, shared
-// across all devices signed into the same scope). localStorage is used only
-// during the one-time migration heal (see factoryDataSync.ts:runTemplatesMigration).
-
-async function fetchRunTemplates(): Promise<RunTemplate[]> {
-  const res = await fetch("/api/run-templates");
-  if (!res.ok) throw new Error(`fetchRunTemplates failed (${res.status})`);
-  const body = (await res.json()) as { templates?: RunTemplate[] };
-  return body.templates ?? [];
-}
-
-/** POST one template to the server; returns the updated server list. */
-export async function saveRunTemplateApi(template: RunTemplate): Promise<RunTemplate[]> {
-  const res = await fetch("/api/run-templates", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ templates: [template] }),
-  });
-  if (!res.ok) throw new Error(`saveRunTemplate failed (${res.status})`);
-  const body = (await res.json()) as { templates?: RunTemplate[] };
-  return body.templates ?? [];
-}
-
-/** DELETE templates by id from the server; returns the updated server list. */
-export async function deleteRunTemplatesApi(ids: string[]): Promise<RunTemplate[]> {
-  const res = await fetch("/api/run-templates", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  if (!res.ok) throw new Error(`deleteRunTemplates failed (${res.status})`);
-  const body = (await res.json()) as { templates?: RunTemplate[] };
-  return body.templates ?? [];
-}
-
-/** React Query key for run templates. */
+/** React Query key for run templates. Kept stable for existing consumers. */
 export const RUN_TEMPLATES_QUERY_KEY = ["runTemplates"] as const;
+export function runTemplatesQueryKey(scope = getRunTemplatesScope()) {
+  return [...RUN_TEMPLATES_QUERY_KEY, scope] as const;
+}
 
 /**
- * Fetch and cache the facility-wide run templates list.
- * Suitable for use in multiple components — they all share the same cache entry.
+ * Compatibility mutation helpers. They optimistically update the durable local
+ * snapshot; callers receive the immediately visible list rather than waiting
+ * for an unavailable network.
  */
-export function useRunTemplates(): {
-  templates: RunTemplate[];
-  isLoaded: boolean;
-} {
-  const { data, isFetched } = useQuery({
-    queryKey: RUN_TEMPLATES_QUERY_KEY,
-    queryFn: fetchRunTemplates,
+export async function saveRunTemplateApi(template: RunTemplate): Promise<RunTemplate[]> {
+  return saveRunTemplate(template);
+}
+export async function deleteRunTemplatesApi(ids: string[]): Promise<RunTemplate[]> {
+  let templates = localRunTemplates();
+  for (const id of ids) templates = deleteRunTemplate(id);
+  return templates;
+}
+
+export function useRunTemplates(): { templates: RunTemplate[]; isLoaded: boolean } {
+  const { me } = useAuth();
+  const scope: RunTemplateScope = me?.sandbox ? "sandbox" : "live";
+  setRunTemplatesScope(scope);
+  const queryClient = useQueryClient();
+  const queryKey = runTemplatesQueryKey(scope);
+  const query = useQuery({
+    queryKey,
+    queryFn: () => reconcileRunTemplates(),
+    initialData: localRunTemplates,
     staleTime: 30_000,
   });
-  return { templates: data ?? [], isLoaded: isFetched };
+  useEffect(() => startRunTemplatesRepository(() => {
+    queryClient.setQueryData(queryKey, localRunTemplates());
+  }), [queryClient, scope]);
+  return { templates: query.data ?? localRunTemplates(), isLoaded: query.isFetched };
 }

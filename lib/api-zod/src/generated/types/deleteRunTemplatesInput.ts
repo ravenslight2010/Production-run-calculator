@@ -5,8 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeleteRunTemplatesInputItemsItem } from './deleteRunTemplatesInputItemsItem';
 
-export interface DeleteRunTemplatesInput {
-  /** The ids of the run templates to delete */
-  ids: string[];
-}
+/**
+ * Revisioned deletion tombstones and/or legacy template ids. At least one of `items` or `ids` must be supplied.
+ */
+export type DeleteRunTemplatesInput = (unknown & {
+  /** Deletion tombstones to apply by id and revision */
+  items?: DeleteRunTemplatesInputItemsItem[];
+  /** Legacy deletion ids. The server atomically assigns a newer revision. */
+  ids?: string[];
+});

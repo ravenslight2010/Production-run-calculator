@@ -34,6 +34,41 @@ export type { MergeAlias, MergeSuggestion, DeniedMerge, MergeSuggestCategory };
 /** A merge suggestion plus its (optional) reviewer-AI verdict. */
 export type ReviewedMergeSuggestion = MergeSuggestion & { review?: ReviewVerdict };
 
+export type PendingDuplicateReview = {
+  groupKey: string;
+  category: MergeSuggestCategory;
+  brand: string | null;
+  target: string;
+  sources: string[];
+  status: "pending" | "resolved" | "ignored";
+};
+
+export type PendingDuplicateReviewList = {
+  groups: PendingDuplicateReview[];
+  count: number;
+};
+
+/** Stable identity shared by the browser and the server review ledger. */
+export function duplicateReviewGroupKey(
+  target: string,
+  sources: string[],
+  category: MergeSuggestCategory = "ingredient",
+  brand?: string,
+): string {
+  const targetKey = target.trim().toLowerCase();
+  const sourceKeys = [...new Set(
+    sources
+      .map((source) => source.trim().toLowerCase())
+      .filter((source) => source && source !== targetKey),
+  )].sort();
+  return [
+    category,
+    category === "flavor" ? brand?.trim().toLowerCase() ?? "" : "",
+    targetKey,
+    ...sourceKeys,
+  ].map((part) => encodeURIComponent(part)).join("::");
+}
+
 /**
  * Shared query-string helper: every category/brand-scoped endpoint takes an
  * optional `category` (defaults server-side to "ingredient") and, only for
@@ -134,6 +169,79 @@ export async function denyMerge(
     }),
   });
   if (!res.ok) throw new Error(`Save denied merges failed (${res.status})`);
+}
+
+export async function fetchPendingDuplicateReviews(
+  signal?: AbortSignal,
+): Promise<PendingDuplicateReviewList> {
+  const res = await fetchWithTimeout(
+    "/api/duplicate-reviews",
+    { headers: { "x-client-id": inventoryClientId() }, signal },
+    15_000,
+  );
+  if (!res.ok) throw new Error(`List duplicate reviews failed (${res.status})`);
+  const data = (await res.json()) as Partial<PendingDuplicateReviewList>;
+  return {
+    groups: Array.isArray(data.groups) ? data.groups : [],
+    count: Number.isFinite(data.count) && (data.count ?? 0) >= 0 ? Math.floor(data.count ?? 0) : 0,
+  };
+}
+
+export async function savePendingDuplicateReviews(
+  suggestions: ReviewedMergeSuggestion[],
+  category: MergeSuggestCategory = "ingredient",
+  brand?: string,
+  signal?: AbortSignal,
+): Promise<PendingDuplicateReviewList> {
+  const groups = suggestions
+    .map((suggestion) => ({
+      groupKey: duplicateReviewGroupKey(suggestion.target, suggestion.sources, category, brand),
+      category,
+      ...(category === "flavor" && brand ? { brand } : {}),
+      target: suggestion.target,
+      sources: suggestion.sources,
+      status: "pending" as const,
+    }));
+  if (groups.length === 0) return fetchPendingDuplicateReviews();
+  const res = await fetchWithTimeout(
+    "/api/duplicate-reviews",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": inventoryClientId(),
+      },
+      signal,
+      body: JSON.stringify({ groups }),
+    },
+    15_000,
+  );
+  if (!res.ok) throw new Error(`Save duplicate reviews failed (${res.status})`);
+  const data = (await res.json()) as PendingDuplicateReviewList;
+  return {
+    groups: Array.isArray(data.groups) ? data.groups : [],
+    count: Number.isFinite(data.count) && data.count >= 0 ? Math.floor(data.count) : 0,
+  };
+}
+
+export async function resolvePendingDuplicateReview(
+  groupKey: string,
+  outcome: "resolved" | "ignored",
+): Promise<PendingDuplicateReviewList> {
+  const res = await fetch("/api/duplicate-reviews/resolve", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ groupKey, outcome }),
+  });
+  if (!res.ok) throw new Error(`Resolve duplicate review failed (${res.status})`);
+  const data = (await res.json()) as PendingDuplicateReviewList;
+  return {
+    groups: Array.isArray(data.groups) ? data.groups : [],
+    count: Number.isFinite(data.count) && data.count >= 0 ? Math.floor(data.count) : 0,
+  };
 }
 
 /**

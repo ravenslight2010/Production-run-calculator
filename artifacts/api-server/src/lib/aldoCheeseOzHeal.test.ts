@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { healAldoCheeseOzInValues } from "./dataHeals";
+import { healAldoCheeseOzInValues } from "./repairs/remainingCheeseRecipeNormalizationRepairs";
 
 const MIX = "Aldo's Standard Cheese Mix";
 

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { type FormValues, type RunMeta } from "../types";
 import { fmtClock, runLabel } from "../utils";
 import { isNotifEnabled, type NotificationPrefs } from "../notificationPrefs";
+import { claimAlertReceipt } from "../alertReceipts";
+import { stableAlertId } from "../alertIds";
+import { computeAutoTrackElapsedMs } from "@workspace/live-calc";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -65,6 +68,8 @@ interface NotifParams {
    * mid-run doesn't retroactively fire alerts for already-passed milestones.
    */
   prefs: NotificationPrefs | undefined;
+  /** Server sync day used in the opaque alert ID (not wall-clock date). */
+  alertDate?: string;
 }
 
 interface NotifResult {
@@ -168,9 +173,17 @@ export function requestBrowserNotificationPermission(onGranted?: () => void): vo
  * push notifications outside of the centralised useNotifications hook.
  */
 export function showAppNotification(title: string, options: NotificationOptions): void {
-  const { state, api } = getBrowserNotificationCapability();
-  if (state !== "granted" || !api) return;
+  const alertId = options.data && typeof options.data === "object"
+    ? (options.data as { alertId?: unknown }).alertId
+    : undefined;
+  // A server push may have arrived during reconnection. Do not duplicate its OS
+  // notice with a local escalation; in-app cards intentionally remain unaffected.
   void (async () => {
+    const { state, api } = getBrowserNotificationCapability();
+    if (state !== "granted" || !api) return;
+    if (typeof alertId === "string") {
+      if (!await claimAlertReceipt(alertId)) return;
+    }
     try {
       const reg = await window.navigator.serviceWorker?.getRegistration();
       if (reg?.showNotification) {
@@ -186,6 +199,19 @@ export function showAppNotification(title: string, options: NotificationOptions)
       /* notifications unsupported in this context — ignore */
     }
   })();
+}
+
+function showStableRunAlert(
+  title: string,
+  options: NotificationOptions,
+  runId: string,
+  generation: number,
+  suffix: string,
+  alertDate?: string,
+): void {
+  void stableAlertId(runId, generation, suffix, alertDate).then((alertId) =>
+    showAppNotification(title, { ...options, data: { ...(options.data as object | undefined), alertId } }),
+  );
 }
 
 /**
@@ -215,6 +241,7 @@ export function useNotifications({
   isCrust,
   nextRunLabels,
   prefs,
+  alertDate,
 }: NotifParams): NotifResult {
   // Read preferences through a ref so toggling a switch never re-runs the
   // milestone effects (which could otherwise re-evaluate old thresholds);
@@ -309,11 +336,11 @@ export function useNotifications({
         const freezerNote = freezerMin > 0
           ? ` Freeze tunnel keeps emptying until ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}.`
           : "";
-        showAppNotification("⏰ 15 minutes left", {
+        showStableRunAlert("⏰ 15 minutes left", {
           body: `${runLabel(currentRun)} — wrap up and prepare for end of run.${freezerNote}`,
           icon: "/icons/icon-192.png",
           tag: `run-end-${runId}`,
-        });
+        }, runId, currentRun.startedAt!, "fifteen-min", alertDate);
       };
       requestBrowserNotificationPermission(fire);
     }
@@ -347,19 +374,19 @@ export function useNotifications({
       latch.current.add(runId);
       navigator.vibrate?.([200, 100, 200]);
       if (stage === "frontline") {
-        showAppNotification("🚚 Warehouse: stage FRONTLINE for next run", {
+        showStableRunAlert("🚚 Warehouse: stage FRONTLINE for next run", {
           body: shortRun
             ? `${runLabel(currentRun)} is under 2 skids total — stage the next 2+ runs now.${nextTxt}`
             : `${runLabel(currentRun)} — 2 skids left at the press (freezer counted done). Stage frontline.${nextTxt}`,
           icon: "/icons/icon-192.png",
           tag: `switchover-frontline-${runId}`,
-        });
+        }, runId, currentRun.startedAt!, "warehouse:frontline", alertDate);
       } else {
-        showAppNotification("🚚 Warehouse: stage PACKAGING for next run", {
+        showStableRunAlert("🚚 Warehouse: stage PACKAGING for next run", {
           body: `${runLabel(currentRun)} — 1 skid left at the press (freezer counted done). Stage packaging.${nextTxt}`,
           icon: "/icons/icon-192.png",
           tag: `switchover-packaging-${runId}`,
-        });
+        }, runId, currentRun.startedAt!, "warehouse:packaging", alertDate);
       }
     };
     const dueStages: Array<"frontline" | "packaging"> = [];
@@ -411,7 +438,14 @@ export function useNotifications({
       setShowBatchDue(false);
       return;
     }
-    const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
+    // Keep the local fallback on the exact same pause/stoppage-aware clock as
+    // the canonical server worker so both transports produce the same batch ID.
+    const elapsed = computeAutoTrackElapsedMs({
+      startedAt: currentRun.startedAt,
+      pausedAt: currentRun.pausedAt,
+      nowMs: nowTime.getTime(),
+      stoppages: currentRun.stoppages,
+    }) / 1000;
     const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
     if (batchNum < 1) return;
     // Early exit: same batch window as the previous tick — nothing to evaluate.
@@ -433,11 +467,11 @@ export function useNotifications({
     navigator.vibrate?.([100, 50, 100]);
     const notification = getBrowserNotificationCapability();
     if (notification.state === "granted") {
-      showAppNotification("🍕 Start next dough batch", {
+      showStableRunAlert("🍕 Start next dough batch", {
         body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
         icon: "/icons/icon-192.png",
         tag: `batch-${currentRun.id}-${batchNum}`,
-      });
+      }, currentRun.id, currentRun.startedAt, `batch:${batchNum}`, alertDate);
     } else if (notification.state === "default") {
       requestBrowserNotificationPermission();
     }
@@ -478,11 +512,11 @@ export function useNotifications({
     navigator.vibrate?.([300, 100, 300, 100, 300]);
     if (!shouldEscalateToBrowser()) return;
     if (getBrowserNotificationCapability().state === "granted") {
-      showAppNotification("✅ Run time complete", {
+      showStableRunAlert("✅ Run time complete", {
         body: `${runLabel(currentRun)} — time's up, end the run.`,
         icon: "/icons/icon-192.png",
         tag: `run-complete-${runId}`,
-      });
+      }, runId, currentRun.startedAt, "run-complete", alertDate);
     }
   }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.adjustedTimeSec, calc.ppm]);
 
@@ -507,11 +541,11 @@ export function useNotifications({
     navigator.vibrate?.([200, 100, 200]);
     if (!shouldEscalateToBrowser()) return;
     if (getBrowserNotificationCapability().state === "granted") {
-      showAppNotification("❄️ Freeze tunnel empty", {
+      showStableRunAlert("❄️ Freeze tunnel empty", {
         body: `${runLabel(currentRun)} — Freeze tunnel is clear, ready for next run.`,
         icon: "/icons/icon-192.png",
         tag: `freezer-done-${runId}`,
-      });
+      }, runId, currentRun.startedAt ?? currentRun.endedAt, "freezer-empty", alertDate);
     }
   }, [runStatus, currentRun?.id, currentRun?.endedAt, v.freezerTime, nowTime]);
 

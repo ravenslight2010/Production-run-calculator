@@ -6,7 +6,6 @@ import {
   UpdateRunSuggestionBody,
   FollowUpRunSuggestionBody,
 } from "@workspace/api-zod";
-import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -15,9 +14,9 @@ import { currentScope } from "../lib/requestScope";
 // Run Insights: pattern-based setting suggestions generated after runs
 // complete. The web client's DETERMINISTIC analysis decides whether a
 // suggestion exists (≥5% deviation across ≥2 recent runs of the same
-// product+die); this route only stores it, attaches a best-effort AI
-// narration, and records the manager's accept/dismiss decision. Nothing is
-// ever auto-applied server-side — Accept is executed by the manager's client.
+// product+die); this route stores the measured facts and records the manager's
+// accept/dismiss decision. Nothing is ever auto-applied server-side — Accept is
+// executed by the manager's client.
 //
 // One row per pattern (`${type}::${brand}::${flavor}::${die}`, case-folded):
 // - pending rows are refreshed in place as new runs come in;
@@ -41,9 +40,6 @@ const observeRateStore =
 // A dismissed pattern reopens only when the observed value drifted at least
 // this much (relative to configured) beyond what the manager dismissed.
 const REOPEN_DRIFT = 0.02;
-// Narration is regenerated only when observed moved by more than this.
-const RENARRATE_DRIFT = 0.02;
-
 function patternId(type: string, brand: string, flavor: string, dieType: string): string {
   return `${type}::${brand.trim().toLowerCase()}::${flavor.trim().toLowerCase()}::${dieType
     .trim()
@@ -76,63 +72,6 @@ async function listAll(): Promise<RunSuggestionRow[]> {
     .from(runSuggestionsTable)
     .where(eq(runSuggestionsTable.scope, currentScope()));
   return rows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-}
-
-// Deterministic fallback explanation, always available even when the AI
-// provider is down/rate-limited. The statsLine is client-built from real math.
-function fallbackNarrative(input: {
-  type: SuggestionType;
-  statsLine: string;
-  configuredValue: number;
-  recommendedValue: number;
-  unit: string;
-}): string {
-  const settingName = input.type === "speed-target" ? "cycle speed" : "tunnel time";
-  return `${input.statsLine} Consider changing the ${settingName} from ${input.configuredValue} to ${input.recommendedValue} ${input.unit}.`;
-}
-
-// Best-effort AI narration. Advisory only — failures fall back to the
-// deterministic text and NEVER block storing the suggestion.
-async function narrate(
-  log: Request["log"],
-  input: {
-    type: SuggestionType;
-    brand: string;
-    flavor: string;
-    dieType: string;
-    statsLine: string;
-    observedValue: number;
-    configuredValue: number;
-    recommendedValue: number;
-    unit: string;
-    runCount: number;
-  },
-): Promise<string> {
-  const fallback = fallbackNarrative(input);
-  try {
-    const settingName =
-      input.type === "speed-target" ? "line speed target (cycle speed)" : "tunnel time";
-    const response = await openai.chat.completions.create({
-      model: pickModel("cheap"),
-      max_completion_tokens: 300,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You write one short, plain-English note (2 sentences max) explaining a production-line setting suggestion to a factory manager. Do not invent numbers — use only the numbers given. No greetings, no markdown.",
-        },
-        {
-          role: "user",
-          content: `Product: ${input.brand} ${input.flavor}${input.dieType ? ` (die ${input.dieType})` : ""}. Setting: ${settingName}. ${input.statsLine} Configured: ${input.configuredValue} ${input.unit}; observed: ${input.observedValue} ${input.unit} over ${input.runCount} runs; recommended: ${input.recommendedValue} ${input.unit}. Explain why the configured value may need adjusting.`,
-        },
-      ],
-    });
-    const text = response.choices[0]?.message?.content?.trim() ?? "";
-    return text.length > 0 && text.length < 2000 ? text : fallback;
-  } catch (err) {
-    log.warn({ err }, "run-suggestion narration failed; using deterministic fallback");
-    return fallback;
-  }
 }
 
 router.get("/run-suggestions", async (req: Request, res: Response) => {
@@ -197,25 +136,6 @@ router.post(
         }
       }
 
-      const valueMoved =
-        !existing ||
-        Math.abs(existing.observedValue - b.observedValue) / b.configuredValue > RENARRATE_DRIFT ||
-        existing.status !== "pending";
-      const narrative = valueMoved
-        ? await narrate(req.log, {
-            type,
-            brand,
-            flavor,
-            dieType,
-            statsLine,
-            observedValue: b.observedValue,
-            configuredValue: b.configuredValue,
-            recommendedValue: b.recommendedValue,
-            unit: b.unit,
-            runCount,
-          })
-        : existing.narrative;
-
       const values = {
         id,
         scope,
@@ -229,7 +149,9 @@ router.post(
         unit: b.unit.slice(0, 50),
         runCount,
         statsLine,
-        narrative,
+        // Keep the legacy field in the response/schema for older clients, but
+        // stop writing model-generated prose. The UI uses statsLine.
+        narrative: "",
         status: "pending",
         dismissedObservedValue: null,
         followUpNote: "",

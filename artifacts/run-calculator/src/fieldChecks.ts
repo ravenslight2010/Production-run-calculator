@@ -12,10 +12,15 @@ export const FIELD_CHECK_CATALOG = [
   { name: "cross-device-convergence", label: "Cross-device convergence", observedBy: "browser" as const },
   { name: "reload-persistence", label: "Reload persistence", observedBy: "browser" as const },
   { name: "offline-recovery", label: "Offline recovery", observedBy: "browser" as const },
+  { name: "offline-queue-replay", label: "Offline queue replay", observedBy: "browser" as const },
   { name: "pwa-update-handoff", label: "PWA update handoff", observedBy: "browser" as const },
   { name: "performance", label: "Performance", observedBy: "browser" as const },
   { name: "touch-accuracy", label: "Touch accuracy", observedBy: "hardware" as const },
   { name: "keyboard-clearance", label: "Keyboard clearance", observedBy: "hardware" as const },
+  { name: "orientation-layout", label: "Orientation layout", observedBy: "hardware" as const },
+  { name: "safe-area-clearance", label: "Safe-area and fixed-navigation clearance", observedBy: "hardware" as const },
+  { name: "camera-file-selection", label: "Camera and file selection", observedBy: "hardware" as const },
+  { name: "update-handoff", label: "Update handoff", observedBy: "hardware" as const },
   { name: "process-kill-recovery", label: "OS process-kill recovery", observedBy: "hardware" as const },
 ] as const;
 

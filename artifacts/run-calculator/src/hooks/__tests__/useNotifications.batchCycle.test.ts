@@ -30,6 +30,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
+// Receipt ownership is covered separately. Keep these hook tests isolated from
+// the persistent IndexedDB claims created by earlier notification cases.
+vi.mock("../../alertReceipts", () => ({
+  claimAlertReceipt: vi.fn().mockResolvedValue(true),
+}));
+
 // ── Sanity: confirm jsdom really omits Notification ──────────────────────────
 // If this fails the whole test file's premise is wrong.
 if (typeof window !== "undefined" && "Notification" in window) {
@@ -255,7 +261,7 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
     // First boundary (batchNum=3) — fires.
     await act(async () => { await Promise.resolve(); });
     expect(vibrateMock).toHaveBeenCalledOnce();
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
 
     vibrateMock.mockClear();
     notifCtor.mockClear();
@@ -269,7 +275,7 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
 
     // New batch boundary — fires again.
     expect(vibrateMock).toHaveBeenCalledWith([100, 50, 100]);
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     // Title matches the batch-cycle notification.
     expect(notifCtor.mock.calls[0][0]).toBe("🍕 Start next dough batch");
   });
@@ -470,7 +476,7 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
     // Flush the async IIFE that calls the Notification constructor.
     await act(async () => { await Promise.resolve(); });
 
-    expect(notifCtor).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notifCtor).toHaveBeenCalledOnce());
     expect(notifCtor.mock.calls[0][0]).toBe("🍕 Start next dough batch");
     const opts = notifCtor.mock.calls[0][1] as NotificationOptions;
     // Body should mention the batch number (batchNum=3 → "batch 4 is due now").

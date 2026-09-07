@@ -108,7 +108,7 @@ export function applyRecipeSuggestion(
 // The web (artifacts/run-calculator/src/aiRecipe.ts) and mobile
 // (artifacts/run-calculator-mobile/context/aiRecipe.ts) apps both shape the
 // current run's recipes, the known ingredient pool, and run context into the
-// POST /ai/recipe-assistant wire payload. That shaping is pure and must stay
+// Shared recipe suggestion payload. This shaping is pure and must stay
 // byte-for-byte identical across platforms (replit.md parity), so it lives here
 // — the same single-source-of-truth treatment Apply/Undo already gets above.
 // Each app keeps only its own fetch glue (cookie session vs. bearer token).

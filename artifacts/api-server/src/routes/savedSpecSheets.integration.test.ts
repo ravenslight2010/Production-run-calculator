@@ -2,7 +2,8 @@
 //
 // A "saved spec sheet" is a snapshot of an imported spec sheet, kept so it can
 // later be cross-referenced against the current recipe library (see
-// /ai/spec-reconcile). These tests guard the route contract against a real
+// /operations-insights/spec-reconciliation). These tests guard the route
+// contract against a real
 // Postgres database:
 //   - GET lists snapshots newest-first;
 //   - POST inserts a snapshot and prunes to the two most recent (MAX_SAVED=2);
@@ -29,11 +30,15 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
+import { signToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let seedRoles: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -67,11 +72,15 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
-  const requestScopeMod = await import("../lib/requestScope");
   const routerMod = await import("./savedSpecSheets");
   db = dbMod.db;
   pool = dbMod.pool;
   savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
+  const { requireAuth } = await import("../middlewares/requireAuth");
+  const { requireCapability } = await import("../middlewares/requireCapability");
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -80,14 +89,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  // Run each request inside the scope named by the x-test-scope header so
-  // currentScope() inside the router resolves to the caller's scope.
-  app.use((req, _res, next) => {
-    const raw = req.header("x-test-scope");
-    const scope = raw === "sandbox" ? "sandbox" : "live";
-    requestScopeMod.runWithScope(scope, () => next());
-  });
-  app.use("/api", routerMod.default);
+  app.use("/api", requireAuth, requireCapability("manage-profiles"), routerMod.default);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -109,7 +111,16 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${savedSpecSheetsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await seedRoles();
+  await db.insert(usersTable).values([
+    { id: "profile-live", username: "profile-live", passwordHash: "x" },
+    { id: "profile-sandbox", username: "profile-sandbox", passwordHash: "x", sandbox: true },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: "profile-live", role: "manager" },
+    { userId: "profile-sandbox", role: "manager" },
+  ]);
 });
 
 type ApiSpecSheet = {
@@ -123,7 +134,10 @@ type ApiSpecSheet = {
 type TestScope = "live" | "sandbox";
 
 function headers(scope: TestScope): Record<string, string> {
-  return { "Content-Type": "application/json", "x-test-scope": scope };
+  return {
+    "Content-Type": "application/json",
+    authorization: `Bearer ${signToken(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
+  };
 }
 
 async function list(scope: TestScope = "live"): Promise<ApiSpecSheet[]> {
@@ -195,12 +209,80 @@ describe("saved-spec-sheets routes", () => {
     expect(sheets[0]?.data).toEqual(rich);
   });
 
+  it("round-trips raw dough and sauce rows from a merged multi-file snapshot unchanged", async () => {
+    // The client saves the canonical merge of all parsed files/chunks, rather
+    // than the intermediate chunk array. Keep both recipes in one payload and
+    // use the compound source key a multi-file import sends so this exercises
+    // the real JSONB persistence boundary without asking the API to reinterpret
+    // recipe row values.
+    const mergedMultiFileSnapshot = {
+      profiles: [
+        {
+          brand: "Raw Values",
+          flavor: "API Round Trip",
+          doughName: "Large Dough",
+          sauceName: "Large Sauce",
+          applicators: [],
+          pepperonis: [],
+        },
+      ],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Large Dough",
+          rows: [
+            { ingredient: "Flour", lbs: 500 },
+            { ingredient: "Water", lbs: 125.25 },
+          ],
+        },
+        {
+          kind: "sauce",
+          name: "Large Sauce",
+          rows: [
+            { ingredient: "Tomato", lbs: 32 },
+            { ingredient: "Water", lbs: 8.5 },
+          ],
+        },
+      ],
+      note: "Merged from dough.xlsx and sauce.xlsx",
+    };
+
+    await save(
+      "merged multi-file snapshot",
+      mergedMultiFileSnapshot,
+      "live",
+      "dough|sauce",
+    );
+
+    // Fetch separately from the POST response: the regression is specifically
+    // that the persisted saved snapshot remains byte-for-byte equivalent in
+    // shape and numeric values when the client reloads it.
+    const reloaded = await list();
+    expect(reloaded).toHaveLength(1);
+    expect(reloaded[0]?.sourceKey).toBe("dough|sauce");
+    expect(reloaded[0]?.data).toEqual(mergedMultiFileSnapshot);
+
+    const recipes = (reloaded[0]?.data as typeof mergedMultiFileSnapshot).recipes;
+    expect(recipes.find((recipe) => recipe.kind === "dough")?.rows[0]?.lbs).toBe(500);
+    expect(recipes.find((recipe) => recipe.kind === "sauce")?.rows[0]?.lbs).toBe(32);
+  });
+
   it("keeps only the two most recent snapshots (newest first), pruning older ones", async () => {
     await save("first", specData("a"));
     await save("second", specData("b"));
     await save("third", specData("c"));
     const sheets = await list();
     expect(sheets.map((s) => s.label)).toEqual(["third", "second"]);
+  });
+
+  it("keeps the retention bound under concurrent saves", async () => {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        save(`concurrent-${index}`, specData(String(index)), "live", "concurrent-sheet"),
+      ),
+    );
+    const retained = (await list()).filter((sheet) => sheet.sourceKey === "concurrent-sheet");
+    expect(retained).toHaveLength(2);
   });
 
   it("keeps the two most recent versions PER distinct sourceKey", async () => {

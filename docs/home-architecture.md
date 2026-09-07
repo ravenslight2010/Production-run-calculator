@@ -18,10 +18,22 @@ state.
   Components that do not call `useLiveRun` must not subscribe to the per-second
   clock. `calcRef` is the intentional non-subscribing bridge for Home-level
   coordination.
-- **Persistence and sync:** Home owns the sync protocol and its fences
-  (`formHandoffRef`, `isSyncApplyingRef`, foreground barrier, and push
-  generation). `storage.ts` owns local persistence and pure merge/guard
-  helpers; it does not own React state or navigation.
+- **Form lifecycle:** `useHomeFormIdentityFences` and
+  `useHomeFormLifecycle` own the focused settled-form identity fence and the
+  coupled current-run heal/autosave effects. Home supplies the canonical day,
+  form instance, persistence commands, and sync scheduler; the hooks do not
+  own a second copy of any of them.
+- **Deferred imports:** `useHomeImportDialogs` owns the seven deferred import
+  dialog state containers and file-input refs. `closeTopmostImportDialog`
+  preserves their local back-button priority. Home retains every
+  `DeferredSurface` conditional and loader function, so import chunks remain
+  lazy and parsing/commit commands remain in the composition root.
+- **Persistence and sync:** Home is the composition root and canonical client
+  owner of live `DayState`; it does not define record formats or transition
+  policy. Browser adapters own bounded records, the synchronization state
+  machine owns connection/push/ack/wake/reset/generation ordering, and pure
+  domain policies choose merge outcomes. `storage.ts` remains a compatibility
+  facade during incremental adoption. See `docs/storage-sync-ownership.md`.
 - **Station composition:** `HomeStationTabs` owns the controlled tab-container
   contract. Station panels own station-specific rendering and local UI state,
   consuming `HomeTabCtx` and `LiveRunContext` rather than lifecycle effects.
@@ -32,7 +44,8 @@ state.
    shell component just to read a value; use a snapshot bridge or a focused
    station component.
 2. Do not make autosave infer identity from a render-local `currentRun`.
-   Preserve the settled-form/run-id guard and the handoff fence.
+   Preserve the settled-form/run-id guard and the handoff fence in
+   `useHomeFormLifecycle`.
 3. Sync receive, foreground wake reconciliation, and daily reset are lifecycle
    transitions. Keep their existing ordering and refs together when extracting
    adapters; a successful HTTP response is not by itself proof that state was

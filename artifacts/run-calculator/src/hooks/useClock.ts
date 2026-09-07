@@ -16,10 +16,11 @@ export const PENDING_CLOCK_MS = 10_000;
  * - Slows to PENDING_CLOCK_MS when no run is active.
  * - Pauses entirely when the tab is hidden to avoid waking the device.
  */
-export function useClock(runStatus: RunStatus): Date {
+export function useClock(runStatus: RunStatus, wakeAcknowledgement = 0): Date {
   const [nowTime, setNowTime] = useState(() => new Date());
 
   useEffect(() => {
+    if (wakeAcknowledgement > 0) setNowTime(new Date());
     const delay = (runStatus === "running" || runStatus === "paused") ? 1_000 : PENDING_CLOCK_MS;
     let id: ReturnType<typeof setInterval> | null = null;
 
@@ -56,7 +57,7 @@ export function useClock(runStatus: RunStatus): Date {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };
-  }, [runStatus]);
+  }, [runStatus, wakeAcknowledgement]);
 
   return nowTime;
 }

@@ -265,7 +265,7 @@ function AuthForm({ mode }: { mode: Mode }) {
   }
 
   return (
-    <div
+    <main
       data-testid="auth-screen"
       className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground"
       style={{
@@ -445,7 +445,7 @@ function AuthForm({ mode }: { mode: Mode }) {
           </div>
         </form>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -515,7 +515,7 @@ function ForgotPasswordForm() {
   }
 
   return (
-    <div className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground px-6 py-12">
+    <main className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground px-6 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <img
@@ -660,7 +660,7 @@ function ForgotPasswordForm() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 

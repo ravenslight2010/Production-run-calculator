@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   signInRequest: vi.fn(),
   setUnauthorizedHandler: vi.fn(),
   setAuthRequestEpoch: vi.fn(),
+  resetMasterDataTransportCache: vi.fn(),
 }));
 
 vi.mock("./inventoryShared", async (importOriginal) => {
@@ -27,6 +28,14 @@ vi.mock("./inventoryShared", async (importOriginal) => {
     signInRequest: mocks.signInRequest,
     setUnauthorizedHandler: mocks.setUnauthorizedHandler,
     setAuthRequestEpoch: mocks.setAuthRequestEpoch,
+  };
+});
+
+vi.mock("./masterData", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./masterData")>();
+  return {
+    ...actual,
+    resetMasterDataTransportCache: mocks.resetMasterDataTransportCache,
   };
 });
 
@@ -99,6 +108,7 @@ afterEach(() => {
   mocks.signInRequest.mockReset();
   mocks.setUnauthorizedHandler.mockReset();
   mocks.setAuthRequestEpoch.mockReset();
+  mocks.resetMasterDataTransportCache.mockReset();
 });
 
 describe("AuthProvider session transition", () => {
@@ -113,6 +123,7 @@ describe("AuthProvider session transition", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await screen.findByText("manager-1");
+    expect(mocks.resetMasterDataTransportCache).toHaveBeenCalledTimes(1);
 
     const unauthorizedHandler = mocks.setUnauthorizedHandler.mock.calls.at(-1)?.[0] as
       | ((epoch: number) => void)

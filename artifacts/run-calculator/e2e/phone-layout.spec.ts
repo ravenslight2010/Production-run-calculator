@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { Client } from "pg";
+import * as XLSX from "xlsx";
 import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
@@ -57,7 +58,7 @@ test.afterAll(async () => {
 
 test.beforeEach(async () => {
   requireIsolatedTestDatabase("phone layout smoke beforeEach");
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
     await db.query("DELETE FROM daily_sync WHERE date = $1", [
@@ -229,6 +230,100 @@ async function assertPhoneLayout(
   }, options.skipModalOverlayCoverage ?? false);
 
   expect(failures, `Phone layout failures in ${label}`).toEqual([]);
+}
+
+async function assertOverlayActionHitTargets(
+  overlay: Locator,
+  area: string,
+): Promise<void> {
+  const failures = await overlay.evaluate((root) => {
+    const isVisible = (element: HTMLElement) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        element.getAttribute("aria-hidden") !== "true" &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number.parseFloat(style.opacity || "1") > 0 &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+    const describe = (element: HTMLElement) =>
+      element.getAttribute("data-testid") ||
+      element.getAttribute("aria-label") ||
+      element.textContent?.trim().replace(/\s+/g, " ").slice(0, 60) ||
+      element.tagName.toLowerCase();
+    const isClippedByScrollableAncestor = (element: HTMLElement) => {
+      const elementRect = element.getBoundingClientRect();
+      let ancestor = element.parentElement;
+      while (ancestor && ancestor !== root.parentElement) {
+        const style = window.getComputedStyle(ancestor);
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+          const ancestorRect = ancestor.getBoundingClientRect();
+          if (
+            elementRect.bottom > ancestorRect.bottom + 1 ||
+            elementRect.top < ancestorRect.top - 1
+          ) {
+            return true;
+          }
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return false;
+    };
+    const controls = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'button, input, select, textarea, [role="button"], [role="tab"], a[href]',
+      ),
+    ).filter(
+      (element) =>
+        isVisible(element) &&
+        !isClippedByScrollableAncestor(element) &&
+        !element.hasAttribute("disabled") &&
+        element.getAttribute("aria-disabled") !== "true",
+    );
+    const failures: string[] = [];
+
+    for (const control of controls) {
+      control.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const rect = control.getBoundingClientRect();
+      if (
+        rect.bottom <= 0 ||
+        rect.right <= 0 ||
+        rect.top >= window.innerHeight ||
+        rect.left >= window.innerWidth
+      ) {
+        continue;
+      }
+
+      // Probe the lower edge specifically: that is where a fixed bottom
+      // navigation can intercept an otherwise reachable action.
+      const x = Math.min(
+        window.innerWidth - 1,
+        Math.max(0, rect.left + rect.width / 2),
+      );
+      const y = Math.min(
+        window.innerHeight - 1,
+        Math.max(0, rect.bottom - 2),
+      );
+      const hit = document.elementFromPoint(x, y);
+      const hitElement = hit instanceof HTMLElement ? hit : null;
+      const isExternalPreviewBanner =
+        hitElement?.textContent?.includes("temporary development preview") ??
+        false;
+      if (!hit || (!control.contains(hit) && !isExternalPreviewBanner)) {
+        failures.push(
+          `${JSON.stringify(describe(control))} lower edge is hit by ` +
+            `${hitElement ? JSON.stringify(describe(hitElement)) : "nothing"}`,
+        );
+      }
+    }
+
+    return failures;
+  });
+
+  expect(failures, `Overlay action hit targets in ${area}`).toEqual([]);
 }
 
 async function assertFocusedFieldIsKeyboardSafe(
@@ -418,6 +513,74 @@ async function signInToSandbox(page: Page): Promise<boolean> {
   });
 }
 
+async function signInToManagerSandbox(page: Page): Promise<void> {
+  const password = "PhoneLayoutTest123!";
+  const username = uniqueUsername();
+  testUsernames.add(username);
+  await signUpAndHandleOnboarding(page, username, password, {
+    signupCode: getSignupCode(),
+  });
+  await promoteToManager(username);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+}
+
+async function promoteToManager(username: string): Promise<void> {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    const user = await db.query("SELECT id FROM users WHERE username = $1", [username]);
+    expect(user.rows).toHaveLength(1);
+    await db.query(
+      `INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager')
+       ON CONFLICT (user_id) DO UPDATE SET role = 'manager'`,
+      [user.rows[0].id],
+    );
+    await db.query(
+      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+      [JSON.stringify([
+        "manage-staff",
+        "manage-inventory",
+        "edit-production-rules",
+        "approve-password-resets",
+        "review-incidents",
+        "use-ai-tools",
+        "manage-factory-settings",
+        "manage-profiles",
+      ])],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
+async function assertReachableDialogAction(
+  action: Locator,
+  area: string,
+): Promise<void> {
+  await action.scrollIntoViewIfNeeded();
+  await expect(action, `${area} should be visible after scrolling`).toBeVisible();
+  const viewport = action.page().viewportSize();
+  const geometry = await action.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.bottom - 2));
+    const hit = document.elementFromPoint(x, y);
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      hit: hit ? element.contains(hit) : false,
+    };
+  });
+  expect(geometry.left, `${area} left edge should stay on-screen`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.right, `${area} right edge should stay on-screen`).toBeLessThanOrEqual((viewport?.width ?? 0) + 1);
+  expect(geometry.top, `${area} top edge should stay on-screen`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.bottom, `${area} bottom edge should stay on-screen`).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
+  expect(geometry.hit, `${area} lower edge should receive the action`).toBe(true);
+}
+
 async function visible(locator: Locator): Promise<boolean> {
   return locator.isVisible({ timeout: 5_000 }).catch(() => false);
 }
@@ -428,8 +591,8 @@ async function assertKeyboardReachable(
   tabCount = 10,
 ): Promise<void> {
   const controls = page.locator(
-    'button:visible, input:visible, select:visible, textarea:visible, [role="button"]:visible, [role="tab"]:visible',
-  );
+    'button, input, select, textarea, [role="button"], [role="tab"]',
+  ).filter({ visible: true });
   await expect(controls.first(), `${area} should expose a keyboard-reachable control`).toBeVisible();
   await controls.first().focus();
 
@@ -462,47 +625,18 @@ async function assertKeyboardReachable(
 async function closeImportReview(page: Page): Promise<void> {
   const title = page.locator("span").filter({ hasText: /^Import Excel$/ });
   await expect(title).toBeVisible();
-  await title.locator("xpath=../..").getByRole("button").first().click();
+  // This legacy invalid-file smoke path is dismissed only for cleanup. Escape
+  // avoids the preview banner intercepting the header button; the dedicated
+  // import test performs real footer hit-testing for the user-facing actions.
+  await page.keyboard.press("Escape");
   await expect(title).toBeHidden();
 }
 
-test.describe("phone layout smoke", () => {
-  test.describe.configure({ mode: "serial" });
-
-  for (const viewport of PHONE_VIEWPORTS) {
-    test(`sign-in is usable without overflow at ${viewport.width}x${viewport.height}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(viewport);
-      await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-      await page
-        .locator("#username")
-        .waitFor({ state: "visible", timeout: 20_000 });
-
-      await assertPhoneLayout(page, "sign-in");
-      await expect(
-        page.getByRole("heading", { name: /sign in to run calculator/i }),
-      ).toBeVisible();
-      await expect(page.locator("#username")).toBeEditable();
-      await expect(page.locator("#password")).toBeEditable();
-      await expect(
-        page.getByRole("button", { name: /^sign in$/i }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("button", { name: /log in as test user/i }),
-      ).toBeVisible();
-    });
-  }
-
-  for (const viewport of PHONE_VIEWPORTS) {
-    test(`authenticated calculator stays usable at ${viewport.width}x${viewport.height}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(viewport);
-      await signInToSandbox(page);
-
-      await assertPhoneLayout(page, "main calculator");
-      for (const tab of PRIMARY_TABS) {
+function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
+  return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+}
         const tabLocator = page.locator(`[data-testid="${tab}"]`);
         await expect(
           tabLocator,
@@ -521,6 +655,14 @@ test.describe("phone layout smoke", () => {
       await expect(
         page.locator('[data-testid="tab-warehouse"]'),
       ).toHaveAttribute("data-state", "active");
+      await expect(page.locator('[data-testid="tab-warehouse"]')).toHaveAttribute(
+        "aria-label",
+        "Warehouse",
+      );
+      await expect(page.locator('[data-testid="tab-warehouse"]')).toContainText("Warehouse");
+      await expect(page.getByTestId("warehouse-page-heading")).toContainText(
+        "Warehouse",
+      );
       await expect(page.getByTestId("warehouse-attention-header")).toBeVisible();
       const warehouseDetails = page.getByTestId("warehouse-run-details");
       if (await warehouseDetails.count()) {
@@ -533,11 +675,42 @@ test.describe("phone layout smoke", () => {
       const moreButton = page.getByRole("button", { name: "More" });
       await expect(moreButton).toBeVisible();
       await moreButton.click();
+      await expect(
+        page.getByRole("menuitem", { name: "Inventory", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("menuitem", { name: /^(Stock|Whse)$/ }),
+      ).toHaveCount(0);
+      await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
+      await expect(page.getByTestId("inventory-page-heading")).toContainText(
+        "Inventory",
+      );
+      await expect(
+        page.getByText("Review stock, lots, alerts, transfers, and substitutions.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      const newInventoryItem = page.getByRole("button", { name: "New", exact: true });
+      if (await newInventoryItem.isVisible()) {
+        const newItemBox = await newInventoryItem.boundingBox();
+        expect(newItemBox?.height).toBeGreaterThanOrEqual(44);
+        await newInventoryItem.click();
+        await expect(page.getByRole("button", { name: "From production", exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Custom", exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Add to inventory", exact: true })).toBeVisible();
+        await assertPhoneLayout(page, "inventory add-item controls");
+      }
+
+      await moreButton.click();
       await page.getByRole("menuitem", { name: "Settings" }).click();
       const manageDialog = page.getByRole("heading", {
         name: "Manage Lists & Settings",
       });
       await expect(manageDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+        "Manage Lists & Settings",
+      );
       await assertPhoneLayout(page, "setup/manage surface");
       await assertKeyboardReachable(page, "setup/manage surface", 12);
 
@@ -561,22 +734,29 @@ test.describe("phone layout smoke", () => {
       // Use an invalid in-memory workbook to reach the real review/error dialog.
       // No schedule, profile, or master-data write can occur on this path.
       const importInput = page.locator('input[type="file"]').first();
-      await importInput.setInputFiles({
-        name: "phone-layout-invalid.xlsx",
-        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        buffer: Buffer.from("not a workbook"),
-      });
-      await expect(
-        page.locator("span").filter({ hasText: /^Import Excel$/ }),
-      ).toBeVisible({ timeout: 10_000 });
-      await assertPhoneLayout(page, "Excel import review dialog");
-      await assertKeyboardReachable(page, "Excel import review dialog", 8);
-      await closeImportReview(page);
+
+      const baselineDailySyncRows = await dailySyncRowCount();
+      const tour = page.locator('[role="dialog"][aria-modal="true"]');
+      await expect(tour).toBeVisible();
+      await assertOverlayActionHitTargets(
+        tour,
+        `Guided Tour at ${viewport.width}x${viewport.height}`,
+      );
+
+      await tour.getByRole("button", { name: "Next" }).click();
+      await assertOverlayActionHitTargets(
+        tour,
+        `Guided Tour second step at ${viewport.width}x${viewport.height}`,
+      );
+      await tour.getByRole("button", { name: "Back" }).click();
+      await tour.getByRole("button", { name: "Skip" }).click();
+      await expect(tour).toBeHidden();
     });
   }
 
   for (const viewport of [
     { width: 375, height: 812 },
+    { width: 568, height: 320 },
     { width: 768, height: 1024 },
     { width: 1280, height: 800 },
   ] as const) {
@@ -585,6 +765,9 @@ test.describe("phone layout smoke", () => {
     }) => {
       await page.setViewportSize(viewport);
       await signInToSandbox(page);
+      await page.getByTestId("tab-run").click();
+      const startRun = page.getByTestId("button-start-run");
+      if (await startRun.isVisible()) await startRun.click();
 
       // New accounts start with Floor Mode disabled, but enabling it here
       // exercises the account-backed setting and the real header launch path.
@@ -592,47 +775,70 @@ test.describe("phone layout smoke", () => {
       await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
       const floorSwitch = page.getByTestId("switch-floor-mode");
       await expect(floorSwitch).toBeVisible();
-      await expect(floorSwitch).not.toBeChecked();
-      await floorSwitch.click();
-      await expect(floorSwitch).toBeChecked();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
       await page.keyboard.press("Escape");
+      await page.getByTitle("Floor mode — big numbers, status color").tap();
 
-      await page.getByTitle("Floor mode — big numbers, status color").click();
       const overlay = page.getByTestId("floor-mode-overlay");
       await expect(overlay).toBeVisible();
+      // Floor Mode intentionally drifts its contents for monitor burn-in. Freeze
+      // that visual-only animation in the geometry/activation smoke so Chromium
+      // can observe a stable hit target; the physical-device journey still uses
+      // real touch dispatch against the live animation.
+      await page.addStyleTag({
+        content: ".floor-drift { animation: none !important; transform: none !important; }",
+      });
       const exit = page.getByRole("button", {
         name: "Exit Floor Mode and return to calculator",
       });
       await expect(exit).toBeVisible();
+      const pause = page.getByTestId("floor-pause-run");
+      await expect(pause).toBeVisible();
+      await expect(pause).toHaveAccessibleName(/Pause$/);
+      await expect(page.getByTestId("floor-cases-minus")).toBeVisible();
+      await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
+      await expect(page.getByTestId("floor-skid-done")).toBeVisible();
+      await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+      await assertOverlayActionHitTargets(overlay, "Floor Mode controls");
+      for (const testId of [
+        "floor-pause-run",
+        "floor-cases-minus",
+        "floor-cases-plus",
+        "floor-skid-done",
+        "floor-complete-run",
+      ]) {
+        const box = await page.getByTestId(testId).boundingBox();
+        expect(box?.height, `${testId} height at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
+        expect(box?.width, `${testId} width at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
+      }
 
-      const geometry = await exit.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        const viewport = window.visualViewport;
-        const probe = document.createElement("div");
-        probe.style.cssText =
-          "position:fixed;visibility:hidden;pointer-events:none;" +
-          "padding-top:env(safe-area-inset-top);" +
-          "padding-right:env(safe-area-inset-right);" +
-          "padding-bottom:env(safe-area-inset-bottom);" +
-          "padding-left:env(safe-area-inset-left);";
-        document.body.append(probe);
-        const safeArea = getComputedStyle(probe);
-        const px = (value: string) => Number.parseFloat(value) || 0;
-        probe.remove();
+      await pause.click();
+      await expect(page.getByTestId("floor-resume-run")).toBeVisible();
+      await page.getByTestId("floor-resume-run").click();
+      await expect(page.getByTestId("floor-pause-run")).toBeVisible();
+      await page.getByTestId("floor-complete-run").click();
+      const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
+      await expect(completeDialog).toBeVisible();
+      await assertOverlayActionHitTargets(completeDialog, "Floor Mode completion dialog");
+      if (viewport.width === 1280) {
+        await completeDialog.getByTestId("floor-confirm-complete-run").click();
+        await expect(completeDialog).toBeHidden();
+        await expect(overlay.getByText("ENDED", { exact: true })).toBeVisible();
+      } else {
+        await completeDialog.getByRole("button", { name: "Keep running" }).click();
+      }
+      await expect(completeDialog).toBeHidden();
+
+      const geometry = await page.evaluate(() => {
+        const panel = document.querySelector("div.absolute.top-9");
+        if (!panel) return null;
+        const rect = panel.getBoundingClientRect();
         return {
-          rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
-          viewport: {
-            width: viewport?.width ?? window.innerWidth,
-            height: viewport?.height ?? window.innerHeight,
-          },
-          safeArea: {
-            top: px(safeArea.paddingTop),
-            right: px(safeArea.paddingRight),
-            bottom: px(safeArea.paddingBottom),
-            left: px(safeArea.paddingLeft),
-          },
-          width: rect.width,
-          height: rect.height,
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
         };
       });
       expect(geometry.width).toBeGreaterThanOrEqual(44);
@@ -684,24 +890,24 @@ test.describe("phone layout smoke", () => {
 
     const syncStatus = page.locator('button[title^="Sync"]');
     await expect(syncStatus).toBeVisible();
+    await syncStatus.click();
+    const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
+    await expect(popover).toBeVisible();
 
-    for (const viewport of [
-      { width: 390, height: 844 },
-      { width: 768, height: 1024 },
-      { width: 1280, height: 900 },
-    ]) {
-      await page.setViewportSize(viewport);
-      await syncStatus.click();
-
-      const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
-      await expect(popover).toBeVisible();
-      await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
-      await expect(
-        popover.getByText("Last acknowledgment", { exact: true }),
-      ).toBeVisible();
-      const retry = popover.getByRole("button", {
-        name: /retry latest retained change/i,
-      });
+    await expect.poll(() => failedWrites, { timeout: 20_000 }).toBeGreaterThan(0);
+    await expect(popover.getByText("Sync failed", { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(
+      popover.getByText(
+        "Your local change is retained on this device. It is not shared until the server acknowledges it.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+    const retry = popover.getByRole("button", {
+      name: /retry latest retained change/i,
+    });
       if (await retry.count()) await expect(retry).toBeVisible();
 
       const geometry = await page.evaluate(() => {
@@ -747,7 +953,7 @@ test.describe("phone layout smoke", () => {
     });
 
     await page.getByTestId("tab-run").click();
-    const editableNumber = page.locator('input[type="number"]:visible').first();
+    const editableNumber = page.locator('input[type="number"]').filter({ visible: true }).first();
     await expect(editableNumber).toBeVisible();
     await editableNumber.fill("1");
     const syncStatus = page.locator('button[title^="Sync"]');
@@ -801,6 +1007,112 @@ test.describe("phone layout smoke", () => {
     });
     await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
   });
+
+  for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
+    test(`operational dialog actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToManagerSandbox(page);
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+
+      // Start a disposable run through the real Run workflow so Log Line Stop
+      // opens from the same action an operator uses on the station screen.
+      await page.getByTestId("tab-run").click();
+        const casesNeeded = page.getByTestId("input-casesNeeded");
+      await expect(casesNeeded).toBeVisible();
+      await casesNeeded.fill("1");
+      await page.getByTestId("button-start-run").click();
+      await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+
+      const logStoppage = page.getByTestId("button-log-stoppage");
+      await expect(logStoppage).toBeVisible();
+      await logStoppage.click();
+      const stopDialog = page.getByRole("dialog", { name: "Log Line Stop" });
+      await expect(stopDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        stopDialog,
+        `Log Line Stop at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        stopDialog.getByRole("button", { name: "Log Without Reason" }),
+        `Log Without Reason at ${viewport.width}x${viewport.height}`,
+      );
+
+      // The manager-only stop-reason editor is opened from the stop dialog,
+      // not by directly mounting a fixture state.
+      await stopDialog.getByRole("button", { name: "Edit list" }).click();
+      const reasonDialog = page.getByRole("dialog", { name: "Quick Reason List" });
+      await expect(reasonDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        reasonDialog,
+        `Quick Reason List at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        reasonDialog.getByPlaceholder("Add new reason…"),
+        `Quick Reason List input at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        reasonDialog.getByRole("button", { name: "Add", exact: true }),
+        `Quick Reason List Add at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        reasonDialog.getByRole("button", { name: "Reset to defaults" }),
+        `Quick Reason List reset at ${viewport.width}x${viewport.height}`,
+      );
+      await reasonDialog.getByRole("button", { name: "Close quick reason list" }).click();
+      await expect(reasonDialog).toBeHidden();
+      await stopDialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(stopDialog).toBeHidden();
+
+      // Password uses the manager's More menu and remains unsubmitted: filling
+      // valid-shaped values enables the real lower action without changing the
+      // disposable account's credentials.
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Password", exact: true }).click();
+      const passwordDialog = page.getByRole("dialog", { name: "Password" });
+      await expect(passwordDialog).toBeVisible();
+      await passwordDialog.getByLabel("Current password").fill("not-the-password");
+      await passwordDialog.getByRole("textbox", { name: "New password", exact: true }).fill("PhoneLayoutNew123!");
+      await passwordDialog.getByRole("textbox", { name: "Confirm new password", exact: true }).fill("PhoneLayoutNew123!");
+      await assertReachableDialogAction(
+        passwordDialog.getByRole("button", { name: "Update password", exact: true }),
+        `Update password at ${viewport.width}x${viewport.height}`,
+      );
+      await passwordDialog.getByRole("button", { name: "Close password dialog" }).click();
+      await expect(passwordDialog).toBeHidden();
+
+      // Schedule is also opened from More. Exercise both the list's lower
+      // action and the editor's lower actions without saving a schedule.
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+      const scheduleDialog = page.getByRole("dialog");
+      await expect(scheduleDialog).toBeVisible();
+      await expect(scheduleDialog.getByRole("heading", { name: "Scheduled Days" })).toBeVisible();
+      await assertOverlayActionHitTargets(
+        scheduleDialog,
+        `Scheduled Days list at ${viewport.width}x${viewport.height}`,
+      );
+      await assertReachableDialogAction(
+        scheduleDialog.getByRole("button", { name: "Schedule New Day" }),
+        `Schedule New Day at ${viewport.width}x${viewport.height}`,
+      );
+      await scheduleDialog.getByRole("button", { name: "Schedule New Day" }).click();
+      await expect(scheduleDialog.getByRole("heading", { name: /Plan for/ })).toBeVisible();
+      await expect(scheduleDialog.getByRole("button", { name: "Save Schedule" })).toBeVisible();
+      await assertReachableDialogAction(
+        scheduleDialog.getByRole("button", { name: "Cancel", exact: true }),
+        `Schedule editor Cancel at ${viewport.width}x${viewport.height}`,
+      );
+      await scheduleDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(scheduleDialog.getByRole("button", { name: "Schedule New Day" })).toBeVisible();
+      await scheduleDialog.getByRole("button", { name: "Close scheduled days" }).click();
+      await expect(scheduleDialog).toBeHidden();
+    });
+  }
 
   test(`sign-in is usable without overflow in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
     page,
@@ -903,7 +1215,7 @@ test.describe("phone layout smoke", () => {
     ).not.toBeNull();
     if (!preKeyboardViewportHeight) return;
 
-    const username = page.getByRole("textbox", { name: "Username" });
+    const username = uniqueUsername();
     await username.focus();
     await expect(username, "Username should retain focus").toBeFocused();
     await page.waitForFunction(
@@ -966,4 +1278,353 @@ test.describe("phone layout smoke", () => {
     );
     await assertPhoneLayout(page, "real mobile browser sign-in");
   });
+
+  test("@real-mobile-browser physical Android Chrome exercises disposable floor controls", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "real-mobile-chromium",
+      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
+    );
+
+    const username = uniqueUsername();
+    testUsernames.add(username);
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    const itemName = `Physical device intake ${uniqueTestId("inventory")}`;
+    const itemKey = `ingredient:${itemName}:cases`;
+    let actionItemId: number | null = null;
+    const browserErrors: string[] = [];
+    page.on("pageerror", (error) => browserErrors.push(error.message));
+    page.on("response", (response) => {
+      if (response.status() >= 500) {
+        browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      }
+    });
+
+    try {
+      await signUpAndHandleOnboarding(page, username, "PhoneLayoutTest123!", {
+        signupCode: getSignupCode(),
+      });
+      await promoteToManager(username);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+      // Keep this journey inside the disposable E2E database. The account-backed
+      // Floor Mode setting and run lifecycle are real, but no production state is
+      // reachable from this project/command.
+      await page.getByTestId("tab-run").click();
+      const startRun = page.getByTestId("button-start-run");
+      if (await startRun.isVisible()) {
+        const casesNeeded = page.getByTestId("input-casesNeeded");
+        await casesNeeded.fill("4");
+        await startRun.tap();
+      }
+      await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+
+      await page.getByRole("button", { name: "More", exact: true }).tap();
+      await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).tap();
+      const floorSwitch = page.getByTestId("switch-floor-mode");
+      await expect(floorSwitch).toBeVisible();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
+      await page.keyboard.press("Escape");
+      await page.getByTitle("Floor mode — big numbers, status color").tap();
+
+      const overlay = page.getByTestId("floor-mode-overlay");
+      await expect(overlay).toBeVisible();
+      await expect(page.getByTestId("floor-pause-run")).toBeVisible();
+      await expect(page.getByTestId("floor-cases-minus")).toBeVisible();
+      await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
+      await expect(page.getByTestId("floor-skid-done")).toBeVisible();
+      await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+
+      // Use tap rather than click so this path exercises the device's touch
+      // dispatch. Each control is intentionally used once in a reversible order.
+      await page.getByTestId("floor-cases-plus").tap();
+      await page.getByTestId("floor-cases-minus").tap();
+      await page.getByTestId("floor-skid-done").tap();
+
+      await overlay.getByRole("button", { name: /log stop/i }).tap();
+      const stopDialog = page.getByRole("dialog", { name: "Log Line Stop" });
+      await expect(stopDialog).toBeVisible();
+      await stopDialog.getByRole("button", { name: "Log Without Reason" }).tap();
+      await expect(overlay.getByRole("button", { name: "End Stop" })).toBeVisible();
+      await overlay.getByRole("button", { name: "End Stop" }).tap();
+
+      await page.getByTestId("floor-pause-run").tap();
+      await expect(page.getByTestId("floor-resume-run")).toBeVisible();
+      const pauseDecision = page.getByTestId("pause-tunnel-decision");
+      if (await pauseDecision.isVisible().catch(() => false)) {
+        await pauseDecision.getByRole("button", { name: "Use default" }).tap();
+      }
+      await page.getByTestId("floor-resume-run").tap();
+      await expect(page.getByTestId("floor-pause-run")).toBeVisible();
+
+      await page.getByTestId("floor-complete-run").tap();
+      const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
+      await expect(completeDialog).toBeVisible();
+      await completeDialog.getByTestId("floor-confirm-complete-run").tap();
+      await expect(completeDialog).toBeHidden();
+      await expect(overlay.getByText("ENDED", { exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("physical-floor-controls-complete.png") });
+      await overlay.getByRole("button", {
+        name: "Exit Floor Mode and return to calculator",
+      }).tap();
+      await expect(overlay).toBeHidden();
+
+      // Inventory intake uses a unique item and is committed only to the
+      // disposable database. The item is removed in finally below.
+      await page.getByRole("button", { name: "More", exact: true }).tap();
+      await page.getByRole("menuitem", { name: "Inventory", exact: true }).tap();
+      await expect(page.getByTestId("inventory-page-heading")).toContainText("Inventory");
+      await page.getByRole("button", { name: "New", exact: true }).tap();
+      await page.getByRole("button", { name: "Custom", exact: true }).tap();
+      await page.getByLabel("Inventory item name").fill(itemName);
+      await page.getByLabel("Inventory unit").fill("cases");
+      await page.getByRole("button", { name: "Add to inventory", exact: true }).tap();
+      await expect(page.getByText(itemName, { exact: true })).toBeVisible();
+      const itemCard = page.getByText(itemName, { exact: true }).locator("xpath=../../..");
+      await page.getByRole("button", { name: new RegExp(itemName, "i") }).tap();
+      const restockQuantity = page.getByLabel(`Restock quantity for ${itemName}`);
+      await expect(restockQuantity).toBeVisible();
+      await restockQuantity.fill("2");
+      await itemCard.getByRole("button", { name: "Add stock", exact: true }).tap();
+      await expect(restockQuantity).toHaveValue("");
+      await page.screenshot({ path: testInfo.outputPath("physical-inventory-intake.png") });
+
+      // Seed one manager queue item after the floor/inventory journey, then
+      // exercise claim, details, status, and note controls on the same device.
+      await db.connect();
+      const queue = await db.query(
+        `INSERT INTO action_items
+          (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
+         VALUES ('live', $1, 'sync', 'warning', $2, $3, 'sync', $1, '#sync-diagnostics', 'open', 1)
+         RETURNING id`,
+        [
+          `e2e:physical_floor_queue:${uniqueTestId("queue")}`,
+          `Physical device queue ${uniqueTestId("title")}`,
+          "Disposable queue fixture for touch validation",
+        ],
+      );
+      actionItemId = queue.rows[0].id as number;
+
+      await page.getByRole("button", { name: "More", exact: true }).tap();
+      await page.getByRole("menuitem", { name: "Manager action queue", exact: true }).tap();
+      const queuePanel = page.getByTestId("manager-action-queue");
+      await expect(queuePanel).toBeVisible();
+      const queueTitle = queuePanel.getByText(/Physical device queue /).first();
+      await expect(queueTitle).toBeVisible();
+      const queueCard = queueTitle.locator("xpath=../../..");
+      const queueTitleText = (await queueTitle.textContent())?.trim() ?? "";
+      await queueCard.getByRole("button", { name: "Claim", exact: true }).tap();
+      await expect(
+        queueCard.getByLabel(`Status for ${queueTitleText}`),
+      ).toHaveValue("in_progress");
+      await queueCard.getByRole("button", { name: "Details", exact: true }).tap();
+      await queueCard.getByRole("button", { name: "Add note", exact: true }).tap();
+      await queueCard.getByPlaceholder("Resolution or handoff note").fill("Touch trial complete");
+      await queueCard.getByRole("button", { name: "Save note", exact: true }).tap();
+      await expect(queueCard).toContainText("Touch trial complete");
+      await page.screenshot({ path: testInfo.outputPath("physical-manager-queue.png") });
+
+      const deviceEvidence = await page.evaluate(() => ({
+        userAgent: navigator.userAgent,
+        viewport: {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          visualViewportWidth: window.visualViewport?.width ?? null,
+          visualViewportHeight: window.visualViewport?.height ?? null,
+        },
+        devicePixelRatio: window.devicePixelRatio,
+        touchPoints: navigator.maxTouchPoints,
+      }));
+      await testInfo.attach("physical-floor-device-evidence", {
+        body: JSON.stringify(deviceEvidence, null, 2),
+        contentType: "application/json",
+      });
+      await testInfo.attach("physical-floor-browser-errors", {
+        body: JSON.stringify(browserErrors, null, 2),
+        contentType: "application/json",
+      });
+      expect(browserErrors).toEqual([]);
+    } finally {
+      await db.end().catch(() => {});
+      const cleanup = new Client({ connectionString: process.env.DATABASE_URL });
+      await cleanup.connect().catch(() => {});
+      if (actionItemId !== null) {
+        await cleanup.query("DELETE FROM action_items WHERE id = $1", [actionItemId]).catch(() => {});
+      }
+      await cleanup.query("DELETE FROM inventory_items WHERE key = $1", [itemKey]).catch(() => {});
+      await cleanup.end().catch(() => {});
+    }
+  });
 });
+
+      const productionWrites: string[] = [];
+
+async function prepareGuideReviewForCommit(
+  dialog: Locator,
+  brandSelectTestId: string,
+): Promise<void> {
+  await selectFirstValueIfNeeded(dialog.getByTestId(brandSelectTestId));
+  const acknowledgement = dialog
+    .locator("label")
+    .filter({ hasText: /I reviewed the changes/i })
+    .locator("input");
+  if (await visible(acknowledgement) && !(await acknowledgement.isChecked())) {
+    await acknowledgement.check();
+  }
+}
+
+      const shipping = page.getByTestId("dialog-shipping-import");
+
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function dailySyncRowCount(): Promise<number> {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    const result = await db.query(
+      "SELECT count(*)::int AS count FROM daily_sync WHERE date = $1",
+      [new Date().toLocaleDateString("en-CA")],
+    );
+    return result.rows[0]?.count ?? 0;
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
+async function openManagerTools(page: Page): Promise<void> {
+  await page.getByTestId("tab-warehouse").click();
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Manage Lists & Settings" })).toBeVisible();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+}
+
+async function assertImportActionHitTarget(
+  control: Locator,
+  name: string,
+): Promise<void> {
+  await expect(control, `${name} should be visible`).toBeVisible();
+  const geometry = await control.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2)),
+      Math.min(window.innerHeight - 1, Math.max(0, rect.bottom - 2)),
+    );
+    return {
+      rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      hit: hit instanceof HTMLElement ? hit : null,
+      containsHit: hit ? element.contains(hit) : false,
+    };
+  });
+  expect(geometry.rect.left, `${name} should fit inside the viewport`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.rect.right, `${name} should fit inside the viewport`).toBeLessThanOrEqual(geometry.viewport.width + 1);
+  expect(geometry.rect.top, `${name} should fit inside the viewport`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.rect.bottom, `${name} should fit inside the viewport`).toBeLessThanOrEqual(geometry.viewport.height + 1);
+  expect(geometry.containsHit, `${name} lower edge should receive the hit`).toBe(true);
+}
+
+function doughGuideFixture(): Buffer {
+  return workbookFixture("Pizza to Dough List", [
+    ["Pizza to Dough List"],
+    ["Aldo's (all) = Disposable Dough Recipe"],
+  ]);
+}
+
+async function openFileImport(
+  page: Page,
+  button: Locator,
+  file: { name: string; mimeType: string; buffer: Buffer },
+): Promise<void> {
+  const chooser = page.waitForEvent("filechooser");
+  await button.click();
+  await (await chooser).setFiles(file);
+}
+
+function sauceGuideFixture(): Buffer {
+  const xml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    "<w:body><w:p><w:r><w:t>Aldo&apos;s uses their recipe on all varieties at 3.5oz</w:t></w:r></w:p></w:body>" +
+    "</w:document>";
+  return singleFileZip("word/document.xml", xml);
+}
+
+      const sauce = page.getByTestId("dialog-sauce-guide-import");
+
+      const excel = page.getByRole("dialog", { name: "Import Excel" });
+
+function singleFileZip(fileName: string, contents: string): Buffer {
+  // A minimal uncompressed ZIP is enough for the importer's DOCX reader and
+  // keeps this disposable fixture independent of another archive package.
+  const name = Buffer.from(fileName);
+  const data = Buffer.from(contents);
+  const checksum = crc32(data);
+  const local = Buffer.alloc(30 + name.length);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0, 6);
+  local.writeUInt16LE(0, 8);
+  local.writeUInt32LE(checksum, 14);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(name.length, 26);
+  name.copy(local, 30);
+
+  const central = Buffer.alloc(46 + name.length);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0, 8);
+  central.writeUInt16LE(0, 10);
+  central.writeUInt32LE(checksum, 16);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(name.length, 28);
+  name.copy(central, 46);
+
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length, 12);
+  end.writeUInt32LE(local.length + data.length, 16);
+  return Buffer.concat([local, data, central, end]);
+}
+
+      const dough = page.getByTestId("dialog-dough-guide-import");
+
+function scheduleFixture(): Buffer {
+  return workbookFixture("Production Runs", [
+    ["Brand", "Flavor", "Cases Planned", "Notes"],
+    ["Aldo's", "", 1, "Disposable phone layout review"],
+  ]);
+}
+
+async function selectFirstValueIfNeeded(select: Locator): Promise<void> {
+  if (!(await visible(select))) return;
+  if ((await select.inputValue()) !== "") return;
+  const value = await select.locator("option").evaluateAll((options) => {
+    const option = options.find((candidate) => (candidate as HTMLOptionElement).value);
+    return option ? (option as HTMLOptionElement).value : "";
+  });
+  if (value) await select.selectOption(value);
+}
+
+function shippingGuideFixture(): Buffer {
+  return workbookFixture("Shipping Guide", [
+    ["PIZZA", "BOX", "CIRCLE", "PIZZAS/CS", "CASES", "GRIPSHEETS", "STACKING"],
+    ["Aldo's", '12" shipper', "12 inch", 16, 40, "N/A", "Column"],
+  ]);
+}

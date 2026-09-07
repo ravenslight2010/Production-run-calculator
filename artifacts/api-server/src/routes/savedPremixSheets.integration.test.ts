@@ -2,7 +2,8 @@
 //
 // A "saved premix sheet" is a snapshot of an imported premix workbook (its
 // Mix[]), kept so the current mixes can later be reconciled against it (see
-// /ai/mix-reconcile). These tests guard the route contract against a real
+// /operations-insights/mix-reconciliation). These tests guard the route
+// contract against a real
 // Postgres database:
 //   - GET lists snapshots newest-first;
 //   - POST inserts a snapshot and prunes to the two most recent (MAX_SAVED=2);
@@ -211,6 +212,16 @@ describe("saved-premix-sheets routes", () => {
     await save("third", premixData("c"));
     const sheets = await list();
     expect(sheets.map((s) => s.label)).toEqual(["third", "second"]);
+  });
+
+  it("keeps the retention bound under concurrent saves", async () => {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        save(`concurrent-${index}`, premixData(String(index)), "live", "concurrent-sheet"),
+      ),
+    );
+    const retained = (await list()).filter((sheet) => sheet.sourceKey === "concurrent-sheet");
+    expect(retained).toHaveLength(2);
   });
 
   it("DELETE removes a snapshot by id", async () => {

@@ -1,12 +1,19 @@
-export const CRB_INGREDIENT_HEAL_ROWS = [
-  { ingredient: "ADM WHEAT FLOUR", lbs: 200 },
-  { ingredient: "WATER", lbs: 97.4 },
-  { ingredient: "SUNFLOWER OIL", lbs: 16 },
-  { ingredient: "FRESH COMPRESSED YEAST", lbs: 3 },
-  { ingredient: "HONEY", lbs: 2 },
-  { ingredient: "SALT", lbs: 1 },
-  { ingredient: "GARLIC POWDER", lbs: 0.5 },
-] as const;
+export const CRB_INGREDIENT_HEAL_CONTRACT = Object.freeze({
+  recipeName: "crb recipe",
+  requiredComponentCount: 0,
+  requiredVariantCount: 12,
+  rows: Object.freeze([
+    { ingredient: "ADM WHEAT FLOUR", lbs: 200 },
+    { ingredient: "WATER", lbs: 97.4 },
+    { ingredient: "SUNFLOWER OIL", lbs: 16 },
+    { ingredient: "FRESH COMPRESSED YEAST", lbs: 3 },
+    { ingredient: "HONEY", lbs: 2 },
+    { ingredient: "SALT", lbs: 1 },
+    { ingredient: "GARLIC POWDER", lbs: 0.5 },
+  ].map((row) => Object.freeze(row))),
+});
+
+export const CRB_INGREDIENT_HEAL_ROWS = CRB_INGREDIENT_HEAL_CONTRACT.rows;
 
 export type CrbIngredientHealRecipe = {
   name: string;
@@ -21,9 +28,10 @@ export type CrbIngredientHealRecipe = {
  * variant set is manager data and is never touched.
  */
 export function isAffectedCrbIngredientRow(recipe: CrbIngredientHealRecipe): boolean {
-  if (recipe.name.trim().toLowerCase() !== "crb recipe") return false;
-  if (!Array.isArray(recipe.components) || recipe.components.length !== 0) return false;
+  if (recipe.name.trim().toLowerCase() !== CRB_INGREDIENT_HEAL_CONTRACT.recipeName) return false;
+  if (!Array.isArray(recipe.components) ||
+    recipe.components.length !== CRB_INGREDIENT_HEAL_CONTRACT.requiredComponentCount) return false;
   const variants = recipe.doughballVariants;
   if (!Array.isArray(variants)) return false;
-  return variants.length === 12;
+  return variants.length === CRB_INGREDIENT_HEAL_CONTRACT.requiredVariantCount;
 }

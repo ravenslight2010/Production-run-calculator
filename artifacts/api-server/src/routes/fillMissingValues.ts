@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, fillMissingValuesTable, type FillMissingValue } from "@workspace/db";
 import { SaveFillMissingValuesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -57,7 +58,7 @@ router.get("/fill-missing-values", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/fill-missing-values", async (req: Request, res: Response) => {
+router.post("/fill-missing-values", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveFillMissingValuesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

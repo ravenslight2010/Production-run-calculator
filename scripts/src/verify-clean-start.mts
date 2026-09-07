@@ -457,7 +457,7 @@ async function main(): Promise<void> {
   await fetchExpect(
     "apiHealthDirect",
     api,
-    `http://127.0.0.1:${apiPort}/api/healthz`,
+    `http://127.0.0.1:${apiPort}/api/readyz`,
     (response, body) => {
       if (response.status !== 200)
         return `expected HTTP 200, received ${response.status}: ${body.slice(0, 500)}`;
@@ -475,7 +475,7 @@ async function main(): Promise<void> {
       return undefined;
     },
   );
-  console.log(`PASS API: port ${apiPort} open and /api/healthz is healthy`);
+  console.log(`PASS API: port ${apiPort} open and /api/readyz is healthy`);
 
   const web = startManaged("web");
   await waitForPort(web, webPort);
@@ -498,7 +498,7 @@ async function main(): Promise<void> {
   await fetchExpect(
     "apiHealthViaWebProxy",
     web,
-    `http://127.0.0.1:${webPort}/api/healthz`,
+    `http://127.0.0.1:${webPort}/api/readyz`,
     (response, body) => {
       if (response.status !== 200)
         return `expected HTTP 200, received ${response.status}: ${body.slice(0, 500)}`;
@@ -517,7 +517,7 @@ async function main(): Promise<void> {
     },
   );
   console.log(
-    `PASS web proxy: /api/healthz forwards a healthy API response on port ${webPort}`,
+    `PASS web proxy: /api/readyz forwards a healthy API response on port ${webPort}`,
   );
   await capturePreviewScreenshot();
   if (screenshot) {

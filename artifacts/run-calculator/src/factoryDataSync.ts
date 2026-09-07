@@ -113,13 +113,11 @@ function getLocalStamp(key: string): number {
     return 0;
   }
 }
-
 function setLocalStamp(key: string, ts: number): void {
   try {
     localStorage.setItem(STAMP_KEY_PREFIX + key, String(ts));
   } catch {}
 }
-
 /** Stamp a local edit and return the timestamp carried by its durable op. */
 export function stampLocalWrite(key: string): number {
   const now = Date.now();
@@ -569,70 +567,6 @@ export async function runFactoryKvMigration(serverData: FactoryDataMap): Promise
     }
 
     localStorage.setItem(FACTORY_KV_MIGRATION_MARKER, "1");
-  } catch {
-    // Fail safely — marker left unset so the heal retries next load.
-  }
-}
-
-/**
- * runTemplatesMigration — marker-guarded one-time heal.
- * Marker: "run-calc-run-templates-migrated-v1"
- *
- * GETs /api/run-templates; if the server list is empty, reads the
- * TEMPLATES_KEY localStorage value and POSTs each template to the API.
- * Writes the marker on success so the heal never repeats.
- *
- * Guard: re-checks the GET response before pushing — if another device
- * already seeded the server list, skips the push to avoid duplicates.
- */
-const TEMPLATES_MIGRATION_MARKER = "run-calc-run-templates-migrated-v1";
-// Inline constant to avoid importing types.ts here (would create a circular
-// dependency chain via storage.ts).
-const TEMPLATES_LOCAL_KEY = "run-calc-templates";
-
-export async function runTemplatesMigration(): Promise<void> {
-  try {
-    if (typeof localStorage === "undefined") return;
-    if (localStorage.getItem(TEMPLATES_MIGRATION_MARKER)) return;
-
-    // Check if the server already has templates.
-    const res = await fetchWithDiagnostics("/api/run-templates");
-    if (!res.ok) return; // Don't mark; retry on next load.
-
-    const body = (await res.json()) as { templates?: unknown[] };
-    const serverTemplates = body.templates ?? [];
-
-    // Guard: server already has templates — no push needed.
-    if (serverTemplates.length > 0) {
-      localStorage.setItem(TEMPLATES_MIGRATION_MARKER, "1");
-      return;
-    }
-
-    // Read local templates.
-    const localRaw = localStorage.getItem(TEMPLATES_LOCAL_KEY);
-    if (!localRaw) {
-      localStorage.setItem(TEMPLATES_MIGRATION_MARKER, "1");
-      return;
-    }
-
-    let localTemplates: unknown[];
-    try {
-      const parsed = JSON.parse(localRaw);
-      localTemplates = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      localTemplates = [];
-    }
-
-    if (localTemplates.length > 0) {
-      const pushRes = await fetchWithDiagnostics("/api/run-templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templates: localTemplates }),
-      });
-      if (!pushRes.ok) return; // Don't mark; retry on next load.
-    }
-
-    localStorage.setItem(TEMPLATES_MIGRATION_MARKER, "1");
   } catch {
     // Fail safely — marker left unset so the heal retries next load.
   }

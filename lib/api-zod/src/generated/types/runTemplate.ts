@@ -21,4 +21,12 @@ export interface RunTemplate {
   flavor?: string;
   /** ISO-8601 timestamp the template was created */
   createdAt: string;
+  /**
+     * Monotonically increasing client revision (a JS-safe integer)
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  revision: number;
+  /** Whether this record is a deletion tombstone */
+  deleted?: boolean;
 }

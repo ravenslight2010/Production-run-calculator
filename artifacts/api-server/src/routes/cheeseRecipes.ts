@@ -5,6 +5,8 @@ import { SaveCheeseRecipesBody, DeleteCheeseRecipesBody } from "@workspace/api-z
 import { normalizeCheeseRecipe, type CheeseRecipe } from "@workspace/cheese-recipes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
+import { broadcastMasterDataChanged } from "./sync";
 
 // Manager-defined, factory-wide cheese recipes (named cheese blends a customer
 // uses on the line). Rebuilt to work like Mixes: reading is open to any signed-in
@@ -141,6 +143,8 @@ router.post(
             });
         }
       });
+      invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "");
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -176,6 +180,8 @@ router.delete(
             ),
           );
       }
+      invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "");
       const items = await listAll();
       res.json({ items });
     } catch (err) {

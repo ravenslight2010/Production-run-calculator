@@ -5,6 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiModelStatus } from './aiModelStatus';
+import type { AiStatus } from './aiStatus';
+import type { ParseSpecSheetResultDecision } from './parseSpecSheetResultDecision';
 import type { SpecImportProfile } from './specImportProfile';
 import type { SpecImportRecipe } from './specImportRecipe';
 import type { SpecImportWarning } from './specImportWarning';
@@ -16,4 +19,8 @@ export interface ParseSpecSheetResult {
   /** Flavor-grounding corrections/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row. */
   warnings?: SpecImportWarning[];
   generatedAt: number;
+  decision: ParseSpecSheetResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }

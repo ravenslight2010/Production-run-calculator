@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   applyDataHealthRepairs,
+  applyAiRetentionCleanup,
   fetchDataHealthWorkspace,
   undoProfileDataHealthRepair,
   type DataHealthFinding,
   type DataHealthWorkspace as DataHealthWorkspaceData,
 } from "@/profileDataHealth";
+import { MASTER_DATA_QUERY_KEY } from "@/masterData";
 
 type Props = { onNavigate?: (section: string) => void };
 
@@ -29,6 +31,7 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
   const [severity, setSeverity] = useState("all");
   const [brand, setBrand] = useState("all");
   const [repairability, setRepairability] = useState("all");
+  const [reconciliationCategory, setReconciliationCategory] = useState("all");
   const [confirming, setConfirming] = useState(false);
   const [selectedRepairIds, setSelectedRepairIds] = useState<string[]>([]);
   const [result, setResult] = useState<{ applied: number; skipped: number; failed: number; repairedRuns: number } | null>(null);
@@ -46,7 +49,14 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
       setConfirming(false);
       await Promise.all([
         query.refetch(),
+        queryClient.invalidateQueries({ queryKey: MASTER_DATA_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ["brand-profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["dough-recipes"] }),
+        queryClient.invalidateQueries({ queryKey: ["sauce-recipes"] }),
+        queryClient.invalidateQueries({ queryKey: ["cheese-recipes"] }),
+        queryClient.invalidateQueries({ queryKey: ["mixes"] }),
+        queryClient.invalidateQueries({ queryKey: ["ingredients"] }),
+        queryClient.invalidateQueries({ queryKey: ["scheduled"] }),
       ]);
       if (next.batchId) {
         const outcome = next.outcome ?? {
@@ -81,6 +91,10 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
       setResult(next.outcome ?? { applied: next.summary.repairedProfiles, skipped: 0, failed: 0, repairedRuns: next.summary.repairedRuns });
     },
   });
+  const retentionMutation = useMutation({
+    mutationFn: applyAiRetentionCleanup,
+    onSuccess: () => query.refetch(),
+  });
   const workspace = query.data;
   const safeFindings = useMemo(
     () => (workspace?.findings ?? []).filter((finding) => finding.repairability === "safe"),
@@ -97,7 +111,8 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
     (category === "all" || finding.category === category)
     && (severity === "all" || finding.severity === severity)
     && (brand === "all" || finding.brand === brand)
-    && (repairability === "all" || finding.repairability === repairability),
+    && (repairability === "all" || finding.repairability === repairability)
+    && (reconciliationCategory === "all" || finding.reconciliationCategory === reconciliationCategory),
   );
   const safeCount = safeFindings.length;
   const selectedFindings = safeFindings.filter((finding) => selectedRepairIds.includes(finding.id));
@@ -114,6 +129,22 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
               : route === "cheeseRecipes" ? "cheese recipes"
                 : route === "mixes" ? "mix recipes"
                   : route === "ingredientTypes" ? "ingredient setup" : "audit log";
+  const reconciliationLabel = (category: NonNullable<DataHealthFinding["reconciliationCategory"]>) =>
+    category === "pool-mismatch" ? "pool mismatch"
+      : category === "alias-gap" ? "alias gap"
+        : category === "stale-profile-link" ? "stale profile link"
+          : category === "stale-pending-run-link" ? "stale pending-run link"
+            : category === "protected-stub" ? "protected stub" : "unexpected stub";
+  const sourceStatusLabel = workspace?.sourceReconciliation.status === "not-verified"
+    ? "Not verified"
+    : workspace?.sourceReconciliation.status === "clean"
+      ? "Clean"
+      : workspace?.sourceReconciliation.status === "warning" ? "Review needed" : "Verification error";
+  const sourceStatusClass = workspace?.sourceReconciliation.status === "clean"
+    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+    : workspace?.sourceReconciliation.status === "warning"
+      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      : "bg-destructive/10 text-destructive";
 
   return (
     <Card data-testid="data-health-workspace">
@@ -153,6 +184,77 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
                <span className="rounded bg-destructive/10 text-destructive px-2 py-0.5">{workspace.summary.errors ?? 0} errors</span>
                <span className="rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5">{workspace.summary.warnings ?? 0} warnings</span>
             </div>
+            <div data-testid="ai-retention-report" className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">Retired AI data retention</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[10px]"
+                  disabled={!workspace.aiRetention.canApply || retentionMutation.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Apply the reviewed retention policy to ${workspace.aiRetention.candidates.total} generated record targets? Protected operational records will be skipped.`)) {
+                      retentionMutation.mutate();
+                    }
+                  }}
+                >
+                  {retentionMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  {workspace.aiRetention.canApply ? "Apply retention cleanup" : "No eligible records"}
+                </Button>
+              </div>
+              <p className="text-muted-foreground">
+                Dry run: {workspace.aiRetention.candidates.total} bounded target{workspace.aiRetention.candidates.total === 1 ? "" : "s"} —
+                {" "}{workspace.aiRetention.candidates.conversationTurns} conversation turns, {workspace.aiRetention.candidates.retiredFacilityFacts} retired facility facts,
+                {" "}{workspace.aiRetention.candidates.incidentGeneratedTextToLabel} incident records to label, {workspace.aiRetention.candidates.qualityThumbnailsToRedact} thumbnails,
+                {" "}{workspace.aiRetention.candidates.closedObservationsToRedact} closed photo-count drafts.
+              </p>
+              {workspace.aiRetention.appliedAt && (
+                <p className="text-muted-foreground">Last cleanup run: {new Date(workspace.aiRetention.appliedAt).toLocaleString()}.</p>
+              )}
+              <p className="text-muted-foreground">
+                Protected and skipped: operational incidents ({workspace.aiRetention.protected.operationalIncidentRows}), confirmed quality history ({workspace.aiRetention.protected.confirmedQualityRows}),
+                {" "}open count drafts ({workspace.aiRetention.protected.openInventoryObservations}), all correction aliases, import evidence, human notes, and inventory ledger effects.
+              </p>
+              {!workspace.aiRetention.canApply && workspace.aiRetention.candidates.total > workspace.aiRetention.batchLimit && (
+                <p className="text-destructive">The candidate set exceeds the {workspace.aiRetention.batchLimit}-record safety bound. Nothing was changed.</p>
+              )}
+              {retentionMutation.isError && <p className="text-destructive">Cleanup did not run. No partial result was accepted.</p>}
+            </div>
+            <div
+              data-testid="source-reconciliation-status"
+              role="status"
+              aria-live="polite"
+              className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium">Authoritative source reconciliation</p>
+                  <p className="text-muted-foreground">
+                    Report {workspace.sourceReconciliation.report.sha256.slice(0, 12)} · captured {new Date(workspace.sourceReconciliation.report.snapshot.capturedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className={`rounded px-2 py-1 text-[10px] font-semibold ${sourceStatusClass}`}>
+                  {sourceStatusLabel} · {workspace.sourceReconciliation.freshness}
+                </span>
+              </div>
+              <p className="mt-1 break-all text-[11px] text-muted-foreground">
+                {workspace.sourceReconciliation.report.path} · verified {new Date(workspace.sourceReconciliation.checkedAt).toLocaleString()}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
+                <span className="rounded bg-muted px-1.5 py-0.5">{workspace.sourceReconciliation.report.automaticProposals} approved proposals</span>
+                <span className="rounded bg-muted px-1.5 py-0.5">{workspace.sourceReconciliation.report.stubs} protected-stub candidates</span>
+                <span className="rounded bg-muted px-1.5 py-0.5">{workspace.sourceReconciliation.summary.protectedHistoryReferences} protected history links</span>
+                {workspace.sourceReconciliation.summary.omittedFindings > 0 && (
+                  <span className="rounded bg-muted px-1.5 py-0.5">
+                    {workspace.sourceReconciliation.summary.omittedFindings} additional findings summarized
+                  </span>
+                )}
+              </div>
+              {!workspace.sourceReconciliation.heal.markerValid && (
+                <p className="mt-2 text-[11px] text-destructive">The approved source heal marker is missing or invalid. Findings are review-only until the release verification is restored.</p>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
               <select aria-label="Filter data health category" className={selectClass} value={category} onChange={(event) => setCategory(event.target.value)}>
                 <option value="all">All categories</option>
@@ -176,6 +278,15 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
               </select>
               <select aria-label="Filter data health repairability" className={selectClass} value={repairability} onChange={(event) => setRepairability(event.target.value)}>
                 <option value="all">Safe and review</option><option value="safe">Safe repairs</option><option value="review">Review only</option>
+              </select>
+              <select aria-label="Filter source reconciliation category" className={selectClass} value={reconciliationCategory} onChange={(event) => setReconciliationCategory(event.target.value)}>
+                <option value="all">All reconciliation findings</option>
+                <option value="pool-mismatch">Pool mismatches</option>
+                <option value="alias-gap">Alias gaps</option>
+                <option value="stale-profile-link">Stale profile links</option>
+                <option value="stale-pending-run-link">Stale pending-run links</option>
+                <option value="protected-stub">Protected stubs</option>
+                <option value="unexpected-stub">Unexpected stubs</option>
               </select>
             </div>
             {findings.length === 0 ? (
@@ -201,6 +312,7 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
                           <p className="font-medium">{finding.brand || "Unbranded"} — {finding.flavor || "All flavors"}</p>
                           <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${severityClass(finding.severity)}`}>{finding.severity}</span>
                           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{finding.repairability === "safe" ? "safe repair" : "review only"}</span>
+                           {finding.reconciliationCategory && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{reconciliationLabel(finding.reconciliationCategory)}</span>}
                         </div>
                          <p className="text-muted-foreground mt-0.5">{finding.affectedRecord} · {finding.recipe}</p>
                         <p className="text-muted-foreground mt-0.5">{finding.message}</p>

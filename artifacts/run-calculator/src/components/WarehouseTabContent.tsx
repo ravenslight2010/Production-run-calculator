@@ -39,10 +39,19 @@ export default memo(function WarehouseTabContent() {
   } = useWarehouseTabCtx();
   return (
     <>
+                <div className="mb-4" data-testid="warehouse-page-heading">
+                  <h2 className="flex items-center gap-2 text-lg font-bold">
+                    <Warehouse className="h-5 w-5 text-primary" />
+                    Warehouse
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Prepare materials and packaging for production.
+                  </p>
+                </div>
                 <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="warehouse-attention-header">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-                    <h2 className="text-sm font-bold">Warehouse attention</h2>
+                    <h3 className="text-sm font-bold">Warehouse attention</h3>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
@@ -55,15 +64,15 @@ export default memo(function WarehouseTabContent() {
                   busy={freezerSurplusBusy}
                   error={freezerSurplusError}
                   pendingRuns={[
-                    ...dayState.runs.filter((run: any) => !run.startedAt && !run.endedAt && !!run.brand),
-                    ...scheduledDays.flatMap((day: any) =>
+                    ...dayState.runs.filter((run) => !run.startedAt && !run.endedAt && !!run.brand),
+                    ...scheduledDays.flatMap((day) =>
                       day.date === todayStr()
                         ? []
                         : (day.runs ?? [])
-                          .filter((run: any) => !!run.brand)
-                          .map((run: any, index: any) => ({
+                          .filter((run) => !!run.brand)
+                          .map((run, index) => ({
                             ...run,
-                            id: (run as typeof run & { id?: string }).id ?? `${day.date}:${run.brand}:${run.flavor}:${index}`,
+                            id: run.id || `${day.date}:${run.brand}:${run.flavor}:${index}`,
                             brand: run.brand,
                             flavor: run.flavor,
                             runDate: day.date,
@@ -90,7 +99,7 @@ export default memo(function WarehouseTabContent() {
                   if (plan.length === 0) return null;
                   return (
                     <div className="space-y-3 mb-4">
-                      {plan.map((group: any) => (
+                      {plan.map((group) => (
                         <Card
                           key={group.date}
                           className="border-border/50 bg-card/60 shadow-md"
@@ -105,13 +114,13 @@ export default memo(function WarehouseTabContent() {
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="px-4 pb-4 space-y-3">
-                            {group.runs.map((run: any, ri: any) => (
+                            {group.runs.map((run, ri) => (
                               <div key={ri} className="rounded-xl border border-border/50 bg-background/50 p-3">
                                 <div className="font-semibold text-sm text-foreground mb-1.5 truncate">
                                   {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
                                 </div>
                                 <div className="space-y-1">
-                                  {run.items.map((it: any, ii: any) => (
+                                  {run.items.map((it, ii) => (
                                     <div key={ii} className="flex items-baseline justify-between gap-2 text-sm">
                                       <span className="text-muted-foreground min-w-0 truncate">
                                         {it.name}
@@ -244,7 +253,7 @@ export default memo(function WarehouseTabContent() {
                         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
                       </summary>
                       <div className="border-t border-border/40 px-4 pb-4 pt-4 space-y-3">
-                        {activeRuns.map((r: any) => {
+                        {activeRuns.map((r) => {
                           const detail = activeRunNeedDetails.get(r.id);
                           const vals = runValuesById.get(r.id) ?? DEFAULT_VALUES;
                           const s = detail?.summary ?? computeSummaryStats(vals);
@@ -330,7 +339,7 @@ export default memo(function WarehouseTabContent() {
                       <p className="text-xs text-muted-foreground text-center py-3">No upcoming days scheduled. Tap Manage to plan future production.</p>
                     ) : (
                       <div className="space-y-1.5">
-                        {scheduledDays.map((day: any) => (
+                        {scheduledDays.map((day) => (
                           <div key={day.date} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/20 border border-border/30 text-sm">
                             <span className="font-medium">{day.date}</span>
                             <span className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""}</span>

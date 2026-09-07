@@ -1,0 +1,182 @@
+{
+  "managedWarnings": [
+    {
+      "path": ".local/skills/canvas/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Platform-managed guidance exceeds the editable 500-line policy and is not owned by this repository."
+    },
+    {
+      "path": ".local/skills/expo/SKILL.md",
+      "findings": { "broken_local_reference": 3 },
+      "reason": "The managed Expo guide names companion mobile-ui references that are not injected into this workspace."
+    },
+    {
+      "path": ".local/skills/media-generation/SKILL.md",
+      "findings": { "broken_local_reference": 1 },
+      "reason": "This platform-managed guide references a provider companion path whose availability is controlled outside the repository."
+    },
+    {
+      "path": ".local/skills/mockup-extract/SKILL.md",
+      "findings": { "broken_local_reference": 1 },
+      "reason": "The managed extraction guide uses a sibling example asset path rather than a repository-owned file."
+    },
+    {
+      "path": ".local/skills/mockup-sandbox/SKILL.md",
+      "findings": {
+        "description_too_long": 1,
+        "line_limit_exceeded": 1,
+        "broken_local_reference": 2
+      },
+      "reason": "The managed sandbox guide contains long operational guidance and example paths for generated artifact content."
+    },
+    {
+      "path": ".local/skills/project-tasks/SKILL.md",
+      "findings": { "broken_local_reference": 1 },
+      "reason": "The managed task guide documents a user-supplied plan path that is intentionally not required to exist."
+    },
+    {
+      "path": ".local/skills/query-integration-data/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Platform-managed integration guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/skills/react-vite/SKILL.md",
+      "findings": { "broken_local_reference": 3 },
+      "reason": "The managed React guide points at optional project-specific references that are absent from this repository."
+    },
+    {
+      "path": ".local/skills/revenuecat/SKILL.md",
+      "findings": {
+        "frontmatter_invalid": 1,
+        "broken_local_reference": 1
+      },
+      "reason": "This managed provider guide contains a legacy frontmatter-adjacent note and references provider-owned setup content."
+    },
+    {
+      "path": ".local/skills/skill-authoring/SKILL.md",
+      "findings": { "broken_local_reference": 2 },
+      "reason": "The managed authoring guide uses placeholder paths for the skill being authored."
+    },
+    {
+      "path": ".local/skills/stripe/SKILL.md",
+      "findings": { "broken_local_reference": 1 },
+      "reason": "The managed provider guide documents a project-specific seed script that need not exist in this repository."
+    },
+    {
+      "path": ".local/skills/video-js/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Platform-managed video guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/ad-creative/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/ai-recruiter/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/ai-secretary/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/excel-generator/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/file-converter/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/geo/SKILL.md",
+      "findings": { "broken_local_reference": 1 },
+      "reason": "The managed SEO guide documents a generated report filename, not a repository-owned file."
+    },
+    {
+      "path": ".local/secondary_skills/infographic-builder/SKILL.md",
+      "findings": { "broken_local_reference": 3 },
+      "reason": "The managed infographic guide references optional companion instructions that are not present in this workspace."
+    },
+    {
+      "path": ".local/secondary_skills/invoice-generator/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/legal-contract/SKILL.md",
+      "findings": {
+        "line_limit_exceeded": 1,
+        "broken_local_reference": 3
+      },
+      "reason": "The managed legal guide contains extended provider examples for an optional application that is not this repository."
+    },
+    {
+      "path": ".local/secondary_skills/meal-planner/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/photo-editor/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/podcast-generator/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/podcast-marketing/SKILL.md",
+      "findings": {
+        "line_limit_exceeded": 1,
+        "broken_local_reference": 2
+      },
+      "reason": "The managed guide contains long instructions and example scripts that are expected to be user/project supplied."
+    },
+    {
+      "path": ".local/secondary_skills/programmatic-seo/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/real-estate-analyzer/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/resume-maker/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/stock-analyzer/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/storyboard/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/travel-assistant/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/video-editing/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    },
+    {
+      "path": ".local/secondary_skills/website-cloning/SKILL.md",
+      "findings": { "line_limit_exceeded": 1 },
+      "reason": "Secondary platform-managed guidance exceeds the editable 500-line policy."
+    }
+  ]
+}

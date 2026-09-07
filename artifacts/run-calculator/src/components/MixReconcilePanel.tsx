@@ -3,7 +3,7 @@
 // Lists the saved premix sheets AND the saved spec sheets, and lets the user
 // cross-reference the CURRENT mixes against either one. The deterministic diff
 // (which products need a NEW mix, which existing mixes have DRIFTED) runs
-// client-side via @workspace/mix-reconcile; an advisory AI summary narrates it.
+// client-side via @workspace/mix-reconcile; the discrepancy list is the result.
 // Each drifted/new item offers a one-tap "Apply suggested fix" that writes
 // through the manager-gated saveMixes path (only shown to managers). Mirrors the
 // mobile section in artifacts/run-calculator-mobile/components/MixReconcilePanel.tsx
@@ -33,7 +33,6 @@ import {
   type MixReconcileView,
 } from "@/mixReconcile";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
-import AiStatusNotice from "@/components/AiStatusNotice";
 
 function fmtDate(ms: number): string {
   try {
@@ -282,8 +281,6 @@ export default function MixReconcilePanel({
         )}
 
         {resultError ? <p className="text-sm text-destructive">{resultError}</p> : null}
-        <AiStatusNotice status={result?.aiStatus} feature="AI reconciliation" />
-
         {result ? (
           <div
             className="space-y-3 rounded-md border border-border bg-muted/30 p-3"
@@ -300,10 +297,6 @@ export default function MixReconcilePanel({
                 </Badge>
               )}
             </div>
-
-            {result.summary ? (
-              <p className="whitespace-pre-wrap text-sm">{result.summary}</p>
-            ) : null}
 
             {result.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">

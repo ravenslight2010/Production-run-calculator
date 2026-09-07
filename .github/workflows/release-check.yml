@@ -41,6 +41,12 @@ jobs:
       NODE_ENV: test
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+      # A fresh service database cannot prove the retained production repair
+      # history. The verifier's focused tests run in ordinary CI; release-check
+      # refuses this switch outside this disposable CI contract.
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
+      REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
@@ -68,7 +74,7 @@ jobs:
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
-      - name: Run release check
+      - name: Run release gates once and retain standard evidence
         run: pnpm run release:check
 
       - name: Verify release evidence allowlist
@@ -94,6 +100,7 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           RELEASE_MODE: standard
@@ -134,6 +141,11 @@ jobs:
       NODE_ENV: test
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+      # See the standard job: this excludes unavailable production history,
+      # not synthetic production reconciliation evidence.
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
+      REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence-full
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
 
@@ -161,7 +173,7 @@ jobs:
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
-      - name: Run full release check
+      - name: Run release gates once and retain full evidence
         run: pnpm run release:check:full
 
       - name: Verify full release evidence allowlist
@@ -187,6 +199,7 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           RELEASE_MODE: full

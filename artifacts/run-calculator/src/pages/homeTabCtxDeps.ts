@@ -41,7 +41,7 @@ export const HOME_TAB_CTX_DEP_FIELDS = [
   "lastEndedRun", "lastRunRecall", "learnedBatchWeightRows", "learnedBatchWeights",
   "me", "mixIngredients", "mixMakeDay", "mixNameBrandTags", "mixRecipeNames", "mixes",
   "newReasonInput", "nextRunDieType",
-  "pep1ShowB", "pep2ShowB", "pepTypes", "proactiveAlert", "productionRules",
+  "pep1ShowB", "pep2ShowB", "pepTypes", "productionRules",
   "promotingRecipeKind", "role", "ruleViolations", "runStatus", "runToTime",
   "saucePoolDrift", "sauceRecipesList", "sauceWeightsOpen", "scheduledDays",
   "screenMode", "serverCheeseByName", "serverCheeseNames", "serverCheeseRowsByName",

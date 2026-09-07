@@ -8,8 +8,12 @@ import {
 import type { Mix } from "@workspace/mixes";
 import { PROMPT_MAX_CELL_CHARS } from "@workspace/spec-import";
 import {
+  buildCheeseExportGrids,
+  buildDoughExportGrids,
   buildSpecExportGrids,
   buildMixExportGrids,
+  buildSauceExportGrids,
+  buildSpecsExportGrids,
   sanitizeSheetName,
   type SheetGrid,
   type SpecExportInput,
@@ -62,8 +66,7 @@ describe("buildSpecExportGrids", () => {
   };
 
   it("emits a Profiles sheet with a header + one row per brand+flavor", () => {
-    const grids = buildSpecExportGrids(input, ALL);
-    const profiles = findSheet(grids, "Profiles");
+    const profiles = findSheet(buildSpecsExportGrids(input), "Bobo's Original");
     expect(profiles.rows[0]?.[0]).toBe("Brand");
     // header + 2 profiles
     expect(profiles.rows.length).toBe(3);
@@ -73,24 +76,25 @@ describe("buildSpecExportGrids", () => {
     expect(row[3]).toBe("4");
     // dough/sauce recipe name columns (the product's assigned types)
     expect(row[4]).toBe("Standard Dough");
-    expect(row[5]).toBe("Pizza Sauce");
-    // applicator 1 (only slot in use across these profiles)
-    expect(row[6]).toBe("Mozzarella");
-    expect(row[7]).toBe("3.5");
+    expect(row[5]).toBe("12");
+    expect(row[6]).toBe("24");
+    expect(row[7]).toBe("Pizza Sauce");
+    expect(row[8]).toBe("Mozzarella");
+    expect(row[9]).toBe("3.5");
+    expect(row[10]).toBe("Cheese Blend");
     // pep 1 type/sticks/oz — now immediately after the used applicator slots
-    // (cols 8/9/10 not 14/15/16 — trimming removed the empty app 2/3/4 slots)
-    expect(row[8]).toBe("Sliced Pepperoni");
-    expect(row[9]).toBe("2");
-    expect(row[10]).toBe("1.5");
+    expect(row[11]).toBe("Sliced Pepperoni");
+    expect(row[12]).toBe("2");
+    expect(row[13]).toBe("1.5");
   });
 
   it("uses spelled-out column headers (Applicator, Pepperoni, oz/pizza)", () => {
-    const grids = buildSpecExportGrids(input, ALL);
-    const header = findSheet(grids, "Profiles").rows[0]!;
+    const header = findSheet(buildSpecsExportGrids(input), "Bobo's Original").rows[0]!;
     // No "App" abbreviation — must say "Applicator"
     expect(header.some((h) => /^App \d/.test(h))).toBe(false);
     expect(header).toContain("Applicator 1 Type");
     expect(header).toContain("Applicator 1 oz/pizza");
+    expect(header).toContain("Applicator 1 Recipe");
     // No "Pep" abbreviation — must say "Pepperoni"
     expect(header.some((h) => /^Pep \d/.test(h))).toBe(false);
     expect(header).toContain("Pepperoni 1 Type");
@@ -98,15 +102,16 @@ describe("buildSpecExportGrids", () => {
     expect(header).toContain("Pepperoni 1 oz/pizza");
     // Sauce column shortened
     expect(header).toContain("Sauce oz/pizza");
+    expect(header).toContain("Target Doughball Weight (oz)");
+    expect(header).toContain("Doughballs Per Tray");
     expect(header.some((h) => h === "Sauce oz per pizza")).toBe(false);
   });
 
-  it("trims unused applicator/pep slot columns — 2-app 1-pep set yields 11 columns", () => {
+  it("trims unused applicator/pep slot columns", () => {
     // input has 2 profiles; together they use 1 applicator slot and 1 pep slot.
-    // 6 base + 1 app×2 + 1 pep×3 = 11 columns (not 20).
-    const grids = buildSpecExportGrids(input, ALL);
-    const header = findSheet(grids, "Profiles").rows[0]!;
-    expect(header.length).toBe(11);
+    // 6 base + 2 optional dough columns + 1 app×3 + 1 pep×3 = 14 columns.
+    const header = findSheet(buildSpecsExportGrids(input), "Bobo's Original").rows[0]!;
+    expect(header.length).toBe(14);
   });
 
   it("emits zero applicator/pep columns when no profile uses any", () => {
@@ -116,39 +121,36 @@ describe("buildSpecExportGrids", () => {
       sauceRecipes: [],
       cheeseRecipes: [],
     };
-    const header = findSheet(buildSpecExportGrids(bare, { profiles: true, dough: false, sauce: false, cheese: false }), "Profiles").rows[0]!;
+    const header = findSheet(buildSpecsExportGrids(bare), "Acme").rows[0]!;
     // Only the 6 base columns
     expect(header.length).toBe(6);
     expect(header).toEqual(["Brand", "Flavor", "Die Type", "Sauce oz/pizza", "Dough Recipe", "Sauce Recipe"]);
   });
 
   it("marks the header row bold on the Profiles sheet", () => {
-    const grids = buildSpecExportGrids(input, ALL);
-    const profiles = findSheet(grids, "Profiles");
+    const profiles = findSheet(buildSpecsExportGrids(input), "Bobo's Original");
     expect(profiles.boldRows).toContain(0);
   });
 
   it("marks Recipe: rows bold on recipe sheets", () => {
-    const grids = buildSpecExportGrids(input, ALL);
-    const dough = findSheet(grids, "Dough Recipes");
+    const dough = findSheet(buildDoughExportGrids(input), "Dough — Standard Dough");
     const recipeRowIdx = dough.rows.findIndex((r) => r[0]?.startsWith("Recipe:"));
     expect(recipeRowIdx).toBeGreaterThanOrEqual(0);
     expect(dough.boldRows).toContain(recipeRowIdx);
   });
 
   it("emits recipe blocks with Brand: flavor targets and ingredient tables", () => {
-    const grids = buildSpecExportGrids(input, ALL);
-    const dough = findSheet(grids, "Dough Recipes");
+    const dough = findSheet(buildDoughExportGrids(input), "Dough — Standard Dough");
     const flat = dough.rows.map((r) => r.join("|"));
     expect(flat).toContain("Recipe: Standard Dough");
     // both flavors listed under the one brand
     expect(flat.some((l) => l === "Bobo's Original: Pepperoni, Cheese" || l === "Bobo's Original: Cheese, Pepperoni")).toBe(true);
     expect(flat).toContain("Target Doughball Weight (oz)|12");
-    expect(flat).toContain("Doughballs Per Tray|24");
+    expect(flat).not.toContain("Doughballs Per Tray|24");
     expect(flat).toContain("Ingredient|Lbs");
     expect(flat).toContain("Flour|50");
 
-    const cheese = findSheet(grids, "Cheese Recipes");
+    const cheese = findSheet(buildCheeseExportGrids(input), "Bobo's Original");
     const cflat = cheese.rows.map((r) => r.join("|"));
     expect(cflat).toContain("Recipe: Cheese Blend");
     expect(cflat).toContain("Applicator Slot|1");
@@ -178,8 +180,7 @@ describe("buildSpecExportGrids", () => {
       sauceRecipes: [],
       cheeseRecipes: [],
     };
-    const grids = buildSpecExportGrids(wide, ALL);
-    const dough = findSheet(grids, "Dough Recipes");
+    const dough = buildDoughExportGrids(wide)[0]!;
     const targetLines = dough.rows
       .map((r) => r.join("|"))
       .filter((l) => l.startsWith("Silverline Kitchens:"));
@@ -196,7 +197,7 @@ describe("buildSpecExportGrids", () => {
   it("honors the selection (only chosen kinds are emitted)", () => {
     const only: SpecExportSelection = { profiles: true, dough: false, sauce: false, cheese: false };
     const grids = buildSpecExportGrids(input, only);
-    expect(grids.map((g) => g.name)).toEqual(["Profiles"]);
+    expect(grids.map((g) => g.name)).toEqual(["Bobo's Original"]);
   });
 
   it("skips an orphan-free empty kind but still exports library-only recipes without targets", () => {
@@ -207,11 +208,122 @@ describe("buildSpecExportGrids", () => {
       cheeseRecipes: [],
     };
     const grids = buildSpecExportGrids(orphan, ALL);
-    expect(grids.map((g) => g.name)).toEqual(["Dough Recipes"]);
+    expect(grids.map((g) => g.name)).toEqual(["Dough — Masa Dough"]);
     const flat = grids[0]!.rows.map((r) => r.join("|"));
     expect(flat).toContain("Recipe: Masa Dough");
     // no profile → no "Brand: flavor" line
     expect(flat.some((l) => l.includes(":") && !l.startsWith("Recipe:"))).toBe(false);
+  });
+
+  it("groups shared cheese by every using brand and puts unused recipes on Unassigned", () => {
+    const grouped: SpecExportInput = {
+      profiles: [
+        { brand: "Alpha", flavor: "Cheese", applicators: [], pepperonis: [], cheeseRecipeNames: ["Shared Blend"] },
+        { brand: "Beta", flavor: "Pep", applicators: [], pepperonis: [], cheeseRecipeNames: ["Shared Blend"] },
+      ],
+      doughRecipes: [],
+      sauceRecipes: [],
+      cheeseRecipes: [
+        { name: "Shared Blend", rows: [{ ingredient: "Mozzarella", lbs: 10 }] },
+        { name: "Library Only", rows: [{ ingredient: "Provolone", lbs: 5 }] },
+      ],
+    };
+    const grids = buildCheeseExportGrids(grouped);
+    expect(grids.map((grid) => grid.name)).toEqual(["Alpha", "Beta", "Unassigned"]);
+    expect(findSheet(grids, "Alpha").rows).toContainEqual(["Recipe: Shared Blend"]);
+    expect(findSheet(grids, "Beta").rows).toContainEqual(["Recipe: Shared Blend"]);
+    expect(findSheet(grids, "Unassigned").rows).toContainEqual(["Recipe: Library Only"]);
+  });
+
+  it("emits one dough and sauce worksheet per recipe, including unreferenced recipes", () => {
+    const extra: SpecExportInput = {
+      ...input,
+      doughRecipes: [...input.doughRecipes, { name: "Unused Dough", rows: [{ ingredient: "Flour", lbs: 1 }] }],
+      sauceRecipes: [...input.sauceRecipes, { name: "Unused Sauce", rows: [{ ingredient: "Tomato", lbs: 1 }] }],
+    };
+    expect(buildDoughExportGrids(extra).map((grid) => grid.name)).toEqual([
+      "Dough — Standard Dough",
+      "Dough — Unused Dough",
+    ]);
+    expect(buildSauceExportGrids(extra).map((grid) => grid.name)).toEqual([
+      "Sauce — Pizza Sauce",
+      "Sauce — Unused Sauce",
+    ]);
+  });
+
+  it("does not export one profile's ambiguous recipe metadata as if it applied to every target", () => {
+    const ambiguous: SpecExportInput = {
+      profiles: [
+        {
+          brand: "Alpha",
+          flavor: "One",
+          applicators: [{ type: "cheese", ozPerPizza: 3 }],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+          targetDoughballWeight: 10,
+          doughballsPerTray: 20,
+          cheeseRecipeNames: ["Shared Cheese"],
+        },
+        {
+          brand: "Alpha",
+          flavor: "Two",
+          applicators: [
+            { type: "", ozPerPizza: 0 },
+            { type: "cheese", ozPerPizza: 4 },
+          ],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+          targetDoughballWeight: 12,
+          doughballsPerTray: 24,
+          cheeseRecipeNames: [undefined, "Shared Cheese"],
+        },
+      ],
+      doughRecipes: [{ name: "Shared Dough", rows: [{ ingredient: "Flour", lbs: 10 }] }],
+      sauceRecipes: [],
+      cheeseRecipes: [{ name: "Shared Cheese", rows: [{ ingredient: "Mozzarella", lbs: 10 }] }],
+    };
+    expect(buildDoughExportGrids(ambiguous)[0]!.rows.flat()).not.toContain("Target Doughball Weight (oz)");
+    expect(buildDoughExportGrids(ambiguous)[0]!.rows.flat()).not.toContain("Doughballs Per Tray");
+    expect(buildCheeseExportGrids(ambiguous)[0]!.rows.flat()).not.toContain("Applicator Slot");
+    const profileRows = buildSpecsExportGrids(ambiguous)[0]!.rows;
+    expect(profileRows[0]).toContain("Target Doughball Weight (oz)");
+    expect(profileRows[0]).toContain("Doughballs Per Tray");
+    expect(profileRows[0]).toContain("Applicator 2 Recipe");
+    const one = profileRows.find((row) => row[1] === "One")!;
+    const two = profileRows.find((row) => row[1] === "Two")!;
+    expect(one[profileRows[0]!.indexOf("Target Doughball Weight (oz)")]).toBe("10");
+    expect(two[profileRows[0]!.indexOf("Target Doughball Weight (oz)")]).toBe("12");
+    expect(one[profileRows[0]!.indexOf("Applicator 1 Recipe")]).toBe("Shared Cheese");
+    expect(two[profileRows[0]!.indexOf("Applicator 2 Recipe")]).toBe("Shared Cheese");
+  });
+
+  it("omits shared dough metadata when any tied profile leaves the field unset", () => {
+    const partial: SpecExportInput = {
+      profiles: [
+        {
+          brand: "Alpha",
+          flavor: "One",
+          applicators: [],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+          targetDoughballWeight: 10,
+          doughballsPerTray: 20,
+        },
+        {
+          brand: "Beta",
+          flavor: "Two",
+          applicators: [],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+        },
+      ],
+      doughRecipes: [{ name: "Shared Dough", rows: [{ ingredient: "Flour", lbs: 10 }] }],
+      sauceRecipes: [],
+      cheeseRecipes: [],
+    };
+    const cells = buildDoughExportGrids(partial)[0]!.rows.flat();
+    expect(cells).not.toContain("Target Doughball Weight (oz)");
+    expect(cells).not.toContain("Doughballs Per Tray");
   });
 });
 
@@ -276,5 +388,46 @@ describe("mix export round-trips through the deterministic premix importer", () 
       { ingredient: "Onions", perPizza: 0.5 },
       { ingredient: "Peppers", perPizza: 0.25 },
     ]);
+  });
+
+  it("groups mixes by brand, keeps notes block-local, and uses Unassigned for orphans", () => {
+    const grouped: Mix[] = [
+      mixes[0]!,
+      {
+        ...mixes[0]!,
+        id: "second",
+        name: "Bobo's Cheese Mix",
+        flavor: "Cheese",
+        daysEarly: 0,
+        notes: undefined,
+      },
+      {
+        ...mixes[0]!,
+        id: "orphan",
+        name: "Library Mix",
+        brand: "",
+        flavor: "",
+        daysEarly: 0,
+        notes: undefined,
+      },
+    ];
+    const grids = buildMixExportGrids(grouped);
+    expect(grids.map((grid) => grid.name)).toEqual(["Bobo's Original", "Unassigned"]);
+    const parsed = parsePremixWorkbook(grids);
+    expect(parsed.map((mix) => [mix.name, mix.daysEarly])).toEqual([
+      ["Bobo's Cheese Mix", 0],
+      ["Bobo's Veggie Mix", 3],
+      ["Library Mix", 0],
+    ]);
+    expect(parsed.find((mix) => mix.name === "Bobo's Veggie Mix")).toMatchObject({
+      productBrand: "Bobo's Original",
+      productFlavor: "Pepperoni",
+      productMarked: true,
+    });
+    expect(parsed.find((mix) => mix.name === "Library Mix")).toMatchObject({
+      productMarked: true,
+      productBrand: undefined,
+      productFlavor: undefined,
+    });
   });
 });

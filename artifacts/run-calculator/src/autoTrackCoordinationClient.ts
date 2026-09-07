@@ -1,15 +1,38 @@
-import type { AutoTrackSchedule } from "@workspace/live-calc";
 import type { SyncPayload } from "./types";
 
 export const AUTO_TRACK_COORDINATION_EVENT = "run-calculator:auto-track-coordination";
+export const AUTO_TRACK_SCHEDULE_EVENT = "run-calculator:auto-track-schedule";
+export const DOUGH_TIMER_CONTROL_EVENT = "run-calculator:dough-timer-control";
+export const DOUGH_TIMER_CONTROL_ADOPT_EVENT = "run-calculator:dough-timer-control-adopt";
 
-type CoordinationShape = Pick<SyncPayload, "autoTrackCoordination">;
+export type DoughTimerControl = {
+  runId: string; generation: string; pausedAt: number; resumeAt: number; updatedAt: number;
+};
 
-export function publishAutoTrackCoordination(payload: CoordinationShape): void {
+export function publishDoughTimerControl(control: DoughTimerControl): void {
+  if (typeof window === "undefined") return;
+  const raw = localStorage.getItem("run-calculator:dough-timer-controls");
+  let controls: Record<string, Omit<DoughTimerControl, "runId">> = {};
+  try { controls = raw ? JSON.parse(raw) : {}; } catch {}
+  controls[control.runId] = {
+    generation: control.generation, pausedAt: control.pausedAt,
+    resumeAt: control.resumeAt, updatedAt: control.updatedAt,
+  };
+  localStorage.setItem("run-calculator:dough-timer-controls", JSON.stringify(controls));
+  window.dispatchEvent(new CustomEvent(DOUGH_TIMER_CONTROL_EVENT, { detail: control }));
+}
+
+export function publishAutoTrackCoordination(payload: Pick<SyncPayload, "autoTrackCoordination">): void {
   if (!payload.autoTrackCoordination || typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(AUTO_TRACK_COORDINATION_EVENT, {
     detail: payload.autoTrackCoordination,
   }));
+}
+
+/** Schedules are advisory freshness leases, not persisted client state. */
+export function publishAutoTrackSchedule(schedule: unknown): void {
+  if (!schedule || typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTO_TRACK_SCHEDULE_EVENT, { detail: schedule }));
 }
 
 export function subscribeAutoTrackCoordination(
@@ -22,40 +45,4 @@ export function subscribeAutoTrackCoordination(
   };
   window.addEventListener(AUTO_TRACK_COORDINATION_EVENT, handle);
   return () => window.removeEventListener(AUTO_TRACK_COORDINATION_EVENT, handle);
-}
-
-/**
- * Map a server-computed auto-track schedule (refactor step 6a) into the
- * coordination shape useAutoTrack already adopts on AUTO_TRACK_COORDINATION_EVENT.
- * Each entry arms its channel's due ref to the server's due time; canonical
- * (coordination-echoed) entries also carry their sequence so peer tabs keep
- * their claim sequences in sync with the server.
- */
-export function autoTrackScheduleToCoordination(
-  schedule: AutoTrackSchedule,
-): CoordinationShape {
-  const channelStates: NonNullable<SyncPayload["autoTrackCoordination"]>["runs"][string] = {};
-  for (const entry of schedule.entries) {
-    channelStates[entry.channel] = {
-      generation: schedule.generation,
-      sequence: entry.sequence ?? 0,
-      nextDueAt: entry.dueAt,
-      dueNow: entry.dueNow,
-      canonical: entry.canonical,
-      updatedAt: schedule.atMs,
-    };
-  }
-  return {
-    autoTrackCoordination: {
-      version: 1,
-      runs: {
-        [schedule.runId]: channelStates,
-      },
-    },
-  };
-}
-
-export function publishAutoTrackSchedule(schedule: AutoTrackSchedule): void {
-  if (typeof window === "undefined") return;
-  publishAutoTrackCoordination(autoTrackScheduleToCoordination(schedule));
 }

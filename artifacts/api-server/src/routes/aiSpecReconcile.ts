@@ -1,4 +1,4 @@
-import { AiSpecReconcileBody } from "@workspace/api-zod";
+import { OperationsSpecReconciliationBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   type Discrepancy,
@@ -9,26 +9,23 @@ import {
   formatProfileDiscrepanciesForPrompt,
 } from "@workspace/spec-reconcile";
 
-// Bounds for the spec-reconcile AI summary, in the same spirit as the other AI
-// endpoints: cap how much the model is asked to read and how much it returns so
-// a single request can't blow up cost/latency.
+// Bounds for the deterministic spec reconciliation request.
 export const MAX_CURRENT_RECIPES = 400;
 export const MAX_ROWS_PER_RECIPE = 200;
 export const MAX_CURRENT_PROFILES = 400;
 export const MAX_SUMMARY_CHARS = 1500;
 export const MAX_DISCREPANCIES_IN_PROMPT = 200;
 
-export type SpecReconcileInput = z.infer<typeof AiSpecReconcileBody>;
+export type SpecReconcileInput = z.infer<typeof OperationsSpecReconciliationBody>;
 
 export type SpecReconcileValidationResult =
   | { ok: true; data: SpecReconcileInput }
   | { ok: false; status: number; error: string };
 
-// Validate POST /ai/spec-reconcile. The body carries the saved spec-sheet id to
-// check against plus the app's current recipe library. Validate the envelope
-// with the generated schema, then enforce the cost caps.
+// Validate POST /operations-insights/spec-reconciliation. The body carries the
+// saved spec-sheet id plus the app's current recipe library.
 export function validateSpecReconcileBody(body: unknown): SpecReconcileValidationResult {
-  const parsed = AiSpecReconcileBody.safeParse(body);
+  const parsed = OperationsSpecReconciliationBody.safeParse(body);
   if (!parsed.success) {
     return { ok: false, status: 400, error: parsed.error.message };
   }

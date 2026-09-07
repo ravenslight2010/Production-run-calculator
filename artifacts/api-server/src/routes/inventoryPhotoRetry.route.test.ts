@@ -45,6 +45,27 @@ vi.mock("../middlewares/requireCapability", () => ({
   },
 }));
 
+vi.mock("../middlewares/costLimitMiddleware", async () => {
+  const [costMiddleware, rateLimit] = await Promise.all([
+    vi.importActual<typeof import("../middlewares/costLimitMiddleware")>(
+      "../middlewares/costLimitMiddleware",
+    ),
+    vi.importActual<typeof import("../middlewares/rateLimit")>(
+      "../middlewares/rateLimit",
+    ),
+  ]);
+
+  return {
+    ...costMiddleware,
+    aiCostLimit: costMiddleware.createAiCostLimit({
+      maxCost: 40,
+      store: new rateLimit.MemoryRateLimitStore(
+        costMiddleware.AI_COST_LIMIT_WINDOW_MS,
+      ),
+    }),
+  };
+});
+
 let server: Server;
 let baseUrl: string;
 
@@ -147,5 +168,27 @@ describe("POST /inventory/production-sheet-photo retry on malformed model output
     expect(body.rows).toHaveLength(0);
     expect(body.note).toContain("could not be read");
     expect(mock.calls).toBe(2);
+  });
+});
+
+describe("POST /inventory/count-observations retirement", () => {
+  it("returns a payload-safe 410 without reaching the provider", async () => {
+    const imagePayload = "retained-photo-payload-that-must-not-appear";
+    const body = {
+      photos: [],
+      candidates: [],
+      imageBase64: imagePayload,
+    };
+
+    const response = await post("/inventory/count-observations", body);
+
+    expect(response.status).toBe(410);
+    expect(mock.calls).toBe(0);
+    const responseBody = await response.text();
+    expect(JSON.parse(responseBody)).toEqual({
+      error: "Photo inventory counts are disabled. Use typed or barcode inventory controls.",
+    });
+    expect(responseBody).not.toContain(imagePayload);
+    expect(responseBody).not.toContain("Identify the distinct");
   });
 });

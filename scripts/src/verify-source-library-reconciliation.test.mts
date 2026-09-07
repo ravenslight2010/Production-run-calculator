@@ -390,6 +390,7 @@ function runVerifierCli(
 function assertBoundedCliEvidence(value: Record<string, unknown>) {
   assert.deepEqual(Object.keys(value).sort(), [
     "aliases",
+    "environment",
     "failures",
     "idempotencyFingerprint",
     "marker",
@@ -404,6 +405,7 @@ function assertBoundedCliEvidence(value: Record<string, unknown>) {
     "verifier",
   ]);
   assert.equal(value.verifier, "source-library-reconciliation");
+  assert.equal(value.environment, "development");
   const expectedSummaryKeys: Record<string, string[]> = {
     repairBoundary: ["fromDate"],
     marker: [
@@ -486,6 +488,8 @@ try {
         "source-library-reconciliation-2026-08-26-v1",
         "--from-date",
         "2026-08-26",
+        "--environment",
+        "development",
         "--output",
         outputPath,
       ],

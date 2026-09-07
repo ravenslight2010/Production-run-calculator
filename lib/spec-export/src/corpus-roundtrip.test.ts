@@ -14,9 +14,13 @@ import {
   type PremixKnown,
 } from "@workspace/premix-import";
 import { normalizeMix, type Mix } from "@workspace/mixes";
-import { buildMixExportGrids, buildSpecExportGrids, type SheetGrid, type SpecExportInput } from "./index";
-
-const ALL = { profiles: true, dough: true, sauce: true, cheese: true } as const;
+import {
+  buildDoughExportGrids,
+  buildMixExportGrids,
+  buildSpecRecipeExportWorkbooks,
+  type SheetGrid,
+  type SpecExportInput,
+} from "./index";
 
 function xlsxRoundTrip(grids: readonly SheetGrid[]): SheetGrid[] {
   const wb = XLSX.utils.book_new();
@@ -182,23 +186,26 @@ const mixes = [
 
 describe("import/export corpus semantic round trips", () => {
   it("keeps spec profiles, dough variants, sauces, cheese, quantities, zeros, and wrapped targets", () => {
-    const exported = buildSpecExportGrids(corpusInput, ALL);
-    const recovered = xlsxRoundTrip(exported);
+    const workbooks = buildSpecRecipeExportWorkbooks(corpusInput);
+    const recovered = workbooks.flatMap((workbook) => xlsxRoundTrip(workbook.grids));
 
-    expect(semanticWorkbook(recovered)).toEqual(semanticWorkbook(exported));
+    expect(semanticWorkbook(recovered)).toEqual(
+      workbooks.flatMap((workbook) => semanticWorkbook(workbook.grids)),
+    );
     expect(recovered.map((grid) => grid.name)).toEqual([
-      "Profiles",
-      "Dough Recipes",
-      "Sauce Recipes",
-      "Cheese Recipes",
+      "Northstar Foods",
+      "Dough — Northstar Standard Doug",
+      "Dough — Northstar Thin Dough",
+      "Sauce — Northstar House Sauce",
+      "Northstar Foods",
     ]);
 
-    const profileRows = recovered.find((grid) => grid.name === "Profiles")!.rows;
+    const profileRows = recovered[0]!.rows;
     expect(profileRows).toHaveLength(corpusInput.profiles.length + 1);
     expect(profileRows.some((row) => row.includes("3.125"))).toBe(true);
     expect(profileRows.some((row) => row.includes("1.375"))).toBe(true);
 
-    const doughRows = recovered.find((grid) => grid.name === "Dough Recipes")!.rows;
+    const doughRows = recovered.slice(1, 3).flatMap((grid) => grid.rows);
     expect(doughRows.flat()).toContain("Target Doughball Weight (oz)");
     expect(doughRows.flat()).toContain("Doughballs Per Tray");
     expect(doughRows.flat()).toContain("0");
@@ -206,8 +213,9 @@ describe("import/export corpus semantic round trips", () => {
   });
 
   it("keeps empty, intentional, and removed rows distinguishable", () => {
-    const exported = buildSpecExportGrids(corpusInput, ALL);
-    const dough = exported.find((grid) => grid.name === "Dough Recipes")!;
+    const dough = buildDoughExportGrids(corpusInput).find((grid) =>
+      grid.rows.some((row) => row[0] === "Recipe: Northstar Standard Dough"),
+    )!;
     const standard = dough.rows.find((row) => row[0] === "Recipe: Northstar Standard Dough");
     expect(standard).toBeDefined();
     expect(dough.rows).toContainEqual(["Salt", "0"]);
@@ -219,14 +227,10 @@ describe("import/export corpus semantic round trips", () => {
   });
 
   it("survives multi-pass exports without changing each selected semantic document", () => {
-    const passes = [
-      { profiles: true, dough: true, sauce: false, cheese: false },
-      { profiles: false, dough: false, sauce: true, cheese: true },
-      ALL,
-    ] as const;
-    for (const selection of passes) {
-      const exported = buildSpecExportGrids(corpusInput, selection);
-      expect(semanticWorkbook(xlsxRoundTrip(exported))).toEqual(semanticWorkbook(exported));
+    for (const workbook of buildSpecRecipeExportWorkbooks(corpusInput)) {
+      expect(semanticWorkbook(xlsxRoundTrip(workbook.grids))).toEqual(
+        semanticWorkbook(workbook.grids),
+      );
     }
   });
 

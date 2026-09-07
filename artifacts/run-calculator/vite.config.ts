@@ -73,6 +73,35 @@ function suppressViteClientReload(): Plugin {
   };
 }
 
+function workbookBoundaryManifest(): Plugin {
+  return {
+    name: "workbook-boundary-manifest",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const chunks = Object.fromEntries(
+        Object.values(bundle)
+          .filter((item): item is Extract<typeof item, { type: "chunk" }> => item.type === "chunk")
+          .map((chunk) => [
+            chunk.fileName,
+            {
+              name: chunk.name,
+              isEntry: chunk.isEntry,
+              isDynamicEntry: chunk.isDynamicEntry,
+              imports: chunk.imports,
+              dynamicImports: chunk.dynamicImports,
+              modules: Object.keys(chunk.modules),
+            },
+          ]),
+      );
+      this.emitFile({
+        type: "asset",
+        fileName: ".vite/workbook-boundary-manifest.json",
+        source: `${JSON.stringify({ chunks }, null, 2)}\n`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: basePath,
   define: {
@@ -83,11 +112,11 @@ export default defineConfig({
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
+    workbookBoundaryManifest(),
     VitePWA({
-      // New workers activate without claiming an existing page. That makes a
-      // plain, user-chosen reload from an older error screen load the fixed
-      // bundle, while `clientsClaim: false` ensures an active run is never
-      // interrupted. AppUpdatePrompt still offers the explicit reload action.
+      // The authored worker activates promptly but does not claim existing
+      // pages, so an active run is never interrupted. AppUpdatePrompt still
+      // offers the explicit reload action.
       registerType: "prompt",
       base: basePath,
       includeAssets: [
@@ -133,32 +162,14 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        skipWaiting: true,
-        clientsClaim: false,
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "service-worker.ts",
+      injectManifest: {
         // The main bundle crossed workbox's default 2 MiB precache cap
         // (build hard-fails, not just a warning). Allow up to 4 MiB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        navigateFallback: null,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-cache",
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "gstatic-fonts-cache",
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-        ],
       },
       devOptions: {
         enabled: false,
@@ -189,6 +200,10 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Retained for the workbook-boundary regression check. The check walks the
+    // static graph from index.html and rejects workbook/import feature modules
+    // there while allowing them as intentional dynamic entries.
+    manifest: true,
   },
   server: {
     port,

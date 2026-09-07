@@ -5,19 +5,15 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AiStatus } from './aiStatus';
 import type { Anomaly } from './anomaly';
 
 export interface AnomalyResult {
   anomalies: Anomaly[];
   checkedRuns: number;
   baselineRuns: number;
-  /** Plain-language narration (AI), or empty when nothing was flagged / AI unavailable */
+  /** Deterministic summary, or empty when nothing was flagged */
   summary: string;
   /** Optional explanation (e.g. not enough history to judge) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }

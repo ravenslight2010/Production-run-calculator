@@ -20,8 +20,12 @@ tags:
     description: Staff roles and access control
   - name: ai
     description: AI assistant (optimization recommendations)
+  - name: operationsInsights
+    description: Deterministic operational analysis and reconciliation
   - name: incidents
     description: Issue reports, crash capture, and AI diagnosis
+  - name: duplicateReviews
+    description: Manager-visible duplicate review reminders
   - name: specImport
     description: Learned spec-sheet / recipe import aliases
   - name: productionRules
@@ -945,134 +949,16 @@ paths:
         "502":
           description: AI provider error
 
-  /ai/optimize:
+  /operations-insights/spec-reconciliation:
     post:
-      operationId: aiOptimize
-      tags: [ai]
-      summary: AI optimization recommendations for runs and break timing
-      description: >-
-        Analyzes the current day's runs, scheduled runs, and recent history and
-        returns grouped/ranked recommendation cards. Read-only — never applies
-        any change.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OptimizeInput"
-      responses:
-        "200":
-          description: Optimization recommendations (advisory only)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OptimizeResult"
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/ask:
-    post:
-      operationId: aiAsk
-      tags: [ai]
-      summary: Ask the AI a free-form question about the day
-      description: >-
-        Answers a plain-language question grounded strictly in the day's real
-        run data, the shared facility memory, and the asking user's recent
-        conversation turns. Keeps per-user follow-up context, never invents data
-        (says so when it can't answer), and records the exchange back into that
-        user's conversation memory. Read-only — never applies any change.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AskInput"
-      responses:
-        "200":
-          description: A grounded answer plus the user's updated conversation window
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AskResult"
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/command:
-    post:
-      operationId: aiCommand
-      tags: [ai]
-      summary: Classify a spoken phrase as a question or an executable command
-      description: >-
-        Takes a single spoken utterance plus the live day-state and classifies it
-        as either a QUESTION (the client routes it to /ai/ask, unchanged) or a
-        COMMAND. For a command, returns one or more structured actions drawn from
-        a fixed vocabulary, with every fuzzy reference already resolved against
-        the grounding (a run by brand/flavor → run id, an inventory item by name →
-        item key/id) and a friendly label attached. Returns an explicit "none"
-        when nothing actionable was understood. This endpoint never mutates
-        anything itself — the client runs the actions through its existing
-        handlers (with role gating and Undo).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CommandInput"
-      responses:
-        "200":
-          description: Classification result — question, command actions, or none
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/recipe-assistant:
-    post:
-      operationId: aiRecipeAssistant
-      tags: [ai]
-      summary: Recipe & ingredient helper — scale, substitute, explain (AI); read-only
-      description: >-
-        Answers a plain-language question about the current run's recipes and
-        ingredients — scaling a recipe, suggesting a substitution, or explaining
-        a formula — grounded strictly in the supplied recipe rows, the known
-        ingredient pool, the shared name-corrections, and the facility memory.
-        Advisory only: never edits or commits a recipe, never invents
-        ingredients or quantities (says so plainly when the data is
-        insufficient). Read-only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RecipeAssistInput"
-      responses:
-        "200":
-          description: A grounded plain-language answer (advisory only)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RecipeAssistResult"
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/spec-reconcile:
-    post:
-      operationId: aiSpecReconcile
-      tags: [ai]
-      summary: Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+      operationId: operationsSpecReconciliation
+      tags: [operationsInsights]
+      summary: Cross-reference a saved spec sheet against the current recipes; read-only
       description: >-
         Loads the saved spec sheet by id, deterministically diffs its recipes
         against the supplied current recipe library (missing recipes, missing /
-        extra ingredients, pound mismatches), then asks the AI for a short
-        plain-language summary of what's off. Read-only and fail-safe: the
-        deterministic discrepancy list is always returned even if the AI summary
-        is unavailable. Available to any signed-in user.
+        extra ingredients, pound mismatches), and returns the authoritative
+        deterministic discrepancy list. Available to any signed-in user.
       requestBody:
         required: true
         content:
@@ -1081,7 +967,7 @@ paths:
               $ref: "#/components/schemas/SpecReconcileInput"
       responses:
         "200":
-          description: Deterministic discrepancies plus an advisory plain-language summary
+          description: Deterministic discrepancies
           content:
             application/json:
               schema:
@@ -1091,18 +977,17 @@ paths:
         "404":
           description: No saved spec sheet with that id
 
-  /ai/mix-reconcile:
+  /operations-insights/mix-reconciliation:
     post:
-      operationId: aiMixReconcile
-      tags: [ai]
-      summary: Narrate already-computed mix discrepancies (AI summary); read-only
+      operationId: operationsMixReconciliation
+      tags: [operationsInsights]
+      summary: Return already-computed mix discrepancies; read-only
       description: >-
         The deterministic diff of the current mixes against the imported premix
         and spec sheets runs on the client (the shared @workspace/mix-reconcile
-        lib). This endpoint takes that exact discrepancy list and asks the AI for
-        a short plain-language summary of what's off. Read-only and fail-safe: an
-        AI error simply yields an empty summary, never an error. It never invents
-        or applies anything. Available to any signed-in user.
+        lib). This endpoint validates and returns that exact deterministic
+        discrepancy list. It never invents or applies anything. Available to any
+        signed-in user.
       requestBody:
         required: true
         content:
@@ -1111,7 +996,7 @@ paths:
               $ref: "#/components/schemas/MixReconcileInput"
       responses:
         "200":
-          description: An advisory plain-language summary of the supplied discrepancies
+          description: The validated deterministic discrepancy result
           content:
             application/json:
               schema:
@@ -1119,142 +1004,16 @@ paths:
         "400":
           description: Invalid input
 
-  /ai/mix-assistant:
+  /operations-insights/recap:
     post:
-      operationId: aiMixAssistant
-      tags: [ai]
-      summary: Mixes helper — answer plain-language questions about the mixes (AI); read-only
-      description: >-
-        Answers a plain-language question grounded strictly in the current mix
-        definitions and the facility memory. Advisory only: it explains and
-        computes but never edits a mix or applies anything (no structured
-        suggestion). Available to any signed-in user.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MixAssistInput"
-      responses:
-        "200":
-          description: A grounded plain-language answer (advisory only)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MixAssistResult"
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/proactive-alert:
-    post:
-      operationId: aiProactiveAlert
-      tags: [ai]
-      summary: At-most-one proactive shift alert (AI); read-only
-      description: >-
-        Same live-day input as /ai/optimize, but evaluated on a cadence while a
-        day is running. Returns at most a single timely, dismissible nudge
-        (falling behind plan, or a natural break/changeover window) — or null
-        when nothing is worth surfacing right now. Read-only; the client owns
-        de-duplication and cooldown via the returned stable alert key.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OptimizeInput"
-      responses:
-        "200":
-          description: At most one proactive alert (advisory only)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProactiveAlertResult"
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/proactive-settings:
-    get:
-      operationId: getProactiveAlertSettings
-      tags: [ai]
-      summary: Get global proactive-alert settings (cadence, cooldown, on/off)
-      responses:
-        "200":
-          description: Proactive-alert settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProactiveAlertSettings"
-    put:
-      operationId: updateProactiveAlertSettings
-      tags: [ai]
-      summary: Update global proactive-alert settings (manager only)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateProactiveAlertSettingsInput"
-      responses:
-        "200":
-          description: Updated proactive-alert settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProactiveAlertSettings"
-        "400":
-          description: Invalid input
-
-  /ai/forecast:
-    post:
-      operationId: aiForecast
-      tags: [ai]
-      summary: Predict an upcoming day's run plan (AI); read-only
-      description: >-
-        Given recent finished production history (grouped by day) and any
-        already-scheduled future runs, predicts a suggested run plan for one
-        upcoming day — what to run, rough case quantities, and a sensible
-        sequence — plus a plain-language rationale and an honest confidence
-        level. Grounded strictly in the supplied history and shared facility
-        memory; explicit about uncertainty and returns a null forecast (with a
-        note) when history is too thin to predict responsibly. Read-only — never
-        writes or commits anything; the manager reviews and adjusts the
-        suggestion into the editable schedule.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ForecastInput"
-      responses:
-        "200":
-          description: A suggested run plan for the target day (advisory only)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ForecastResult"
-        "400":
-          description: Invalid input
-        "502":
-          description: AI provider error
-
-  /ai/summary:
-    post:
-      operationId: aiSummary
-      tags: [ai]
-      summary: Plain-language end-of-day / weekly production recap (AI); read-only
+      operationId: operationsRecap
+      tags: [operationsInsights]
+      summary: Plain-language end-of-day / weekly production recap; read-only
       description: >-
         Given a day's (or rolling week's) runs — planned vs. produced cases,
         downtime/stoppages, unfinished runs, and any reported issues — returns a
-        short, plain-language recap for floor staff and managers. The numeric
-        stats are computed deterministically server-side; the AI only narrates
-        them and never invents figures. Read-only — never writes or commits run
-        data. Fail-safe: if the AI is unavailable or returns nothing usable, a
-        deterministic plain-language summary built from the same stats is returned
-        instead, so the caller always gets a usable recap.
+        short, deterministic plain-language recap for floor staff and managers.
+        Read-only — never writes or commits run data.
       requestBody:
         required: true
         content:
@@ -1277,7 +1036,10 @@ paths:
       tags: [audit]
       summary: Export a manager-only operational day or week report
       description: >-
-        Deterministically aggregates the supplied production run facts and
+        Deterministically aggregates production facts derived from every
+        canonical scoped daily-sync snapshot in the requested date range. The
+        legacy runs field is accepted for compatibility but ignored; clients
+        cannot supply report production facts. The report
         enriches them with date-filtered quality and incident records plus a
         clearly labeled current inventory snapshot plus date-scoped inventory
         ledger events. No AI is required and
@@ -1299,6 +1061,204 @@ paths:
           description: Invalid input
         "403":
           description: Manager capability required
+
+  /reports/operational/finalize:
+    post:
+      operationId: finalizeOperationalReport
+      tags: [audit]
+      summary: Finalize an immutable authoritative operational report
+      description: >-
+        Re-derives the canonical report from server-side scoped records and
+        appends it to the audit archive. Client report JSON is never accepted.
+        Repeating a finalization for the same scope and reporting period returns
+        the original immutable record and never replaces it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationalReportInput"
+      responses:
+        "201":
+          description: Finalized report created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizedOperationalReport" }
+        "200":
+          description: Existing finalized report returned idempotently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizedOperationalReport" }
+        "400": { description: Invalid input }
+        "403": { description: Manager capability required }
+        "409": { description: Canonical source data is incomplete or ambiguous }
+
+  /reports/operational/finalized:
+    get:
+      operationId: listFinalizedOperationalReports
+      tags: [audit]
+      summary: Search finalized operational reports
+      description: >-
+        Retrieves immutable summaries for one exact reporting period in the
+        authenticated facility.
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, enum: [day, week] }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Immutable finalized report archive entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FinalizedOperationalReportSummary" }
+        "400": { description: Invalid query }
+        "403": { description: Manager capability required }
+
+  /reports/operational/finalized/search:
+    get:
+      operationId: searchFinalizedOperationalReports
+      tags: [audit]
+      summary: Search finalized operational reports across a date range
+      description: >-
+        Returns at most 100 immutable archive summaries from the authenticated
+        facility whose reporting end date falls within the inclusive range.
+        Searches are limited to 366 inclusive days and include both day and
+        week reports unless scope is supplied.
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: endDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [day, week] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        "200":
+          description: Immutable finalized report archive entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FinalizedOperationalReportSummary" }
+        "400": { description: Invalid query or date range }
+        "403": { description: Manager capability required }
+
+  /reports/operational/finalized/{id}:
+    get:
+      operationId: getFinalizedOperationalReport
+      tags: [audit]
+      summary: Retrieve one immutable finalized operational report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Immutable finalized report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizedOperationalReport" }
+        "403": { description: Manager capability required }
+        "404": { description: Report absent from this scope }
+
+  /reports/operational/finalized/{id}/export:
+    get:
+      # Keep this distinct from its generated query-parameter type
+      # (DownloadCanonicalOperationalReportExportParams).
+      operationId: downloadCanonicalOperationalReport
+      tags: [audit]
+      summary: Download an export from one identified canonical finalized snapshot
+      description: >-
+        Produces CSV, XLSX, or print-ready HTML solely from the immutable
+        finalized report in the authenticated facility. Responses include
+        X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded
+        artifact remains attributable to the canonical audit snapshot. This
+        endpoint never accepts browser report data.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [csv, xlsx, print] }
+        - name: jobId
+          in: query
+          required: false
+          description: Completed export-package job whose pre-generated retained artifact should be served.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Canonical snapshot export
+          headers:
+            X-Canonical-Snapshot-Id:
+              schema: { type: string }
+              description: Stable finalized-report and content-hash identity.
+            X-Canonical-Content-Hash:
+              schema: { type: string }
+            X-Export-Artifact-Source:
+              description: job-cache, canonical-regenerated when another instance lacks the cache entry, or canonical-direct for the synchronous compatibility path.
+              schema: { type: string, enum: [job-cache, canonical-regenerated, canonical-direct] }
+          content:
+            text/csv: {}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {}
+            text/html: {}
+        "400": { description: Invalid report id or export format }
+        "403": { description: Manager capability required }
+        "404": { description: Report absent from this scope }
+
+  /reports/operational-view:
+    get:
+      operationId: getOperationalRunView
+      tags: [audit]
+      summary: Read one manager-only server-derived operational run view
+      description: >-
+        Reads exactly one canonical scoped daily-sync snapshot and derives the
+        requested run using the server clock. The payload is never accepted from
+        the client. Missing snapshots or runs are reported distinctly; duplicate
+        runs and reset-generation ambiguity return conflict responses.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: runId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Server-derived operational run view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationalRunView"
+        "400":
+          description: Invalid request or malformed canonical snapshot
+        "403":
+          description: Manager capability required
+        "404":
+          description: Canonical snapshot or requested run not found
+        "409":
+          description: Duplicate run or reset/snapshot ambiguity
 
   /reports/handoff:
     get:
@@ -1329,49 +1289,16 @@ paths:
         "403":
           description: Manager capability required
 
-  /ai/forecast-accuracy:
+  /operations-insights/incident-patterns:
     post:
-      operationId: aiForecastAccuracy
-      tags: [ai]
-      summary: Review how accurate past forecasts were vs. what actually ran; read-only
+      operationId: operationsIncidentPatterns
+      tags: [operationsInsights]
+      summary: Group recurring reported issues and crashes; manager-only, read-only
       description: >-
-        Compares previously recorded demand forecasts (kept in shared facility
-        memory) against the supplied actual finished production history for those
-        dates. Returns a per-date review of predicted vs. actual products and
-        case quantities plus a lightweight accuracy signal, so managers can see
-        how well the forecaster has been doing and the AI can learn from misses.
-        Read-only — never writes or commits run data; only the deterministic
-        comparison is computed (no AI call).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ForecastAccuracyInput"
-      responses:
-        "200":
-          description: Per-date forecast-vs-actual reviews
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ForecastAccuracyResult"
-        "400":
-          description: Invalid input
-
-  /ai/incident-clusters:
-    post:
-      operationId: aiIncidentClusters
-      tags: [ai]
-      summary: Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
-      description: >-
-        Reads the recorded incident log (manager-only) and groups recurring
-        reports and crashes into a small number of root-cause themes, each with a
-        plain-language hypothesis and a suggested next step. The AI only proposes
-        groupings and narration; the server verifies every incident id, recomputes
-        the per-theme counts deterministically, and never invents incidents or
-        edits anything. Read-only and advisory. Fail-safe: if the AI is
-        unavailable or returns nothing usable, a deterministic grouping (by screen
-        and platform) is returned instead so managers always get a useful view.
+        Reads the recorded incident log and deterministically groups recurring
+        reports and crashes by screen and platform. Counts and descriptions come
+        only from recorded incidents; the endpoint never invents incidents or
+        edits anything. Read-only and advisory.
       requestBody:
         required: false
         content:
@@ -1388,20 +1315,16 @@ paths:
         "400":
           description: Invalid input
 
-  /ai/anomalies:
+  /operations-insights/anomalies:
     post:
-      operationId: aiAnomalies
-      tags: [ai]
-      summary: Flag production runs that drifted from their historical norm (AI narration); read-only
+      operationId: operationsAnomalyDetection
+      tags: [operationsInsights]
+      summary: Flag production runs that drifted from their historical norm; read-only
       description: >-
         Given today's finished runs plus recent finished-run history, deterministically
         flags runs whose downtime, yield (cases attained vs. planned), or stoppage count
-        drifted meaningfully from a per-product baseline. The drift detection is computed
-        server-side and is fully deterministic; the AI is only asked to NARRATE a short
-        plain-language summary, and only when at least one anomaly is flagged (no flags →
-        no AI call). Read-only and advisory — never edits or commits run data. Fail-safe:
-        if the AI is unavailable, the deterministic anomaly list is still returned with an
-        empty narration.
+        drifted meaningfully from a per-product baseline. Detection and descriptions
+        are fully deterministic. Read-only — never edits or commits run data.
       requestBody:
         required: true
         content:
@@ -1410,7 +1333,7 @@ paths:
               $ref: "#/components/schemas/AnomalyInput"
       responses:
         "200":
-          description: Deterministic anomaly flags plus an optional plain-language narration
+          description: Deterministic anomaly flags and descriptions
           content:
             application/json:
               schema:
@@ -1418,21 +1341,18 @@ paths:
         "400":
           description: Invalid input
 
-  /ai/schedule-optimize:
+  /operations-insights/schedule-order:
     post:
-      operationId: aiScheduleOptimize
-      tags: [ai]
-      summary: Suggest an optimal run order for the day (AI narration); read-only
+      operationId: operationsScheduleOrdering
+      tags: [operationsInsights]
+      summary: Suggest a deterministic run order for the day; read-only
       description: >-
         Given the runs planned for one day, deterministically proposes an ordering that
         schedules allergen runs at the end of the day, groups same brand/die together to
         minimize line changeovers, and honors factory sequence production rules. The
-        ordering and all before/after metrics are computed server-side and are fully
-        deterministic (shared @workspace/schedule-optimize lib); the AI is only asked to
-        NARRATE a short plain-language explanation, and only when a better order exists
-        (no improvement → no AI call). Read-only and advisory — never edits or commits the
-        schedule. Fail-safe: if the AI is unavailable, the deterministic suggested order
-        is still returned with an empty narration.
+        ordering and all before/after metrics are computed server-side by the shared
+        @workspace/schedule-optimize library. Read-only — never edits or commits
+        the schedule.
       requestBody:
         required: true
         content:
@@ -1441,7 +1361,7 @@ paths:
               $ref: "#/components/schemas/ScheduleOptimizeInput"
       responses:
         "200":
-          description: Deterministic suggested order plus an optional plain-language narration
+          description: Deterministic suggested order and before/after metrics
           content:
             application/json:
               schema:
@@ -1739,6 +1659,74 @@ paths:
         "400":
           description: Invalid input
 
+  /duplicate-reviews:
+    get:
+      operationId: listDuplicateReviews
+      tags: [duplicateReviews]
+      summary: List outstanding duplicate-review groups
+      description: >-
+        Returns the pending duplicate groups for the current facility scope.
+        This is a manager-only advisory read; it never applies a merge.
+      responses:
+        "200":
+          description: Outstanding duplicate-review groups and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateReviewList"
+        "403":
+          description: Missing manage-inventory capability
+    post:
+      operationId: saveDuplicateReviews
+      tags: [duplicateReviews]
+      summary: Record duplicate groups for manager review
+      description: >-
+        Adds newly observed duplicate groups to the current facility's pending
+        review ledger. Existing groups are left unchanged, including groups
+        already resolved or ignored, so stale scans cannot reopen work.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDuplicateReviewsInput"
+      responses:
+        "200":
+          description: Current outstanding duplicate-review groups and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateReviewList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Missing manage-inventory capability
+
+  /duplicate-reviews/resolve:
+    post:
+      operationId: resolveDuplicateReview
+      tags: [duplicateReviews]
+      summary: Resolve or ignore one duplicate-review group
+      description: >-
+        Explicitly closes one pending group after a manager reviewed it. This
+        endpoint does not merge or delete master data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveDuplicateReviewInput"
+      responses:
+        "200":
+          description: Current outstanding duplicate-review groups and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateReviewList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Missing manage-inventory capability
   /merged-away:
     get:
       operationId: listMergedAway
@@ -2273,10 +2261,9 @@ paths:
       tags: [runTemplates]
       summary: Create or update run templates
       description: >-
-        Upserts a batch of run templates by id. Each template is normalized and
-        validated server-side; malformed templates are dropped. Any signed-in
-        user may save (matching the previous local behavior where anyone could
-        create a template).
+        Upserts a batch of run templates by id and revision. A write applies only
+        when its revision is strictly newer than the stored revision; equal
+        revisions are idempotent. Any signed-in user may save.
       requestBody:
         required: true
         content:
@@ -2295,9 +2282,10 @@ paths:
     delete:
       operationId: deleteRunTemplates
       tags: [runTemplates]
-      summary: Delete run templates by id
+      summary: Tombstone run templates by id and revision
       description: >-
-        Removes a batch of run templates by id. Any signed-in user may delete.
+        Persists a deletion tombstone for each item when its revision is strictly
+        newer than the stored revision. Any signed-in user may delete.
       requestBody:
         required: true
         content:
@@ -2306,7 +2294,7 @@ paths:
               $ref: "#/components/schemas/DeleteRunTemplatesInput"
       responses:
         "200":
-          description: The full updated template list after removal
+          description: The full updated template list, including tombstones
           content:
             application/json:
               schema:
@@ -3040,6 +3028,14 @@ paths:
       responses:
         "200":
           description: Findings, safe repairs, cleanup history, and repair batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspace]
+                properties:
+                  workspace:
+                    $ref: "#/components/schemas/ProfileDataHealthWorkspace"
         "403":
           description: Missing manager capability
 
@@ -3142,46 +3138,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FacilityKnowledgeList"
-        "400":
-          description: Invalid input
-
-  /ai-memory/conversation:
-    get:
-      operationId: getConversationHistory
-      tags: [aiMemory]
-      summary: Get the current user's recent AI conversation turns
-      description: >-
-        Returns the signed-in user's most recent AI conversation turns (oldest
-        first), a rolling per-user window so follow-up questions keep context.
-        Scoped to the caller only — never another user's history.
-      responses:
-        "200":
-          description: The current user's recent conversation turns
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConversationHistory"
-    post:
-      operationId: appendConversation
-      tags: [aiMemory]
-      summary: Append turns to the current user's AI conversation memory
-      description: >-
-        Appends one or more turns (user and/or assistant messages) to the
-        signed-in user's conversation memory, then trims to the rolling window so
-        the log never grows without bound. Scoped to the caller only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AppendConversationInput"
-      responses:
-        "200":
-          description: The current user's recent conversation turns after appending
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConversationHistory"
         "400":
           description: Invalid input
 
@@ -3499,6 +3455,79 @@ paths:
               schema:
                 $ref: "#/components/schemas/SavedPremixSheetList"
 
+  /server-jobs:
+    get:
+      operationId: listServerJobs
+      tags: [serverJobs]
+      summary: List the authenticated user's retained server jobs
+      responses:
+        "200":
+          description: Jobs in newest-first order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ServerJob" }
+    post:
+      operationId: createServerJob
+      tags: [serverJobs]
+      summary: Enqueue a bounded, idempotent server job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateServerJobInput" }
+      responses:
+        "202":
+          description: Job was accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "200":
+          description: Idempotent replay of an existing job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "400": { description: Invalid job type or bounded input }
+        "403": { description: Capability required }
+
+  /server-jobs/{id}:
+    get:
+      operationId: getServerJob
+      tags: [serverJobs]
+      summary: Read an owned server job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Job state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "404": { description: Job is not in this actor's scope }
+
+  /server-jobs/{id}/cancel:
+    post:
+      operationId: cancelServerJob
+      tags: [serverJobs]
+      summary: Request cancellation of an owned running or queued server job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202":
+          description: Cancellation was requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerJob" }
+        "403": { description: Capability required }
+        "404": { description: Job is not cancelable in this actor's scope }
+
   /import-history:
     get:
       operationId: listImportHistory
@@ -3782,16 +3811,40 @@ paths:
         "403":
           description: Incident review capability required
 
+  /profile-data/ai-retention/apply:
+    post:
+      operationId: applyAiRetentionCleanup
+      tags: [profile-data]
+      summary: Apply the bounded retired-AI retention cleanup
+      description: >-
+        Manager-only, scope-aware cleanup. Returns the dry-run-compatible
+        report, records a bounded per-run audit marker, and can be repeated as
+        retained operational records age into the policy cutoffs.
+      responses:
+        "200":
+          description: Eligible cleanup applied, or no eligible records found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report]
+                properties:
+                  report:
+                    $ref: "#/components/schemas/AiRetentionReport"
+        "403":
+          description: Staff-management capability required
+        "409":
+          description: Candidate set exceeds the bounded cleanup limit
+
   /incidents:
     post:
       operationId: reportIncident
       tags: [incidents]
-      summary: Report an issue or a crash and get an AI diagnosis
+      summary: Report an issue or a crash for manager review
       description: >-
         Records an incident (a user-reported problem or an auto-captured crash)
-        and returns a plain-language AI diagnosis plus a suggested workaround.
-        Allowed for any signed-in user. The diagnosis is also stored on the
-        incident for managers to review later. Rate-limited per user.
+        for manager review. Retired automated diagnosis fields are returned as
+        null. Allowed for any signed-in user. Rate-limited per user.
       requestBody:
         required: true
         content:
@@ -3800,7 +3853,7 @@ paths:
               $ref: "#/components/schemas/ReportIncidentInput"
       responses:
         "200":
-          description: Incident recorded; diagnosis returned
+          description: Incident recorded
           content:
             application/json:
               schema:
@@ -4318,6 +4371,39 @@ paths:
         "404":
           description: User not found
 
+  /completed-history:
+    get:
+      operationId: listCompletedHistory
+      tags: [sync]
+      summary: List immutable completed-run history for the authenticated scope
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Canonical immutable completion records
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompletedHistoryList" }
+    post:
+      operationId: finalizeCompletedRun
+      tags: [sync]
+      summary: Append an immutable completed-run snapshot idempotently
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompletedRunFinalization" }
+      responses:
+        "200": { description: Existing completion acknowledged }
+        "201": { description: Completion persisted }
+        "400": { description: Invalid or oversized snapshot }
+        "409": { description: Different immutable completion already exists }
+
   /sync/today:
     get:
       operationId: getSyncToday
@@ -4408,10 +4494,48 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    CompletedRunFinalization:
+      type: object
+      required: [operationId, runId, date, completedAt, snapshot]
+      properties:
+        operationId: { type: string, maxLength: 300 }
+        runId: { type: string, maxLength: 500 }
+        date: { type: string, format: date }
+        completedAt: { type: string, format: date-time }
+        snapshot: { type: object, additionalProperties: true }
+    CompletedHistoryRecord:
+      allOf:
+        - $ref: "#/components/schemas/CompletedRunFinalization"
+        - type: object
+          required: [snapshotHash]
+          properties:
+            snapshotHash: { type: string }
+    CompletedHistoryList:
+      type: object
+      required: [history]
+      properties:
+        history:
+          type: array
+          items: { $ref: "#/components/schemas/CompletedHistoryRecord" }
     AiStatus:
       type: string
       enum: [deterministic, enriched, unavailable]
       description: Whether the response is deterministic-only, AI-enriched, or missing AI narration
+
+    AiModelStatus:
+      type: string
+      enum: [completed, provider-unavailable, rate-limited, malformed]
+      description: Optional provider outcome detail for an advisory response
+
+    SuggestionMetadata:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     AutoTrackMutation:
       type: object
@@ -4978,34 +5102,6 @@ components:
         expirySoonDays:
           type: integer
 
-    ProactiveAlertSettings:
-      type: object
-      required:
-        - enabled
-        - pollSeconds
-        - cooldownSeconds
-      properties:
-        enabled:
-          type: boolean
-        pollSeconds:
-          type: integer
-        cooldownSeconds:
-          type: integer
-
-    UpdateProactiveAlertSettingsInput:
-      type: object
-      required:
-        - enabled
-        - pollSeconds
-        - cooldownSeconds
-      properties:
-        enabled:
-          type: boolean
-        pollSeconds:
-          type: integer
-        cooldownSeconds:
-          type: integer
-
     PhotoCandidate:
       type: object
       description: >-
@@ -5073,6 +5169,7 @@ components:
       required:
         - workbookText
         - generatedAt
+        - decision
       properties:
         workbookText:
           type: string
@@ -5081,6 +5178,15 @@ components:
           type: number
         note:
           type: string
+        decision:
+          type: string
+          enum: [suggestion]
+        aiGenerated:
+          type: boolean
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     PhotoGuess:
       type: object
@@ -5810,428 +5916,6 @@ components:
           type: string
           format: date-time
 
-    OptimizeStoppage:
-      type: object
-      required:
-        - reason
-        - durationSec
-        - open
-      properties:
-        reason:
-          type: string
-        durationSec:
-          type: number
-        open:
-          type: boolean
-          description: True if the stoppage is still in progress (no end time)
-
-    OptimizeRun:
-      type: object
-      required:
-        - id
-        - label
-        - brand
-        - flavor
-        - dieType
-        - status
-        - casesNeeded
-        - casesMade
-        - casesLeft
-        - plannedPpm
-        - actualPpm
-        - minutesRemaining
-        - netElapsedSec
-        - downtimeSec
-        - stoppages
-      properties:
-        id:
-          type: string
-        label:
-          type: string
-        brand:
-          type: string
-        flavor:
-          type: string
-        dieType:
-          type: string
-        status:
-          type: string
-          enum: [running, upcoming, finished]
-        casesNeeded:
-          type: number
-        casesMade:
-          type: number
-          description: Recorded/cased output only; excludes work still in the freezer or on the line
-        casesOnLine:
-          type: number
-          description: Lifecycle-aware cases pressed but not yet cased (freezer/on-line work in progress); optional for older clients
-        casesLeft:
-          type: number
-        plannedPpm:
-          type: number
-          description: Planned pizzas-per-minute from line config
-        actualPpm:
-          type: [number, "null"]
-          description: Observed pizzas-per-minute, or null if not yet measurable
-        minutesRemaining:
-          type: [number, "null"]
-        netElapsedSec:
-          type: number
-        downtimeSec:
-          type: number
-        stoppages:
-          type: array
-          items:
-            $ref: "#/components/schemas/OptimizeStoppage"
-        pizzasPerCase:
-          type: number
-          description: How many pizzas make one case (unit-conversion denominator for PPM→cases)
-        casesPerSkid:
-          type: number
-          description: How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)
-
-    OptimizeScheduledRun:
-      type: object
-      required:
-        - date
-        - brand
-        - flavor
-        - dieType
-        - casesNeeded
-      properties:
-        date:
-          type: string
-        brand:
-          type: string
-        flavor:
-          type: string
-        dieType:
-          type: string
-        casesNeeded:
-          type: number
-
-    OptimizeInput:
-      type: object
-      required:
-        - date
-        - nowMs
-        - runs
-      properties:
-        date:
-          type: string
-        nowMs:
-          type: number
-          description: Client clock (ms epoch) so the model can reason about timing
-        tzOffsetMinutes:
-          type: number
-          description: >-
-            Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()),
-            so the server can render local wall-clock times in prompts
-        runToTime:
-          type: string
-          description: Target completion time of day (HH:MM), or empty if unset
-        todayPpm:
-          type: number
-          description: Today's aggregate pizzas-per-minute so far
-        benchmarkPpm:
-          type: [number, "null"]
-          description: Historical average pizzas-per-minute, or null if no history
-        runs:
-          type: array
-          description: Today's runs (running, upcoming, and finished)
-          items:
-            $ref: "#/components/schemas/OptimizeRun"
-        scheduledRuns:
-          type: array
-          description: Future planned runs
-          items:
-            $ref: "#/components/schemas/OptimizeScheduledRun"
-        historyRuns:
-          type: array
-          description: Recent finished runs from prior days
-          items:
-            $ref: "#/components/schemas/OptimizeRun"
-        reorderDemandByKey:
-          type: object
-          description: >-
-            Client-resolved material demand from upcoming (today-or-later)
-            scheduled runs, keyed by inventory item key. Brand/recipe profiles
-            live client-side, so the server can't resolve scheduled-run demand
-            itself; the client sends it so the proactive reorder nudge can
-            project on-hand exactly like the warehouse "Reorder Now" card.
-            Optional; omitted/empty means demand is not subtracted.
-          additionalProperties:
-            type: number
-
-    OptimizeAction:
-      type: object
-      description: >-
-        Optional one-tap action a manager can apply from a recommendation.
-        Advisory until explicitly tapped; each kind maps to an existing client
-        mutation. Run-targeted kinds reference today's run ids.
-      required:
-        - kind
-        - label
-      properties:
-        kind:
-          type: string
-          enum: [set_target_time, set_run_target, reorder_run]
-        label:
-          type: string
-          description: Short imperative button caption
-        time:
-          type: string
-          description: "Target finish time HH:MM (set_target_time)"
-        runId:
-          type: string
-          description: Target run id (set_run_target, reorder_run)
-        casesNeeded:
-          type: number
-          description: New case target (set_run_target)
-        beforeRunId:
-          type: [string, "null"]
-          description: >-
-            reorder_run: move runId immediately before this run id, or null to
-            move it last
-
-    OptimizeRecommendation:
-      type: object
-      required:
-        - category
-        - title
-        - detail
-        - impact
-        - appliesTo
-      properties:
-        category:
-          type: string
-          enum: [run, break, efficiency]
-        title:
-          type: string
-        detail:
-          type: string
-        impact:
-          type: string
-          enum: [high, medium, low]
-        appliesTo:
-          type: [string, "null"]
-          description: Run label or scope this applies to, or null for shift-wide
-        action:
-          oneOf:
-            - $ref: "#/components/schemas/OptimizeAction"
-            - type: "null"
-          description: Optional one-tap action, or null when nothing is safely applicable
-        review:
-          $ref: "#/components/schemas/ReviewVerdict"
-
-    OptimizeResult:
-      type: object
-      required:
-        - recommendations
-        - generatedAt
-      properties:
-        recommendations:
-          type: array
-          items:
-            $ref: "#/components/schemas/OptimizeRecommendation"
-        generatedAt:
-          type: number
-        note:
-          type: string
-          description: Optional message when data is insufficient for analysis
-
-    AskInput:
-      type: object
-      description: >-
-        A free-form question about the day plus the full live day-state the
-        answer must be grounded in. Reuses the OptimizeInput shape so both
-        clients send identically-shaped data.
-      required:
-        - question
-        - dayState
-      properties:
-        question:
-          type: string
-          description: The user's plain-language question about the day
-        dayState:
-          $ref: "#/components/schemas/OptimizeInput"
-
-    AskResult:
-      type: object
-      required:
-        - answer
-        - turns
-        - generatedAt
-      properties:
-        answer:
-          type: string
-          description: The grounded plain-language answer
-        turns:
-          type: array
-          description: >-
-            The asking user's recent conversation window (oldest first) after
-            this exchange was recorded, so the client can render the thread from
-            server truth.
-          items:
-            $ref: "#/components/schemas/ConversationTurn"
-        generatedAt:
-          type: number
-        note:
-          type: string
-          description: Optional message when the question could not be answered from data
-
-    CommandInput:
-      type: object
-      description: >-
-        A single spoken utterance plus the full live day-state it must be
-        interpreted against. Reuses the OptimizeInput shape so both clients send
-        identically-shaped grounding data (the same data /ai/ask uses), letting
-        the server resolve fuzzy run references to concrete run ids.
-      required:
-        - utterance
-        - dayState
-      properties:
-        utterance:
-          type: string
-          description: The user's spoken phrase (a question or an action command)
-        dayState:
-          $ref: "#/components/schemas/OptimizeInput"
-
-    RecipeAssistRow:
-      type: object
-      description: One ingredient line of a recipe (ingredient name + pounds).
-      required:
-        - ingredient
-        - lbs
-      properties:
-        ingredient:
-          type: string
-        lbs:
-          type: number
-          description: Pounds of this ingredient in the recipe/batch
-
-    RecipeAssistRecipe:
-      type: object
-      description: >-
-        One of the current run's recipes the question may be about — a named set
-        of ingredient rows tagged by kind (dough, sauce, cheese, other).
-      required:
-        - kind
-        - name
-        - rows
-      properties:
-        id:
-          type: string
-          description: >-
-            Stable settings-field key identifying which recipe this is (e.g.
-            doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an "apply"
-            suggestion target this exact recipe deterministically.
-        kind:
-          type: string
-          description: What the recipe is for (dough, sauce, cheese, other)
-        name:
-          type: string
-          description: The recipe's name (may be empty if unnamed)
-        rows:
-          type: array
-          items:
-            $ref: "#/components/schemas/RecipeAssistRow"
-
-    RecipeAssistContext:
-      type: object
-      description: >-
-        Optional run numbers the model may use to ground scaling math so its
-        answer is consistent with what the app computes.
-      properties:
-        brand:
-          type: string
-        flavor:
-          type: string
-        casesNeeded:
-          type: number
-        pizzasPerCase:
-          type: number
-        doughballWeightOz:
-          type: number
-          description: Target weight of one doughball in ounces
-
-    RecipeAssistInput:
-      type: object
-      description: >-
-        A plain-language recipe/ingredient question plus the real recipe rows,
-        the known ingredient pool, and optional run context the answer must be
-        grounded in. Both clients send identically-shaped data.
-      required:
-        - question
-        - recipes
-      properties:
-        question:
-          type: string
-          description: The user's plain-language recipe/ingredient question
-        recipes:
-          type: array
-          description: The current run's recipes (dough/sauce/cheese), may be empty
-          items:
-            $ref: "#/components/schemas/RecipeAssistRecipe"
-        ingredientNames:
-          type: array
-          description: Known ingredient names, so substitutions stay within the app's pool
-          items:
-            type: string
-        context:
-          $ref: "#/components/schemas/RecipeAssistContext"
-
-    RecipeAssistResult:
-      type: object
-      required:
-        - answer
-        - generatedAt
-      properties:
-        answer:
-          type: string
-          description: The grounded plain-language answer
-        generatedAt:
-          type: number
-        note:
-          type: string
-          description: Optional message when the question could not be answered from data
-        suggestion:
-          $ref: "#/components/schemas/RecipeAssistSuggestion"
-
-    RecipeAssistSuggestion:
-      type: object
-      description: >-
-        An optional structured, confirm-first edit the worker can apply in one
-        tap — the exact resulting ingredient rows of a scaled or substituted
-        recipe. Present only for SCALE/SUBSTITUTE questions where the model could
-        produce exact rows; absent for EXPLAIN questions or when it is unsure.
-        Advisory: nothing is applied until the worker confirms.
-      required:
-        - kind
-        - recipeId
-        - rows
-      properties:
-        kind:
-          type: string
-          enum: [scale, substitute]
-          description: Whether this resizes a recipe (scale) or swaps an ingredient (substitute)
-        recipeId:
-          type: string
-          description: >-
-            The id of the recipe to apply this to, copied from the matching
-            RecipeAssistRecipe.id sent in the request.
-        recipeName:
-          type: string
-          description: The target recipe's display name (for the confirmation UI)
-        summary:
-          type: string
-          description: A short button/label describing the change (e.g. "Apply scaled dough 1.5x")
-        rows:
-          type: array
-          description: The COMPLETE new set of ingredient rows for that recipe after the change
-          items:
-            $ref: "#/components/schemas/RecipeAssistRow"
-
     SpecReconcileRow:
       type: object
       required:
@@ -6572,8 +6256,6 @@ components:
         - specSheetId
         - discrepancies
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         specSheetId:
           type: integer
@@ -6581,16 +6263,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReconcileDiscrepancy"
-        summary:
-          type: string
-          description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     MixComponentSpec:
       type: object
@@ -6825,275 +6499,16 @@ components:
     MixReconcileResult:
       type: object
       required:
-        - generatedAt
-        - aiGenerated
-        - aiStatus
-      properties:
-        summary:
-          type: string
-          description: Advisory plain-language summary; absent/empty when the AI is unavailable
-        generatedAt:
-          type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
-
-    MixAssistMix:
-      type: object
-      required:
-        - name
-        - brand
-        - flavor
-        - components
-      properties:
-        name:
-          type: string
-        brand:
-          type: string
-        flavor:
-          type: string
-        batchSize:
-          type: number
-        daysEarly:
-          type: number
-        amountAlreadyMade:
-          type: number
-        enabled:
-          type: boolean
-        components:
-          type: array
-          items:
-            $ref: "#/components/schemas/MixComponentSpec"
-
-    MixAssistInput:
-      type: object
-      required:
-        - question
-        - mixes
-      properties:
-        question:
-          type: string
-        mixes:
-          type: array
-          items:
-            $ref: "#/components/schemas/MixAssistMix"
-
-    MixAssistResult:
-      type: object
-      required:
-        - answer
+        - discrepancies
         - generatedAt
       properties:
-        answer:
-          type: string
+        discrepancies:
+          type: array
+          description: The validated deterministic discrepancies supplied by the client
+          items:
+            $ref: "#/components/schemas/MixDiscrepancyWire"
         generatedAt:
           type: number
-        note:
-          type: string
-
-    ProactiveAlert:
-      type: object
-      description: >-
-        A single proactive, dismissible shift nudge. The key is a stable
-        lowercase slug naming the KIND of nudge (e.g. "behind-plan",
-        "break-window") so repeats of the same situation can be de-duped/cooled
-        down client-side; it is never run-instance or timestamp specific.
-      required:
-        - key
-        - category
-        - title
-        - detail
-        - impact
-      properties:
-        key:
-          type: string
-          description: Stable de-dup slug for the kind of nudge
-        category:
-          type: string
-          enum: [run, break, efficiency]
-        title:
-          type: string
-          description: Short glanceable headline
-        detail:
-          type: string
-          description: One or two plain-language sentences a manager can act on
-        impact:
-          type: string
-          enum: [high, medium, low]
-
-    ProactiveAlertResult:
-      type: object
-      required:
-        - alert
-        - generatedAt
-        - aiStatus
-      properties:
-        alert:
-          oneOf:
-            - $ref: "#/components/schemas/ProactiveAlert"
-            - type: "null"
-          description: The single nudge to surface now, or null when nothing applies
-        generatedAt:
-          type: number
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
-        note:
-          type: string
-          description: Optional message when no alert could be produced
-
-    ForecastHistoryRun:
-      type: object
-      description: A finished run from a past day, used to learn demand patterns.
-      required:
-        - brand
-        - flavor
-        - dieType
-        - cases
-        - netRunMin
-      properties:
-        brand:
-          type: string
-        flavor:
-          type: string
-        dieType:
-          type: string
-          description: May be empty when unknown
-        cases:
-          type: number
-          description: Cases actually produced for this run
-        netRunMin:
-          type: number
-          description: Net run minutes (excludes downtime); a throughput signal
-
-    ForecastHistoryDay:
-      type: object
-      description: One past production day with its finished runs.
-      required:
-        - date
-        - runs
-      properties:
-        date:
-          type: string
-          description: ISO date (YYYY-MM-DD) of the production day
-        runs:
-          type: array
-          items:
-            $ref: "#/components/schemas/ForecastHistoryRun"
-
-    ForecastInput:
-      type: object
-      required:
-        - targetDate
-        - nowMs
-        - history
-      properties:
-        targetDate:
-          type: string
-          description: ISO date (YYYY-MM-DD) of the first upcoming day to forecast
-        horizonDays:
-          type: integer
-          minimum: 1
-          maximum: 7
-          description: >-
-            How many consecutive days to forecast starting at targetDate
-            (1-7, default 1). Each day gets its own plan grounded in that
-            weekday's history.
-        nowMs:
-          type: number
-          description: Client clock in epoch ms (for relative reasoning)
-        history:
-          type: array
-          description: Recent finished production days, most useful when several weeks deep
-          items:
-            $ref: "#/components/schemas/ForecastHistoryDay"
-        scheduledRuns:
-          type: array
-          description: Runs already planned for future days (incl. any existing plan for the target day)
-          items:
-            $ref: "#/components/schemas/OptimizeScheduledRun"
-
-    ForecastRun:
-      type: object
-      description: One suggested run in the predicted plan (advisory; not committed).
-      required:
-        - brand
-        - flavor
-        - dieType
-        - casesNeeded
-        - rationale
-      properties:
-        brand:
-          type: string
-        flavor:
-          type: string
-        dieType:
-          type: string
-          description: May be empty when the model is unsure
-        casesNeeded:
-          type: number
-          description: Rough suggested case target
-        rationale:
-          type: string
-          description: Short reason this run is suggested (grounded in history)
-
-    ForecastPlan:
-      type: object
-      required:
-        - targetDate
-        - confidence
-        - summary
-        - runs
-      properties:
-        targetDate:
-          type: string
-        confidence:
-          type: string
-          enum: [high, medium, low]
-          description: Honest confidence given how much history supports the prediction
-        summary:
-          type: string
-          description: Plain-language rationale for the whole plan, incl. caveats
-        runs:
-          type: array
-          description: Suggested runs in a sensible production sequence
-          items:
-            $ref: "#/components/schemas/ForecastRun"
-
-    ForecastResult:
-      type: object
-      required:
-        - forecast
-        - generatedAt
-        - aiGenerated
-        - aiStatus
-      properties:
-        forecast:
-          oneOf:
-            - $ref: "#/components/schemas/ForecastPlan"
-            - type: "null"
-          description: >-
-            The predicted plan for the first day (back-compat), or null when
-            history is too thin to predict. Equals forecasts[0] when present.
-        forecasts:
-          type: array
-          description: >-
-            One predicted plan per requested day in the horizon, in date order.
-            Present whenever at least one day could be forecast; single-element
-            for a one-day horizon.
-          items:
-            $ref: "#/components/schemas/ForecastPlan"
-        generatedAt:
-          type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI produced a forecast; false when no forecast was produced
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
-        note:
-          type: string
-          description: Explanation when no forecast could responsibly be produced
 
     SummaryRunInput:
       type: object
@@ -7222,25 +6637,18 @@ components:
         - summary
         - stats
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         summary:
           type: string
-          description: Plain-language recap (AI narration, or deterministic fallback)
+          description: Deterministic plain-language recap
         stats:
           $ref: "#/components/schemas/SummaryStats"
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI narrated; false when the deterministic fallback was used
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     OperationalReportInput:
       type: object
-      required: [scope, date, runs]
+      required: [scope, date]
       properties:
         scope:
           type: string
@@ -7250,9 +6658,173 @@ components:
           description: ISO date, or week-ending date for a weekly report
         runs:
           type: array
+          description: Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.
           maxItems: 600
           items:
             $ref: "#/components/schemas/SummaryRunInput"
+
+    FinalizedOperationalReportSummary:
+      type: object
+      required: [id, reportScope, periodStart, periodEnd, generatedAt, generatedBy, finalizedAt, finalizedBy, contentHash, hashContract, proofContract, proofKeyId, proofStatus]
+      properties:
+        id: { type: string, format: uuid }
+        reportScope: { type: string, enum: [day, week] }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        generatedBy: { type: string }
+        finalizedAt: { type: string, format: date-time }
+        finalizedBy: { type: string }
+        contentHash: { type: string }
+        hashContract:
+          type: string
+          enum: [json-v1, canonical-json-v2, unrecognized]
+          description: Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.
+        proofContract:
+          type: [string, "null"]
+          enum: [hmac-sha256-v1, null]
+          description: Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+        proofKeyId:
+          type: [string, "null"]
+          description: Identifier used to select a retained verification key during safe rotation. This is not secret key material.
+        proofStatus:
+          type: string
+          enum: [verified, unsigned-legacy, invalid, key-unavailable, not-checked]
+          description: Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.
+
+    FinalizedOperationalReport:
+      allOf:
+        - $ref: "#/components/schemas/FinalizedOperationalReportSummary"
+        - type: object
+          required: [scope, report]
+          properties:
+            scope: { type: string, enum: [live, sandbox] }
+            idempotent: { type: boolean }
+            report: { $ref: "#/components/schemas/OperationalReport" }
+
+    OperationalRunView:
+      type: object
+      required: [version, date, runId, observed, recap, elapsed, pace, advisory, calculatedAt, freshness, formulaProvenance]
+      properties:
+        version: { type: integer, enum: [1] }
+        date: { type: string, format: date }
+        runId: { type: string }
+        observed:
+          type: object
+          required: [brand, flavor, status, elapsedBatchSec, substitutionsApplied, packagingProgress, temporaryOverrides, stoppages]
+          properties:
+            brand: { type: string }
+            flavor: { type: string }
+            status: { type: string, enum: [not-started, running, paused, ended] }
+            startedAt: { type: number }
+            pausedAt: { type: number }
+            endedAt: { type: number }
+            elapsedBatchSec: { type: number }
+            substitutionsApplied: { type: integer }
+            packagingProgress:
+              oneOf:
+                - type: object
+                  required: [skidsCompleted, casesOnCurrentSkid]
+                  properties:
+                    skidsCompleted: { type: number }
+                    casesOnCurrentSkid: { type: number }
+                - type: "null"
+            temporaryOverrides:
+              type: object
+              required: [freezerTime, crustsPerCycle, cycleSpeed]
+              properties:
+                freezerTime: { type: boolean }
+                crustsPerCycle: { type: boolean }
+                cycleSpeed: { type: boolean }
+            stoppages:
+              type: object
+              required: [count, downtimeSeconds]
+              properties:
+                count: { type: integer }
+                downtimeSeconds: { type: number }
+        recap:
+          type: object
+          required: [casesNeeded, casesCompleted, casesLeftToRun, pressDone, extraCases]
+          properties:
+            casesNeeded: { type: number }
+            casesCompleted: { type: number }
+            casesLeftToRun: { type: number }
+            pressDone: { type: boolean }
+            extraCases: { type: number }
+        elapsed:
+          type: object
+          required: [batchSec, phase]
+          properties:
+            batchSec: { type: number }
+            phase:
+              type: object
+              required: [stage1, stage2, stage3]
+              properties:
+                stage1: { $ref: "#/components/schemas/OperationalLinePhase" }
+                stage2: { $ref: "#/components/schemas/OperationalLinePhase" }
+                stage3: { $ref: "#/components/schemas/OperationalLinePhase" }
+        pace:
+          type: object
+          required: [ppm, paceStatus, paceDelta, catchUpPpm]
+          properties:
+            ppm: { type: number }
+            paceStatus:
+              type: string
+              enum: [on-pace, ahead, behind]
+              nullable: true
+            paceDelta: { type: number }
+            catchUpPpm:
+              oneOf:
+                - type: number
+                - type: "null"
+        advisory:
+          type: object
+          description: Read-only projections; never authoritative counter or inventory writes.
+          required: [freezer, line]
+          properties:
+            freezer:
+              type: object
+              required: [cases, configuredMinutes]
+              properties:
+                cases: { type: number }
+                configuredMinutes: { type: number }
+            line:
+              type: object
+              required: [cases]
+              properties:
+                cases: { type: number }
+        calculatedAt: { type: number }
+        freshness:
+          type: object
+          required: [status, snapshotId, capturedAt, ageMs, maxAgeMs]
+          properties:
+            status: { type: string, enum: [fresh, stale] }
+            snapshotId: { type: string }
+            capturedAt: { type: number }
+            ageMs: { type: number }
+            maxAgeMs: { type: number }
+        formulaProvenance:
+          type: object
+          required: [policy, policyVersion, calculator, calculatorVersion, temporaryOverrides, inventory, linePhases, linePhasesVersion]
+          properties:
+            policy: { type: string, enum: [operational-run-view] }
+            policyVersion: { type: integer, enum: [1] }
+            calculator: { type: string, enum: [computeServerCalc] }
+            calculatorVersion: { type: integer, enum: [1] }
+            temporaryOverrides: { type: string, enum: [applyTemporaryOverrides] }
+            inventory:
+              type: array
+              items: { type: string, enum: [computeCasesOnLine, computeCasesInFreezer] }
+            linePhases: { type: string, enum: [computeLinePhases] }
+            linePhasesVersion: { type: integer, enum: [1] }
+
+    OperationalLinePhase:
+      type: object
+      required: [label, state, remainMs]
+      properties:
+        label: { type: string }
+        state: { type: string, enum: [filling, active, paused, draining, resuming, empty] }
+        remainMs: { type: number }
 
     OperationalReport:
       type: object
@@ -7415,7 +6987,6 @@ components:
         - clusters
         - totalIncidents
         - generatedAt
-        - aiGenerated
       properties:
         clusters:
           type: array
@@ -7429,9 +7000,6 @@ components:
           description: Optional explanation (e.g. too few incidents to cluster)
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI proposed the grouping; false for the deterministic fallback
 
     AnomalyRunInput:
       type: object
@@ -7516,8 +7084,6 @@ components:
         - baselineRuns
         - summary
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         anomalies:
           type: array
@@ -7529,17 +7095,12 @@ components:
           type: number
         summary:
           type: string
-          description: Plain-language narration (AI), or empty when nothing was flagged / AI unavailable
+          description: Deterministic summary, or empty when nothing was flagged
         note:
           type: string
           description: Optional explanation (e.g. not enough history to judge)
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI narrated; false otherwise
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
 
     ScheduleOptimizeRunInput:
       type: object
@@ -7639,8 +7200,6 @@ components:
         - after
         - summary
         - generatedAt
-        - aiGenerated
-        - aiStatus
       properties:
         order:
           type: array
@@ -7659,156 +7218,12 @@ components:
           $ref: "#/components/schemas/ScheduleMetrics"
         summary:
           type: string
-          description: Plain-language narration (AI), or empty when no improvement / AI unavailable
+          description: Deterministic summary, or empty when no improvement is available
         note:
           type: string
           description: Optional explanation (e.g. already optimally ordered)
         generatedAt:
           type: number
-        aiGenerated:
-          type: boolean
-          description: True when the AI narrated; false otherwise
-        aiStatus:
-          $ref: "#/components/schemas/AiStatus"
-
-    ForecastAccuracyInput:
-      type: object
-      description: Actual finished production history to grade past forecasts against.
-      required:
-        - nowMs
-        - history
-      properties:
-        nowMs:
-          type: number
-          description: Client clock in epoch ms (for relative reasoning)
-        history:
-          type: array
-          description: Recent finished production days (the actual results to compare forecasts to)
-          items:
-            $ref: "#/components/schemas/ForecastHistoryDay"
-
-    ForecastAccuracyProduct:
-      type: object
-      description: One product's predicted vs. actual cases for a reviewed day.
-      required:
-        - label
-        - predictedCases
-        - actualCases
-        - status
-      properties:
-        label:
-          type: string
-          description: Product label (brand + flavor) as recorded/run
-        predictedCases:
-          type: number
-          description: Cases the forecast predicted (0 if it was not predicted)
-        actualCases:
-          type: number
-          description: Cases actually produced (0 if it did not run)
-        status:
-          type: string
-          enum: [hit, over, under, missed, unexpected]
-          description: >-
-            hit = predicted ≈ actual; over/under = predicted more/fewer than ran;
-            missed = predicted but did not run; unexpected = ran but not predicted
-
-    ForecastAccuracyReview:
-      type: object
-      description: One past forecast graded against the day's actual finished runs.
-      required:
-        - date
-        - confidence
-        - predictedTotalCases
-        - actualTotalCases
-        - caseAccuracyPct
-        - products
-      properties:
-        date:
-          type: string
-          description: ISO date (YYYY-MM-DD) the forecast was for
-        confidence:
-          type: string
-          enum: [high, medium, low]
-          description: Confidence the forecast was issued with
-        predictedTotalCases:
-          type: number
-        actualTotalCases:
-          type: number
-        caseAccuracyPct:
-          type: number
-          description: 0–100 closeness of predicted total cases to actual total cases
-        products:
-          type: array
-          items:
-            $ref: "#/components/schemas/ForecastAccuracyProduct"
-
-    ForecastAccuracyTrendProduct:
-      type: object
-      description: A product the forecast consistently mis-predicts across reviewed days.
-      required:
-        - label
-        - daysOver
-        - daysUnder
-        - daysScored
-      properties:
-        label:
-          type: string
-          description: Product label (brand + flavor)
-        daysOver:
-          type: number
-          description: Reviewed days this product was over-predicted
-        daysUnder:
-          type: number
-          description: Reviewed days this product was under-predicted
-        daysScored:
-          type: number
-          description: Reviewed days this product appeared in at all
-
-    ForecastAccuracyTrend:
-      type: object
-      description: Cross-day calibration summary rolled up from the per-day reviews.
-      required:
-        - daysScored
-        - averageCaseAccuracyPct
-        - chronicOver
-        - chronicUnder
-      properties:
-        daysScored:
-          type: number
-          description: Number of reviewed (forecast + finished) days included
-        averageCaseAccuracyPct:
-          type: number
-          description: Mean case-accuracy across the reviewed days (0–100)
-        chronicOver:
-          type: array
-          description: Products repeatedly over-predicted, most frequent first
-          items:
-            $ref: "#/components/schemas/ForecastAccuracyTrendProduct"
-        chronicUnder:
-          type: array
-          description: Products repeatedly under-predicted, most frequent first
-          items:
-            $ref: "#/components/schemas/ForecastAccuracyTrendProduct"
-
-    ForecastAccuracyResult:
-      type: object
-      required:
-        - reviews
-        - trend
-        - generatedAt
-      properties:
-        reviews:
-          type: array
-          description: Per-date reviews, most recent first
-          items:
-            $ref: "#/components/schemas/ForecastAccuracyReview"
-        trend:
-          $ref: "#/components/schemas/ForecastAccuracyTrend"
-        generatedAt:
-          type: number
-        note:
-          type: string
-          description: Explanation when there is nothing to review yet
 
     FillMissingField:
       type: object
@@ -7902,6 +7317,7 @@ components:
       required:
         - suggestions
         - generatedAt
+        - decision
       properties:
         suggestions:
           type: array
@@ -7912,6 +7328,15 @@ components:
         note:
           type: string
           description: Optional message when no suggestions could be made
+        decision:
+          type: string
+          enum: [suggestion]
+        aiGenerated:
+          type: boolean
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     MatchImportCandidateFlavor:
       type: object
@@ -8522,13 +7947,132 @@ components:
 
     ProfileDataHealthWorkspace:
       type: object
-      required: [findings, safeRepairs, summary, cleanupHistory, repairBatches]
+      required: [findings, safeRepairs, summary, cleanupHistory, repairBatches, aiRetention, sourceReconciliation]
       properties:
-        findings: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthFinding" } }
+        findings: { type: array, items: { $ref: "#/components/schemas/DataHealthFinding" } }
         safeRepairs: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthRepair" } }
         summary: { type: object, additionalProperties: { type: integer } }
         cleanupHistory: { type: object, nullable: true }
         repairBatches: { type: array, items: { type: object, additionalProperties: true } }
+        aiRetention:
+          $ref: "#/components/schemas/AiRetentionReport"
+        sourceReconciliation:
+          $ref: "#/components/schemas/SourceLibraryReconciliationStatus"
+
+    DataHealthFinding:
+      type: object
+      required: [id, category, severity, repairability, brand, flavor, recipe, message, proposedRepair, affectedRecord, protectedValue, source, sourceRoute]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        severity: { type: string, enum: [info, warning, error] }
+        repairability: { type: string, enum: [safe, review] }
+        brand: { type: string }
+        flavor: { type: string }
+        recipe: { type: string }
+        message: { type: string }
+        proposedRepair: { type: string }
+        affectedRecord: { type: string }
+        protectedValue: { type: boolean }
+        source: { type: string, enum: [profile-health, master-data, saved-spec, cleanup] }
+        sourceRoute: { type: string }
+        reconciliationCategory:
+          type: string
+          nullable: true
+          enum: [pool-mismatch, alias-gap, stale-profile-link, stale-pending-run-link, protected-stub, unexpected-stub]
+        preview:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    SourceLibraryReconciliationStatus:
+      type: object
+      additionalProperties: false
+      required: [report, heal, checkedAt, status, freshness, summary, findings]
+      properties:
+        report:
+          type: object
+          additionalProperties: false
+          required: [path, sha256, formatVersion, automaticProposals, stubs, planSha256, snapshot, manifest]
+          properties:
+            path: { type: string }
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            formatVersion: { type: integer }
+            automaticProposals: { type: integer, minimum: 0 }
+            stubs: { type: integer, minimum: 0 }
+            planSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            snapshot:
+              type: object
+              additionalProperties: false
+              required: [path, sha256, capturedAt]
+              properties:
+                path: { type: string }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+                capturedAt: { type: string, format: date-time }
+            manifest:
+              type: object
+              additionalProperties: false
+              required: [path, sha256, retained, excludedOlderDuplicates]
+              properties:
+                path: { type: string }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+                retained: { type: integer, minimum: 0 }
+                excludedOlderDuplicates: { type: integer, minimum: 0 }
+        heal:
+          type: object
+          additionalProperties: false
+          required: [id, fromDate, appliedAt, markerValid, result]
+          properties:
+            id: { type: string }
+            fromDate: { type: string, format: date }
+            appliedAt: { type: string, format: date-time, nullable: true }
+            markerValid: { type: boolean }
+            result:
+              type: object
+              additionalProperties: false
+              required: [replacements, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs]
+              properties:
+                replacements: { type: integer, minimum: 0 }
+                aliasesInserted: { type: integer, minimum: 0 }
+                repointedProfiles: { type: integer, minimum: 0 }
+                repointedRuns: { type: integer, minimum: 0 }
+                deletedStubs: { type: integer, minimum: 0 }
+        checkedAt: { type: string, format: date-time }
+        status: { type: string, enum: [clean, warning, error, not-verified] }
+        freshness: { type: string, enum: [current, stale] }
+        summary:
+          type: object
+          additionalProperties: false
+          required: [poolMismatches, aliasGaps, staleProfileLinks, stalePendingRunLinks, protectedStubs, unexpectedStubs, protectedHistoryReferences, omittedFindings, findingLimitPerCategory]
+          properties:
+            poolMismatches: { type: integer, minimum: 0 }
+            aliasGaps: { type: integer, minimum: 0 }
+            staleProfileLinks: { type: integer, minimum: 0 }
+            stalePendingRunLinks: { type: integer, minimum: 0 }
+            protectedStubs: { type: integer, minimum: 0 }
+            unexpectedStubs: { type: integer, minimum: 0 }
+            protectedHistoryReferences: { type: integer, minimum: 0 }
+            omittedFindings: { type: integer, minimum: 0 }
+            findingLimitPerCategory: { type: integer, minimum: 1 }
+        findings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, category, severity, affectedRecord, currentValue, proposedOutcome, protectedValue, sourceRoute]
+            properties:
+              id: { type: string }
+              category:
+                type: string
+                enum: [pool-mismatch, alias-gap, stale-profile-link, stale-pending-run-link, protected-stub, unexpected-stub]
+              severity: { type: string, enum: [info, warning, error] }
+              affectedRecord: { type: string }
+              currentValue: { type: string }
+              proposedOutcome: { type: string }
+              protectedValue: { type: boolean }
+              sourceRoute:
+                type: string
+                enum: [dough, sauce, cheeseRecipes, mixes, import, setupProfiles, audit]
 
     ProfileNameLinkCleanupAudit:
       type: object
@@ -8609,45 +8153,6 @@ components:
           items:
             $ref: "#/components/schemas/FacilityKnowledge"
 
-    ConversationTurn:
-      type: object
-      description: >-
-        One turn in a user's AI conversation memory — a single message either
-        from the user or the assistant.
-      required:
-        - role
-        - text
-      properties:
-        role:
-          type: string
-          enum: [user, assistant]
-          description: Who produced this turn
-        text:
-          type: string
-          description: The message text
-
-    ConversationHistory:
-      type: object
-      required:
-        - turns
-      properties:
-        turns:
-          type: array
-          description: The user's recent conversation turns, oldest first
-          items:
-            $ref: "#/components/schemas/ConversationTurn"
-
-    AppendConversationInput:
-      type: object
-      required:
-        - turns
-      properties:
-        turns:
-          type: array
-          description: One or more turns to append to the current user's conversation memory
-          items:
-            $ref: "#/components/schemas/ConversationTurn"
-
     MergeSuggestCategory:
       type: string
       description: >-
@@ -8720,6 +8225,74 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DeniedMerge"
+
+    DuplicateReviewGroup:
+      type: object
+      required:
+        - groupKey
+        - category
+        - target
+        - sources
+        - status
+      properties:
+        groupKey:
+          type: string
+          minLength: 1
+          maxLength: 500
+        category:
+          $ref: "#/components/schemas/MergeSuggestCategory"
+        brand:
+          type: [string, "null"]
+        target:
+          type: string
+          minLength: 1
+        sources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        status:
+          type: string
+          enum: [pending, resolved, ignored]
+
+    DuplicateReviewList:
+      type: object
+      required:
+        - groups
+        - count
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/DuplicateReviewGroup"
+        count:
+          type: integer
+          minimum: 0
+
+    SaveDuplicateReviewsInput:
+      type: object
+      required:
+        - groups
+      properties:
+        groups:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/DuplicateReviewGroup"
+
+    ResolveDuplicateReviewInput:
+      type: object
+      required:
+        - groupKey
+        - outcome
+      properties:
+        groupKey:
+          type: string
+          minLength: 1
+          maxLength: 500
+        outcome:
+          type: string
+          enum: [resolved, ignored]
 
     SaveDeniedMergesInput:
       type: object
@@ -9330,6 +8903,7 @@ components:
         - name
         - values
         - createdAt
+        - revision
       properties:
         id:
           type: string
@@ -9348,6 +8922,15 @@ components:
         createdAt:
           type: string
           description: ISO-8601 timestamp the template was created
+        revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Monotonically increasing client revision (a JS-safe integer)
+        deleted:
+          type: boolean
+          default: false
+          description: Whether this record is a deletion tombstone
 
     RunTemplateList:
       type: object
@@ -9368,16 +8951,76 @@ components:
           type: array
           description: The batch of run templates to create or update (by id)
           items:
-            $ref: "#/components/schemas/RunTemplate"
+            $ref: "#/components/schemas/RunTemplateInput"
+
+    RunTemplateInput:
+      type: object
+      description: >-
+        A run template mutation. `revision` is optional solely for compatibility
+        with cached legacy clients; when omitted, the server assigns a revision
+        newer than the stored record atomically.
+      required:
+        - id
+        - name
+        - values
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Human-readable template name
+        values:
+          type: object
+          additionalProperties: true
+          description: Run configuration (cross-platform wire shape; opaque to the server)
+        brand:
+          type: string
+        flavor:
+          type: string
+        createdAt:
+          type: string
+          description: ISO-8601 timestamp the template was created
+        revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Monotonically increasing client revision (a JS-safe integer)
+        deleted:
+          type: boolean
+          default: false
+          description: Whether this record is a deletion tombstone
 
     DeleteRunTemplatesInput:
       type: object
-      required:
-        - ids
+      description: >-
+        Revisioned deletion tombstones and/or legacy template ids. At least one
+        of `items` or `ids` must be supplied.
+      anyOf:
+        - required: [items]
+        - required: [ids]
       properties:
+        items:
+          type: array
+          description: Deletion tombstones to apply by id and revision
+          items:
+            type: object
+            required:
+              - id
+              - revision
+            properties:
+              id:
+                type: string
+                description: Stable client-generated id
+              revision:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Monotonically increasing client revision (a JS-safe integer)
         ids:
           type: array
-          description: The ids of the run templates to delete
+          description: Legacy deletion ids. The server atomically assigns a newer revision.
           items:
             type: string
 
@@ -10057,6 +9700,7 @@ components:
         - generatedAt
         - aiGenerated
         - aiStatus
+        - decision
       properties:
         suggestions:
           type: array
@@ -10073,6 +9717,11 @@ components:
         note:
           type: string
           description: Optional brief overall comment from the model
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     SpecImportAlias:
       type: object
@@ -10228,6 +9877,14 @@ components:
             Batch size in lbs one made batch of this topping weighs, when the
             sheet states it. Fallback only — a cheese/topping recipe for this
             slot derives the batch size from its row sum instead. Optional.
+        slot:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: Physical applicator slot when the workbook identifies it.
+        recipeName:
+          type: string
+          description: Exact cheese or mix recipe linked to this applicator slot.
 
     SpecImportPepperoni:
       type: object
@@ -10270,6 +9927,18 @@ components:
             Name of the sauce when the sheet names a specific one (e.g. BBQ,
             Ranch). Bought/ready-made sauces have no mixing recipe in the
             workbook; the name lets the app pull them as-is by name.
+        doughName:
+          type: string
+          description: >-
+            Exact dough or crust recipe name assigned to this product profile.
+        targetDoughballWeight:
+          type: number
+          exclusiveMinimum: 0
+          description: Product-specific target doughball weight in ounces.
+        doughballsPerTray:
+          type: integer
+          minimum: 1
+          description: Product-specific number of doughballs per tray.
         pizzasPerCase:
           type: number
           description: >-
@@ -10366,6 +10035,7 @@ components:
         - profiles
         - recipes
         - generatedAt
+        - decision
       properties:
         profiles:
           type: array
@@ -10388,6 +10058,15 @@ components:
             $ref: "#/components/schemas/SpecImportWarning"
         generatedAt:
           type: number
+        decision:
+          type: string
+          enum: [suggestion]
+        aiGenerated:
+          type: boolean
+        aiStatus:
+          $ref: "#/components/schemas/AiStatus"
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     SpecImportWarning:
       type: object
@@ -10449,6 +10128,7 @@ components:
         - generatedAt
         - aiGenerated
         - aiStatus
+        - decision
       properties:
         brandMatches:
           type: array
@@ -10483,6 +10163,11 @@ components:
         note:
           type: string
           description: Optional message when no matches could be made
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     MatchPremixInput:
       type: object
@@ -10535,6 +10220,7 @@ components:
         - generatedAt
         - aiGenerated
         - aiStatus
+        - decision
       properties:
         matches:
           type: array
@@ -10550,6 +10236,11 @@ components:
         note:
           type: string
           description: Optional message when no matches could be made
+        decision:
+          type: string
+          enum: [suggestion]
+        modelStatus:
+          $ref: "#/components/schemas/AiModelStatus"
 
     FieldCheckObservationBatch:
       type: object
@@ -10739,9 +10430,16 @@ components:
         errorStack:
           type: string
           description: The uncaught error's stack/component trace (crashes)
-        userAgent:
-          type: string
-          description: Client user-agent / device string, when available
+        browserFamily: { type: string }
+        deviceClass: { type: string }
+        correlationId: { type: string }
+        relatedCorrelationId: { type: string }
+        action: { type: string }
+        outcome: { type: string }
+        retryCount: { type: integer }
+        connectivity: { type: string }
+        syncState: { type: string }
+        signalKind: { type: string }
 
     ReportIncidentInput:
       type: object
@@ -10778,6 +10476,17 @@ components:
         userAgent:
           type: string
           maxLength: 500
+        diagnostics:
+          type: object
+          additionalProperties: false
+          properties:
+            action: { type: string, maxLength: 80 }
+            outcome: { type: string, enum: [error, rejected, degraded] }
+            retryCount: { type: integer, minimum: 0, maximum: 10 }
+            connectivity: { type: string, enum: [online, offline, unstable, unknown] }
+            syncState: { type: string, enum: [idle, pending, retrying, blocked, unknown] }
+            signalKind: { type: string, enum: [user_report, crash, rejected_promise, api_failure, startup, update, sync] }
+            correlationId: { type: string, maxLength: 128 }
 
     IncidentRecurrence:
       type: object
@@ -10800,23 +10509,71 @@ components:
       type: object
       required:
         - incidentId
+        - correlationId
         - diagnosis
         - workaround
         - recurrence
+        - aiGenerated
       properties:
         incidentId:
           type: string
+        correlationId:
+          type: string
         diagnosis:
-          type: string
-          description: Plain-language explanation of what likely went wrong
+          type: [string, "null"]
+          description: Retained compatibility field; null for new reports
         workaround:
-          type: string
-          description: Suggested next step / workaround for the user
+          type: [string, "null"]
+          description: Retained compatibility field; null for new reports
         recurrence:
           oneOf:
             - $ref: "#/components/schemas/IncidentRecurrence"
             - type: "null"
           description: Recurrence signal, or null when this problem has no precedent
+        aiGenerated:
+          type: boolean
+          enum: [false]
+          description: New reports do not use automated diagnosis
+
+    AiRetentionReport:
+      type: object
+      required: [policyVersion, scope, batchLimit, canApply, alreadyApplied, appliedAt, candidates, protected, cutoffs]
+      properties:
+        policyVersion: { type: string }
+        scope: { type: string, enum: [live, sandbox] }
+        batchLimit: { type: integer, minimum: 1 }
+        canApply: { type: boolean }
+        alreadyApplied: { type: boolean }
+        appliedAt: { type: [string, "null"], format: date-time }
+        candidates:
+          type: object
+          additionalProperties: false
+          required: [conversationTurns, retiredFacilityFacts, incidentGeneratedTextToLabel, qualityThumbnailsToRedact, closedObservationsToRedact, total]
+          properties:
+            conversationTurns: { type: integer, minimum: 0 }
+            retiredFacilityFacts: { type: integer, minimum: 0 }
+            incidentGeneratedTextToLabel: { type: integer, minimum: 0 }
+            qualityThumbnailsToRedact: { type: integer, minimum: 0 }
+            closedObservationsToRedact: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+        protected:
+          type: object
+          additionalProperties: false
+          required: [correctionAndAliasRecords, operationalIncidentRows, confirmedQualityRows, openInventoryObservations, inventoryLedgerEffects]
+          properties:
+            correctionAndAliasRecords: { type: string }
+            operationalIncidentRows: { type: integer, minimum: 0 }
+            confirmedQualityRows: { type: integer, minimum: 0 }
+            openInventoryObservations: { type: integer, minimum: 0 }
+            inventoryLedgerEffects: { type: string }
+        cutoffs:
+          type: object
+          additionalProperties: false
+          required: [conversationBefore, thumbnailBefore, observationBefore]
+          properties:
+            conversationBefore: { type: string, format: date-time }
+            thumbnailBefore: { type: string, format: date-time }
+            observationBefore: { type: string, format: date-time }
 
     Incident:
       type: object
@@ -10943,6 +10700,42 @@ components:
       properties:
         count:
           type: integer
+
+    CreateServerJobInput:
+      type: object
+      additionalProperties: false
+      required: [type, idempotencyKey]
+      properties:
+        type:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,63}$"
+        idempotencyKey: { type: string, minLength: 8, maxLength: 128 }
+        input: {}
+        snapshotId: { type: string, maxLength: 200 }
+
+    ServerJob:
+      type: object
+      required: [id, type, status, progress, attempt, maxAttempts, cancelRequested, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        snapshotId: { type: [string, "null"] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        progressMessage: { type: [string, "null"] }
+        attempt: { type: integer }
+        maxAttempts: { type: integer }
+        cancelRequested: { type: boolean }
+        result: {}
+        error:
+          type: [object, "null"]
+          properties:
+            code: { type: string }
+            message: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        expiresAt: { type: string, format: date-time }
 
     ManagerActionItem:
       type: object

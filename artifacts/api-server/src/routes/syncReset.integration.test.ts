@@ -207,14 +207,22 @@ describe("POST /sync/purge-all — full factory purge", () => {
 
   it("wipes day-state AND master data, bumps epoch, keeps accounts", async () => {
     const dbMod = await seedMasterData();
+    await db.insert(dataResetTable).values({ scope: "live", epoch: 4, resetAt: new Date() });
+    await db.insert(dbMod.operationalIntentLedgerTable).values({
+      scope: "live",
+      date: "2030-03-10",
+      intentId: "offline:before-purge",
+      outcome: "review-required",
+    });
     const res = await fetch(`${baseUrl}/api/sync/purge-all`, {
       method: "POST",
       headers: authHeaders(MANAGER),
     });
     expect(res.status).toBe(200);
-    expect((await res.json()) as { ok: boolean; epoch: number }).toEqual({ ok: true, epoch: 1 });
+    expect((await res.json()) as { ok: boolean; epoch: number }).toEqual({ ok: true, epoch: 5 });
 
     expect(await db.select().from(dailySyncTable)).toHaveLength(0);
+    expect(await db.select().from(dbMod.operationalIntentLedgerTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.cheeseRecipesTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.mixesTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.inventoryItemsTable)).toHaveLength(0);
@@ -227,7 +235,7 @@ describe("POST /sync/purge-all — full factory purge", () => {
 
     // Manager can still hit a protected endpoint afterwards (auth intact).
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(MANAGER) });
-    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1 });
+    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 5 });
   });
 
   it("stale pre-purge pushes are rejected by the epoch guard", async () => {

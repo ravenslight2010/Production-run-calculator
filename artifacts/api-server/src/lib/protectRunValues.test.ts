@@ -390,6 +390,33 @@ describe("protectRunValues", () => {
   });
 });
 
+describe("server-owned wall-clock bookkeeping", () => {
+  const serverState = { version: 1, wallClockBookkeeping: { r1: { caseNextDueMs: 1_800_000_100_000 } } };
+  it("preserves it on ordinary same-day pushes", () => {
+    const existing = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 },
+      runValues: { r1: { casesNeeded: 10 } }, runValuesUpdatedAt: { r1: 1 },
+      autoTrackServerState: serverState,
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 },
+      runValues: { r1: { casesNeeded: 10, casesOnCurrentSkid: 1 } }, runValuesUpdatedAt: { r1: 2 },
+    };
+    expect((protectRunValues(incoming, existing) as Record<string, unknown>).autoTrackServerState).toEqual(serverState);
+  });
+  it("drops it on an allowed wholesale reset", () => {
+    const existing = {
+      dayState: { runs: [{ id: "r1" }], resetAt: 1 }, runValues: { r1: {} },
+      runValuesUpdatedAt: { r1: 1 }, autoTrackServerState: serverState,
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "r2" }], resetAt: 2 }, runValues: { r2: {} },
+      runValuesUpdatedAt: { r2: 2 },
+    };
+    expect((protectRunValues(incoming, existing, { allowRunListReplacement: true }) as Record<string, unknown>).autoTrackServerState).toBeUndefined();
+  });
+});
+
 describe("protectRunValues run-list lifecycle LWW (metaUpdatedAt)", () => {
   type RunMeta = {
     id: string;

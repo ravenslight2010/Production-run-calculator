@@ -514,20 +514,20 @@ export default function ExcelImportDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="excel-import-dialog-title"
-        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-xl"
+        className="w-full max-w-lg h-[90vh] max-h-[90vh] min-h-0 flex flex-col rounded-xl border border-border bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Upload className="w-4 h-4 text-primary" />
             <span id="excel-import-dialog-title" className="text-base font-semibold text-foreground">Import Excel</span>
           </div>
-          <button type="button" aria-label="Close import review" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button type="button" aria-label="Close import review" onClick={onClose} className="text-muted-foreground hover:text-foreground" data-testid="button-excel-import-close">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="px-5 py-4 overflow-y-auto space-y-4">
+        <div className="min-h-0 flex-1 px-5 py-4 overflow-y-auto overscroll-contain space-y-4">
           {multiDay ? (
             <div className="rounded-md border border-border bg-muted/40 p-3">
               <p className="text-sm font-semibold text-foreground">Schedule planner detected</p>
@@ -734,22 +734,33 @@ export default function ExcelImportDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border">
-          <span className="text-sm text-muted-foreground">
+        <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-4 border-t border-border">
+          <span className="basis-full min-w-0 text-sm text-muted-foreground">
             {progress
               ? `Importing day ${progress.done} of ${progress.total}…`
               : multiDay
                 ? `${willImport} run${willImport === 1 ? "" : "s"} across ${dayCount} day${dayCount === 1 ? "" : "s"}`
                 : `${willImport} run${willImport === 1 ? "" : "s"} → schedule${skipped > 0 ? `, ${skipped} skipped` : ""}`}
           </span>
-          <button
-            type="button"
-            disabled={willImport === 0 || !dateValid || !!progress}
-            onClick={handleConfirm}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-40"
-          >
-            {progress ? "Importing…" : `Import ${willImport > 0 ? willImport : ""}`}
-          </button>
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-2 max-[479px]:w-full">
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-40"
+              data-testid="button-excel-import-cancel"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={willImport === 0 || !dateValid || !!progress}
+              onClick={handleConfirm}
+              className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-40"
+              data-testid="button-excel-import-confirm"
+            >
+              {progress ? "Importing…" : `Import ${willImport > 0 ? willImport : ""}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>

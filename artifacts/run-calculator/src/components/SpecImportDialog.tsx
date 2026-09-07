@@ -15,6 +15,7 @@ import {
   recipeLinkSuggestionKey,
   crossFamilyRoutingSuggestionKey,
   repointProfileNamedRecipes,
+  reviewRecipeRowsUnit,
   specImportNameMatchKey,
   type NamedRecipeRename,
   type ParsedProfile,
@@ -143,6 +144,8 @@ type RecipeItem = {
    * instead of creating/overwriting one from the sheet. Empty = create new.
    */
   linkExisting?: string;
+  /** Manager-confirmed provenance for every row in this recipe. */
+  confirmedRowsUnit?: "lbs" | "oz";
   include: boolean;
   tombstoned: boolean;
   /**
@@ -302,6 +305,7 @@ function buildRecipeItems(
       flavor: r.flavor ?? "",
       ...(linkExisting ? { linkExisting } : {}),
       ...(crossFamily ? { linkExisting: crossFamily.linkExisting } : {}),
+      ...(r.confirmedRowsUnit ? { confirmedRowsUnit: r.confirmedRowsUnit } : {}),
       include: true,
       tombstoned: false,
     };
@@ -337,6 +341,7 @@ function buildRecipeItems(
     kind: specImportRecipeDisplayKind(r),
     brand: r.brand ?? "",
     flavor: r.flavor ?? "",
+    ...(r.confirmedRowsUnit ? { confirmedRowsUnit: r.confirmedRowsUnit } : {}),
     include: false,
     tombstoned: true,
   }));
@@ -798,6 +803,8 @@ export default function SpecImportDialog({
         if (r.kind === "mix") out.forcedCategory = "mix";
         else if (r.kind === "cheese") out.forcedCategory = "cheese";
         else delete out.forcedCategory;
+        if (r.confirmedRowsUnit) out.confirmedRowsUnit = r.confirmedRowsUnit;
+        else delete out.confirmedRowsUnit;
         const b = r.brand.trim();
         const f = r.flavor.trim();
         if (b) out.brand = b;
@@ -1182,6 +1189,9 @@ export default function SpecImportDialog({
                               // recipe (or clearing the pick) retires it.
                               mergedAway: false,
                             })
+                          }
+                          onConfirmRowsUnit={(confirmedRowsUnit) =>
+                            setRecipe(r.key, { confirmedRowsUnit })
                           }
                         />
                       );
@@ -1685,6 +1695,7 @@ function RecipeRow({
   onName,
   onKind,
   onLinkExisting,
+  onConfirmRowsUnit,
 }: {
   item: RecipeItem;
   /** Existing saved recipes of this kind the user can reuse instead of creating one. */
@@ -1699,6 +1710,7 @@ function RecipeRow({
   onName: (v: string) => void;
   onKind: (v: SpecImportDisplayKind) => void;
   onLinkExisting: (v: string) => void;
+  onConfirmRowsUnit: (v: "lbs" | "oz" | undefined) => void;
 }) {
   const linked = item.linkExisting?.trim() ?? "";
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
@@ -1723,6 +1735,7 @@ function RecipeRow({
     item.orig,
     item.kind === "mix" ? "oz/pizza" : "lb",
   );
+  const rowsUnitReview = reviewRecipeRowsUnit(item.orig);
   // SPEC-WINS: a linked Dough/Sauce pick with parsed rows always replaces the
   // existing recipe's ingredients on Apply — no opt-in checkbox. Linked mixes
   // follow the same explicit update decision: sheet components and per-pizza
@@ -1872,6 +1885,72 @@ function RecipeRow({
           {!linked && rowsPreview && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Read: {rowsPreview}
+            </div>
+          )}
+          {rowsUnitReview.clarity === "clear" ? (
+            <div
+              className="mt-1.5 text-xs text-muted-foreground"
+              data-testid={`spec-recipe-rows-unit-${item.key}`}
+            >
+              Reported row unit:{" "}
+              <span className="font-medium text-foreground">
+                {rowsUnitReview.reportedUnit}
+              </span>
+            </div>
+          ) : (
+            <div
+              className="mt-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+              data-testid={`spec-recipe-rows-unit-warning-${item.key}`}
+            >
+              <div className="flex items-center gap-1.5 text-amber-600">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-xs font-semibold">Check recipe row units</span>
+              </div>
+              <p className="mt-0.5 text-xs text-amber-700">
+                {rowsUnitReview.clarity === "missing"
+                  ? "The workbook did not clearly state whether these row values are pounds or ounces."
+                  : `The reported row unit “${rowsUnitReview.reportedUnit}” is ambiguous.`}{" "}
+                Review before applying; the values will stay exactly as reported.
+              </p>
+              <fieldset className="mt-2">
+                <legend className="text-xs font-medium text-foreground">
+                  Confirm from workbook (optional)
+                </legend>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {([
+                    ["lbs", "Pounds"],
+                    ["oz", "Ounces"],
+                  ] as const).map(([unit, label]) => {
+                    const selected = item.confirmedRowsUnit === unit;
+                    return (
+                      <button
+                        key={unit}
+                        type="button"
+                        aria-pressed={selected}
+                        aria-label={`Confirm ${item.name || "recipe"} row values are ${label.toLowerCase()}`}
+                        data-testid={`spec-recipe-rows-unit-confirm-${item.key}-${unit}`}
+                        onClick={() => onConfirmRowsUnit(selected ? undefined : unit)}
+                        className={`rounded-md border px-2 py-1 text-xs font-medium ${
+                          selected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-background text-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {item.confirmedRowsUnit && (
+                  <p
+                    className="mt-1 text-xs font-medium text-foreground"
+                    data-testid={`spec-recipe-rows-unit-confirmed-${item.key}`}
+                  >
+                    Confirmed as {item.confirmedRowsUnit === "lbs" ? "pounds" : "ounces"}.
+                    Numeric values will not be converted.
+                  </p>
+                )}
+              </fieldset>
             </div>
           )}
           {!linked && !item.orig.referenceOnly && (

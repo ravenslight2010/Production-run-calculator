@@ -25,7 +25,7 @@ services:
       node migration/node_modules/drizzle-kit/bin.cjs push --force
       --config migration/drizzle.config.ts
     plan: free
-    healthCheckPath: /api/healthz
+    healthCheckPath: /api/readyz
     envVars:
       # ---- Database (auto-linked by Render) ----
       - key: DATABASE_URL

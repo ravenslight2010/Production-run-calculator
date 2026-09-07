@@ -58,6 +58,7 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
 import {
@@ -65,6 +66,7 @@ import {
   markProfileEdited,
   markProfileDeleted,
 } from "./profileServerSync";
+import { localRunTemplates, replaceRunTemplates } from "./runTemplatesRepository";
 import {
   type MergeMap,
   mergeList as mergeListNames,
@@ -108,6 +110,44 @@ import {
   planProfileCleanup,
   brandsToRemoveAfterDeletes,
 } from "@workspace/profile-cleanup";
+import {
+  deepEqual,
+  freshDayState,
+  stampDayStateMeta,
+} from "./domain/runSyncPolicy";
+export {
+  acceptRemoteRunValueOnSync,
+  adoptStrictlyNewerRemoteLifecycles,
+  createSyncBaselineGate,
+  deepEqual,
+  freshDayState,
+  isAllDefaultRunValue,
+  isBlankRemovableRun,
+  isEmptyOverPopulated,
+  isPristineSeedRun,
+  pickCurrentRunPushValue,
+  RECENT_LOCAL_EDIT_WINDOW_MS,
+  removeRunByIdFromDayState,
+  selectInboundRunLifecycles,
+  shouldAcceptSyncDaySnapshot,
+  shouldAtomicallyAdoptFirstSnapshot,
+  shouldHealFormFromStored,
+  shouldKeepLocalRunLifecycle,
+  shouldResetFormOnRunSwitch,
+} from "./domain/runSyncPolicy";
+import {
+  loadRunValues as readBrowserRunValues,
+  loadRunValuesUpdated as readBrowserRunValuesUpdated,
+  markRunValuesUpdated as stampBrowserRunValues,
+  saveRunValues as writeBrowserRunValues,
+  saveRunValuesUpdated as writeBrowserRunValuesUpdated,
+  subscribeRunValuesWrites as subscribeBrowserRunValuesWrites,
+} from "./adapters/browserRunPersistence";
+import {
+  applyResetWipe as wipeBrowserRunCalculator,
+  getStoredResetEpoch as readBrowserResetEpoch,
+} from "./adapters/browserResetPersistence";
+import { browserStorage as localStorage } from "./adapters/browserRecordStore";
 
 export function loadList(key: string, fallback: string[]): string[] {
   try {
@@ -366,12 +406,20 @@ export function saveBrandFlavors(bf: Record<string, string[]>): void {
   notifyKv(BRAND_FLAVORS_KEY, bf);
 }
 
-// Fields that are run-specific and must never carry over via a brand/flavor profile
-const PER_RUN_FIELDS: (keyof FormValues)[] = [
+// Complete set of values owned by one production run. These must never be
+// persisted in a brand/flavor profile or copied from one run snapshot to
+// another when shared setup changes are propagated.
+export const PROFILE_EXCLUDED_FIELDS = [
   "casesNeeded", "carryOverDone",
   // Temporary this-run-only Setup overrides — never part of a profile
   "tempFreezerTime", "tempCrustsPerCycle", "tempCycleSpeed",
-];
+  ...PROGRESS_FIELDS,
+  "sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration",
+  "app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration",
+  "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
+  "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
+  "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
+] as const satisfies readonly (keyof FormValues)[];
 
 // Rename legacy pep-type names ("Pep - Cured"/"Pep - Natural") to the detailed
 // standard names on read, so saved profiles/runs keep their pre-made calc behavior
@@ -516,8 +564,8 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
       if (crustRaw) crustVals = JSON.parse(crustRaw);
     } catch {}
     const result = { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
-    // Strip per-run fields even if they were saved in an old profile
-    PER_RUN_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
+    // Strip per-run fields even if they were saved in an old profile.
+    PROFILE_EXCLUDED_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
     const rawHadCombined = typeof (doughVals as Record<string, unknown>).pep1Combined === "boolean"
       || typeof (crustVals as Record<string, unknown>).pep1Combined === "boolean";
     resolvePep1Combined(result as unknown as Record<string, unknown>, rawHadCombined);
@@ -633,7 +681,7 @@ export function backfillSauceFromProfile(
  * untouched DEFAULT for it (never overwrites data the run already has).
  *
  * Skipped on purpose:
- *   • PER_RUN_FIELDS / PROGRESS_FIELDS — never part of a profile;
+ *   • PROFILE_EXCLUDED_FIELDS — never part of a profile;
  *   • booleans — their default is a meaningful choice, "still default" is
  *     indistinguishable from "deliberately set to the default";
  *   • brand/flavor identity fields (not FormValues fields, but guarded anyway).
@@ -651,8 +699,7 @@ export function backfillFromProfile(
   const profile = loadProfile(brand, flavor ?? "");
   if (!profile) return out;
   const skip = new Set<string>([
-    ...PER_RUN_FIELDS,
-    ...PROGRESS_FIELDS,
+    ...PROFILE_EXCLUDED_FIELDS,
     "brand",
     "flavor",
   ]);
@@ -695,8 +742,7 @@ export function profileHasRealData(brand: string, flavor: string): boolean {
 function extractProfileBlobs(values: FormValues): { dough: string; crust: string } {
   const doughVals = { ...values } as Record<string, unknown>;
   CRUST_FIELDS.forEach((f) => delete doughVals[f]);
-  PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
-  PER_RUN_FIELDS.forEach((f) => delete doughVals[f]);
+  PROFILE_EXCLUDED_FIELDS.forEach((f) => delete doughVals[f]);
   const crustVals: Partial<Record<CrustField, unknown>> = {};
   CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
   return { dough: JSON.stringify(doughVals), crust: JSON.stringify(crustVals) };
@@ -999,8 +1045,8 @@ export function recipeRowsEqual(
 /**
  * Overlay a freshly saved profile onto the OPEN run form's current values,
  * keeping everything that belongs to the run rather than the profile:
- * PER_RUN_FIELDS (cases needed, temp overrides), PROGRESS_FIELDS (skids/cases/
- * trays/batches progress of a started run) and the brand/flavor identity.
+ * PROFILE_EXCLUDED_FIELDS (targets, temp overrides, production progress and
+ * auto-track registers) and the brand/flavor identity.
  * Returns `current` unchanged (same reference) when nothing differs, so the
  * caller can cheaply skip the reset/stamp/push dance.
  */
@@ -1009,8 +1055,7 @@ export function mergeProfileIntoOpenForm(
   profile: FormValues,
 ): FormValues {
   const skip = new Set<string>([
-    ...PER_RUN_FIELDS,
-    ...PROGRESS_FIELDS,
+    ...PROFILE_EXCLUDED_FIELDS,
     "brand",
     "flavor",
   ]);
@@ -1024,6 +1069,13 @@ export function mergeProfileIntoOpenForm(
     (out as Record<string, unknown>)[field] = prof;
   }
   return out;
+}
+
+/** Shared recipe/profile refreshes stop permanently at the first Start. */
+export function isRunRecipeRefreshEligible(
+  run: Pick<RunMeta, "startedAt" | "pausedAt" | "endedAt"> | undefined,
+): boolean {
+  return !!run && !run.startedAt && !run.pausedAt && !run.endedAt;
 }
 
 /** One changed shared (server-pool) dough/sauce recipe to fan out to profiles. */
@@ -1195,12 +1247,13 @@ export function refreshCheeseOrMixProfileRows(
   targetName: string,
   targetRows: ReadonlyArray<{ ingredient: string; lbs: number }>,
   opts?: { emptyRowsOnly?: boolean },
-): void {
-  if (!profileWritesAllowed) return;
-  if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return;
+): { brand: string; flavor: string }[] {
+  if (!profileWritesAllowed) return [];
+  if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return [];
   const nameLc = targetName.trim().toLowerCase();
   const prefixes = ["run-calc-profile-", "run-calc-crust-profile-"];
   const keys: string[] = [];
+  const touched: { brand: string; flavor: string }[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && prefixes.some((p) => k.startsWith(p))) keys.push(k);
@@ -1234,158 +1287,19 @@ export function refreshCheeseOrMixProfileRows(
       if (changed) {
         localStorage.setItem(k, JSON.stringify(obj));
         const profilePrefix = prefixes.find((p) => k.startsWith(p)) ?? prefixes[0];
-        markProfileEdited(k.slice(profilePrefix.length));
+        const profileKey = k.slice(profilePrefix.length);
+        markProfileEdited(profileKey);
+        const sep = profileKey.indexOf("__");
+        touched.push({
+          brand: sep >= 0 ? profileKey.slice(0, sep) : profileKey,
+          flavor: sep >= 0 ? profileKey.slice(sep + 2) : "",
+        });
       }
     } catch {
       // Skip unreadable profiles — never let one bad entry block the fan-out.
     }
   }
-}
-
-export function freshDayState(): DayState {
-  // The placeholder run is `seeded`: auto-created, not a user action. While it
-  // stays pristine it is excluded from sync pushes and dropped on receive once
-  // the shared day has real runs (see isPristineSeedRun) — otherwise every
-  // fresh device signing in mid-day adds a blank "Unnamed Run" to every peer's
-  // list via the additive union.
-  return {
-    runs: [{ id: genId(), brand: "", flavor: "", seeded: true }],
-    currentIndex: 0,
-    date: todayStr(),
-    substitutions: [],
-    substitutionLog: [],
-    stagedItems: {},
-    prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
-  };
-}
-
-/**
- * Holds automatic sync writes until the SSE connection has delivered its first
- * frame. A first frame can carry either the server row or an explicit null when
- * the row does not exist; both establish the baseline. This keeps a new device's
- * local placeholder or stale day from racing ahead of the shared snapshot.
- */
-export function createSyncBaselineGate() {
-  let ready = false;
-  let pushPending = false;
-  return {
-    beginConnection(): void {
-      ready = false;
-      pushPending = false;
-    },
-    requestPush(): boolean {
-      if (ready) return true;
-      pushPending = true;
-      return false;
-    },
-    completeInitialSnapshot(): boolean {
-      ready = true;
-      const shouldPush = pushPending;
-      pushPending = false;
-      return shouldPush;
-    },
-    isReady(): boolean {
-      return ready;
-    },
-  };
-}
-
-export function shouldAcceptSyncDaySnapshot(args: {
-  remoteDate?: string;
-  localDate?: string;
-  remoteResetAt: number;
-  localResetAt: number;
-  initialSnapshot?: boolean;
-}): boolean {
-  const dateMatches = !args.remoteDate || !args.localDate || args.remoteDate === args.localDate;
-  return dateMatches && (
-    args.initialSnapshot === true || args.remoteResetAt >= args.localResetAt
-  );
-}
-
-/**
- * A brand-new browser has exactly one automatic seeded placeholder. Its first
- * server snapshot is safe to adopt wholesale, but later reconnects must keep
- * using the normal additive/LWW merge so an intentional offline New Run or edit
- * is not discarded before it can be pushed.
- */
-export function shouldAtomicallyAdoptFirstSnapshot(args: {
-  initialSnapshot?: boolean;
-  localRuns: RunMeta[];
-  // The form can receive a user keystroke before its autosave effect has
-  // persisted the intent by clearing `seeded`. Do not discard that in-flight
-  // edit just because the placeholder's meta still looks automatic.
-  hasLocalUserEdit?: boolean;
-}): boolean {
-  return (
-    args.initialSnapshot === true &&
-    args.localRuns.length === 1 &&
-    args.hasLocalUserEdit !== true &&
-    isPristineSeedRun(args.localRuns[0])
-  );
-}
-
-// True when a run is still the untouched auto-created placeholder: flagged
-// `seeded` (freshDayState / daily rollover — never New Run, imports, or
-// schedule pull-ups), with blank identity/lifecycle meta AND an all-default
-// value. Such a run is local-only: buildSyncPayload skips it and the
-// sync-receive union drops it once the shared day has real runs. Any user
-// input (brand, notes, Start, a typed value) makes this false and the run
-// syncs normally. `value` is whatever would be pushed for the run (live form
-// for the current run, stored copy otherwise) so mid-typing is respected.
-export function isPristineSeedRun(run: RunMeta): boolean {
-  return !!run.seeded && isBlankRemovableRun(run);
-}
-
-// True when a run is completely blank — no identity and never started —
-// REGARDLESS of the `seeded` flag or stored form values. Used by:
-//   • The "remove blank runs" eraser: placeholder runs pushed before the
-//     seeded/local-only fix (and runs whose values were contaminated by
-//     profile fan-out) are recognised by their identity/lifecycle alone —
-//     relying on isAllDefaultRunValue caused contaminated runs (which had
-//     full recipe data but no brand/flavor/startedAt) to slip through.
-//   • isPristineSeedRun: a seeded run that received recipe data via profile
-//     fan-out must still be kept local-only if it was never given an identity.
-export function isBlankRemovableRun(run: RunMeta): boolean {
-  return (
-    !run.brand &&
-    !run.flavor &&
-    !(run.notes ?? "").trim() &&
-    !run.startedAt &&
-    !run.endedAt &&
-    (run.stoppages ?? []).length === 0
-  );
-}
-
-/**
- * Remove one not-started run while keeping the day focused on a surviving
- * run.  The caller owns persistence and tombstoning because those are side
- * effects; returning null makes active, completed, unknown, and last-run
- * removals explicit no-ops.
- */
-export function removeRunByIdFromDayState(
-  dayState: DayState,
-  id: string,
-): { dayState: DayState; removedRun: RunMeta; removedCurrent: boolean } | null {
-  const idx = dayState.runs.findIndex((run) => run.id === id);
-  if (idx === -1) return null;
-  const run = dayState.runs[idx];
-  if (run.startedAt || run.endedAt) return null;
-
-  const newRuns = dayState.runs.filter((_, i) => i !== idx);
-  if (newRuns.length === 0) return null;
-
-  const currentId = dayState.runs[dayState.currentIndex]?.id;
-  const removedCurrent = currentId === id;
-  const newIndex = removedCurrent
-    ? Math.max(0, idx - 1)
-    : Math.max(0, newRuns.findIndex((candidate) => candidate.id === currentId));
-
-  return {
-    dayState: { ...dayState, runs: newRuns, currentIndex: newIndex },
-    removedRun: run,
-    removedCurrent,
-  };
+  return touched;
 }
 
 export function loadDayState(): DayState {
@@ -1405,14 +1319,6 @@ export function loadDayState(): DayState {
   return freshDayState();
 }
 
-// True when two run objects carry the same metadata, ignoring the LWW stamp
-// itself. Used to decide whether a save actually changed a run's meta.
-function runMetaEquals(a: RunMeta, b: RunMeta): boolean {
-  const { metaUpdatedAt: _a, ...restA } = a;
-  const { metaUpdatedAt: _b, ...restB } = b;
-  return deepEqual(restA, restB);
-}
-
 // Diff-stamp each run's lifecycle/metadata against the currently STORED copy:
 // a run whose meta changed (or is new) gets metaUpdatedAt = now; an unchanged
 // run keeps its prior stamp. Centralized here so EVERY local mutation path
@@ -1423,24 +1329,7 @@ function runMetaEquals(a: RunMeta, b: RunMeta): boolean {
 export function saveDayState(ds: DayState, opts?: { stampMeta?: boolean }): void {
   let toSave = ds;
   if (opts?.stampMeta !== false) {
-    try {
-      const stored = loadDayState();
-      const storedById = new Map(stored.runs.map(r => [r.id, r]));
-      const now = Date.now();
-      let changed = false;
-      const runs = ds.runs.map(r => {
-        const prev = storedById.get(r.id);
-        if (prev && runMetaEquals(r, prev)) {
-          // Unchanged meta: keep the strongest stamp either copy carries.
-          const keep = Math.max(r.metaUpdatedAt ?? 0, prev.metaUpdatedAt ?? 0);
-          if (keep !== (r.metaUpdatedAt ?? 0)) { changed = true; return { ...r, metaUpdatedAt: keep }; }
-          return r;
-        }
-        changed = true;
-        return { ...r, metaUpdatedAt: now };
-      });
-      if (changed) toSave = { ...ds, runs };
-    } catch {}
+    try { toSave = stampDayStateMeta(ds, loadDayState(), Date.now()); } catch {}
   }
   try { localStorage.setItem(DAY_KEY, JSON.stringify({ ...toSave, date: todayStr() })); } catch {}
 }
@@ -1461,103 +1350,6 @@ export function overlayRunMetaStamps(runs: RunMeta[]): RunMeta[] {
   } catch {
     return runs;
   }
-}
-
-/**
- * Decide whether a local lifecycle must survive an incoming copy of the same
- * run. A pause is an explicit lifecycle transition, not a display-only flag:
- * a running copy with the same production start cannot be a resume because a
- * real resume shifts startedAt forward. Keep the pause when a delayed server
- * snapshot or a skewed device clock tries to regress it back to running.
- *
- * All other lifecycle copies retain the normal metadata LWW behavior.
- */
-export function shouldKeepLocalRunLifecycle(
-  localRun: RunMeta | undefined,
-  remoteRun: RunMeta | undefined,
-): boolean {
-  if (!localRun || !remoteRun) return false;
-
-  const localHasActivePause = !!localRun.pausedAt && !localRun.endedAt;
-  const remoteRegressesSameStartPause =
-    localHasActivePause
-    && !remoteRun.pausedAt
-    && !remoteRun.endedAt
-    && remoteRun.startedAt === localRun.startedAt;
-
-  return remoteRegressesSameStartPause
-    || (localRun.metaUpdatedAt ?? 0) > (remoteRun.metaUpdatedAt ?? 0);
-}
-
-/**
- * Select the lifecycle copy for each run included in a normal inbound sync
- * payload. The caller handles local-only runs, ordering, and tombstones; this
- * helper keeps the per-run lifecycle choice testable and consistent with
- * foreground recovery.
- */
-export function selectInboundRunLifecycles(
-  localRuns: RunMeta[],
-  remoteRuns: RunMeta[],
-): RunMeta[] {
-  const localById = new Map(localRuns.map((run) => [run.id, run]));
-  return remoteRuns.map((remoteRun) => {
-    const localRun = localById.get(remoteRun.id);
-    return shouldKeepLocalRunLifecycle(localRun, remoteRun)
-      ? localRun!
-      : remoteRun;
-  });
-}
-
-/**
- * Atomically adopt strictly-newer remote lifecycle copies for runs already in
- * the local day. Foreground recovery uses this before releasing auto-track or
- * any queued push, so a sleeping client's durable running copy cannot survive
- * long enough to publish over a Stop it missed.
- *
- * This intentionally follows the established lifecycle LWW contract:
- * strictly-newer metaUpdatedAt wins; equal/absent stamps do not get a special
- * stop-wins rule. The ordinary inbound merge still handles remote-only runs,
- * ordering, tombstones, overlays, and run values.
- */
-export function adoptStrictlyNewerRemoteLifecycles(
-  localDay: DayState,
-  remoteRuns: RunMeta[],
-): { dayState: DayState; adoptedRunIds: string[] } {
-  const remoteById = new Map(remoteRuns.map((run) => [run.id, run]));
-  const adoptedRunIds: string[] = [];
-  const runs = localDay.runs.map((localRun) => {
-    const remoteRun = remoteById.get(localRun.id);
-    if (
-      !remoteRun
-      || (remoteRun.metaUpdatedAt ?? 0) <= (localRun.metaUpdatedAt ?? 0)
-      || shouldKeepLocalRunLifecycle(localRun, remoteRun)
-      || (
-        remoteRun.startedAt === localRun.startedAt
-        && remoteRun.pausedAt === localRun.pausedAt
-        && remoteRun.endedAt === localRun.endedAt
-      )
-    ) {
-      return localRun;
-    }
-    adoptedRunIds.push(localRun.id);
-    return remoteRun;
-  });
-  if (adoptedRunIds.length === 0) return { dayState: localDay, adoptedRunIds };
-
-  const selectedRunId = localDay.runs[localDay.currentIndex]?.id;
-  const selectedIndex = selectedRunId
-    ? runs.findIndex((run) => run.id === selectedRunId)
-    : -1;
-  return {
-    dayState: {
-      ...localDay,
-      runs,
-      currentIndex: selectedIndex >= 0
-        ? selectedIndex
-        : Math.max(0, Math.min(localDay.currentIndex, runs.length - 1)),
-    },
-    adoptedRunIds,
-  };
 }
 
 export function loadHistory(): HistoryDay[] {
@@ -1608,7 +1400,12 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
     const runValues: Record<string, FormValues> = {};
     for (const run of keptRuns) {
       const raw = localStorage.getItem(RUN_KEY(run.id));
-      if (raw) runValues[run.id] = JSON.parse(raw);
+      if (raw) {
+        runValues[run.id] = JSON.parse(raw);
+        // Archive first, then enqueue immutable finalization. A failed network
+        // request can never make the local completion disappear.
+        queueCompletedRun(date, run, runValues[run.id]);
+      }
     }
     const entry: HistoryDay = { date, runs: keptRuns, runValues };
     const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
@@ -1617,24 +1414,11 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
 }
 
 export function loadRunValues(id: string): FormValues {
-  try {
-    const raw = localStorage.getItem(RUN_KEY(id));
-    if (raw) {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const result = { ...DEFAULT_VALUES, ...parsed } as unknown as Record<string, unknown>;
-      foldMachineTimeZeros(result);
-      resolvePep1Combined(result, typeof parsed.pep1Combined === "boolean");
-      return normalizePepFields(result) as unknown as FormValues;
-    }
-  } catch {}
-  return DEFAULT_VALUES;
+  return readBrowserRunValues(id);
 }
 
 export function saveRunValues(id: string, values: FormValues): void {
-  try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("run-calculator:run-values-written", { detail: { id } }));
-  }
+  writeBrowserRunValues(id, values);
 }
 
 /**
@@ -1643,33 +1427,20 @@ export function saveRunValues(id: string, values: FormValues): void {
  * (autosave, sync adoption, recipe application, and draining-run updates).
  */
 export function subscribeRunValuesWrites(listener: (runId: string) => void): () => void {
-  if (typeof window === "undefined") return () => {};
-  const eventName = "run-calculator:run-values-written";
-  const handleWrite = (event: Event) => listener(
-    (event as CustomEvent<{ id?: unknown }>).detail?.id as string,
-  );
-  window.addEventListener(eventName, handleWrite);
-  return () => window.removeEventListener(eventName, handleWrite);
+  return subscribeBrowserRunValuesWrites(listener);
 }
 
 // Per-run monotonic edit timestamps (run id -> ms of last local edit). Synced via
 // SyncPayload.runValuesUpdatedAt so the apply path can tell a fresher local edit
 // from a stale remote and refuse to clobber it. Bumped only on real local edits.
-const RUN_VALUES_UPDATED_KEY = "run-calc-runvalues-updated";
 export function loadRunValuesUpdated(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(RUN_VALUES_UPDATED_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, number>;
-  } catch {}
-  return {};
+  return readBrowserRunValuesUpdated();
 }
 export function saveRunValuesUpdated(map: Record<string, number>): void {
-  try { localStorage.setItem(RUN_VALUES_UPDATED_KEY, JSON.stringify(map)); } catch {}
+  writeBrowserRunValuesUpdated(map);
 }
 export function markRunValuesUpdated(id: string, ts: number = Date.now()): void {
-  const m = loadRunValuesUpdated();
-  m[id] = ts;
-  saveRunValuesUpdated(m);
+  stampBrowserRunValues(id, ts);
 }
 
 // Structural deep-equality used by the autosave effect to tell a real user edit
@@ -1682,186 +1453,6 @@ export function markRunValuesUpdated(id: string, ts: number = Date.now()): void 
 // loss). Mirrors mobile's primed-baseline diffStampRunEdits, which only stamps
 // genuine changes. Objects compare key-order-independently; arrays compare by
 // index (recipe-row order is meaningful).
-export function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (a === null || b === null) return a === b;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
-    return true;
-  }
-  if (typeof a === "object" && typeof b === "object") {
-    const ak = Object.keys(a as object);
-    const bk = Object.keys(b as object);
-    if (ak.length !== bk.length) return false;
-    for (const k of ak) {
-      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-      if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
-    }
-    return true;
-  }
-  return a === b;
-}
-
-// Decide which value to PUSH for the CURRENT run when building a sync payload.
-// The current run is normally pushed from the live form so an in-progress edit is
-// shared immediately, but the form is transiently all-default during mount /
-// hydration and right after any programmatic form.reset() (run switch, daily
-// rollover, sync-apply) before the run's real values are loaded back in. The
-// stamp map (runValuesUpdatedAt) is read independently from localStorage and
-// still carries this run's real edit time, so a push firing in that window would
-// emit an EMPTY value paired with a REAL stamp — and because the stamps are equal
-// the per-run lost-update guard on every peer ACCEPTS it, wiping real data on the
-// shared day-state row (the recurring "I entered it, refreshed, it vanished"
-// loss). Never let an all-default live form overwrite a populated stored value;
-// fall back to the durable localStorage copy. Returns `live` in every other case
-// (genuine edit, or a legitimately blank run whose stored value is also default),
-// so this only blocks the populated→empty transition.
-export function pickCurrentRunPushValue(
-  live: FormValues,
-  stored: FormValues,
-): FormValues {
-  return isEmptyOverPopulated(live, stored) ? stored : live;
-}
-
-// True when `candidate` is an all-default/empty run value but `fallback` is a
-// populated one. This is the single predicate behind ALL the day-state
-// data-loss guards: the corruption pairs an empty run value with a REAL edit
-// stamp (the form is transiently all-default during mount / after any
-// programmatic form.reset() while localStorage still holds the real value AND
-// stamp), so the stamp-based lost-update guard would otherwise ACCEPT the empty
-// value and wipe real data on the shared sync row. Used on BOTH the push side
-// (candidate = live form, fallback = stored) and the RECEIVE side (candidate =
-// incoming remote value, fallback = local stored) so an empty value can never
-// overwrite a populated one in either direction, regardless of stamp.
-export function isEmptyOverPopulated(
-  candidate: FormValues,
-  fallback: FormValues,
-): boolean {
-  return isAllDefaultRunValue(candidate) && !isAllDefaultRunValue(fallback);
-}
-
-// The pep batch-lbs fields defaulted to 25 before the defaults cleanup zeroed
-// them (DEFAULT_VALUES now starts them at 0). Blank runs saved under the old
-// defaults are still all-default in spirit — every "is this run value
-// untouched?" check must recognize BOTH shapes, or legacy blank runs stop
-// being sweepable and legacy blank stored copies start counting as
-// "populated" in the empty-over-populated guards.
-const LEGACY_PEP_BATCH_FIELDS = [
-  "pep1BatchLbs",
-  "pep2BatchLbs",
-  "pep1BatchLbsB",
-  "pep2BatchLbsB",
-] as const;
-
-// True when `value` is an all-default run value under EITHER the current
-// all-zero defaults or the exact legacy blank signature where ALL FOUR pep
-// batch-lbs fields were 25 (the old DEFAULT_VALUES shape). Never treats a
-// real edit as default: any other field difference fails the check, and a 25
-// in only SOME of the pep fields is treated as a real user-typed weight —
-// only the full four-field legacy signature counts as untouched.
-export function isAllDefaultRunValue(value: unknown): boolean {
-  if (deepEqual(value, DEFAULT_VALUES)) return true;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const o = { ...(value as Record<string, unknown>) };
-  // Machine times used to default to 0; blank runs saved under the old
-  // defaults (or with the fields folded either way) are still untouched in
-  // spirit. Normalize 0-or-default to the current default before comparing.
-  for (const k of Object.keys(MACHINE_TIME_DEFAULTS) as (keyof typeof MACHINE_TIME_DEFAULTS)[]) {
-    if (o[k] === 0) o[k] = MACHINE_TIME_DEFAULTS[k];
-  }
-  if (deepEqual(o, DEFAULT_VALUES)) return true;
-  for (const f of LEGACY_PEP_BATCH_FIELDS) {
-    if (o[f] !== 25) return false;
-  }
-  const normalized = { ...o };
-  for (const f of LEGACY_PEP_BATCH_FIELDS) normalized[f] = 0;
-  return deepEqual(normalized, DEFAULT_VALUES);
-}
-
-// A form.reset() re-emits values through form.watch(), so a heal that fires
-// while the operator is mid-keystroke could clobber a just-typed edit before
-// autosave persists it. Any caller of the heal (and the sync-receive current-run
-// reset) must honor this quiet window after the last local edit.
-export const RECENT_LOCAL_EDIT_WINDOW_MS = 2000;
-
-// Pure decision behind the current-run form heal effect (home.tsx). On a fresh
-// device's FIRST sync-apply right after sign-in, the apply callback's form-reset
-// block reads the PRE-apply dayStateRef — whose blank local run id isn't in the
-// payload — so it skips the reset, leaving the live form all-default ("0 cases
-// needed") while localStorage now holds the real synced values. The server sends
-// only ONE initial SSE payload on connect, so nothing later heals it. Heal (i.e.
-// reset the form to the stored copy) ONLY when:
-//   1. the live form is all-default while the stored copy is populated
-//      (isEmptyOverPopulated — the same guard the sync receive path uses, so a
-//      genuinely edited or legitimately blank form is never touched), and
-//   2. no local edit landed within RECENT_LOCAL_EDIT_WINDOW_MS, so genuine
-//      user typing always wins over the heal.
-// Healing is one-directional (defaults → stored real data); anything looser
-// re-introduces the empty-over-populated clobber class of bugs.
-export function shouldHealFormFromStored(
-  liveVals: FormValues,
-  storedVals: FormValues,
-  lastLocalEditAt: number,
-  now: number,
-): boolean {
-  return (
-    isEmptyOverPopulated(liveVals, storedVals) &&
-    now - lastLocalEditAt > RECENT_LOCAL_EDIT_WINDOW_MS
-  );
-}
-
-// Pure decision behind the settle branch of the current-run heal effect
-// (home.tsx). When the CURRENT RUN id changes without an imperative run-switch
-// handler firing form.reset — e.g. a peer's day RESET (or a fully-tombstoned
-// run union) seeds a fresh blank placeholder run and the current index clamps
-// onto it — the live form still shows the PREVIOUS run's values. Blindly
-// marking the form "settled" for the new run in that state lets the very next
-// form.watch autosave write the old run's casesNeeded/skidsCompleted/recipes
-// into the blank run's localStorage slot: the cross-run contamination that
-// produced the daily "Unnamed Run" rows carrying the first real run's data.
-// Returns true when the form must be reset to the new run's stored copy
-// INSTEAD of being settled as-is:
-//   1. the form was last settled for a DIFFERENT run (formSettledForRun=false)
-//      — an imperative handler that already reset the form also set
-//      lastFormRunIdRef, so this only fires on the unhandled switch paths, and
-//   2. the live form differs from the new run's stored (default-merged) copy —
-//      identical values (e.g. both all-default on a fresh device) need no reset.
-// No recent-edit quiet window here: any typing in flight belongs to the OLD
-// run, and preserving it in the NEW run's form IS the contamination.
-export function shouldResetFormOnRunSwitch(
-  liveVals: FormValues,
-  storedMergedVals: FormValues,
-  formSettledForRun: boolean,
-): boolean {
-  if (formSettledForRun) return false;
-  return !deepEqual(liveVals, storedMergedVals);
-}
-
-// ── Sync-receive merge-survival helpers ─────────────────────────────────────
-// Extracted from the home.tsx sync-receive handler so the recipe-name-merge
-// survival guarantees are importable and regression-tested end-to-end (a merge
-// followed by a stale incoming sync payload). See recipeMergeSyncReceive.test.ts.
-
-// Per-run lost-update decision for the sync-receive run-values loop. Returns
-// true when the incoming remote value should overwrite the local one; false to
-// keep local. Keep local when the remote is all-default over a populated local
-// (empty-over-populated corruption, regardless of stamp) OR when our local edit
-// stamp is strictly newer than the remote's. This is what makes a recipe-name
-// merge stick across a stale peer: the merge advances the re-pointed runs' edit
-// stamps, so localTs > remoteTs here and the stale pre-merge selection is
-// rejected instead of overwriting the merged one.
-export function acceptRemoteRunValueOnSync(
-  remoteVals: FormValues,
-  localVals: FormValues,
-  remoteTs: number,
-  localTs: number,
-): boolean {
-  if (isEmptyOverPopulated(remoteVals, localVals)) return false;
-  return !(localTs > remoteTs);
-}
-
 // Drop recipe-preset keys tombstoned under `namespace` from a preset map. A
 // recipe-name merge folds the merged-away name's preset KEY and tombstones it;
 // the additive preset union on sync-receive would otherwise resurrect that
@@ -1927,21 +1518,15 @@ export function profileKeyIsTombstoned(
 }
 
 export function loadTemplates(): RunTemplate[] {
-  try {
-    const raw = localStorage.getItem(TEMPLATES_KEY);
-    if (raw) {
-      const templates = JSON.parse(raw) as RunTemplate[];
-      for (const t of templates) {
-        if (t.values) normalizePepFields(t.values as unknown as Record<string, unknown>);
-      }
-      return templates;
-    }
-  } catch {}
-  return [];
+  const templates = localRunTemplates();
+  for (const t of templates) {
+    if (t.values) normalizePepFields(t.values as unknown as Record<string, unknown>);
+  }
+  return templates;
 }
 
 export function saveTemplates(t: RunTemplate[]): void {
-  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(t)); } catch {}
+  try { replaceRunTemplates(t); } catch {}
 }
 
 export function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
@@ -2247,8 +1832,9 @@ const RECIPE_NAME_MERGE_STORE: Record<
 
 // Persist a user-driven RECIPE-NAME merge across every localStorage surface:
 // the category's name list, its recipe-preset map keys, and the recipe-name
-// selection fields on per-run values, brand/crust profiles, templates, and
-// history. Deletion tombstones stop the additive live-sync union from
+// selection fields on pending current-day run values, brand/crust profiles,
+// and templates. Started/ended/unknown run values and history are immutable.
+// Deletion tombstones stop the additive live-sync union from
 // resurrecting the merged-away names. Pure rewriting lives in ./mergeRecipeNames;
 // this only wires it to storage. Callers refresh React state (refreshAfterMerge)
 // so the merged data shows immediately and the sync push carries it.
@@ -2282,25 +1868,17 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
   if (fields.length === 0) return [];
   const rewrite = <T extends Record<string, unknown>>(obj: T) =>
     mergeRecipeNameSettingsObject(obj, map, fields);
+  const eligibleRunIds = new Set(
+    loadDayState().runs
+      .filter(isRunRecipeRefreshEligible)
+      .map((run) => run.id),
+  );
   // ── Templates ──
   try {
     const templates = loadTemplates().map((t) =>
       t.values ? { ...t, values: rewrite(t.values as unknown as Record<string, unknown>) as unknown as typeof t.values } : t,
     );
     saveTemplates(templates);
-  } catch {}
-  // ── History ──
-  try {
-    const history = loadHistory().map((day) => ({
-      ...day,
-      runValues: Object.fromEntries(
-        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
-          id,
-          rewrite(vals as unknown as Record<string, unknown>) as unknown as FormValues,
-        ]),
-      ),
-    }));
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   } catch {}
   // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
   const runPrefix = RUN_KEY("");
@@ -2319,13 +1897,15 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
   const affectedRunIds: string[] = [];
   for (const k of keysToRewrite) {
     try {
+      const runId = k.startsWith(runPrefix) ? k.slice(runPrefix.length) : undefined;
+      if (runId !== undefined && !eligibleRunIds.has(runId)) continue;
       const raw = localStorage.getItem(k) ?? "null";
       const obj = JSON.parse(raw);
       if (obj && typeof obj === "object") {
         const next = JSON.stringify(rewrite(obj as Record<string, unknown>));
         if (next !== raw) {
           localStorage.setItem(k, next);
-          if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));
+          if (runId !== undefined) affectedRunIds.push(runId);
         }
       }
     } catch {}
@@ -2337,7 +1917,7 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
  * Blank every selection field that still points at a recipe name which is
  * leaving its category (a reclassify/"move to another category", not a merge —
  * there is no target name of the SAME category to re-point to). Walks the same
- * surfaces as applyRecipeNameMerge (templates, history, per-run values,
+ * surfaces as applyRecipeNameMerge (templates, pending current-day run values,
  * brand/crust profiles) and returns the ids of runs it actually changed so the
  * caller can bump their edit stamps before the sync push — otherwise a stale
  * peer at an equal/older stamp resurrects the dangling selection.
@@ -2350,6 +1930,11 @@ export function clearRecipeNameSelections(
   const fields = RECIPE_NAME_FIELDS_BY_CATEGORY[category];
   if (fields.length === 0 || !name.trim()) return [];
   const needle = name.trim().toLowerCase();
+  const eligibleRunIds = new Set(
+    loadDayState().runs
+      .filter(isRunRecipeRefreshEligible)
+      .map((run) => run.id),
+  );
   const clear = <T extends Record<string, unknown>>(obj: T): T => {
     let changed = false;
     const out = { ...obj } as Record<string, unknown>;
@@ -2369,19 +1954,6 @@ export function clearRecipeNameSelections(
     );
     saveTemplates(templates);
   } catch {}
-  // ── History ──
-  try {
-    const history = loadHistory().map((day) => ({
-      ...day,
-      runValues: Object.fromEntries(
-        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
-          id,
-          clear(vals as unknown as Record<string, unknown>) as unknown as FormValues,
-        ]),
-      ),
-    }));
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch {}
   // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
   const runPrefix = RUN_KEY("");
   const keysToRewrite: string[] = [];
@@ -2399,13 +1971,15 @@ export function clearRecipeNameSelections(
   const affectedRunIds: string[] = [];
   for (const k of keysToRewrite) {
     try {
+      const runId = k.startsWith(runPrefix) ? k.slice(runPrefix.length) : undefined;
+      if (runId !== undefined && !eligibleRunIds.has(runId)) continue;
       const raw = localStorage.getItem(k) ?? "null";
       const obj = JSON.parse(raw);
       if (obj && typeof obj === "object") {
         const next = JSON.stringify(clear(obj as Record<string, unknown>));
         if (next !== raw) {
           localStorage.setItem(k, next);
-          if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));
+          if (runId !== undefined) affectedRunIds.push(runId);
         }
       }
     } catch {}
@@ -2476,7 +2050,11 @@ export function captureMasterDataSnapshot(): Record<string, string> {
   if (typeof localStorage === "undefined") return snap;
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (!k || k === CHANGE_HISTORY_KEY) continue;
+    if (
+      !k || k === CHANGE_HISTORY_KEY || k === HISTORY_KEY
+      || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
+      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+    ) continue;
     if (!k.startsWith(APP_KEY_PREFIX)) continue;
     const v = localStorage.getItem(k);
     if (v !== null) snap[k] = v;
@@ -2492,7 +2070,14 @@ export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
   const present = new Set<string>();
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY) present.add(k);
+    // Master-data undo/reset must never discard append-only completed history or
+    // its upload queue. Explicit purge-all is server-administered, not an
+    // incidental local rollback side effect.
+    if (
+      k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY && k !== HISTORY_KEY
+      && !k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
+      && !k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+    ) present.add(k);
   }
   for (const k of present) {
     if (!(k in snap)) {
@@ -2500,6 +2085,10 @@ export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
     }
   }
   for (const [k, v] of Object.entries(snap)) {
+    if (
+      k === HISTORY_KEY || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
+      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+    ) continue;
     try { localStorage.setItem(k, v); } catch {}
   }
 }
@@ -2983,18 +2572,9 @@ const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
 // day-state and adopts the new epoch. This is the ONE reliable reset path — no
 // constant to bump, no API downtime, and the PUT epoch guard stops a populated
 // client from re-uploading its old copy through the additive live-sync union.
-const RESET_EPOCH_KEY = "run-calc-reset-epoch";
-
 /** The reset epoch this device has already honoured (0 if never reset). */
 export function getStoredResetEpoch(): number {
-  if (typeof localStorage === "undefined") return 0;
-  try {
-    const raw = localStorage.getItem(RESET_EPOCH_KEY);
-    const n = raw == null ? 0 : parseInt(raw, 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  return readBrowserResetEpoch();
 }
 
 /**
@@ -3006,20 +2586,7 @@ export function getStoredResetEpoch(): number {
  * should reload the app), false otherwise. Fail-safe: never throws.
  */
 export function applyResetWipe(serverEpoch: number): boolean {
-  if (typeof localStorage === "undefined") return false;
-  if (!Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
-  try {
-    const doomed: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith("run-calc") && k !== RESET_EPOCH_KEY) doomed.push(k);
-    }
-    for (const k of doomed) localStorage.removeItem(k);
-    localStorage.setItem(RESET_EPOCH_KEY, String(serverEpoch));
-    return true;
-  } catch {
-    return false;
-  }
+  return wipeBrowserRunCalculator(serverEpoch);
 }
 
 /**
@@ -4243,6 +3810,15 @@ export function applySpecImport(
     // authoritative and must clear a previously stored allergen.
     if (p.allergen !== undefined) values.allergen = p.allergen;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
+    // These values belong to this exact product profile. They intentionally
+    // outrank shared recipe defaults so two products can use the same formula
+    // while retaining different doughball weights or tray counts.
+    if (p.targetDoughballWeight != null && p.targetDoughballWeight > 0) {
+      values.targetDoughballWeight = p.targetDoughballWeight;
+    }
+    if (p.doughballsPerTray != null && p.doughballsPerTray > 0) {
+      values.doughballsPerTray = p.doughballsPerTray;
+    }
     // Case pack read from the sheet (how many pizzas per case). Only present when
     // the sheet stated a positive count, so this never clobbers with a default.
     if (p.pizzasPerCase != null && p.pizzasPerCase > 0) values.pizzasPerCase = p.pizzasPerCase;
@@ -4401,6 +3977,7 @@ export function applySpecImport(
             ? true
             : Math.abs(existingWeightOz - Number(poolMatched.weightOz ?? 0)) < 0.1;
         if (
+          !(Number(p.targetDoughballWeight ?? 0) > 0) &&
           w > 0 &&
           (isForced || !(existingWeightOz > 0) || (wMatchedViaCustomers && !existingMatchesVariant))
         ) {
@@ -4449,8 +4026,26 @@ export function applySpecImport(
       }
       return out;
     };
+    const assignedApps = assignApplicatorSlots(p.applicators);
+    const explicitApplicatorLinks = assignedApps.flatMap((app, index) => {
+      const recipeName = app.recipeName?.trim();
+      const kind = app.type.trim().toLowerCase();
+      if (!recipeName || (kind !== "cheese" && kind !== "mix")) return [];
+      return [{ slot: index + 1, recipeName, kind: kind as "cheese" | "mix" }];
+    });
+    const slottedApps = assignedApps.map((app) => {
+      const recipeName = app.recipeName?.trim();
+      const kind = app.type.trim().toLowerCase();
+      // The split Specs workbook carries the generic station kind and its
+      // exact recipe link independently of the recipe workbook. Preserve that
+      // pair directly even when no candidate recipe is loaded yet.
+      if (recipeName && (kind === "cheese" || kind === "mix")) {
+        return { ...app, type: kind === "mix" ? "Mix" : "cheese" };
+      }
+      return recipeName ? { ...app, type: recipeName } : app;
+    });
     const { applicators: cheeseResolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
-      assignApplicatorSlots(p.applicators),
+      slottedApps,
       [...cheeseCandidateNames, ...profileLinkCandidates("cheese")],
       p.brand,
     );
@@ -4507,6 +4102,27 @@ export function applySpecImport(
           newName: resolved,
         });
       }
+      (values as Record<string, unknown>)[field] = resolved;
+    }
+    for (const link of explicitApplicatorLinks) {
+      const field = `app${link.slot}CheeseRecipeName`;
+      const priorLink = String((values as Record<string, unknown>)[field] ?? "").trim();
+      const resolved = resolveImportName(
+        link.recipeName,
+        link.kind === "mix" ? "mixes" : "cheese",
+        importMergeAliases,
+      ).trim();
+      if (priorLink && resolved && priorLink.toLowerCase() !== resolved.toLowerCase()) {
+        nameCorrections.push({
+          kind: "appType",
+          context: null,
+          specRawName: link.recipeName,
+          oldName: priorLink,
+          newName: resolved,
+        });
+      }
+      (values as Record<string, unknown>)[`app${link.slot}Type`] =
+        link.kind === "mix" ? "Mix" : "cheese";
       (values as Record<string, unknown>)[field] = resolved;
     }
     // Post-correct any stale "cheese"-typed slot whose linked recipe is actually
@@ -4743,6 +4359,15 @@ export function applySpecImport(
       if (r.kind === "dough") {
         values.doughRecipeName = r.name;
         values.doughRecipe = rows;
+        const parsedProfile = parsed.profiles.find(
+          (profile) =>
+            profile.brand.trim().toLowerCase() === brand.toLowerCase() &&
+            profile.flavor.trim().toLowerCase() === flavor.toLowerCase(),
+        );
+        const hasProfileDoughballWeight =
+          (parsedProfile?.targetDoughballWeight ?? 0) > 0;
+        const hasProfileDoughballsPerTray =
+          (parsedProfile?.doughballsPerTray ?? 0) > 0;
         // Weight/per-tray are PER-FLAVOR: only this recipe's own explicit spec
         // targets take its values verbatim; a profile tied on by the name
         // re-link keeps its existing values (backfill blank fields only).
@@ -4765,7 +4390,11 @@ export function applySpecImport(
             continue;
           }
         }
-        if (r.doughballOz != null && (!relinked || !(Number(values.targetDoughballWeight ?? 0) > 0))) {
+        if (
+          !hasProfileDoughballWeight &&
+          r.doughballOz != null &&
+          (!relinked || !(Number(values.targetDoughballWeight ?? 0) > 0))
+        ) {
           values.targetDoughballWeight = r.doughballOz;
         }
         // Crusts-per-batch yield — fallback only; when the dough rows + doughball
@@ -4778,6 +4407,7 @@ export function applySpecImport(
           values.doughBatchYield = r.doughBatchYield;
         }
         if (
+          !hasProfileDoughballsPerTray &&
           r.doughballsPerTray != null && r.doughballsPerTray > 0 &&
           (!relinked || !(Number(values.doughballsPerTray ?? 0) > 0))
         ) {

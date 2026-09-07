@@ -1,4 +1,4 @@
-import { AiAnomaliesBody } from "@workspace/api-zod";
+import { OperationsAnomalyDetectionBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   detectAnomalies,
@@ -17,7 +17,7 @@ import {
 // is unavailable or returns nothing usable, the deterministic anomaly list is
 // still returned with an empty narration.
 
-export type AnomalyInput = z.infer<typeof AiAnomaliesBody>;
+export type AnomalyInput = z.infer<typeof OperationsAnomalyDetectionBody>;
 
 // Bound how many runs one request can carry so a single call can't blow up cost
 // or latency. Mirrors the other AI endpoint guards.
@@ -30,7 +30,7 @@ export type AnomalyValidationResult =
   | { ok: false; status: number; error: string };
 
 export function validateAnomalyBody(body: unknown): AnomalyValidationResult {
-  const parsed = AiAnomaliesBody.safeParse(body);
+  const parsed = OperationsAnomalyDetectionBody.safeParse(body);
   if (!parsed.success) {
     return { ok: false, status: 400, error: "Invalid anomaly input" };
   }

@@ -422,7 +422,26 @@ function preserveAndInvalidateAutoTrackCoordination(
   existingCoordination: unknown,
   existingPayload: Record<string, unknown>,
 ): unknown {
-  if (!isPlainObject(protectedPayload) || !isPlainObject(existingCoordination)) return protectedPayload;
+  if (!isPlainObject(protectedPayload)) return protectedPayload;
+  const mergeControls = () => {
+    const old = isPlainObject(existingPayload.doughTimerControls) ? existingPayload.doughTimerControls : {};
+    const next = isPlainObject(protectedPayload.doughTimerControls) ? protectedPayload.doughTimerControls : {};
+    const merged: Record<string, unknown> = { ...old };
+    for (const [id, value] of Object.entries(next)) {
+      const a = isPlainObject(value) ? asNumber(value.updatedAt) : 0;
+      const b = isPlainObject(old[id]) ? asNumber(old[id].updatedAt) : 0;
+      if (a >= b) merged[id] = value;
+    }
+    return Object.keys(merged).length ? { doughTimerControls: merged } : {};
+  };
+  if (!isPlainObject(existingCoordination)) {
+    return {
+      ...protectedPayload,
+      ...(isPlainObject(existingPayload.autoTrackServerState)
+        ? { autoTrackServerState: existingPayload.autoTrackServerState } : {}),
+      ...mergeControls(),
+    };
+  }
   const priorValues = isPlainObject(existingPayload.runValues) ? existingPayload.runValues : {};
   const nextValues = isPlainObject(protectedPayload.runValues) ? protectedPayload.runValues : {};
   const coordinationRuns = isPlainObject(existingCoordination.runs)
@@ -487,6 +506,14 @@ function preserveAndInvalidateAutoTrackCoordination(
   }
   return {
     ...protectedPayload,
+    // Server arm-state is authoritative bookkeeping, not a client register.
+    // Keep it through ordinary additive merges, but callers deliberately skip
+    // this helper for reset/future-day replacement so it never crosses a run
+    // generation or date boundary.
+    ...(isPlainObject(existingPayload.autoTrackServerState)
+      ? { autoTrackServerState: existingPayload.autoTrackServerState }
+      : {}),
+    ...mergeControls(),
     autoTrackCoordination: {
       ...existingCoordination,
       runs: coordinationRuns,
@@ -541,10 +568,16 @@ export function protectRunValues(
     && asNumber(incomingDayForCoordination?.resetAt) > asNumber(existingDayForCoordination?.resetAt);
   if (
     !replacesCoordinatedDay
-    && Object.prototype.hasOwnProperty.call(existing, "autoTrackCoordination")
+    && (
+      Object.prototype.hasOwnProperty.call(existing, "autoTrackCoordination")
+      || Object.prototype.hasOwnProperty.call(existing, "autoTrackServerState")
+      || Object.prototype.hasOwnProperty.call(existing, "doughTimerControls")
+    )
   ) {
     const existingWithoutCoordination = { ...existing };
     delete existingWithoutCoordination.autoTrackCoordination;
+    delete existingWithoutCoordination.autoTrackServerState;
+    delete existingWithoutCoordination.doughTimerControls;
     const protectedPayload = protectRunValues(incoming, existingWithoutCoordination, options);
     return preserveAndInvalidateAutoTrackCoordination(
       protectedPayload,
@@ -1075,6 +1108,7 @@ const KNOWN_TOP_LEVEL_KEYS = new Set<string>([
   "deletedStamps",
   "undeletedStamps",
   "packagingProgress",
+  "doughTimerControls",
 ]);
 
 // Name-list fields that are additive string arrays — each entry is a single
@@ -1155,6 +1189,20 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
           bf[cappedBrand] = capStringArray(asArray(val[brand]));
         }
         out[key] = bf;
+      }
+    } else if (key === "doughTimerControls") {
+      if (isPlainObject(val)) {
+        const controls: Record<string, unknown> = {};
+        for (const [runId, raw] of Object.entries(val).slice(0, MAX_RUNS)) {
+          if (!runId || runId.length > 160 || !isPlainObject(raw)) continue;
+          const generation = typeof raw.generation === "string" ? raw.generation.slice(0, 160) : "";
+          const pausedAt = asNumber(raw.pausedAt);
+          const resumeAt = asNumber(raw.resumeAt);
+          const updatedAt = asNumber(raw.updatedAt);
+          if (!generation || updatedAt <= 0 || pausedAt < 0 || resumeAt < 0) continue;
+          controls[runId] = { generation, pausedAt, resumeAt, updatedAt };
+        }
+        out[key] = controls;
       }
     } else if (key === "dayState") {
       // Strip unknown dayState sub-keys and cap free-text fields + run count.

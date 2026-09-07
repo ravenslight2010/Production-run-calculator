@@ -1,12 +1,9 @@
 import { WasteInsightBody } from "@workspace/api-zod";
 import * as z from "zod";
 
-// Cap how much production context the request can carry and how much the model
-// can return, matching the other AI endpoint guards.
+// Keep the compatibility request bounded even though deterministic expiry
+// insight no longer sends planned items to a model.
 export const MAX_PLANNED_ITEMS = 1000;
-export const MAX_FLAGGED_IN_PROMPT = 100;
-export const MAX_SUGGESTION_CHARS = 1200;
-export const MAX_NOTE_CHARS = 400;
 
 export type WasteStatus = "expired" | "soon";
 
@@ -119,97 +116,4 @@ export function validateWasteInsightBody(body: unknown): WasteValidationResult {
   }
   return { ok: true, data: parsed.data };
 }
-
-// Shape the flagged stock + (optional) planned production into a compact prompt
-// asking for a plain-language run-order suggestion to consume at-risk stock
-// first. Never invents data; advisory only.
-export function buildWastePrompt(
-  flagged: ReadonlyArray<WasteFlaggedItem>,
-  plannedItems: ReadonlyArray<{ key: string; name: string; unit: string; category: string }> = [],
-): { system: string; user: string } {
-  const system =
-    "You are an inventory-waste advisor for a frozen-pizza production facility. " +
-    "You are given the ingredients/packaging that are expired or expiring soon, and " +
-    "(when available) the items the upcoming production plan would consume. Suggest a " +
-    "concrete run-order strategy that consumes the at-risk stock first to minimize waste — " +
-    "e.g. which products/runs to prioritize because they use the soon-to-expire items. " +
-    "Be specific and quantitative when the data supports it, and keep it short and actionable. " +
-    "NEVER invent data. If there is nothing meaningful to suggest, say so plainly. " +
-    "This is advisory only — you do not change any schedule or inventory.";
-
-  const lines: string[] = [];
-  lines.push("AT-RISK STOCK (expired or expiring soon):");
-  if (flagged.length === 0) {
-    lines.push("(none)");
-  } else {
-    for (const f of flagged.slice(0, MAX_FLAGGED_IN_PROMPT)) {
-      const when =
-        f.daysUntilExpiry == null
-          ? "no date"
-          : f.daysUntilExpiry < 0
-            ? `expired ${Math.abs(f.daysUntilExpiry)}d ago`
-            : `expires in ${f.daysUntilExpiry}d`;
-      lines.push(
-        `- ${f.name} [${f.category}] — ${f.qtyAtRisk} ${f.unit} at risk, ${when}` +
-          (f.earliestExpiration ? ` (${f.earliestExpiration})` : ""),
-      );
-    }
-  }
-
-  if (plannedItems.length > 0) {
-    lines.push("");
-    lines.push("ITEMS THE UPCOMING PLAN WOULD CONSUME:");
-    for (const p of plannedItems.slice(0, MAX_FLAGGED_IN_PROMPT)) {
-      lines.push(`- ${p.name} [${p.category}] (${p.unit})`);
-    }
-  }
-
-  lines.push("");
-  lines.push(
-    "Return ONLY JSON of the exact shape: " +
-      '{"suggestion":string,"note":string}. ' +
-      'Put your plain-language run-order recommendation in "suggestion". ' +
-      'If there is nothing useful to suggest, set "suggestion" to a brief honest line ' +
-      'and put any caveat in "note". Otherwise leave "note" empty.',
-  );
-
-  return { system, user: lines.join("\n") };
-}
-
-function clamp(s: string, max: number): string {
-  const t = s.trim();
-  return t.length > max ? t.slice(0, max).trimEnd() : t;
-}
-
-const SuggestionSchema = z.object({
-  suggestion: z.coerce.string().optional(),
-  note: z.coerce.string().optional(),
-});
-
-// The model returns JSON but isn't trustworthy. Parse leniently: prefer a
-// well-formed {suggestion, note}; if parsing fails entirely, fall back to using
-// the raw content as the suggestion so a stray formatting slip never drops a
-// real reply.
-export function sanitizeWasteSuggestion(content: string): {
-  suggestion: string;
-  note?: string;
-} {
-  const rawText = (content ?? "").trim();
-  if (!rawText) return { suggestion: "" };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    return { suggestion: clamp(rawText, MAX_SUGGESTION_CHARS) };
-  }
-
-  const result = SuggestionSchema.safeParse(parsed);
-  if (!result.success) {
-    return { suggestion: clamp(rawText, MAX_SUGGESTION_CHARS) };
-  }
-  const suggestion = clamp(result.data.suggestion ?? "", MAX_SUGGESTION_CHARS);
-  const note = clamp(result.data.note ?? "", MAX_NOTE_CHARS);
-  if (!suggestion && !note) return { suggestion: clamp(rawText, MAX_SUGGESTION_CHARS) };
-  return note ? { suggestion, note } : { suggestion };
-}
+// End of deterministic waste insight helpers.

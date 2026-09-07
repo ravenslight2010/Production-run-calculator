@@ -1,399 +1,279 @@
 import { randomUUID } from "node:crypto";
 import {
-  buildAppSlotClaimMutations,
-  buildAutoTrackScheduleFromPayload,
-  buildSauceClaimMutations,
   computeAutoTrackElapsedMs,
+  computeAutoTrackSchedule,
   computeAutoTrackSuggestion,
   computeServerCalc,
   createWallClockBookkeeping,
   getAutoTrackTiming,
+  rearmWallClockTimers,
   tickWallClock,
-  type Calc,
+  type AutoTrackSchedule,
+  type WallClockChannel,
   type WallClockBookkeeping,
 } from "@workspace/live-calc";
 import type { AutoTrackClaim, AutoTrackMutation } from "./autoTrackCoordination";
 
-/** Channels the server tick loop executes (refactor step 7a): the net-second
- * channels whose due times the server derives purely from stored state
- * (anchor + cadence vs pause-aware elapsed net seconds). The wall-clock
- * channels (case/tray/batch/hopper) depend on client arm-state machines
- * (period advance, remainder carry, feed-complete gates) and stay
- * client-driven; the server only echoes their canonical coordination. */
-export const SERVER_TICK_CHANNELS = new Set<string>([
-  "sauce-barrel",
-  "app1-batch",
-  "app2-batch",
-  "app3-batch",
-  "app4-batch",
-]);
-
-export function isServerTickChannel(channel: string): boolean {
-  return SERVER_TICK_CHANNELS.has(channel);
-}
-
-/** Wall-clock channels the server can bootstrap for a fresh run (step 7b):
- * the client arm-state machines ported into `tickWallClock` (case, tray
- * consume/produce, batch consume/produce, hopper cycle). The net-second
- * channels above are derived purely from stored anchors; these need
- * per-run bookkeeping, which the runner persists under
- * `autoTrackServerState.wallClockBookkeeping[runId]`. */
-export const WALL_CLOCK_CHANNELS = [
-  "case",
-  "tray-consume",
-  "tray-produce",
-  "batch-consume",
-  "batch-produce",
-  "hopper",
-] as const;
-
-export type WallClockChannel = (typeof WALL_CLOCK_CHANNELS)[number];
-
-/** Same fresh-run replay window the schedule uses for compute-only wall-clock
- * verdicts. Once a register is canonical (any claim landed), the server stops
- * driving that channel and hands it back to clients. */
+const NET_CHANNELS = ["sauce-barrel", "app1-batch", "app2-batch", "app3-batch", "app4-batch"] as const;
 export const WALL_CLOCK_REPLAY_CAP_MS = 6 * 60 * 60 * 1000;
 
-const WALL_CLOCK_MUTATION_FIELDS: Record<WallClockChannel, readonly string[]> = {
-  case: ["skidsCompleted", "casesOnCurrentSkid"],
-  "tray-consume": ["traysOnLine"],
-  "tray-produce": ["traysOnLine"],
-  "batch-consume": ["batchesReady"],
-  "batch-produce": ["batchesReady"],
-  hopper: [],
-};
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function finiteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function toNumber(value: unknown): number {
-  return finiteNumber(value) ? value : 0;
-}
-
-/** Per-run arm-state stored under `autoTrackServerState.wallClockBookkeeping`.
- * Missing/malformed entries fall back to a fresh bootstrap (same as a brand-new
- * run), never NaN. */
-export function sanitizeWallClockBookkeeping(raw: unknown): WallClockBookkeeping {
-  const base = createWallClockBookkeeping();
-  const r = isPlainObject(raw) ? raw : {};
-  const num = (key: string): number => (finiteNumber(r[key]) ? r[key] : 0);
-  const bool = (key: string): boolean => r[key] === true;
-  return {
-    caseNextDueMs: num("caseNextDueMs"),
-    trayProdNextDueMs: num("trayProdNextDueMs"),
-    trayConsNextDueMs: num("trayConsNextDueMs"),
-    batchProdNextDueMs: num("batchProdNextDueMs"),
-    batchConsNextDueMs: num("batchConsNextDueMs"),
-    hopperNextDueMs: num("hopperNextDueMs"),
-    trayLastMs: num("trayLastMs"),
-    batchLastMs: num("batchLastMs"),
-    lastExpectedCases: finiteNumber(r.lastExpectedCases) ? r.lastExpectedCases : base.lastExpectedCases,
-    drainFreezer: finiteNumber(r.drainFreezer) ? r.drainFreezer : base.drainFreezer,
-    traysRemainder: num("traysRemainder"),
-    traySeeded: bool("traySeeded"),
-    batchSeeded: bool("batchSeeded"),
-    formResetSkipped: bool("formResetSkipped"),
-    caseClaimRetry: bool("caseClaimRetry"),
-    doughPausedAtMs: num("doughPausedAtMs"),
-    doughResumeAtMs: num("doughResumeAtMs"),
+type Payload = {
+  dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
+  runValues?: Record<string, Record<string, unknown>>;
+  runValuesUpdatedAt?: Record<string, number>;
+  autoTrackCoordination?: { runs?: Record<string, Record<string, {
+    generation?: string; sequence?: number; acceptedEventId?: string;
+  }>> };
+  packagingProgress?: Record<string, Record<string, unknown>>;
+  autoTrackServerState?: {
+    wallClockBookkeeping?: Record<string, Record<string, unknown>>;
+    netOwnership?: Record<string, Record<string, { generation?: string; sequence?: number; updatedAt?: number }>>;
   };
-}
-
-export type WallClockServerPlan = {
-  runId: string;
-  /** Next persisted arm-state for this run after this beat. */
-  bookkeeping: WallClockBookkeeping;
-  /** Claims for the standard parse/apply/row-lock pipeline. */
-  claims: AutoTrackClaim[];
+  doughTimerControls?: Record<string, { generation?: string; pausedAt?: number; resumeAt?: number; updatedAt?: number }>;
 };
-
-export type WallClockServerState = {
-  version: number;
-  wallClockBookkeeping: Record<string, WallClockBookkeeping>;
-};
-
-/** Attach the runner's next bookkeeping to a sync-payload-shaped data blob.
- * `applyAutoTrackClaim` only rewrites runValues / runValuesUpdatedAt /
- * autoTrackCoordination / packagingProgress, so this key survives it; the
- * runner persists it in the same upsert. */
-export function withWallClockServerState(
-  data: Record<string, unknown>,
-  runId: string,
-  bookkeeping: WallClockBookkeeping,
-): Record<string, unknown> {
-  const prior = isPlainObject(data.autoTrackServerState)
-    ? { ...data.autoTrackServerState }
-    : {};
-  const bookkeepingMap = isPlainObject(prior.wallClockBookkeeping)
-    ? { ...prior.wallClockBookkeeping } as Record<string, WallClockBookkeeping>
-    : {};
-  bookkeepingMap[runId] = bookkeeping;
-  const serverState: WallClockServerState = {
-    version: 1,
-    wallClockBookkeeping: bookkeepingMap,
-  };
-  return { ...data, autoTrackServerState: serverState };
+const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
+function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anchorFrom: number, anchorTo: number, correctionGeneration: number): AutoTrackMutation[] {
+  return [
+    { field: (prefix === "sauceBarrel" ? "sauceBarrelsMade" : `${prefix}esMade`) as AutoTrackMutation["field"], from: madeFrom, to: madeTo },
+    { field: `${prefix}AnchorNetSec` as AutoTrackMutation["field"], from: anchorFrom, to: anchorTo },
+    { field: `${prefix}CorrectionGeneration` as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+  ];
 }
 
-/**
- * Build the server's wall-clock claims for one run beat. Pure (no DB): the
- * runner applies each claim through the SAME parse/apply/row-lock pipeline as
- * a client POST and persists `bookkeeping` atomically with the row. Drives
- * only FRESH live runs within WALL_CLOCK_REPLAY_CAP_MS and only channels with
- * NO canonical coordination record yet — once any claim (server or client)
- * re-persists a canonical nextDueAt, the schedule echoes it and this builder
- * leaves that channel to the clients. Returns null for rows without an
- * eligible live run (or once every wall-clock channel is canonical).
- */
-export function buildWallClockServerClaims(
-  payload: unknown,
-  nowMs = Date.now(),
-): WallClockServerPlan | null {
-  let schedule;
-  try {
-    // Skeletal/incomplete run values cannot drive the calc; an un-computable
-    // row simply has no server wall-clock ticks, like the net-second path.
-    const calcResult = computeServerCalc(payload as never, []);
-    if (!calcResult) return null;
-    const calc = calcResult.calc;
-    schedule = buildAutoTrackScheduleFromPayload(payload, calcResult, nowMs);
-    if (!schedule) return null;
-    return buildWallClockClaimFromInputs({ payload, runId: schedule.runId, calc, schedule, nowMs });
-  } catch {
-    return null;
-  }
-}
-
-function buildWallClockClaimFromInputs(input: {
-  payload: unknown;
-  runId: string;
-  calc: Calc;
-  schedule: NonNullable<ReturnType<typeof buildAutoTrackScheduleFromPayload>>;
-  nowMs: number;
-}): WallClockServerPlan | null {
-  const { payload, runId, calc, schedule, nowMs } = input;
-  if (!schedule) return null;
-  const p = (payload ?? {}) as {
-    dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
-    runValues?: Record<string, Record<string, unknown>>;
-    runValuesUpdatedAt?: Record<string, number>;
-    autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
-    packagingProgress?: Record<string, Record<string, unknown>>;
-    autoTrackServerState?: WallClockServerState;
-  };
-  const run = p.dayState?.runs?.[p.dayState?.currentIndex ?? 0];
-  const startedAt = toNumber(run?.startedAt);
-  const pausedAt = toNumber(run?.pausedAt);
-  const endedAt = toNumber(run?.endedAt);
+function schedule(
+  payload: Payload,
+  nowMs: number,
+  options: { allowEndedDrain?: boolean } = {},
+): { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null {
+  const result = computeServerCalc(payload as never, [], nowMs);
+  const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
+  if (!result || !run || typeof run.id !== "string") return null;
+  // Date rows are client-local (and can legitimately be tomorrow in UTC), so
+  // eligibility is lifecycle based rather than server-date based. Conversely,
+  // an abandoned old running register must never restart net claims.
+  const startedAt = number(run.startedAt);
+  const endedAt = number(run.endedAt);
+  const values = payload.runValues?.[run.id];
+  if (!values) return null;
+  const endedDrainActive = options.allowEndedDrain === true
+    && endedAt > 0
+    && number(values.freezerTime) > 0
+    && nowMs < endedAt + number(values.freezerTime) * 60_000;
+  const lifecycleStamp = Math.max(startedAt, number(run.metaUpdatedAt));
   if (
     startedAt <= 0
-    || pausedAt > 0
-    || endedAt > 0
-    || nowMs - startedAt > WALL_CLOCK_REPLAY_CAP_MS
+    || number(run.pausedAt) > 0
+    || (endedAt > 0 && !endedDrainActive)
+    || lifecycleStamp <= 0
+    || nowMs - lifecycleStamp > WALL_CLOCK_REPLAY_CAP_MS
   ) return null;
-  const values = p.runValues?.[runId] ?? {};
-  const baseUpdatedAt = toNumber(p.runValuesUpdatedAt?.[runId]);
-  const coordinationForRun = p.autoTrackCoordination?.runs?.[runId] as
-    | Partial<Record<string, { sequence?: number; nextDueAt?: number }>>
-    | undefined;
-
-  // Channels the server still drives: schedule entries in wall-clock replay
-  // (canonical echo wins and hands the channel back to clients).
-  const driveChannels = new Set<WallClockChannel>();
-  for (const entry of schedule.entries) {
-    if (!entry.canonical && (WALL_CLOCK_CHANNELS as readonly string[]).includes(entry.channel)) {
-      driveChannels.add(entry.channel as WallClockChannel);
-    }
-  }
-  if (driveChannels.size === 0) return null;
-
-  const netMs = computeAutoTrackElapsedMs({
-    startedAt,
-    pausedAt: undefined,
-    nowMs,
-    stoppages: Array.isArray(run?.stoppages) ? run.stoppages as never : undefined,
-  });
-  const timing = getAutoTrackTiming(
-    calc.ppm,
-    toNumber(values.pizzasPerCase),
-    calc.perTray,
-    calc.perBatch,
-    {
-      spinSec: toNumber(values.mixerLowSec) + toNumber(values.mixerHighSec),
-      hopperSec: toNumber(values.hopperSec),
-    },
-  );
-  const suggestion = computeAutoTrackSuggestion({
-    runStatus: "running",
-    drainActive: false,
-    packagingDrainActive: false,
-    packagingDrainElapsedSec: 0,
-    ppm: calc.ppm,
-    casesPerSkid: toNumber(values.casesPerSkid),
-    pizzasPerCase: toNumber(values.pizzasPerCase),
-    casesNeeded: toNumber(values.casesNeeded),
-    freezerTime: toNumber(values.freezerTime),
-    elapsedBatchSec: netMs / 1000,
-  });
-  const prior = sanitizeWallClockBookkeeping(
-    p.autoTrackServerState?.wallClockBookkeeping?.[runId],
-  );
-  const tickResult = tickWallClock({
-    bookkeeping: prior,
-    nowMs,
-    timing,
-    runStatus: "running",
-    drainActive: false,
-    packagingDrainActive: false,
-    packagingAutoTrackActive: true,
-    caseSuppressed: false,
-    doughSuppressed: false,
-    calc: {
-      ppm: calc.ppm,
-      perTray: calc.perTray,
-      perBatch: calc.perBatch,
-      pressDone: calc.pressDone,
-      casesInFreezer: calc.casesInFreezer,
-      traysNeeded: calc.traysNeeded,
-      batchesNeeded: calc.batchesNeeded,
-    },
-    v: {
-      pizzasPerCase: toNumber(values.pizzasPerCase),
-      casesPerSkid: toNumber(values.casesPerSkid),
-      casesNeeded: toNumber(values.casesNeeded),
-      traysOnLine: toNumber(values.traysOnLine),
-      batchesReady: toNumber(values.batchesReady),
-    },
-    form: {
-      skidsCompleted: toNumber(values.skidsCompleted),
-      casesOnCurrentSkid: toNumber(values.casesOnCurrentSkid),
-      traysOnLine: toNumber(values.traysOnLine),
-      batchesReady: toNumber(values.batchesReady),
-    },
-    expectedCasesRaw: suggestion?.expectedCasesRaw ?? 0,
-    expectedCases: suggestion?.expectedCases ?? 0,
-  });
-
-  const claims: AutoTrackClaim[] = [];
-  for (const event of tickResult.events) {
-    if (!driveChannels.has(event.channel)) continue;
-    const state = coordinationForRun?.[event.channel];
-    const sequence = (typeof state?.sequence === "number" ? state.sequence : 0) + 1;
-    const mutations = event.mutations
-      .filter((mutation) => WALL_CLOCK_MUTATION_FIELDS[event.channel].includes(mutation.field))
-      .map((mutation) => ({
-        field: mutation.field as AutoTrackMutation["field"],
-        from: Math.max(0, mutation.from),
-        to: Math.max(0, mutation.to),
-      }));
-    const correctionGeneration = event.channel === "case"
-      ? Math.max(0, toNumber(p.packagingProgress?.[runId]?.correctionGeneration))
-      : undefined;
-    claims.push({
-      version: 1,
-      runId,
-      channel: event.channel,
-      generation: schedule.generation,
-      sequence,
-      eventId: `srv:wc:${sequence}:${event.channel}:${randomUUID()}`,
-      dueAt: event.dueAt,
-      nextDueAt: event.nextDueAt,
-      baseUpdatedAt,
-      ...(correctionGeneration !== undefined ? { correctionGeneration } : {}),
-      mutations,
-    });
-  }
-  return { runId, bookkeeping: tickResult.next, claims };
+  return {
+    schedule: computeAutoTrackSchedule({
+      runId: run.id, metaUpdatedAt: number(run.metaUpdatedAt), startedAt: number(run.startedAt),
+      pausedAt: number(run.pausedAt) || undefined, endedAt: number(run.endedAt) || undefined,
+      stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined,
+      v: values as never, calc: result.calc, progress: values,
+      coordination: payload.autoTrackCoordination?.runs?.[run.id] as never, nowMs,
+      serverNetOwnership: payload.autoTrackServerState?.netOwnership?.[run.id] as never,
+      serverWallOwnership: (
+        payload.autoTrackServerState?.wallClockBookkeeping?.[run.id] as any
+      )?.serverSequences as never,
+    }),
+    values,
+  };
 }
 
-/**
- * Build server-driven auto-track claims for the current run when a net-second
- * channel is due now. Pure (no DB): the tick runner applies each claim through
- * the SAME parse/apply pipeline as a client POST, so every invariant
- * (sequence, generation, correction generation, mutation from-checks, sauce
- * inventory) still holds. Returns [] for runs without a computable schedule or
- * with no due net-second channels.
- */
-export function buildNetSecondServerClaims(
-  payload: unknown,
-  nowMs = Date.now(),
-): AutoTrackClaim[] {
-  let calc;
-  let schedule;
-  try {
-    // Skeletal/incomplete run values cannot drive the calc (computeServerCalc
-    // throws on missing form fields); an un-computable run simply has no
-    // server ticks, exactly like the SSE/claim paths' calc guards.
-    calc = computeServerCalc(payload as never, []);
-    schedule = buildAutoTrackScheduleFromPayload(payload, calc, nowMs);
-  } catch {
-    return [];
-  }
-  if (!schedule) return [];
-  const p = (payload ?? {}) as {
-    runValues?: Record<string, Record<string, unknown>>;
-    runValuesUpdatedAt?: Record<string, number>;
-    autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
-  };
-  const runId = schedule.runId;
-  const values = p.runValues?.[runId] ?? {};
-  const baseUpdatedAt = Number(p.runValuesUpdatedAt?.[runId]) || 0;
-  const coordinationForRun = p.autoTrackCoordination?.runs?.[runId] as
-    | Partial<Record<string, { sequence?: number; generation?: string; nextDueAt?: number }>>
-    | undefined;
-  const claims: AutoTrackClaim[] = [];
+/** Builds due sauce/applicator claims entirely from canonical stored state. */
+export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): AutoTrackClaim[] {
+  const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
+  let built: { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null;
+  try { built = schedule(payload, nowMs); } catch { return []; }
+  if (!built) return [];
+  const { schedule: plan, values } = built;
+  const baseUpdatedAt = number(payload.runValuesUpdatedAt?.[plan.runId]);
+  const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
+  return plan.entries.flatMap((entry) => {
+    if (!(NET_CHANNELS as readonly string[]).includes(entry.channel) || !entry.dueNow) return [];
+    const slot = entry.channel === "sauce-barrel" ? "" : entry.channel.slice(0, 4);
+    const madeField = entry.channel === "sauce-barrel" ? "sauceBarrelsMade" : `${slot}BatchesMade`;
+    const anchorField = entry.channel === "sauce-barrel" ? "sauceBarrelAnchorNetSec" : `${slot}BatchAnchorNetSec`;
+    const correctionField = entry.channel === "sauce-barrel" ? "sauceBarrelCorrectionGeneration" : `${slot}BatchCorrectionGeneration`;
+    const correctionGeneration = Math.max(0, number(values[correctionField]));
+    const prefix = entry.channel === "sauce-barrel" ? "sauceBarrel" : `${slot}Batch`;
+    const mutations = buildNetMutations(prefix, Math.max(0, number(values[madeField])), Math.max(0, number(values[madeField])) + 1, Math.max(0, number(values[anchorField])), entry.dueAt, correctionGeneration);
+    const cadence = Math.max(0, entry.dueAt - Math.max(0, number(values[anchorField])));
+    const claimNextDueAt = entry.nextDueAt > entry.dueAt
+      ? entry.nextDueAt : entry.dueAt + cadence;
+    return [{
+      version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
+      sequence: number(coordination?.[entry.channel]?.sequence) + 1,
+      eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
+      nextDueAt: claimNextDueAt, baseUpdatedAt, correctionGeneration, mutations,
+    } as AutoTrackClaim];
+  });
+}
 
-  for (const entry of schedule.entries) {
-    if (!isServerTickChannel(entry.channel) || !entry.dueNow) continue;
-    const state = coordinationForRun?.[entry.channel];
-    const sequence = (typeof state?.sequence === "number" ? state.sequence : 0) + 1;
-    const slot = entry.channel.slice(0, 4);
-    const correctionField = entry.channel === "sauce-barrel"
-      ? "sauceBarrelCorrectionGeneration"
-      : `${slot}BatchCorrectionGeneration`;
-    const correctionGeneration = Math.max(0, Number(values[correctionField]) || 0);
-    const countField = entry.channel === "sauce-barrel"
-      ? "sauceBarrelsMade"
-      : `${slot}BatchesMade`;
-    const anchorField = entry.channel === "sauce-barrel"
-      ? "sauceBarrelAnchorNetSec"
-      : `${slot}BatchAnchorNetSec`;
-    const countFrom = Math.max(0, Number(values[countField]) || 0);
-    const anchorFrom = Math.max(0, Number(values[anchorField]) || 0);
-    const mutations = entry.channel === "sauce-barrel"
-      ? buildSauceClaimMutations({
-          countFrom,
-          countTo: countFrom + 1,
-          anchorFrom,
-          anchorTo: entry.dueAt,
-          correctionGeneration,
-        })
-      : buildAppSlotClaimMutations({
-          slot: slot as "app1" | "app2" | "app3" | "app4",
-          madeFrom: countFrom,
-          madeTo: countFrom + 1,
-          anchorFrom,
-          anchorTo: entry.dueAt,
-          correctionGeneration,
-        });
-    claims.push({
-      version: 1,
-      runId,
-      channel: entry.channel,
-      generation: schedule.generation,
-      sequence,
-      eventId: `srv:${sequence}:${entry.channel}:${randomUUID()}`,
-      dueAt: entry.dueAt,
-      nextDueAt: entry.nextDueAt,
-      baseUpdatedAt,
-      correctionGeneration,
-      mutations,
-    });
+/** Server bootstrap for wall-clock channels. Bookkeeping is deliberately
+ * persisted by the caller even if no channel is due, so restarts cannot replay
+ * a stale beat. Canonical client coordination always takes ownership back. */
+export type ServerWallClockBookkeeping = WallClockBookkeeping & {
+  lifecycleGeneration: string;
+  serverSequences: Partial<Record<WallClockChannel, number>>;
+  appliedDoughControlUpdatedAt?: number;
+};
+export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
+  const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
+  const built = schedule(payload, nowMs, { allowEndedDrain: true });
+  const run = payload.dayState?.runs?.[payload.dayState?.currentIndex ?? 0];
+  if (!built || !run || number(run.startedAt) <= 0 || number(run.pausedAt) > 0) return null;
+  const { schedule: plan, values } = built;
+  const endedAt = number(run.endedAt);
+  const drainActive = endedAt > 0
+    && number(values.freezerTime) > 0
+    && nowMs < endedAt + number(values.freezerTime) * 60_000;
+  const runStatus = drainActive ? "ended" : "running";
+  const old = payload.autoTrackServerState?.wallClockBookkeeping?.[plan.runId] ?? {};
+  const calc = computeServerCalc(payload as never, [], nowMs)!.calc;
+  const timing = getAutoTrackTiming(calc.ppm, number(values.pizzasPerCase), calc.perTray, calc.perBatch, {
+    spinSec: number(values.mixerLowSec) + number(values.mixerHighSec),
+    hopperSec: number(values.hopperSec),
+  });
+  const freshBookkeeping = createWallClockBookkeeping();
+  const bookNumber = (field: keyof WallClockBookkeeping, fallback = 0) =>
+    typeof old[field] === "number" && Number.isFinite(old[field]) ? old[field] as number : fallback;
+  let bookkeeping: WallClockBookkeeping = {
+    caseNextDueMs: bookNumber("caseNextDueMs"),
+    trayProdNextDueMs: bookNumber("trayProdNextDueMs"),
+    trayConsNextDueMs: bookNumber("trayConsNextDueMs"),
+    batchProdNextDueMs: bookNumber("batchProdNextDueMs"),
+    batchConsNextDueMs: bookNumber("batchConsNextDueMs"),
+    hopperNextDueMs: bookNumber("hopperNextDueMs"),
+    trayLastMs: bookNumber("trayLastMs"),
+    batchLastMs: bookNumber("batchLastMs"),
+    lastExpectedCases: bookNumber("lastExpectedCases", freshBookkeeping.lastExpectedCases),
+    drainFreezer: bookNumber("drainFreezer", freshBookkeeping.drainFreezer),
+    traysRemainder: bookNumber("traysRemainder"),
+    traySeeded: old.traySeeded === true,
+    batchSeeded: old.batchSeeded === true,
+    formResetSkipped: old.formResetSkipped === true,
+    caseClaimRetry: old.caseClaimRetry === true,
+    doughPausedAtMs: bookNumber("doughPausedAtMs"),
+    doughResumeAtMs: bookNumber("doughResumeAtMs"),
+  };
+  const hasPersistedBookkeeping = Object.keys(old).some((key) => key !== "lifecycleGeneration");
+  let serverSequences = old.serverSequences && typeof old.serverSequences === "object"
+    ? { ...old.serverSequences } as Partial<Record<WallClockChannel, number>>
+    : {};
+  if (hasPersistedBookkeeping && old.lifecycleGeneration !== plan.generation) {
+    const priorCaseNextDueMs = bookkeeping.caseNextDueMs;
+    const priorDrainFreezer = bookkeeping.drainFreezer;
+    bookkeeping = rearmWallClockTimers(freshBookkeeping, nowMs, timing);
+    // End Run advances the lifecycle generation, but the physical freezer keeps
+    // draining. Preserve its last observed contents and case arm so the first
+    // ended-generation beat accounts for exactly what exited across the handoff.
+    // Every dough-owned timer still rebases and other lifecycle transitions keep
+    // the normal full reset above.
+    if (drainActive) {
+      bookkeeping.caseNextDueMs = priorCaseNextDueMs > 0
+        ? priorCaseNextDueMs
+        : bookkeeping.caseNextDueMs;
+      bookkeeping.drainFreezer = priorDrainFreezer;
+    }
+    serverSequences = {};
   }
-  return claims;
+  const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
+  const elapsedSec = computeAutoTrackElapsedMs({
+    startedAt: number(run.startedAt), pausedAt: number(run.pausedAt) || undefined, nowMs,
+    stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined,
+  }) / 1000;
+  const suggestion = computeAutoTrackSuggestion({
+    runStatus, drainActive, packagingDrainActive: false, packagingDrainElapsedSec: 0,
+    ppm: calc.ppm, casesPerSkid: number(values.casesPerSkid), pizzasPerCase: number(values.pizzasPerCase),
+    casesNeeded: number(values.casesNeeded), freezerTime: number(values.freezerTime), elapsedBatchSec: elapsedSec,
+  });
+  // Pre-engine records persisted only the six due refs. When adopting one of
+  // those overdue arms, preserve its already-authorized single case beat while
+  // establishing the engine's incremental baseline; subsequent beats use the
+  // normal elapsed/freezer calculation exclusively.
+  const legacyCaseArm = old.lifecycleGeneration === plan.generation
+    && typeof old.caseNextDueMs === "number"
+    && !Object.prototype.hasOwnProperty.call(old, "lastExpectedCases")
+    && old.caseNextDueMs <= nowMs;
+  const legacyExpected = number(values.skidsCompleted) * number(values.casesPerSkid)
+    + number(values.casesOnCurrentSkid) + 1;
+  const expectedCasesRaw = legacyCaseArm
+    ? Math.max(suggestion?.expectedCasesRaw ?? 0, legacyExpected)
+    : suggestion?.expectedCasesRaw ?? 0;
+  const expectedCases = number(values.casesNeeded) > 0
+    ? Math.min(number(values.casesNeeded), expectedCasesRaw)
+    : expectedCasesRaw;
+  const control = payload.doughTimerControls?.[plan.runId];
+  const matchingControl = control?.generation === plan.generation;
+  const pausedByControl = matchingControl && number(control.pausedAt) > 0
+    && (number(control.resumeAt) === 0 || number(control.resumeAt) > nowMs);
+  const timedResume = matchingControl && number(control.pausedAt) > 0
+    && number(control.resumeAt) > 0 && number(control.resumeAt) <= nowMs
+    && number(old.appliedDoughControlUpdatedAt) !== number(control.updatedAt);
+  if (timedResume) {
+    bookkeeping = {
+      ...bookkeeping,
+      doughPausedAtMs: number(control?.pausedAt),
+      doughResumeAtMs: number(control?.resumeAt),
+    };
+  } else if (pausedByControl) {
+    bookkeeping = {
+      ...bookkeeping,
+      doughPausedAtMs: bookkeeping.doughPausedAtMs || number(control?.pausedAt),
+      doughResumeAtMs: number(control?.resumeAt),
+    };
+  } else if (matchingControl && number(control?.pausedAt) === 0 && bookkeeping.doughPausedAtMs > 0) {
+    bookkeeping = rearmWallClockTimers(bookkeeping, nowMs, timing);
+  }
+  const tick = tickWallClock({
+    bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive: false,
+    packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
+    calc: { ppm: calc.ppm, perTray: calc.perTray, perBatch: calc.perBatch, pressDone: calc.pressDone, casesInFreezer: calc.casesInFreezer, traysNeeded: calc.traysNeeded, batchesNeeded: calc.batchesNeeded },
+    v: { pizzasPerCase: number(values.pizzasPerCase), casesPerSkid: number(values.casesPerSkid), casesNeeded: number(values.casesNeeded), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
+    form: { skidsCompleted: number(values.skidsCompleted), casesOnCurrentSkid: number(values.casesOnCurrentSkid), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
+    expectedCasesRaw, expectedCases,
+  });
+  const claims = tick.events
+    .filter((event) => {
+      const state = coordination?.[event.channel];
+      if (!state) return true;
+      // Manual invalidation remains client-owned until a current-generation
+      // register is established. A current client register is a safe takeover
+      // base once its due boundary actually produces an engine event.
+      if (state.generation !== plan.generation) {
+        // End advances the lifecycle generation while the same physical case
+        // stream drains. Let the new generation's sequence-1 claim arbitrate
+        // through the normal row lock regardless of whether the browser or
+        // server owned the running generation. Competing browser/server claims
+        // for the ended generation cannot both be accepted.
+        return drainActive && event.channel === "case";
+      }
+      const ownedSequence = number(serverSequences[event.channel]);
+      return ownedSequence === 0 || ownedSequence === number(state.sequence);
+    })
+    .map((event) => ({
+      version: 1, runId: plan.runId, channel: event.channel, generation: plan.generation,
+      sequence: coordination?.[event.channel]?.generation === plan.generation
+        ? number(coordination[event.channel]?.sequence) + 1 : 1,
+      eventId: `srv:wc:${event.channel}:${randomUUID()}`,
+      dueAt: event.dueAt, nextDueAt: event.nextDueAt, baseUpdatedAt: number(payload.runValuesUpdatedAt?.[plan.runId]),
+      ...(event.channel === "case" ? { correctionGeneration: number(payload.packagingProgress?.[plan.runId]?.correctionGeneration) } : {}),
+      mutations: event.mutations as AutoTrackMutation[],
+    } as AutoTrackClaim));
+  for (const claim of claims) {
+    serverSequences[claim.channel as WallClockChannel] = claim.sequence;
+  }
+  return {
+    runId: plan.runId,
+    bookkeeping: {
+      ...tick.next, lifecycleGeneration: plan.generation, serverSequences,
+      appliedDoughControlUpdatedAt: timedResume
+        ? number(control?.updatedAt) : number(old.appliedDoughControlUpdatedAt),
+    },
+    claims,
+  };
 }

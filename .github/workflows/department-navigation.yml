@@ -33,6 +33,14 @@ jobs:
       PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+      # /api/healthz deliberately reports 503 when an API dependency is not
+      # configured. This journey never calls AI, so use a non-secret fixture
+      # value that also works for pull requests from forks.
+      AI_INTEGRATIONS_GEMINI_API_KEY: department-navigation-configured
+      # Vite otherwise defaults its same-origin /api proxy to port 8080. This
+      # journey starts the API on 5000, so make browser API calls reach that
+      # ready server rather than receiving the proxy's 503.
+      VITE_API_PROXY_TARGET: http://127.0.0.1:5000
 
     steps:
       - name: Checkout

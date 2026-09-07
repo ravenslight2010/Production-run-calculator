@@ -51,9 +51,18 @@ with `WITH (FORCE)` during teardown.
 - A stale lifecycle/value snapshot and blank run value are pushed after newer
   edits.
 - Wake-style pull/re-adoption brings every client to the same canonical state.
+- Wake blocks publication until the canonical snapshot is adopted; failed
+  recovery remains blocked and matching generations alone may acknowledge it.
 - A future date remains separate from the client-local current date.
 - A manager reset clears both dates; a pre-reset client push is rejected by the
   reset epoch, and an epoch-adopted empty client can write again.
+- Operational intents use stable IDs and canonical accepted/rebased/review
+  outcomes. End-run acknowledgement is returned only with its canonical
+  lifecycle and atomic inventory finalization.
+
+The pure contract suites also freeze browser-record corruption fallback,
+state-machine generation ordering, canonical snapshot hashing, partial
+dependency validation, and response-envelope classification.
 
 ## Interpreting the report
 

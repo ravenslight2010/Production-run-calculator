@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { db, auditLogsTable, dataHealsTable, insertAuditLogSchema } from "@workspace/db";
-import { requireCapability } from "../middlewares/requireCapability";
+import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 
 /**
@@ -57,6 +57,7 @@ export function profileNameLinkCleanupSummary(value: unknown): ProfileNameLinkCl
 // Manager-only read-only record of the one-time name-link/stub cleanup.
 router.get(
   "/audit-logs/profile-name-link-cleanup",
+  requireLiveScope,
   requireCapability("manage-staff"),
   async (req: Request, res: Response) => {
     try {
@@ -89,6 +90,7 @@ router.get(
 // GET /api/audit-logs?scope=live&startDate=2026-07-01&endDate=2026-07-31&limit=100
 router.get(
   "/audit-logs",
+  requireLiveScope,
   requireCapability("manage-staff"),
   async (req: Request, res: Response) => {
     try {

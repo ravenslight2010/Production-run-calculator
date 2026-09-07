@@ -21,6 +21,11 @@ export type ParsedApplicator = {
   type: string;
   ozPerPizza: number;
   /**
+   * Exact cheese/mix recipe linked to this physical slot. Optional for legacy
+   * workbooks, which continue to resolve links from the applicator type.
+   */
+  recipeName?: string;
+  /**
    * Batch size in lbs one made batch of this topping weighs, when the sheet
    * states it. Used only as a FALLBACK — when the profile has a cheese/topping
    * recipe for this slot, the batch math derives the batch size from the recipe
@@ -86,6 +91,10 @@ export type ParsedProfile = {
    * batch math derives the barrel size from the recipe row sum instead.
    */
   sauceBarrelLbs?: number;
+  /** Product-specific target doughball weight in oz. */
+  targetDoughballWeight?: number;
+  /** Product-specific doughballs per tray. */
+  doughballsPerTray?: number;
   applicators: ParsedApplicator[];
   pepperonis: ParsedPepperoni[];
   /**
@@ -106,6 +115,16 @@ export type ParsedRecipeTarget = { brand: string; flavor: string };
 export type ParsedRecipe = {
   kind: "dough" | "sauce" | "cheese";
   name: string;
+  /**
+   * Unit label reported by the source parse for every numeric ingredient row.
+   * Provenance only: consumers must never convert or reinterpret `rows` from it.
+   */
+  rowsUnit?: string;
+  /**
+   * Canonical unit a manager confirmed from the source workbook during import
+   * review. This is provenance only and must never rescale `rows`.
+   */
+  confirmedRowsUnit?: "lbs" | "oz";
   /** Single brand/flavor this recipe ties to (simple case). */
   brand?: string;
   flavor?: string;
@@ -172,6 +191,31 @@ export type ParsedRecipe = {
   referenceOnly?: boolean;
   rows: RecipeRow[];
 };
+
+export type RecipeRowsUnitReview =
+  | { clarity: "clear"; reportedUnit: string; normalizedUnit: "lbs" | "oz" }
+  | { clarity: "missing"; reportedUnit?: undefined; normalizedUnit?: undefined }
+  | { clarity: "ambiguous"; reportedUnit: string; normalizedUnit?: undefined };
+
+/**
+ * Classify recipe-row unit provenance for advisory import review. This never
+ * reads or changes row values; it only interprets the reported label.
+ */
+export function reviewRecipeRowsUnit(
+  recipe: Pick<ParsedRecipe, "rowsUnit">,
+): RecipeRowsUnitReview {
+  const reportedUnit = recipe.rowsUnit?.trim();
+  if (!reportedUnit) return { clarity: "missing" };
+
+  const token = reportedUnit.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+  if (/^(?:lb|lbs|pound|pounds)$/.test(token)) {
+    return { clarity: "clear", reportedUnit, normalizedUnit: "lbs" };
+  }
+  if (/^(?:oz|ounce|ounces)$/.test(token)) {
+    return { clarity: "clear", reportedUnit, normalizedUnit: "oz" };
+  }
+  return { clarity: "ambiguous", reportedUnit };
+}
 
 /**
  * One flavor-grounding correction/flag the sanitizer made — e.g. an
@@ -355,7 +399,16 @@ function mergeProfilePair(
  */
 function mergeRecipePair(prev: ParsedRecipe, next: ParsedRecipe): ParsedRecipe {
   const merged = overlayDefined(prev, next);
-  merged.rows = next.rows?.length ? next.rows : prev.rows ?? [];
+  if (next.rows?.length) {
+    merged.rows = next.rows;
+    // Unit provenance and manager confirmation belong to the selected row set.
+    // If the later workbook replaces the rows without either field, do not
+    // retain metadata from the earlier workbook.
+    if (next.rowsUnit == null) delete merged.rowsUnit;
+    if (next.confirmedRowsUnit == null) delete merged.confirmedRowsUnit;
+  } else {
+    merged.rows = prev.rows ?? [];
+  }
 
   // Union the explicit flavor-level targets of BOTH sides (recipeTargets folds
   // each side's singular brand+flavor in as well).
@@ -3329,6 +3382,20 @@ export type SheetGrid = {
    * Optional — callers that don't need styling omit it.
    */
   boldRows?: number[];
+  /** Zero-based rows rendered with the workbook's accent treatment. */
+  accentRows?: number[];
+  /** Zero-based table-header rows rendered with neutral header styling. */
+  headerRows?: number[];
+  /** Practical Excel widths, in characters, by zero-based column index. */
+  columnWidths?: number[];
+  /** Wrap long cell text across the used range. */
+  wrapText?: boolean;
+  /** Number of top rows to freeze in the worksheet. */
+  freezeRows?: number;
+  /** Optional safe filter range, expressed as zero-based row indices. */
+  autoFilter?: { startRow: number; endRow: number };
+  /** Numeric display formats applied to selected zero-based columns. */
+  numberFormats?: Array<{ columns: number[]; format: string }>;
 };
 
 export type GridTextLimits = {
@@ -4661,6 +4728,7 @@ export function sanitizeParsedSpecImport(
         });
       }
       const appBatchLbs = num(ao.batchLbs);
+      const recipeName = clampName(ao.recipeName, lim.maxNameChars);
       // Physical line station (1-4) when the sheet makes it discernible —
       // anything else (0, 5, 2.5, non-numeric) is dropped so a hallucinated
       // slot can't scramble the fill-in-order fallback.
@@ -4674,6 +4742,7 @@ export function sanitizeParsedSpecImport(
         ozPerPizza: ozPerPizza ?? 0,
         ...(appBatchLbs != null && appBatchLbs > 0 ? { batchLbs: appBatchLbs } : {}),
         ...(appSlot != null ? { slot: appSlot } : {}),
+        ...(recipeName ? { recipeName } : {}),
       });
     }
     const pepperonis: ParsedPepperoni[] = [];
@@ -4705,6 +4774,14 @@ export function sanitizeParsedSpecImport(
     if (die) profile.dieType = die;
     const sauceOz = num(o.sauceOzPerPizza);
     if (sauceOz != null) profile.sauceOzPerPizza = sauceOz;
+    const targetDoughballWeight = num(o.targetDoughballWeight);
+    if (targetDoughballWeight != null && targetDoughballWeight > 0) {
+      profile.targetDoughballWeight = targetDoughballWeight;
+    }
+    const profileDoughballsPerTray = num(o.doughballsPerTray);
+    if (profileDoughballsPerTray != null && profileDoughballsPerTray > 0) {
+      profile.doughballsPerTray = Math.round(profileDoughballsPerTray);
+    }
     const sauceName = clampName(o.sauceName, lim.maxNameChars);
     if (sauceName && !isGenericSauceName(sauceName)) {
       // Grounding backstop for the profile's SAUCE NAME, same snap-or-flag
@@ -4820,29 +4897,19 @@ export function sanitizeParsedSpecImport(
     const name = clampName(o.name, lim.maxNameChars);
     const rows: RecipeRow[] = [];
     const rawRows = Array.isArray(o.rows) ? o.rows : [];
-    // Spec sheets at this factory write recipe ingredient amounts in OUNCES,
-    // so ounces is the DEFAULT: every row is converted oz→lbs here unless the
-    // sheet explicitly labels the amounts as pounds (AI reports the unit it
-    // saw via `rowsUnit`; it never does arithmetic). The canonical
-    // ParsedRecipe (and everything downstream — batch math, inventory,
-    // review preview) stays in lbs.
-    const unitRaw = clampName(o.rowsUnit, 16).toLowerCase();
-    const rowsAreLbs =
-      unitRaw === "lb" || unitRaw === "lb." || unitRaw === "lbs" || unitRaw === "lbs." ||
-      unitRaw === "pound" || unitRaw === "pounds";
-    // Cheese-kind rows are EXEMPT from the conversion: by long-standing
-    // contract their `lbs` field carries per-pizza OUNCES verbatim (see
-    // SpecCheeseRecipeDraft) — converting them ÷16 corrupted mix/cheese
-    // per-pizza amounts (1.5 oz became 0.094).
-    const rowsAreOz = !rowsAreLbs && kind !== "cheese";
+    // Recipe rows are an opaque numeric value from the source sheet. The AI
+    // reports `rowsUnit` as descriptive provenance, but the shared parsed
+    // contract intentionally preserves the number verbatim for every recipe
+    // kind. In particular, never apply an implicit oz↔lb conversion here:
+    // large imports can contain pound-valued dough/sauce rows even when the
+    // workbook layout usually uses ounces.
     for (const row of rawRows.slice(0, lim.maxRecipeRows)) {
       if (!row || typeof row !== "object") continue;
       const ro = row as Record<string, unknown>;
       const ingredient = clampName(ro.ingredient, lim.maxNameChars);
       const raw = num(ro.lbs);
       if (!ingredient || raw == null) continue;
-      const lbs = rowsAreOz ? Math.round((raw / 16) * 1000) / 1000 : raw;
-      rows.push({ ingredient, lbs });
+      rows.push({ ingredient, lbs: raw });
     }
     if (rows.length === 0) continue;
     // A stick-applied pep (pepperoni sticks OR cheese sticks) is a pep TYPE
@@ -4856,6 +4923,12 @@ export function sanitizeParsedSpecImport(
     // ingredients have 2+ rows and pass through.)
     if (kind === "cheese" && isDicedPepStandaloneApplicator(name ?? "", rows)) continue;
     const recipe: ParsedRecipe = { kind, name, rows };
+    const rowsUnit = clampName(o.rowsUnit, 32);
+    if (rowsUnit) recipe.rowsUnit = rowsUnit;
+    const confirmedRowsUnit = clampName(o.confirmedRowsUnit, 8).toLowerCase();
+    if (confirmedRowsUnit === "lbs" || confirmedRowsUnit === "oz") {
+      recipe.confirmedRowsUnit = confirmedRowsUnit;
+    }
     // Grounding backstop for RECIPE brands, same semantics as profiles: a
     // paraphrased recipe brand silently attaches a dough/sauce/cheese recipe
     // to a wrong/new brand, so it never shows on the intended products.

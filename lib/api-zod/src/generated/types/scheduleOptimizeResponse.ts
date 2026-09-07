@@ -5,7 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AiStatus } from './aiStatus';
 import type { ScheduleMetrics } from './scheduleMetrics';
 
 export interface ScheduleOptimizeResponse {
@@ -17,12 +16,9 @@ export interface ScheduleOptimizeResponse {
   improved: boolean;
   before: ScheduleMetrics;
   after: ScheduleMetrics;
-  /** Plain-language narration (AI), or empty when no improvement / AI unavailable */
+  /** Deterministic summary, or empty when no improvement is available */
   summary: string;
   /** Optional explanation (e.g. already optimally ordered) */
   note?: string;
   generatedAt: number;
-  /** True when the AI narrated; false otherwise */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
 }

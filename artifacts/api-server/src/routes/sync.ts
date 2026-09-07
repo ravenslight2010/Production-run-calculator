@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   db,
   dailySyncTable,
@@ -42,8 +42,10 @@ import {
   proactiveAlertSettingsTable,
   auditLogsTable,
   syncConflictLogsTable,
+  operationalIntentLedgerTable,
+  completedRunHistoryTable,
 } from "@workspace/db";
-import { and, eq, gt, gte, lte, asc, sql } from "drizzle-orm";
+import { and, eq, gt, gte, lte, asc, sql, inArray } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
@@ -54,63 +56,36 @@ import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from ".
 import {
   buildNetSecondServerClaims,
   buildWallClockServerClaims,
-  withWallClockServerState,
-  type WallClockServerPlan,
 } from "../lib/autoTrackServerTicks";
+import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
+import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
-import { consumeSauceBarrelInTransaction } from "./inventory";
-export { detectConflicts } from "../lib/syncConflict";
 import {
-  buildAutoTrackScheduleFromPayload,
+  SYNC_SNAPSHOT_ID_RE,
+  buildSyncWriteEnvelope,
+  emptySyncData,
+  isPartialSyncPayload,
+  isValidPartialSyncContract,
+  syncSnapshotId,
+} from "../lib/syncContract";
+import {
+  computeAutoTrackSchedule,
   computeServerCalc,
+  applyTemporaryOverrides,
   type AutoTrackSchedule,
+  type AutoTrackScheduleInput,
   type ServerCalcResult,
 } from "@workspace/live-calc";
+export { detectConflicts } from "../lib/syncConflict";
+export { syncSnapshotId } from "../lib/syncContract";
 
 const router: IRouter = Router();
 
 type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string };
 const clients = new Set<SseClient>();
-const SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
-
-/** Stable identity for a canonical JSON snapshot (object key order independent). */
-export function syncSnapshotId(data: unknown): string {
-  const stable = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(stable);
-    if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([key, child]) => [key, stable(child)]),
-      );
-    }
-    return value;
-  };
-  return createHash("sha256").update(JSON.stringify(stable(data))).digest("hex");
-}
-
 function requestedSnapshot(req: Request): string | undefined {
   const value = req.query.snapshot;
-  return typeof value === "string" && SNAPSHOT_ID_RE.test(value) ? value : undefined;
-}
-
-function emptySyncData(date: string): Record<string, unknown> {
-  return {
-    dayState: { date, runs: [] },
-    runValues: {},
-    runValuesUpdatedAt: {},
-  };
-}
-
-function isPartialSyncPayload(payload: unknown): payload is Record<string, unknown> {
-  return !!payload && typeof payload === "object" && !Array.isArray(payload) &&
-    (payload as Record<string, unknown>).completeness === "partial";
-}
-
-function isValidPartialContract(payload: Record<string, unknown>): boolean {
-  return payload.syncVersion === 1 &&
-    typeof payload.baseSnapshotId === "string" &&
-    SNAPSHOT_ID_RE.test(payload.baseSnapshotId);
+  return typeof value === "string" && SYNC_SNAPSHOT_ID_RE.test(value) ? value : undefined;
 }
 
 type ProtectedUpsertResult = {
@@ -118,6 +93,7 @@ type ProtectedUpsertResult = {
   wrote: boolean;
   partialFallback: boolean;
   retries: number;
+  staleEpoch?: number;
 };
 
 function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
@@ -168,39 +144,76 @@ type BroadcastPayload = {
   dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
   runValues?: Record<string, Record<string, unknown>>;
   packagingProgress?: Record<string, unknown>;
-  autoTrackCoordination?: {
-    runs?: Record<string, Record<string, unknown>>;
-  };
+  autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
+  autoTrackServerState?: { netOwnership?: Record<string, Record<string, unknown>> };
 };
 
-/** Server-side tick detection for the current run (refactor steps 6a/7). */
-function buildAutoTrackSchedule(
+export function buildAutoTrackSchedule(
   payload: BroadcastPayload | null,
   calcResult: ServerCalcResult | null,
+  nowMs = Date.now(),
 ): AutoTrackSchedule | null {
-  return buildAutoTrackScheduleFromPayload(payload, calcResult);
+  const run = payload?.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
+  if (!run || typeof run.id !== "string" || !calcResult) return null;
+  const runId = run.id;
+  const rawValues = payload?.runValues?.[runId];
+  if (!rawValues || typeof rawValues !== "object") return null;
+  return computeAutoTrackSchedule({
+    runId,
+    metaUpdatedAt: typeof run.metaUpdatedAt === "number" ? run.metaUpdatedAt : undefined,
+    startedAt: typeof run.startedAt === "number" ? run.startedAt : undefined,
+    pausedAt: typeof run.pausedAt === "number" ? run.pausedAt : undefined,
+    endedAt: typeof run.endedAt === "number" ? run.endedAt : undefined,
+    stoppages: Array.isArray(run.stoppages) ? run.stoppages as AutoTrackScheduleInput["stoppages"] : undefined,
+    v: applyTemporaryOverrides(rawValues) as unknown as AutoTrackScheduleInput["v"],
+    calc: calcResult.calc,
+    progress: rawValues,
+    coordination: payload.autoTrackCoordination?.runs?.[runId] as AutoTrackScheduleInput["coordination"],
+    serverNetOwnership: payload.autoTrackServerState?.netOwnership?.[runId] as AutoTrackScheduleInput["serverNetOwnership"],
+    serverWallOwnership: (
+      payload.autoTrackServerState as any
+    )?.wallClockBookkeeping?.[runId]?.serverSequences as AutoTrackScheduleInput["serverWallOwnership"],
+    nowMs,
+  });
 }
 
-// Only ever push to clients watching the SAME data scope AND the SAME local date,
-// so a sandbox writer's state never streams into a live watcher's UI, and a peer
-// on a different local calendar day (behind/ahead of UTC) never receives another
-// day's state into its live view — the cross-date clobber this fix prevents.
-function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
-  // Compute server-side calc + auto-track schedule for the current run so
-  // clients can display authoritative values and adopt the server's tick
-  // schedule without doing the math themselves.
-  let serverCalc: ServerCalcResult | null = null;
-  let autoTrackSchedule: AutoTrackSchedule | null = null;
+function computeServerLiveState(data: unknown, nowMs = Date.now()): {
+  serverCalc: ServerCalcResult | null;
+  autoTrackSchedule: AutoTrackSchedule | null;
+} {
   try {
     const payload = data as BroadcastPayload | null;
-    if (payload?.dayState?.runs && payload.dayState.runs.length > 0) {
-      serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], []);
-      autoTrackSchedule = buildAutoTrackSchedule(payload, serverCalc);
-    }
-  } catch { /* calc failure must not break the sync broadcast */ }
-  const msg = `data: ${JSON.stringify({ data, senderId, serverCalc, autoTrackSchedule })}\n\n`;
+    const serverCalc = payload?.dayState
+      ? computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs)
+      : null;
+    return { serverCalc, autoTrackSchedule: buildAutoTrackSchedule(payload, serverCalc, nowMs) };
+  } catch {
+    return { serverCalc: null, autoTrackSchedule: null };
+  }
+}
+
+function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
+  const liveState = computeServerLiveState(data);
+  const msg = `data: ${JSON.stringify({ data, senderId, ...liveState })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
+      try { client.res.write(msg); } catch {}
+    }
+  }
+}
+
+// Master data is facility-wide rather than date-scoped. Reuse the authenticated
+// sync stream, but send a bounded nudge instead of the recipe payload. The
+// sender is excluded so its optimistic mutation result is not immediately
+// invalidated by its own echo.
+export function broadcastMasterDataChanged(senderId: string, scope: Scope = currentScope()): void {
+  const msg = `data: ${JSON.stringify({
+    type: "master-data",
+    masterDataChanged: true,
+    senderId,
+  })}\n\n`;
+  for (const client of clients) {
+    if (client.scope === scope && client.clientId !== senderId) {
       try { client.res.write(msg); } catch {}
     }
   }
@@ -465,12 +478,22 @@ async function upsertProtected(
   scope: Scope,
   payload: unknown,
   clientTodayDate: string,
+  expectedEpoch: number,
   clientIp?: string,
 ): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
       let existingData: unknown = undefined;
       const merged = await db.transaction(async (tx) => {
+        // Scope reset fence is always acquired before the daily document,
+        // matching /sync/reset and operational intents.
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+          .onConflictDoNothing();
+        const [reset] = await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
+        if ((reset?.epoch ?? 0) !== expectedEpoch) {
+          return { data: null, wrote: false, partialFallback: false, retries: attempt, staleEpoch: reset?.epoch ?? 0 };
+        }
         const [existing] = await tx
           .select()
           .from(dailySyncTable)
@@ -491,7 +514,7 @@ async function upsertProtected(
             ? undefined
             : syncSnapshotId(existing.data);
           if (
-            !isValidPartialContract(payload) ||
+            !isValidPartialSyncContract(payload) ||
             typeof currentSnapshotId !== "string" ||
             payload.baseSnapshotId !== currentSnapshotId
           ) {
@@ -604,7 +627,13 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const result = await upsertProtected(today, scope, sanitized, today, req.ip);
+  const expectedEpoch = await getResetEpoch(scope);
+  const result = await upsertProtected(today, scope, sanitized, today, expectedEpoch, req.ip);
+  if (result.staleEpoch !== undefined) {
+    res.setHeader("X-Sync-Response", "stale");
+    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    return;
+  }
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
@@ -616,16 +645,217 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   res.setHeader("X-Sync-Retry-Count", String(result.retries));
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
-  const responseBody = !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
-    ? { ok: true, unchanged: true, snapshotId }
-    : {
-        ok: true,
-        data: merged,
-        ...(snapshotId ? { snapshotId } : {}),
-        ...(result.partialFallback ? { partialFallback: true } : {}),
-      };
+  const responseBody = buildSyncWriteEnvelope(merged, {
+    requestedSnapshotId: requestedId,
+    partialFallback: result.partialFallback,
+  });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   res.json(responseBody);
+});
+
+// Offline operational commands are not snapshots. Their stable ID is retained
+// with a bounded outcome trail so retries after a timeout/restart return the
+// original answer instead of applying a second pause or correction.
+router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
+  const now = Date.now();
+  const intent = parseOperationalIntent(req.body?.intent, now);
+  if (!intent || intent.date !== clientToday(req)) {
+    res.status(400).json({ error: "Invalid operational intent or production date" }); return;
+  }
+  const scope = currentScope();
+  try {
+    let result: (ReturnType<typeof applyOperationalIntent> & { cursor?: number }) | undefined;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await db.transaction(async (tx) => {
+          // Fence reset and intent under one transaction. A reset that wins
+          // this lock makes the command review-required; it cannot resurrect
+          // state between a preflight epoch read and the document write.
+          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+            .onConflictDoNothing();
+          const [reset] = await tx.select().from(dataResetTable)
+            .where(eq(dataResetTable.scope, scope)).for("update");
+          const [existing] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope))).for("update");
+          const [seen] = await tx.select().from(operationalIntentLedgerTable)
+            .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, intent.date), eq(operationalIntentLedgerTable.intentId, intent.id)))
+            .for("update");
+          // A duplicate must return the snapshot produced by its original
+          // transaction, rather than whichever later command currently owns
+          // the daily document. This is the idempotency boundary clients use
+          // after a timeout or a process restart.
+          if (seen) return {
+            data: seen.snapshot ?? existing?.data ?? emptySyncData(intent.date),
+            outcome: seen.outcome as any,
+            duplicate: true,
+            cursor: seen.sequence,
+          };
+          if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
+            const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
+              scope, date: intent.date, intentId: intent.id, outcome: "review-required",
+              snapshot: (existing?.data ?? emptySyncData(intent.date)) as any,
+            }).returning({ sequence: operationalIntentLedgerTable.sequence });
+            return {
+              data: existing?.data ?? emptySyncData(intent.date),
+              outcome: "review-required" as const,
+              duplicate: false,
+              cursor: receipt!.sequence,
+            };
+          }
+          const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
+          applied.data.dayState = { ...applied.data.dayState, date: intent.date };
+          if (
+            applied.outcome === "accepted" &&
+            intent.action === "lifecycle" &&
+            intent.lifecycle === "end"
+          ) {
+            const [legacyCompletion] = await tx.select().from(completedRunHistoryTable).where(and(
+              eq(completedRunHistoryTable.scope, scope),
+              eq(completedRunHistoryTable.date, intent.date),
+              eq(completedRunHistoryTable.runId, intent.runId),
+            )).for("update");
+            const lockedRun = (existing?.data as any)?.dayState?.runs?.find(
+              (run: any) => run?.id === intent.runId,
+            );
+            const legacySnapshotRun = (legacyCompletion?.snapshot as any)?.dayState?.runs?.filter(
+              (run: any) => run?.id === intent.runId,
+            );
+            const legacyAgeMs = legacyCompletion
+              ? now - legacyCompletion.createdAt.getTime()
+              : Number.POSITIVE_INFINITY;
+            const compatibleLegacyCompletion = !!legacyCompletion
+              && legacyCompletion.operationId === `completed:${intent.date}:${intent.runId}`
+              && legacyAgeMs >= 0
+              && legacyAgeMs <= 10 * 60_000
+              && Array.isArray(legacySnapshotRun)
+              && legacySnapshotRun.length === 1
+              && Number(legacySnapshotRun[0].startedAt) === Number(lockedRun?.startedAt)
+              && Number(legacySnapshotRun[0].endedAt) === legacyCompletion.completedAt.getTime()
+              && legacyCompletion.completedAt.getTime() >= Number(lockedRun?.startedAt)
+              && Math.abs(legacyCompletion.completedAt.getTime() - intent.effectiveAt) <= 10 * 60_000;
+            // During the bounded migration window, an older client may have
+            // uploaded immutable history just before its canonical End intent.
+            // Only that exact, recently server-observed, fact-compatible record
+            // may bridge the migration; arbitrary history never controls a run.
+            if (compatibleLegacyCompletion) {
+              applied.data.dayState = {
+                ...applied.data.dayState,
+                runs: (applied.data.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+                  run.id === intent.runId
+                    ? { ...run, endedAt: legacyCompletion!.completedAt.getTime() }
+                    : run
+                ),
+              };
+            } else if (legacyCompletion) {
+              applied.data = (existing?.data ?? emptySyncData(intent.date)) as Record<string, any>;
+              applied.outcome = "review-required";
+            }
+            if (applied.outcome === "accepted") {
+              const snapshot = JSON.parse(JSON.stringify(applied.data, (_key, value) => value)) as Record<string, unknown>;
+              const stable = (value: unknown): unknown => {
+                if (Array.isArray(value)) return value.map(stable);
+                if (value && typeof value === "object") {
+                  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([key, child]) => [key, stable(child)]));
+                }
+                return value;
+              };
+              const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
+              const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
+              const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
+                .find((run) => run.id === intent.runId);
+              const completedAt = Number(canonicalRun?.endedAt);
+              if (!compatibleLegacyCompletion) {
+                await tx.insert(completedRunHistoryTable).values({
+                  id: randomUUID(),
+                  scope,
+                  operationId: intent.id,
+                  runId: intent.runId,
+                  date: intent.date,
+                  completedAt: new Date(completedAt),
+                  snapshot: canonicalSnapshot,
+                  snapshotHash,
+                  actorId: req.userId ?? "unknown",
+                });
+              }
+              await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
+            }
+          }
+          if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
+            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
+          else await tx.insert(dailySyncTable).values({ date: intent.date, scope, data: applied.data as any, updatedAt: new Date() });
+          const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
+            scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
+            snapshot: applied.data as any,
+          }).returning({ sequence: operationalIntentLedgerTable.sequence });
+          return { ...applied, cursor: receipt!.sequence };
+        });
+        break;
+      } catch (error) {
+        if (isUniqueViolation(error) && attempt < 3) continue;
+        throw error;
+      }
+    }
+    if (!result) throw new Error("Operational intent did not complete");
+    if (!result.duplicate) broadcast(result.data, typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "", scope, intent.date);
+    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, cursor: result.cursor, data: result.data, snapshotId: syncSnapshotId(result.data) });
+  } catch (error) {
+    req.log.error({ err: error, event: "operational_intent" }, "Operational intent reconciliation failed");
+    res.status(500).json({ error: "Operational intent could not sync. Please retry." });
+  }
+});
+
+// Compact accepted command history for clients that have a cursor. The payload
+// is intentionally materialized snapshots, not executable operations: replay
+// cannot re-consume inventory or re-run a lifecycle transition. The existing
+// POST endpoint remains synchronous for older clients.
+router.get("/sync/operational-intents/cursor", async (req: Request, res: Response): Promise<void> => {
+  const raw = req.query.after;
+  const after = raw === undefined ? 0 : Number(raw);
+  if (!Number.isSafeInteger(after) || after < 0) {
+    res.status(400).json({ error: "Invalid mutation cursor" });
+    return;
+  }
+  const scope = currentScope();
+  try {
+    const rows = await db.select({
+      cursor: operationalIntentLedgerTable.sequence,
+      date: operationalIntentLedgerTable.date,
+      outcome: operationalIntentLedgerTable.outcome,
+      snapshot: operationalIntentLedgerTable.snapshot,
+      createdAt: operationalIntentLedgerTable.createdAt,
+    }).from(operationalIntentLedgerTable)
+      .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
+      .orderBy(asc(operationalIntentLedgerTable.sequence))
+      .limit(100);
+    // Cursor recovery must be monotonic across pages. Never mix a compacted
+    // receipt's current materialization with a later retained historical
+    // snapshot: every adoptable receipt in this page points at the current
+    // scoped materialization for its date.
+    const dates = [...new Set(rows.map((row) => row.date))];
+    const materialized = dates.length
+      ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data }).from(dailySyncTable)
+        .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
+      : [];
+    const byDate = new Map(materialized.map((row) => [row.date, row.data]));
+    res.json({
+      cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
+      hasMore: rows.length === 100,
+      mutations: rows.map(({ snapshot: _historical, ...row }) => {
+        const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
+        const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
+        return {
+          ...row,
+          snapshot,
+          materializedSnapshotId: snapshot ? syncSnapshotId(snapshot) : null,
+        };
+      }),
+    });
+  } catch (error) {
+    req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
+    res.status(500).json({ error: "Mutation cursor could not sync" });
+  }
 });
 
 router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promise<void> => {
@@ -690,6 +920,7 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
     if (!result) throw new Error("Auto-track claim did not complete");
     const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
     if (result.outcome === "accepted") broadcast(result.data, senderId, scope, date);
+    const liveState = computeServerLiveState(result.data);
     req.log.info({
       event: "auto_track_claim",
       outcome: result.outcome,
@@ -699,18 +930,13 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       sequence: claim.sequence,
       durationMs: Date.now() - startedAt,
     }, "Auto-track claim resolved");
-    let autoTrackSchedule: AutoTrackSchedule | null = null;
-    try {
-      const claimCalc = computeServerCalc(result.data as unknown as Parameters<typeof computeServerCalc>[0], []);
-      autoTrackSchedule = buildAutoTrackSchedule(result.data as BroadcastPayload, claimCalc);
-    } catch { /* schedule failure must not break the claim response */ }
     res.json({
       ok: true,
       outcome: result.outcome,
       state: result.channelState,
       values: result.values,
       data: result.data,
-      autoTrackSchedule,
+      ...liveState,
       snapshotId: syncSnapshotId(result.data),
     });
   } catch (error) {
@@ -757,22 +983,17 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const data = row?.data ?? null;
   const snapshotId = data ? syncSnapshotId(data) : undefined;
   const requested = requestedSnapshot(req);
-  let autoTrackSchedule: AutoTrackSchedule | null = null;
-  let initialServerCalc: ServerCalcResult | null = null;
-  if (data) {
-    try {
-      initialServerCalc = computeServerCalc(data as Parameters<typeof computeServerCalc>[0], []);
-      autoTrackSchedule = buildAutoTrackSchedule(data as BroadcastPayload, initialServerCalc);
-    } catch { /* calc failure must not break the baseline frame */ }
-  }
+  const liveState = data ? computeServerLiveState(data) : {
+    serverCalc: null,
+    autoTrackSchedule: null,
+  };
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
     senderId: null,
     initial: true,
-    serverCalc: initialServerCalc,
-    autoTrackSchedule,
+    ...liveState,
   })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME
@@ -780,43 +1001,25 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   client = { res, clientId, scope, watchDate };
   clients.add(client);
 
-  // Schedule-bearing heartbeat (refactor step 6c): the existing 15s keepalive
-  // ping now carries the server-computed auto-track schedule instead of an
-  // empty comment — same connection, same cadence, zero extra request traffic.
-  // The frame is sent DELTA-ONLY (skipped while the schedule is unchanged;
-  // atMs is excluded from the comparison because it changes every compute), so
-  // clients continuously converge on the server's due times/verdicts and the
-  // local derivation stays a fallback. A failed beat never kills the stream.
-  // Tests override the interval via AUTO_TRACK_HEARTBEAT_MS (read per request
-  // so a suite can set it without rebuilding the app).
-  let lastBeatScheduleKey: string | null = null;
+  // Refresh schedule leases on the established heartbeat. A schedule never
+  // outlives its SSE freshness window: a failed read simply sends a normal
+  // keepalive and clients resume their local fallback after the lease expires.
   heartbeat = setInterval(() => {
     void (async () => {
-      if (closed) return;
-      let frame: string | null = null;
       try {
-        const [freshRow] = await db
-          .select()
-          .from(dailySyncTable)
+        const [fresh] = await db.select().from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
-        const freshData = freshRow?.data ?? null;
-        if (freshData) {
-          const calc = computeServerCalc(freshData as Parameters<typeof computeServerCalc>[0], []);
-          const freshSchedule = buildAutoTrackSchedule(freshData as BroadcastPayload, calc);
-          if (freshSchedule) {
-            const key = JSON.stringify({ generation: freshSchedule.generation, entries: freshSchedule.entries });
-            if (key !== lastBeatScheduleKey) {
-              lastBeatScheduleKey = key;
-              frame = `data: ${JSON.stringify({ autoTrackSchedule: freshSchedule, heartbeat: true })}\n\n`;
-            }
-          }
+        const live = fresh?.data ? computeServerLiveState(fresh.data) : null;
+        if (live?.autoTrackSchedule) {
+          res.write(`data: ${JSON.stringify({ autoTrackSchedule: live.autoTrackSchedule, heartbeat: true })}\n\n`);
+        } else {
+          res.write(": heartbeat\n\n");
         }
-      } catch { /* a failed compute/read must not tear the connection down */ }
-      try {
-        res.write(frame ?? ": heartbeat\n\n");
-      } catch { /* connection already closed */ }
+      } catch {
+        try { res.write(": heartbeat\n\n"); } catch {}
+      }
     })();
-  }, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000);
+  }, Math.max(1_000, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000));
 });
 
 // ── Scheduled (future) days ──────────────────────────────────────────────────
@@ -871,7 +1074,14 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.json(data);
 });
 
-router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
+// Generic dated PUT is the scheduling surface.  It always needs the existing
+// factory-settings capability: the client-controlled `?today` parameter must
+// never turn a scheduled write into an operator write.  Floor collaboration is
+// deliberately limited to the explicit auth-only /sync/today endpoint.
+router.put(
+  "/sync/:date",
+  requireCapability("manage-factory-settings"),
+  async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload, snapshotId: requestedId, syncMeta } = req.body as {
@@ -889,7 +1099,13 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const result = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
+  const expectedEpoch = await getResetEpoch(scope);
+  const result = await upsertProtected(date, scope, sanitized, clientToday(req), expectedEpoch, req.ip);
+  if (result.staleEpoch !== undefined) {
+    res.setHeader("X-Sync-Response", "stale");
+    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    return;
+  }
   const merged = result.data;
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
@@ -903,17 +1119,14 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.setHeader("X-Sync-Retry-Count", String(result.retries));
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
-  const responseBody = !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
-    ? { ok: true, unchanged: true, snapshotId }
-    : {
-      ok: true,
-      data: merged,
-      ...(snapshotId ? { snapshotId } : {}),
-      ...(result.partialFallback ? { partialFallback: true } : {}),
-    };
+  const responseBody = buildSyncWriteEnvelope(merged, {
+    requestedSnapshotId: requestedId,
+    partialFallback: result.partialFallback,
+  });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
-  res.json(responseBody);
-});
+    res.json(responseBody);
+  },
+);
 
 router.delete("/sync/:date", requireCapability("manage-factory-settings"), async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
@@ -941,14 +1154,17 @@ router.post(
     const scope = currentScope();
     const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
+      // Every writer locks this scope fence before a daily row. Establish it
+      // first so reset cannot deadlock with an intent's daily-row lock.
+      await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+        .onConflictDoNothing();
+      await tx.select().from(dataResetTable).where(eq(dataResetTable.scope, scope)).for("update");
+      await tx.delete(operationalIntentLedgerTable).where(eq(operationalIntentLedgerTable.scope, scope));
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
       const [row] = await tx
-        .insert(dataResetTable)
-        .values({ scope, epoch: 1, resetAt: new Date() })
-        .onConflictDoUpdate({
-          target: dataResetTable.scope,
-          set: { epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() },
-        })
+        .update(dataResetTable)
+        .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
+        .where(eq(dataResetTable.scope, scope))
         .returning();
       return row?.epoch ?? 0;
     });
@@ -985,6 +1201,7 @@ router.post(
     const scope = currentScope();
     const scopedTables = [
       dailySyncTable,
+      operationalIntentLedgerTable,
       brandProfilesTable,
       cheeseRecipesTable,
       doughRecipesTable,
@@ -1014,6 +1231,7 @@ router.post(
       productionRunsTable,
       qualityChecksTable,
       proactiveAlertSettingsTable,
+      completedRunHistoryTable,
       // Inventory tables child-first so FK constraints never block the wipe.
       inventoryLedgerTable,
       inventoryLotsTable,
@@ -1032,6 +1250,13 @@ router.post(
       sandboxMetaTable,
     ] as const;
     const epoch = await db.transaction(async (tx) => {
+      // Match every normal snapshot/reset/intent writer: establish and lock the
+      // scope fence before touching any scoped or global data. This prevents a
+      // concurrent writer from recreating rows partway through the purge.
+      await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+        .onConflictDoNothing();
+      await tx.select().from(dataResetTable)
+        .where(eq(dataResetTable.scope, scope)).for("update");
       for (const t of scopedTables) {
         await tx.execute(sql`DELETE FROM ${t} WHERE scope = ${scope}`);
       }
@@ -1039,12 +1264,9 @@ router.post(
         await tx.execute(sql`DELETE FROM ${t}`);
       }
       const [row] = await tx
-        .insert(dataResetTable)
-        .values({ scope, epoch: 1, resetAt: new Date() })
-        .onConflictDoUpdate({
-          target: dataResetTable.scope,
-          set: { epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() },
-        })
+        .update(dataResetTable)
+        .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
+        .where(eq(dataResetTable.scope, scope))
         .returning();
       return row?.epoch ?? 0;
     });
@@ -1053,80 +1275,13 @@ router.post(
   },
 );
 
-// ── Server-owned auto-track tick loop (refactor steps 7a/7b) ────────────────
-// Runs the NET-SECOND channels (sauce barrel, applicator batches) AND the
-// WALL-CLOCK channels (case/tray/batch/hopper, step 7b) from the server itself
-// so runs keep auto-tracking even when every device is closed. Net-second
-// claims are pure stored-state math; wall-clock claims mirror the client's
-// arm-state machines through the shared tickWallClock engine, with per-run
-// bookkeeping persisted atomically under `autoTrackServerState`. Server
-// wall-clock execution is limited to FRESH runs (< 6h) with no canonical
-// coordination register yet — once any claim (server or client) re-persists a
-// canonical nextDueAt, that channel returns to client ownership. Every server
-// claim is applied through the EXACT same parse/apply/transaction path as a
-// client claim POST, so every safety invariant (sequence, generation,
-// correction generation, mutation from-checks, sauce inventory idempotency)
-// still holds; a competing client or another server instance simply loses the
-// row-lock race and is rejected as stale/duplicate.
-
-const SERVER_TICK_SENDER_ID = "server:tick";
 const SERVER_TICK_DEFAULT_MS = 15_000;
-const SERVER_TICK_LOOKBACK_DAYS = 45;
 const SERVER_TICK_MAX_CLAIMS = 24;
+const SERVER_TICK_LOOKBACK_DAYS = 45;
 
-function dateDaysAgo(days: number): string {
-  const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Apply one server-built claim with the same row-locked transaction as the
- * claim POST route (sauce inventory consumption + upsert + unique retry). */
-async function applyServerClaim(
-  date: string,
-  scope: Scope,
-  claim: AutoTrackClaim,
-  nowMs: number,
-): Promise<ReturnType<typeof applyAutoTrackClaim>> {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      return await db.transaction(async (tx) => {
-        const [existing] = await tx
-          .select()
-          .from(dailySyncTable)
-          .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
-          .for("update");
-        const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim, nowMs);
-        if (applied.outcome === "accepted") {
-          if (applied.inventoryConsumption?.kind === "sauce-barrel") {
-            const consumption = applied.inventoryConsumption;
-            await consumeSauceBarrelInTransaction(
-              tx,
-              consumption.runId,
-              consumption.barrelIndex,
-              consumption.itemKey,
-              consumption.qty,
-              true,
-              consumption.eventId,
-            );
-          }
-          const where = and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope));
-          if (existing) {
-            await tx.update(dailySyncTable)
-              .set({ data: applied.data as any, updatedAt: new Date() })
-              .where(where);
-          } else {
-            await tx.insert(dailySyncTable)
-              .values({ date, scope, data: applied.data as any, updatedAt: new Date() });
-          }
-        }
-        return applied;
-      });
-    } catch (error) {
-      if (isUniqueViolation(error) && attempt < 3) continue;
-      throw error;
-    }
-  }
-  throw new Error("Server auto-track claim did not complete");
+function serverTickStartDate(nowMs: number): string {
+  const date = new Date(nowMs - SERVER_TICK_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  return date.toISOString().slice(0, 10);
 }
 
 export type ServerTickSummary = {
@@ -1136,223 +1291,109 @@ export type ServerTickSummary = {
   outcomes: Record<string, number>;
 };
 
-/** Scan the live scope's recent days and apply server-built net-second claims
- * that are due now. Bounded per pass (maxClaims) — anything not reached simply
- * fires on a later beat. Exported for the integration suite; started in
- * production by `startAutoTrackServerTicks`. */
-export async function runNetSecondServerTicks(opts: {
-  nowMs?: number;
-  maxClaims?: number;
-} = {}): Promise<ServerTickSummary> {
+/** Executes automatic claims under the same locked, idempotent path as the
+ * public claim route. A beat writes wall-clock bookkeeping even without an
+ * accepted claim, which prevents a restart from replaying elapsed time. */
+export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?: number } = {}): Promise<ServerTickSummary> {
   const nowMs = opts.nowMs ?? Date.now();
-  const maxClaims = opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS;
-  // No upper date bound on purpose: the suite seeds historical pseudo-dates,
-  // and future rows without a live run simply produce no claims (a run needs a
-  // startedAt to be ticked at all).
-  const rows = await db
-    .select()
-    .from(dailySyncTable)
-    .where(and(
-      eq(dailySyncTable.scope, "live"),
-      gte(dailySyncTable.date, dateDaysAgo(SERVER_TICK_LOOKBACK_DAYS)),
-    ));
+  const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
+  const rows = await db.select().from(dailySyncTable).where(and(
+    eq(dailySyncTable.scope, "live"),
+    gte(dailySyncTable.date, serverTickStartDate(nowMs)),
+    // Client-local dates may be one calendar day ahead of server UTC.
+    lte(dailySyncTable.date, new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
+  ));
   let builtClaims = 0;
   let accepted = 0;
   const outcomes: Record<string, number> = {};
   for (const row of rows) {
     if (builtClaims >= maxClaims) break;
-    let claims: AutoTrackClaim[] = [];
     try {
-      claims = buildNetSecondServerClaims(row.data, nowMs);
-    } catch { /* an un-computable row simply has no server ticks this beat */ }
-    for (const raw of claims) {
-      if (builtClaims >= maxClaims) break;
-      const parsed = parseAutoTrackClaim(raw, nowMs);
-      if (!parsed) {
-        outcomes.invalid = (outcomes.invalid ?? 0) + 1;
-        continue;
-      }
-      builtClaims++;
-      let result: ReturnType<typeof applyAutoTrackClaim>;
-      try {
-        result = await applyServerClaim(row.date, "live", parsed, nowMs);
-      } catch (error) {
-        logger.error({
-          err: error,
-          event: "server_auto_track_tick",
-          date: row.date,
-          runId: createHash("sha256").update(parsed.runId).digest("hex").slice(0, 12),
-          channel: parsed.channel,
-        }, "Server auto-track tick failed");
-        outcomes.error = (outcomes.error ?? 0) + 1;
-        continue;
-      }
-      outcomes[result.outcome] = (outcomes[result.outcome] ?? 0) + 1;
-      if (result.outcome === "accepted") {
-        accepted++;
-        broadcast(result.data, SERVER_TICK_SENDER_ID, "live", row.date);
-      }
-    }
-  }
-  if (builtClaims > 0) {
-    logger.info({
-      event: "server_auto_track_tick",
-      examinedDates: rows.length,
-      builtClaims,
-      accepted,
-      outcomes,
-    }, "Server auto-track tick pass completed");
-  }
-  return { examinedDates: rows.length, builtClaims, accepted, outcomes };
-}
-
-/** Apply one wall-clock beat for a single row inside a row-locked transaction:
- * build from the LOCKED data + persisted bookkeeping, run every claim through
- * the standard parse/apply path, then persist the next bookkeeping in the same
- * upsert — even on beats with no event (case refs/baseline advance every
- * tick, remainder carries must survive rejection beats). */
-async function applyWallClockServerTick(
-  date: string,
-  scope: Scope,
-  nowMs: number,
-  claimBudget: number,
-): Promise<{
-  plan: WallClockServerPlan | null;
-  claimsBuilt: number;
-  accepted: number;
-  outcomes: Record<string, number>;
-  broadcastData?: Record<string, unknown>;
-}> {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      return await db.transaction(async (tx) => {
-        const [existing] = await tx
-          .select()
-          .from(dailySyncTable)
-          .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
-          .for("update");
-        const stored = existing?.data ?? emptySyncData(date);
-        const plan = buildWallClockServerClaims(stored, nowMs);
-        if (!plan) {
-          return { plan: null, claimsBuilt: 0, accepted: 0, outcomes: {} };
-        }
-        const outcomes: Record<string, number> = {};
-        let accepted = 0;
-        let data: Record<string, unknown> = stored as Record<string, unknown>;
-        const claims = plan.claims.slice(0, claimBudget);
-        for (const raw of claims) {
-          const parsed = parseAutoTrackClaim(raw, nowMs);
-          if (!parsed) {
-            outcomes.invalid = (outcomes.invalid ?? 0) + 1;
-            continue;
+      const result = await db.transaction(async (tx) => {
+        const [locked] = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live"))).for("update");
+        const stored = locked?.data ?? emptySyncData(row.date);
+        const wall = buildWallClockServerClaims(stored, nowMs);
+        const netClaims = buildNetSecondServerClaims(stored, nowMs);
+        const remainingBudget = maxClaims - builtClaims;
+        // Never persist an arm-state that has advanced past a claim omitted by
+        // this pass's global budget. A later pass must see that due event.
+        const wallFitsBudget = !wall || wall.claims.length <= Math.max(0, remainingBudget - netClaims.length);
+        const rawClaims = [...netClaims, ...(wallFitsBudget ? (wall?.claims ?? []) : [])]
+          .slice(0, remainingBudget);
+        let data = stored as Record<string, unknown>;
+        let acceptedHere = 0;
+        const acceptedNet: AutoTrackClaim[] = [];
+        const outcomesHere: Record<string, number> = {};
+        for (const rawClaim of rawClaims) {
+          const claim = parseAutoTrackClaim(rawClaim, nowMs);
+          if (!claim) { outcomesHere.invalid = (outcomesHere.invalid ?? 0) + 1; continue; }
+          const applied = applyAutoTrackClaim(data, claim, nowMs);
+          outcomesHere[applied.outcome] = (outcomesHere[applied.outcome] ?? 0) + 1;
+          if (applied.outcome !== "accepted") continue;
+          if (applied.inventoryConsumption?.kind === "sauce-barrel") {
+            const consumption = applied.inventoryConsumption;
+            await consumeSauceBarrelInTransaction(tx, consumption.runId, consumption.barrelIndex, consumption.itemKey, consumption.qty, true, consumption.eventId);
           }
-          const applied = applyAutoTrackClaim(data, parsed, nowMs);
-          outcomes[applied.outcome] = (outcomes[applied.outcome] ?? 0) + 1;
-          if (applied.outcome === "accepted") {
-            accepted++;
-            data = applied.data;
+          data = applied.data;
+          acceptedHere++;
+          if (/^(sauce-barrel|app[1-4]-batch)$/.test(claim.channel)) acceptedNet.push(claim);
+        }
+        // A no-event bootstrap arm is safe to persist. Eventful arm-state is
+        // committed only after every wall event in that state was accepted;
+        // stale/rejected/truncated events remain rearmed for the next beat.
+        const allWallAccepted = !!wall && wallFitsBudget
+          && wall.claims.every((claim) => {
+            const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
+            return state?.acceptedEventId === claim.eventId;
+          });
+        if (wall && (wall.claims.length === 0 || allWallAccepted)) {
+          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+            ? data.autoTrackServerState as Record<string, unknown> : {};
+          const book = previous.wallClockBookkeeping && typeof previous.wallClockBookkeeping === "object"
+            ? previous.wallClockBookkeeping as Record<string, unknown> : {};
+          data = { ...data, autoTrackServerState: { ...previous, version: 1, wallClockBookkeeping: { ...book, [wall.runId]: wall.bookkeeping } } };
+        }
+        if (acceptedNet.length) {
+          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+            ? data.autoTrackServerState as Record<string, any> : {};
+          const ownership = { ...(previous.netOwnership ?? {}) };
+          for (const claim of acceptedNet) {
+            ownership[claim.runId] = {
+              ...(ownership[claim.runId] ?? {}),
+              [claim.channel]: {
+                generation: claim.generation, sequence: claim.sequence, updatedAt: nowMs,
+              },
+            };
           }
+          data = { ...data, autoTrackServerState: { ...previous, version: 1, netOwnership: ownership } };
         }
-        const nextData = withWallClockServerState(data, plan.runId, plan.bookkeeping);
-        const where = and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope));
-        if (existing) {
-          await tx.update(dailySyncTable)
-            .set({ data: nextData as any, updatedAt: new Date() })
-            .where(where);
-        } else {
-          await tx.insert(dailySyncTable)
-            .values({ date, scope, data: nextData as any, updatedAt: new Date() });
-        }
-        return {
-          plan,
-          claimsBuilt: claims.length,
-          accepted,
-          outcomes,
-          ...(accepted > 0 ? { broadcastData: nextData } : {}),
-        };
+        if (locked) await tx.update(dailySyncTable).set({ data: data as any, updatedAt: new Date() })
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live")));
+        return { data, claims: rawClaims.length, accepted: acceptedHere, outcomes: outcomesHere };
       });
-    } catch (error) {
-      if (isUniqueViolation(error) && attempt < 3) continue;
-      throw error;
-    }
-  }
-  throw new Error("Server wall-clock auto-track tick did not complete");
-}
-
-/** Scan the live scope's recent days and apply due server-built wall-clock
- * claims (case/tray/batch/hopper bootstrap for fresh runs). Purely additive to
- * the net-second pass; each beat persists the run's arm-state bookkeeping so
- * the state machine never re-bootstraps from zero. */
-export async function runWallClockServerTicks(opts: {
-  nowMs?: number;
-  maxClaims?: number;
-} = {}): Promise<ServerTickSummary> {
-  const nowMs = opts.nowMs ?? Date.now();
-  const maxClaims = opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS;
-  const rows = await db
-    .select()
-    .from(dailySyncTable)
-    .where(and(
-      eq(dailySyncTable.scope, "live"),
-      gte(dailySyncTable.date, dateDaysAgo(SERVER_TICK_LOOKBACK_DAYS)),
-    ));
-  let builtClaims = 0;
-  let accepted = 0;
-  const outcomes: Record<string, number> = {};
-  for (const row of rows) {
-    if (builtClaims >= maxClaims) break;
-    let result: Awaited<ReturnType<typeof applyWallClockServerTick>>;
-    try {
-      result = await applyWallClockServerTick(row.date, "live", nowMs, maxClaims - builtClaims);
-    } catch (error) {
-      logger.error({
-        err: error,
-        event: "server_wall_clock_tick",
-        date: row.date,
-      }, "Server wall-clock auto-track tick failed");
+      builtClaims += result.claims;
+      accepted += result.accepted;
+      for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
+      if (result.accepted) broadcast(result.data, "server:tick", "live", row.date);
+    } catch (err) {
+      logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;
-      continue;
     }
-    if (!result.plan) continue;
-    builtClaims += result.claimsBuilt;
-    accepted += result.accepted;
-    for (const [outcome, count] of Object.entries(result.outcomes)) {
-      outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
-    }
-    if (result.broadcastData) broadcast(result.broadcastData, SERVER_TICK_SENDER_ID, "live", row.date);
-  }
-  if (builtClaims > 0) {
-    logger.info({
-      event: "server_wall_clock_tick",
-      examinedDates: rows.length,
-      builtClaims,
-      accepted,
-      outcomes,
-    }, "Server wall-clock auto-track tick pass completed");
   }
   return { examinedDates: rows.length, builtClaims, accepted, outcomes };
 }
 
-/** App-level ticker (deferred/unref'd so it never blocks shutdown). Reads the
- * interval from AUTO_TRACK_SERVER_TICK_MS (default 15s) and skips a pass that
- * is still running from the previous beat. */
 export function startAutoTrackServerTicks(): NodeJS.Timeout {
-  const intervalMs = Math.max(5_000, Number(process.env.AUTO_TRACK_SERVER_TICK_MS ?? SERVER_TICK_DEFAULT_MS));
+  const intervalMs = Math.max(5_000, Number(process.env.AUTO_TRACK_SERVER_TICK_MS) || SERVER_TICK_DEFAULT_MS);
   let running = false;
-  const tick = (): void => {
+  const timer = setInterval(() => {
     if (running) return;
     running = true;
-    runNetSecondServerTicks()
-      .catch((err: unknown) => {
-        logger.error({ err, event: "server_auto_track_tick" }, "Server auto-track tick pass failed");
-      })
-      .then(() => runWallClockServerTicks())
-      .catch((err: unknown) => {
-        logger.error({ err, event: "server_wall_clock_tick" }, "Server wall-clock auto-track tick pass failed");
-      })
-      .finally(() => { running = false; });
-  };
-  const timer = setInterval(tick, intervalMs);
+    void runAutoTrackServerTicks().catch((err) => {
+      logger.error({ err, event: "server_auto_track_tick" }, "Server auto-track tick pass failed");
+    }).finally(() => { running = false; });
+  }, intervalMs);
   timer.unref();
   return timer;
 }

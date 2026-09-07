@@ -14,6 +14,51 @@ type ActivateWaitingWorker = (
 ) => Promise<void> | void;
 
 export const WORKER_INSTALL_TIMEOUT_MS = 5_000;
+export const STALE_ASSET_RELOAD_FALLBACK_MS = WORKER_INSTALL_TIMEOUT_MS + 1_000;
+const STALE_ASSET_RECOVERY_PREFIX = "run-calc:stale-asset-recovery:";
+
+type SessionStorageLike = Pick<Storage, "getItem" | "setItem">;
+
+/**
+ * Allows one service-worker recovery attempt per failing build in a tab.
+ * A second crash from the same bundle must leave recovery under the user's
+ * control instead of automatically entering another update/reload cycle.
+ */
+export function claimStaleAssetRecoveryAttempt(
+  buildId: string,
+  storage: SessionStorageLike | undefined =
+    typeof sessionStorage === "undefined" ? undefined : sessionStorage,
+): boolean {
+  if (!storage) return true;
+  const key = `${STALE_ASSET_RECOVERY_PREFIX}${buildId}`;
+  try {
+    if (storage.getItem(key) === "1") return false;
+    storage.setItem(key, "1");
+    return true;
+  } catch {
+    // Storage may be unavailable in privacy modes. The user-click-only update
+    // flow remains safer than refusing recovery altogether.
+    return true;
+  }
+}
+
+export async function clearStaleAppShellCaches(
+  cacheStorage: Pick<CacheStorage, "keys" | "delete"> | undefined =
+    typeof caches === "undefined" ? undefined : caches,
+): Promise<void> {
+  if (!cacheStorage) return;
+  try {
+    const keys = await cacheStorage.keys();
+    await Promise.all(
+      keys
+        .filter((key) => key.startsWith("workbox-precache"))
+        .map((key) => cacheStorage.delete(key)),
+    );
+  } catch {
+    // Cache cleanup is best-effort; the worker update and network reload still
+    // provide a recovery path when browser cache APIs are unavailable.
+  }
+}
 
 function waitForInstalledWorker(
   registration: WaitingServiceWorkerRegistration,

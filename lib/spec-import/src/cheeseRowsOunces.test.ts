@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeParsedSpecImport } from "./index";
+import {
+  mergeParsedSpecImports,
+  reviewRecipeRowsUnit,
+  sanitizeParsedSpecImport,
+} from "./index";
 
-// Cheese-kind recipe rows carry per-pizza OUNCES verbatim in the lbs field
-// (long-standing contract — see SpecCheeseRecipeDraft). The oz→lbs default
-// conversion applies to dough/sauce rows only; converting cheese rows ÷16
-// corrupted mix/cheese per-pizza amounts (1.5 oz became 0.094).
-describe("sanitizeParsedSpecImport recipe row units", () => {
+// Recipe rows preserve the source workbook's raw number in the shared `lbs`
+// field. `rowsUnit` is descriptive provenance for the AI response only; it
+// must never trigger an implicit oz↔lb conversion.
+describe("sanitizeParsedSpecImport recipe row raw units", () => {
   const raw = {
     profiles: [],
     recipes: [
@@ -30,7 +33,7 @@ describe("sanitizeParsedSpecImport recipe row units", () => {
     ],
   };
 
-  it("keeps cheese rows verbatim (per-pizza oz), converts dough/sauce oz→lbs", () => {
+  it("keeps cheese, dough, and sauce row numbers verbatim", () => {
     const parsed = sanitizeParsedSpecImport(raw);
     const byName = new Map(parsed.recipes.map((r) => [r.name, r]));
     expect(byName.get("White Fajita Mix")?.rows).toEqual([
@@ -38,25 +41,160 @@ describe("sanitizeParsedSpecImport recipe row units", () => {
       { ingredient: "Fajita Seasoning", lbs: 0.5 },
     ]);
     expect(byName.get("CRB Dough")?.rows).toEqual([
-      { ingredient: "Flour", lbs: 2 },
+      { ingredient: "Flour", lbs: 32 },
     ]);
     expect(byName.get("Lucia Pizza Sauce")?.rows).toEqual([
-      { ingredient: "Tomato Paste", lbs: 1 },
+      { ingredient: "Tomato Paste", lbs: 16 },
     ]);
   });
 
-  it("still respects an explicit lbs label for dough/sauce", () => {
+  it("does not convert rows when the source explicitly reports either unit", () => {
     const parsed = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [
         {
           kind: "dough",
-          name: "CRB Dough",
+          name: "Ounce-Labeled Dough",
+          rowsUnit: "oz",
+          rows: [{ ingredient: "Flour", lbs: 3.25 }],
+        },
+        {
+          kind: "sauce",
+          name: "Pound-Labeled Sauce",
           rowsUnit: "lbs",
-          rows: [{ ingredient: "Flour", lbs: 32 }],
+          rows: [{ ingredient: "Tomato Paste", lbs: 18.5 }],
         },
       ],
     });
-    expect(parsed.recipes[0]?.rows).toEqual([{ ingredient: "Flour", lbs: 32 }]);
+    expect(parsed.recipes[0]?.rows).toEqual([{ ingredient: "Flour", lbs: 3.25 }]);
+    expect(parsed.recipes[1]?.rows).toEqual([{ ingredient: "Tomato Paste", lbs: 18.5 }]);
+    expect(parsed.recipes[0]?.rowsUnit).toBe("oz");
+    expect(parsed.recipes[1]?.rowsUnit).toBe("lbs");
+  });
+
+  it("classifies reported, omitted, and ambiguous units without touching values", () => {
+    expect(reviewRecipeRowsUnit({ rowsUnit: "POUNDS" })).toEqual({
+      clarity: "clear",
+      reportedUnit: "POUNDS",
+      normalizedUnit: "lbs",
+    });
+    expect(reviewRecipeRowsUnit({})).toEqual({ clarity: "missing" });
+    expect(reviewRecipeRowsUnit({ rowsUnit: "lbs or oz" })).toEqual({
+      clarity: "ambiguous",
+      reportedUnit: "lbs or oz",
+    });
+  });
+
+  it.each([
+    ["dough", "lbs"],
+    ["sauce", "oz"],
+    ["cheese", "lbs"],
+  ] as const)("preserves %s manager unit confirmation without rescaling rows", (kind, unit) => {
+    const rows = [{ ingredient: `${kind} ingredient`, lbs: 7.375 }];
+    const parsed = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [{
+        kind,
+        name: `${kind} recipe`,
+        rowsUnit: "unclear",
+        confirmedRowsUnit: unit,
+        rows,
+      }],
+    });
+
+    expect(parsed.recipes[0]?.confirmedRowsUnit).toBe(unit);
+    expect(parsed.recipes[0]?.rows).toEqual(rows);
+  });
+
+  it("drops stale confirmation when a later workbook replaces the row set", () => {
+    const merged = mergeParsedSpecImports([
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "sauce",
+          name: "Shared Sauce",
+          confirmedRowsUnit: "lbs",
+          rows: [{ ingredient: "Paste", lbs: 20 }],
+        }],
+      }),
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "sauce",
+          name: "Shared Sauce",
+          rows: [{ ingredient: "Paste", lbs: 24 }],
+        }],
+      }),
+    ]);
+
+    expect(merged.recipes[0]?.rows).toEqual([{ ingredient: "Paste", lbs: 24 }]);
+    expect(merged.recipes[0]?.confirmedRowsUnit).toBeUndefined();
+  });
+
+  it("preserves raw dough and sauce values after per-chunk sanitizing and merging", () => {
+    const chunks = [
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [
+          {
+            kind: "dough",
+            name: "Chunked Dough A",
+            rowsUnit: "oz",
+            rows: [{ ingredient: "Flour", lbs: 48 }],
+          },
+        ],
+      }),
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [
+          {
+            kind: "sauce",
+            name: "Chunked Sauce B",
+            rowsUnit: "oz",
+            rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+          },
+        ],
+      }),
+    ];
+    const merged = mergeParsedSpecImports(chunks);
+    expect(merged.recipes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "dough",
+          name: "Chunked Dough A",
+          rows: [{ ingredient: "Flour", lbs: 48 }],
+        }),
+        expect.objectContaining({
+          kind: "sauce",
+          name: "Chunked Sauce B",
+          rows: [{ ingredient: "Tomato Paste", lbs: 24 }],
+        }),
+      ]),
+    );
+  });
+
+  it("does not carry an earlier unit onto later replacement rows that omit it", () => {
+    const merged = mergeParsedSpecImports([
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Shared Dough",
+          rowsUnit: "lbs",
+          rows: [{ ingredient: "Flour", lbs: 48 }],
+        }],
+      }),
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Shared Dough",
+          rows: [{ ingredient: "Flour", lbs: 52 }],
+        }],
+      }),
+    ]);
+
+    expect(merged.recipes[0]?.rows).toEqual([{ ingredient: "Flour", lbs: 52 }]);
+    expect(reviewRecipeRowsUnit(merged.recipes[0]!)).toEqual({ clarity: "missing" });
   });
 });

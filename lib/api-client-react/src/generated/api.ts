@@ -25,10 +25,8 @@ import type {
   AiMemoryHealthApplyResult,
   AnomalyInput,
   AnomalyResult,
-  AppendConversationInput,
+  ApplyAiRetentionCleanup200,
   ApprovePasswordResetResult,
-  AskInput,
-  AskResult,
   AuditAiMemoryHealth200,
   AuditProfileDataHealth200,
   AuthCredentials,
@@ -40,14 +38,15 @@ import type {
   CheckUsernameAvailableParams,
   CheeseRecipeList,
   ClaimAutoTrackEventParams,
-  CommandInput,
+  CompletedHistoryList,
+  CompletedRunFinalization,
   ConfirmFreezerSurplusInput,
   ConsumeInput,
   ConsumeResult,
-  ConversationHistory,
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
   CreateRole,
+  CreateServerJobInput,
   CycleCountScheduleList,
   DeleteBrandProfilesInput,
   DeleteCheeseRecipesInput,
@@ -64,6 +63,8 @@ import type {
   DeniedMergeList,
   DieLineDefaultsList,
   DieTypeList,
+  DownloadCanonicalOperationalReportParams,
+  DuplicateReviewList,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -71,15 +72,15 @@ import type {
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
+  FinalizedOperationalReport,
+  FinalizedOperationalReportSummary,
   FollowUpRunSuggestion200,
-  ForecastAccuracyInput,
-  ForecastAccuracyResult,
-  ForecastInput,
-  ForecastResult,
   ForgotPasswordRequest,
   FreezerPullItemList,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
+  GetOperationalRunViewParams,
+  GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
   GetSyncTodayParams,
@@ -105,7 +106,9 @@ import type {
   InventorySettings,
   LabelVerifyInput,
   LabelVerifyResult,
+  ListCompletedHistoryParams,
   ListDeniedMergesParams,
+  ListFinalizedOperationalReportsParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
   ListInventoryLedgerParams,
@@ -124,8 +127,6 @@ import type {
   MergeInventoryInput,
   MergeInventoryResult,
   MergedAwayList,
-  MixAssistInput,
-  MixAssistResult,
   MixList,
   MixReconcileInput,
   MixReconcileResult,
@@ -135,16 +136,13 @@ import type {
   OkResponse,
   OperationalReport,
   OperationalReportInput,
-  OptimizeInput,
-  OptimizeResult,
+  OperationalRunView,
   ParseSpecImagesInput,
   ParseSpecImagesResult,
   ParseSpecSheetInput,
   ParseSpecSheetResult,
   PasswordResetRequest,
   PhotoAliasList,
-  ProactiveAlertResult,
-  ProactiveAlertSettings,
   ProductionRuleList,
   ProductionRun,
   ProductionRunInput,
@@ -157,12 +155,11 @@ import type {
   QualityCheckRecord,
   QualityCheckRecordInput,
   QualityCheckResult,
-  RecipeAssistInput,
-  RecipeAssistResult,
   ReplaceFreezerSurplusAllocationInput,
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
+  ResolveDuplicateReviewInput,
   RestockInput,
   RoleCapabilitiesUpdate,
   RoleDefinition,
@@ -177,6 +174,7 @@ import type {
   SaveDeniedMergesInput,
   SaveDieLineDefaultsInput,
   SaveDieTypesInput,
+  SaveDuplicateReviewsInput,
   SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
   SaveFreezerPullItemsInput,
@@ -202,6 +200,8 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  SearchFinalizedOperationalReportsParams,
+  ServerJob,
   SetFloorMode,
   SetNotificationPrefs,
   ShiftHandoffDigest,
@@ -225,7 +225,6 @@ import type {
   UpdateInventoryLocationInput,
   UpdateInventorySettingsInput,
   UpdateManagerActionItem200,
-  UpdateProactiveAlertSettingsInput,
   UpdateRunSuggestionInput,
   UsernameAvailability,
   WasteInsightInput,
@@ -3296,19 +3295,19 @@ export const useWasteInsight = <TError = ErrorType<void>,
       return useMutation(getWasteInsightMutationOptions(options));
     }
 
-export const getAiOptimizeUrl = () => {
+export const getOperationsSpecReconciliationUrl = () => {
 
 
 
 
-  return `/api/ai/optimize`
+  return `/api/operations-insights/spec-reconciliation`
 }
 
 /**
- * Analyzes the current day's runs, scheduled runs, and recent history and returns grouped/ranked recommendation cards. Read-only — never applies any change.
- * @summary AI optimization recommendations for runs and break timing
+ * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), and returns the authoritative deterministic discrepancy list. Available to any signed-in user.
+ * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
-export const aiOptimize = async (optimizeInput: OptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<OptimizeResult> => {
+export const operationsSpecReconciliation = async (specReconcileInput: SpecReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecReconcileResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3316,323 +3315,7 @@ export const aiOptimize = async (optimizeInput: OptimizeInput, options?: Paramet
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<OptimizeResult>(getAiOptimizeUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(optimizeInput)
-  }
-);}
-
-
-
-
-
-export const getAiOptimizeMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiOptimize>>, TError,AiOptimizeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiOptimize>>, TError,AiOptimizeMutationVariables, TContext> => {
-
-const mutationKey = ['aiOptimize'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiOptimize>>, AiOptimizeMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiOptimize(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiOptimizeMutationResult = NonNullable<Awaited<ReturnType<typeof aiOptimize>>>
-    export type AiOptimizeMutationBody = BodyType<OptimizeInput>
-    export type AiOptimizeMutationError = ErrorType<void>
-    export type AiOptimizeMutationVariables = {data: BodyType<OptimizeInput>}
-
-    /**
- * @summary AI optimization recommendations for runs and break timing
- */
-export const useAiOptimize = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiOptimize>>, TError,AiOptimizeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiOptimize>>,
-        TError,
-        AiOptimizeMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiOptimizeMutationOptions(options));
-    }
-
-export const getAiAskUrl = () => {
-
-
-
-
-  return `/api/ai/ask`
-}
-
-/**
- * Answers a plain-language question grounded strictly in the day's real run data, the shared facility memory, and the asking user's recent conversation turns. Keeps per-user follow-up context, never invents data (says so when it can't answer), and records the exchange back into that user's conversation memory. Read-only — never applies any change.
- * @summary Ask the AI a free-form question about the day
- */
-export const aiAsk = async (askInput: AskInput, options?: Parameters<typeof customFetch>[1]): Promise<AskResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<AskResult>(getAiAskUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(askInput)
-  }
-);}
-
-
-
-
-
-export const getAiAskMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAsk>>, TError,AiAskMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiAsk>>, TError,AiAskMutationVariables, TContext> => {
-
-const mutationKey = ['aiAsk'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiAsk>>, AiAskMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiAsk(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiAskMutationResult = NonNullable<Awaited<ReturnType<typeof aiAsk>>>
-    export type AiAskMutationBody = BodyType<AskInput>
-    export type AiAskMutationError = ErrorType<void>
-    export type AiAskMutationVariables = {data: BodyType<AskInput>}
-
-    /**
- * @summary Ask the AI a free-form question about the day
- */
-export const useAiAsk = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAsk>>, TError,AiAskMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiAsk>>,
-        TError,
-        AiAskMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiAskMutationOptions(options));
-    }
-
-export const getAiCommandUrl = () => {
-
-
-
-
-  return `/api/ai/command`
-}
-
-/**
- * Takes a single spoken utterance plus the live day-state and classifies it as either a QUESTION (the client routes it to /ai/ask, unchanged) or a COMMAND. For a command, returns one or more structured actions drawn from a fixed vocabulary, with every fuzzy reference already resolved against the grounding (a run by brand/flavor → run id, an inventory item by name → item key/id) and a friendly label attached. Returns an explicit "none" when nothing actionable was understood. This endpoint never mutates anything itself — the client runs the actions through its existing handlers (with role gating and Undo).
- * @summary Classify a spoken phrase as a question or an executable command
- */
-export const aiCommand = async (commandInput: CommandInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<void>(getAiCommandUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(commandInput)
-  }
-);}
-
-
-
-
-
-export const getAiCommandMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiCommand>>, TError,AiCommandMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiCommand>>, TError,AiCommandMutationVariables, TContext> => {
-
-const mutationKey = ['aiCommand'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiCommand>>, AiCommandMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiCommand(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiCommandMutationResult = NonNullable<Awaited<ReturnType<typeof aiCommand>>>
-    export type AiCommandMutationBody = BodyType<CommandInput>
-    export type AiCommandMutationError = ErrorType<void>
-    export type AiCommandMutationVariables = {data: BodyType<CommandInput>}
-
-    /**
- * @summary Classify a spoken phrase as a question or an executable command
- */
-export const useAiCommand = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiCommand>>, TError,AiCommandMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiCommand>>,
-        TError,
-        AiCommandMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiCommandMutationOptions(options));
-    }
-
-export const getAiRecipeAssistantUrl = () => {
-
-
-
-
-  return `/api/ai/recipe-assistant`
-}
-
-/**
- * Answers a plain-language question about the current run's recipes and ingredients — scaling a recipe, suggesting a substitution, or explaining a formula — grounded strictly in the supplied recipe rows, the known ingredient pool, the shared name-corrections, and the facility memory. Advisory only: never edits or commits a recipe, never invents ingredients or quantities (says so plainly when the data is insufficient). Read-only.
- * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
- */
-export const aiRecipeAssistant = async (recipeAssistInput: RecipeAssistInput, options?: Parameters<typeof customFetch>[1]): Promise<RecipeAssistResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<RecipeAssistResult>(getAiRecipeAssistantUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(recipeAssistInput)
-  }
-);}
-
-
-
-
-
-export const getAiRecipeAssistantMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiRecipeAssistant>>, TError,AiRecipeAssistantMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiRecipeAssistant>>, TError,AiRecipeAssistantMutationVariables, TContext> => {
-
-const mutationKey = ['aiRecipeAssistant'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiRecipeAssistant>>, AiRecipeAssistantMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiRecipeAssistant(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiRecipeAssistantMutationResult = NonNullable<Awaited<ReturnType<typeof aiRecipeAssistant>>>
-    export type AiRecipeAssistantMutationBody = BodyType<RecipeAssistInput>
-    export type AiRecipeAssistantMutationError = ErrorType<void>
-    export type AiRecipeAssistantMutationVariables = {data: BodyType<RecipeAssistInput>}
-
-    /**
- * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
- */
-export const useAiRecipeAssistant = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiRecipeAssistant>>, TError,AiRecipeAssistantMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiRecipeAssistant>>,
-        TError,
-        AiRecipeAssistantMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiRecipeAssistantMutationOptions(options));
-    }
-
-export const getAiSpecReconcileUrl = () => {
-
-
-
-
-  return `/api/ai/spec-reconcile`
-}
-
-/**
- * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), then asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: the deterministic discrepancy list is always returned even if the AI summary is unavailable. Available to any signed-in user.
- * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
- */
-export const aiSpecReconcile = async (specReconcileInput: SpecReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecReconcileResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<SpecReconcileResult>(getAiSpecReconcileUrl(),
+return customFetch<SpecReconcileResult>(getOperationsSpecReconciliationUrl(),
   {
     ...options,
     method: 'POST',
@@ -3645,11 +3328,11 @@ return customFetch<SpecReconcileResult>(getAiSpecReconcileUrl(),
 
 
 
-export const getAiSpecReconcileMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,AiSpecReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,AiSpecReconcileMutationVariables, TContext> => {
+export const getOperationsSpecReconciliationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsSpecReconciliation>>, TError,OperationsSpecReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsSpecReconciliation>>, TError,OperationsSpecReconciliationMutationVariables, TContext> => {
 
-const mutationKey = ['aiSpecReconcile'];
+const mutationKey = ['operationsSpecReconciliation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3659,10 +3342,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSpecReconcile>>, AiSpecReconcileMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsSpecReconciliation>>, OperationsSpecReconciliationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiSpecReconcile(data,requestOptions)
+          return  operationsSpecReconciliation(data,requestOptions)
         }
 
 
@@ -3672,38 +3355,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiSpecReconcileMutationResult = NonNullable<Awaited<ReturnType<typeof aiSpecReconcile>>>
-    export type AiSpecReconcileMutationBody = BodyType<SpecReconcileInput>
-    export type AiSpecReconcileMutationError = ErrorType<void>
-    export type AiSpecReconcileMutationVariables = {data: BodyType<SpecReconcileInput>}
+    export type OperationsSpecReconciliationMutationResult = NonNullable<Awaited<ReturnType<typeof operationsSpecReconciliation>>>
+    export type OperationsSpecReconciliationMutationBody = BodyType<SpecReconcileInput>
+    export type OperationsSpecReconciliationMutationError = ErrorType<void>
+    export type OperationsSpecReconciliationMutationVariables = {data: BodyType<SpecReconcileInput>}
 
     /**
- * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+ * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
-export const useAiSpecReconcile = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,AiSpecReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsSpecReconciliation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsSpecReconciliation>>, TError,OperationsSpecReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiSpecReconcile>>,
+        Awaited<ReturnType<typeof operationsSpecReconciliation>>,
         TError,
-        AiSpecReconcileMutationVariables,
+        OperationsSpecReconciliationMutationVariables,
         TContext
       > => {
-      return useMutation(getAiSpecReconcileMutationOptions(options));
+      return useMutation(getOperationsSpecReconciliationMutationOptions(options));
     }
 
-export const getAiMixReconcileUrl = () => {
+export const getOperationsMixReconciliationUrl = () => {
 
 
 
 
-  return `/api/ai/mix-reconcile`
+  return `/api/operations-insights/mix-reconciliation`
 }
 
 /**
- * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint takes that exact discrepancy list and asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: an AI error simply yields an empty summary, never an error. It never invents or applies anything. Available to any signed-in user.
- * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint validates and returns that exact deterministic discrepancy list. It never invents or applies anything. Available to any signed-in user.
+ * @summary Return already-computed mix discrepancies; read-only
  */
-export const aiMixReconcile = async (mixReconcileInput: MixReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<MixReconcileResult> => {
+export const operationsMixReconciliation = async (mixReconcileInput: MixReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<MixReconcileResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3711,7 +3394,7 @@ export const aiMixReconcile = async (mixReconcileInput: MixReconcileInput, optio
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<MixReconcileResult>(getAiMixReconcileUrl(),
+return customFetch<MixReconcileResult>(getOperationsMixReconciliationUrl(),
   {
     ...options,
     method: 'POST',
@@ -3724,11 +3407,11 @@ return customFetch<MixReconcileResult>(getAiMixReconcileUrl(),
 
 
 
-export const getAiMixReconcileMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,AiMixReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,AiMixReconcileMutationVariables, TContext> => {
+export const getOperationsMixReconciliationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsMixReconciliation>>, TError,OperationsMixReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsMixReconciliation>>, TError,OperationsMixReconciliationMutationVariables, TContext> => {
 
-const mutationKey = ['aiMixReconcile'];
+const mutationKey = ['operationsMixReconciliation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3738,10 +3421,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMixReconcile>>, AiMixReconcileMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsMixReconciliation>>, OperationsMixReconciliationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiMixReconcile(data,requestOptions)
+          return  operationsMixReconciliation(data,requestOptions)
         }
 
 
@@ -3751,38 +3434,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiMixReconcileMutationResult = NonNullable<Awaited<ReturnType<typeof aiMixReconcile>>>
-    export type AiMixReconcileMutationBody = BodyType<MixReconcileInput>
-    export type AiMixReconcileMutationError = ErrorType<void>
-    export type AiMixReconcileMutationVariables = {data: BodyType<MixReconcileInput>}
+    export type OperationsMixReconciliationMutationResult = NonNullable<Awaited<ReturnType<typeof operationsMixReconciliation>>>
+    export type OperationsMixReconciliationMutationBody = BodyType<MixReconcileInput>
+    export type OperationsMixReconciliationMutationError = ErrorType<void>
+    export type OperationsMixReconciliationMutationVariables = {data: BodyType<MixReconcileInput>}
 
     /**
- * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ * @summary Return already-computed mix discrepancies; read-only
  */
-export const useAiMixReconcile = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,AiMixReconcileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsMixReconciliation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsMixReconciliation>>, TError,OperationsMixReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiMixReconcile>>,
+        Awaited<ReturnType<typeof operationsMixReconciliation>>,
         TError,
-        AiMixReconcileMutationVariables,
+        OperationsMixReconciliationMutationVariables,
         TContext
       > => {
-      return useMutation(getAiMixReconcileMutationOptions(options));
+      return useMutation(getOperationsMixReconciliationMutationOptions(options));
     }
 
-export const getAiMixAssistantUrl = () => {
+export const getOperationsRecapUrl = () => {
 
 
 
 
-  return `/api/ai/mix-assistant`
+  return `/api/operations-insights/recap`
 }
 
 /**
- * Answers a plain-language question grounded strictly in the current mix definitions and the facility memory. Advisory only: it explains and computes but never edits a mix or applies anything (no structured suggestion). Available to any signed-in user.
- * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
+ * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, deterministic plain-language recap for floor staff and managers. Read-only — never writes or commits run data.
+ * @summary Plain-language end-of-day / weekly production recap; read-only
  */
-export const aiMixAssistant = async (mixAssistInput: MixAssistInput, options?: Parameters<typeof customFetch>[1]): Promise<MixAssistResult> => {
+export const operationsRecap = async (summaryInput: SummaryInput, options?: Parameters<typeof customFetch>[1]): Promise<SummaryResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -3790,399 +3473,7 @@ export const aiMixAssistant = async (mixAssistInput: MixAssistInput, options?: P
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<MixAssistResult>(getAiMixAssistantUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(mixAssistInput)
-  }
-);}
-
-
-
-
-
-export const getAiMixAssistantMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixAssistant>>, TError,AiMixAssistantMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiMixAssistant>>, TError,AiMixAssistantMutationVariables, TContext> => {
-
-const mutationKey = ['aiMixAssistant'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMixAssistant>>, AiMixAssistantMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiMixAssistant(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiMixAssistantMutationResult = NonNullable<Awaited<ReturnType<typeof aiMixAssistant>>>
-    export type AiMixAssistantMutationBody = BodyType<MixAssistInput>
-    export type AiMixAssistantMutationError = ErrorType<void>
-    export type AiMixAssistantMutationVariables = {data: BodyType<MixAssistInput>}
-
-    /**
- * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
- */
-export const useAiMixAssistant = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixAssistant>>, TError,AiMixAssistantMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiMixAssistant>>,
-        TError,
-        AiMixAssistantMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiMixAssistantMutationOptions(options));
-    }
-
-export const getAiProactiveAlertUrl = () => {
-
-
-
-
-  return `/api/ai/proactive-alert`
-}
-
-/**
- * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
- * @summary At-most-one proactive shift alert (AI); read-only
- */
-export const aiProactiveAlert = async (optimizeInput: OptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<ProactiveAlertResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<ProactiveAlertResult>(getAiProactiveAlertUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(optimizeInput)
-  }
-);}
-
-
-
-
-
-export const getAiProactiveAlertMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiProactiveAlert>>, TError,AiProactiveAlertMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiProactiveAlert>>, TError,AiProactiveAlertMutationVariables, TContext> => {
-
-const mutationKey = ['aiProactiveAlert'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiProactiveAlert>>, AiProactiveAlertMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiProactiveAlert(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiProactiveAlertMutationResult = NonNullable<Awaited<ReturnType<typeof aiProactiveAlert>>>
-    export type AiProactiveAlertMutationBody = BodyType<OptimizeInput>
-    export type AiProactiveAlertMutationError = ErrorType<void>
-    export type AiProactiveAlertMutationVariables = {data: BodyType<OptimizeInput>}
-
-    /**
- * @summary At-most-one proactive shift alert (AI); read-only
- */
-export const useAiProactiveAlert = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiProactiveAlert>>, TError,AiProactiveAlertMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiProactiveAlert>>,
-        TError,
-        AiProactiveAlertMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiProactiveAlertMutationOptions(options));
-    }
-
-export const getGetProactiveAlertSettingsUrl = () => {
-
-
-
-
-  return `/api/ai/proactive-settings`
-}
-
-/**
- * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
- */
-export const getProactiveAlertSettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<ProactiveAlertSettings> => {
-
-  return customFetch<ProactiveAlertSettings>(getGetProactiveAlertSettingsUrl(),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetProactiveAlertSettingsQueryKey = () => {
-    return [
-    `/api/ai/proactive-settings`
-    ] as const;
-    }
-
-
-export const getGetProactiveAlertSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetProactiveAlertSettingsQueryKey();
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProactiveAlertSettings>>> = ({ signal }) => getProactiveAlertSettings({ signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetProactiveAlertSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getProactiveAlertSettings>>>
-export type GetProactiveAlertSettingsQueryError = ErrorType<unknown>
-
-
-/**
- * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
- */
-
-export function useGetProactiveAlertSettings<TData = Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetProactiveAlertSettingsQueryOptions(options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getUpdateProactiveAlertSettingsUrl = () => {
-
-
-
-
-  return `/api/ai/proactive-settings`
-}
-
-/**
- * @summary Update global proactive-alert settings (manager only)
- */
-export const updateProactiveAlertSettings = async (updateProactiveAlertSettingsInput: UpdateProactiveAlertSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<ProactiveAlertSettings> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<ProactiveAlertSettings>(getUpdateProactiveAlertSettingsUrl(),
-  {
-    ...options,
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(updateProactiveAlertSettingsInput)
-  }
-);}
-
-
-
-
-
-export const getUpdateProactiveAlertSettingsMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, TError,UpdateProactiveAlertSettingsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, TError,UpdateProactiveAlertSettingsMutationVariables, TContext> => {
-
-const mutationKey = ['updateProactiveAlertSettings'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, UpdateProactiveAlertSettingsMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  updateProactiveAlertSettings(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type UpdateProactiveAlertSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateProactiveAlertSettings>>>
-    export type UpdateProactiveAlertSettingsMutationBody = BodyType<UpdateProactiveAlertSettingsInput>
-    export type UpdateProactiveAlertSettingsMutationError = ErrorType<void>
-    export type UpdateProactiveAlertSettingsMutationVariables = {data: BodyType<UpdateProactiveAlertSettingsInput>}
-
-    /**
- * @summary Update global proactive-alert settings (manager only)
- */
-export const useUpdateProactiveAlertSettings = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, TError,UpdateProactiveAlertSettingsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof updateProactiveAlertSettings>>,
-        TError,
-        UpdateProactiveAlertSettingsMutationVariables,
-        TContext
-      > => {
-      return useMutation(getUpdateProactiveAlertSettingsMutationOptions(options));
-    }
-
-export const getAiForecastUrl = () => {
-
-
-
-
-  return `/api/ai/forecast`
-}
-
-/**
- * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
- * @summary Predict an upcoming day's run plan (AI); read-only
- */
-export const aiForecast = async (forecastInput: ForecastInput, options?: Parameters<typeof customFetch>[1]): Promise<ForecastResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<ForecastResult>(getAiForecastUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(forecastInput)
-  }
-);}
-
-
-
-
-
-export const getAiForecastMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecast>>, TError,AiForecastMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiForecast>>, TError,AiForecastMutationVariables, TContext> => {
-
-const mutationKey = ['aiForecast'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiForecast>>, AiForecastMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiForecast(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiForecastMutationResult = NonNullable<Awaited<ReturnType<typeof aiForecast>>>
-    export type AiForecastMutationBody = BodyType<ForecastInput>
-    export type AiForecastMutationError = ErrorType<void>
-    export type AiForecastMutationVariables = {data: BodyType<ForecastInput>}
-
-    /**
- * @summary Predict an upcoming day's run plan (AI); read-only
- */
-export const useAiForecast = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecast>>, TError,AiForecastMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiForecast>>,
-        TError,
-        AiForecastMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiForecastMutationOptions(options));
-    }
-
-export const getAiSummaryUrl = () => {
-
-
-
-
-  return `/api/ai/summary`
-}
-
-/**
- * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, plain-language recap for floor staff and managers. The numeric stats are computed deterministically server-side; the AI only narrates them and never invents figures. Read-only — never writes or commits run data. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic plain-language summary built from the same stats is returned instead, so the caller always gets a usable recap.
- * @summary Plain-language end-of-day / weekly production recap (AI); read-only
- */
-export const aiSummary = async (summaryInput: SummaryInput, options?: Parameters<typeof customFetch>[1]): Promise<SummaryResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<SummaryResult>(getAiSummaryUrl(),
+return customFetch<SummaryResult>(getOperationsRecapUrl(),
   {
     ...options,
     method: 'POST',
@@ -4195,11 +3486,11 @@ return customFetch<SummaryResult>(getAiSummaryUrl(),
 
 
 
-export const getAiSummaryMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,AiSummaryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,AiSummaryMutationVariables, TContext> => {
+export const getOperationsRecapMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsRecap>>, TError,OperationsRecapMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsRecap>>, TError,OperationsRecapMutationVariables, TContext> => {
 
-const mutationKey = ['aiSummary'];
+const mutationKey = ['operationsRecap'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4209,10 +3500,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSummary>>, AiSummaryMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsRecap>>, OperationsRecapMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiSummary(data,requestOptions)
+          return  operationsRecap(data,requestOptions)
         }
 
 
@@ -4222,23 +3513,23 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiSummaryMutationResult = NonNullable<Awaited<ReturnType<typeof aiSummary>>>
-    export type AiSummaryMutationBody = BodyType<SummaryInput>
-    export type AiSummaryMutationError = ErrorType<void>
-    export type AiSummaryMutationVariables = {data: BodyType<SummaryInput>}
+    export type OperationsRecapMutationResult = NonNullable<Awaited<ReturnType<typeof operationsRecap>>>
+    export type OperationsRecapMutationBody = BodyType<SummaryInput>
+    export type OperationsRecapMutationError = ErrorType<void>
+    export type OperationsRecapMutationVariables = {data: BodyType<SummaryInput>}
 
     /**
- * @summary Plain-language end-of-day / weekly production recap (AI); read-only
+ * @summary Plain-language end-of-day / weekly production recap; read-only
  */
-export const useAiSummary = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,AiSummaryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsRecap = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsRecap>>, TError,OperationsRecapMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiSummary>>,
+        Awaited<ReturnType<typeof operationsRecap>>,
         TError,
-        AiSummaryMutationVariables,
+        OperationsRecapMutationVariables,
         TContext
       > => {
-      return useMutation(getAiSummaryMutationOptions(options));
+      return useMutation(getOperationsRecapMutationOptions(options));
     }
 
 export const getExportOperationalReportUrl = () => {
@@ -4250,7 +3541,7 @@ export const getExportOperationalReportUrl = () => {
 }
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates production facts derived from every canonical scoped daily-sync snapshot in the requested date range. The legacy runs field is accepted for compatibility but ignored; clients cannot supply report production facts. The report enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReport = async (operationalReportInput: OperationalReportInput, options?: Parameters<typeof customFetch>[1]): Promise<OperationalReport> => {
@@ -4319,6 +3610,507 @@ export const useExportOperationalReport = <TError = ErrorType<void>,
       > => {
       return useMutation(getExportOperationalReportMutationOptions(options));
     }
+
+export const getFinalizeOperationalReportUrl = () => {
+
+
+
+
+  return `/api/reports/operational/finalize`
+}
+
+/**
+ * Re-derives the canonical report from server-side scoped records and appends it to the audit archive. Client report JSON is never accepted. Repeating a finalization for the same scope and reporting period returns the original immutable record and never replaces it.
+ * @summary Finalize an immutable authoritative operational report
+ */
+export const finalizeOperationalReport = async (operationalReportInput: OperationalReportInput, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReport> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FinalizedOperationalReport>(getFinalizeOperationalReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(operationalReportInput)
+  }
+);}
+
+
+
+
+
+export const getFinalizeOperationalReportMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeOperationalReport>>, TError,FinalizeOperationalReportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finalizeOperationalReport>>, TError,FinalizeOperationalReportMutationVariables, TContext> => {
+
+const mutationKey = ['finalizeOperationalReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finalizeOperationalReport>>, FinalizeOperationalReportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  finalizeOperationalReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinalizeOperationalReportMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeOperationalReport>>>
+    export type FinalizeOperationalReportMutationBody = BodyType<OperationalReportInput>
+    export type FinalizeOperationalReportMutationError = ErrorType<void>
+    export type FinalizeOperationalReportMutationVariables = {data: BodyType<OperationalReportInput>}
+
+    /**
+ * @summary Finalize an immutable authoritative operational report
+ */
+export const useFinalizeOperationalReport = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeOperationalReport>>, TError,FinalizeOperationalReportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof finalizeOperationalReport>>,
+        TError,
+        FinalizeOperationalReportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFinalizeOperationalReportMutationOptions(options));
+    }
+
+export const getListFinalizedOperationalReportsUrl = (params: ListFinalizedOperationalReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational/finalized?${stringifiedParams}` : `/api/reports/operational/finalized`
+}
+
+/**
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
+ */
+export const listFinalizedOperationalReports = async (params: ListFinalizedOperationalReportsParams, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReportSummary[]> => {
+
+  return customFetch<FinalizedOperationalReportSummary[]>(getListFinalizedOperationalReportsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFinalizedOperationalReportsQueryKey = (params?: ListFinalizedOperationalReportsParams,) => {
+    return [
+    `/api/reports/operational/finalized`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFinalizedOperationalReportsQueryOptions = <TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(params: ListFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFinalizedOperationalReportsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFinalizedOperationalReports>>> = ({ signal }) => listFinalizedOperationalReports(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFinalizedOperationalReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listFinalizedOperationalReports>>>
+export type ListFinalizedOperationalReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Search finalized operational reports
+ */
+
+export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
+ params: ListFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFinalizedOperationalReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSearchFinalizedOperationalReportsUrl = (params: SearchFinalizedOperationalReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational/finalized/search?${stringifiedParams}` : `/api/reports/operational/finalized/search`
+}
+
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
+export const searchFinalizedOperationalReports = async (params: SearchFinalizedOperationalReportsParams, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReportSummary[]> => {
+
+  return customFetch<FinalizedOperationalReportSummary[]>(getSearchFinalizedOperationalReportsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchFinalizedOperationalReportsQueryKey = (params?: SearchFinalizedOperationalReportsParams,) => {
+    return [
+    `/api/reports/operational/finalized/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchFinalizedOperationalReportsQueryOptions = <TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(params: SearchFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchFinalizedOperationalReportsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>> = ({ signal }) => searchFinalizedOperationalReports(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchFinalizedOperationalReportsQueryResult = NonNullable<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>>
+export type SearchFinalizedOperationalReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Search finalized operational reports across a date range
+ */
+
+export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(
+ params: SearchFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchFinalizedOperationalReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFinalizedOperationalReportUrl = (id: string,) => {
+
+
+
+
+  return `/api/reports/operational/finalized/${id}`
+}
+
+/**
+ * @summary Retrieve one immutable finalized operational report
+ */
+export const getFinalizedOperationalReport = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReport> => {
+
+  return customFetch<FinalizedOperationalReport>(getGetFinalizedOperationalReportUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFinalizedOperationalReportQueryKey = (id: string,) => {
+    return [
+    `/api/reports/operational/finalized/${id}`
+    ] as const;
+    }
+
+
+export const getGetFinalizedOperationalReportQueryOptions = <TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFinalizedOperationalReportQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFinalizedOperationalReport>>> = ({ signal }) => getFinalizedOperationalReport(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFinalizedOperationalReportQueryResult = NonNullable<Awaited<ReturnType<typeof getFinalizedOperationalReport>>>
+export type GetFinalizedOperationalReportQueryError = ErrorType<void>
+
+
+/**
+ * @summary Retrieve one immutable finalized operational report
+ */
+
+export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFinalizedOperationalReportQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDownloadCanonicalOperationalReportUrl = (id: string,
+    params: DownloadCanonicalOperationalReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational/finalized/${id}/export?${stringifiedParams}` : `/api/reports/operational/finalized/${id}/export`
+}
+
+/**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
+export const downloadCanonicalOperationalReport = async (id: string,
+    params: DownloadCanonicalOperationalReportParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getDownloadCanonicalOperationalReportUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadCanonicalOperationalReportQueryKey = (id: string,
+    params?: DownloadCanonicalOperationalReportParams,) => {
+    return [
+    `/api/reports/operational/finalized/${id}/export`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getDownloadCanonicalOperationalReportQueryOptions = <TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(id: string,
+    params: DownloadCanonicalOperationalReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadCanonicalOperationalReportQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>> = ({ signal }) => downloadCanonicalOperationalReport(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadCanonicalOperationalReportQueryResult = NonNullable<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>>
+export type DownloadCanonicalOperationalReportQueryError = ErrorType<void>
+
+
+/**
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
+
+export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(
+ id: string,
+    params: DownloadCanonicalOperationalReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadCanonicalOperationalReportQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOperationalRunViewUrl = (params: GetOperationalRunViewParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational-view?${stringifiedParams}` : `/api/reports/operational-view`
+}
+
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
+export const getOperationalRunView = async (params: GetOperationalRunViewParams, options?: Parameters<typeof customFetch>[1]): Promise<OperationalRunView> => {
+
+  return customFetch<OperationalRunView>(getGetOperationalRunViewUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOperationalRunViewQueryKey = (params?: GetOperationalRunViewParams,) => {
+    return [
+    `/api/reports/operational-view`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOperationalRunViewQueryOptions = <TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(params: GetOperationalRunViewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOperationalRunViewQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOperationalRunView>>> = ({ signal }) => getOperationalRunView(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOperationalRunViewQueryResult = NonNullable<Awaited<ReturnType<typeof getOperationalRunView>>>
+export type GetOperationalRunViewQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read one manager-only server-derived operational run view
+ */
+
+export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(
+ params: GetOperationalRunViewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOperationalRunViewQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetShiftHandoffDigestUrl = (params: GetShiftHandoffDigestParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -4405,19 +4197,19 @@ export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getSh
 
 
 
-export const getAiForecastAccuracyUrl = () => {
+export const getOperationsIncidentPatternsUrl = () => {
 
 
 
 
-  return `/api/ai/forecast-accuracy`
+  return `/api/operations-insights/incident-patterns`
 }
 
 /**
- * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
- * @summary Review how accurate past forecasts were vs. what actually ran; read-only
+ * Reads the recorded incident log and deterministically groups recurring reports and crashes by screen and platform. Counts and descriptions come only from recorded incidents; the endpoint never invents incidents or edits anything. Read-only and advisory.
+ * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
-export const aiForecastAccuracy = async (forecastAccuracyInput: ForecastAccuracyInput, options?: Parameters<typeof customFetch>[1]): Promise<ForecastAccuracyResult> => {
+export const operationsIncidentPatterns = async (incidentClustersInput?: IncidentClustersInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentClustersResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -4425,86 +4217,7 @@ export const aiForecastAccuracy = async (forecastAccuracyInput: ForecastAccuracy
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<ForecastAccuracyResult>(getAiForecastAccuracyUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(forecastAccuracyInput)
-  }
-);}
-
-
-
-
-
-export const getAiForecastAccuracyMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecastAccuracy>>, TError,AiForecastAccuracyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiForecastAccuracy>>, TError,AiForecastAccuracyMutationVariables, TContext> => {
-
-const mutationKey = ['aiForecastAccuracy'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiForecastAccuracy>>, AiForecastAccuracyMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiForecastAccuracy(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiForecastAccuracyMutationResult = NonNullable<Awaited<ReturnType<typeof aiForecastAccuracy>>>
-    export type AiForecastAccuracyMutationBody = BodyType<ForecastAccuracyInput>
-    export type AiForecastAccuracyMutationError = ErrorType<void>
-    export type AiForecastAccuracyMutationVariables = {data: BodyType<ForecastAccuracyInput>}
-
-    /**
- * @summary Review how accurate past forecasts were vs. what actually ran; read-only
- */
-export const useAiForecastAccuracy = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecastAccuracy>>, TError,AiForecastAccuracyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiForecastAccuracy>>,
-        TError,
-        AiForecastAccuracyMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiForecastAccuracyMutationOptions(options));
-    }
-
-export const getAiIncidentClustersUrl = () => {
-
-
-
-
-  return `/api/ai/incident-clusters`
-}
-
-/**
- * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
- * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
- */
-export const aiIncidentClusters = async (incidentClustersInput?: IncidentClustersInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentClustersResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<IncidentClustersResult>(getAiIncidentClustersUrl(),
+return customFetch<IncidentClustersResult>(getOperationsIncidentPatternsUrl(),
   {
     ...options,
     method: 'POST',
@@ -4517,11 +4230,11 @@ return customFetch<IncidentClustersResult>(getAiIncidentClustersUrl(),
 
 
 
-export const getAiIncidentClustersMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,AiIncidentClustersMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,AiIncidentClustersMutationVariables, TContext> => {
+export const getOperationsIncidentPatternsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsIncidentPatterns>>, TError,OperationsIncidentPatternsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsIncidentPatterns>>, TError,OperationsIncidentPatternsMutationVariables, TContext> => {
 
-const mutationKey = ['aiIncidentClusters'];
+const mutationKey = ['operationsIncidentPatterns'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4531,10 +4244,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiIncidentClusters>>, AiIncidentClustersMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsIncidentPatterns>>, OperationsIncidentPatternsMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiIncidentClusters(data,requestOptions)
+          return  operationsIncidentPatterns(data,requestOptions)
         }
 
 
@@ -4544,38 +4257,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiIncidentClustersMutationResult = NonNullable<Awaited<ReturnType<typeof aiIncidentClusters>>>
-    export type AiIncidentClustersMutationBody = BodyType<IncidentClustersInput> | undefined
-    export type AiIncidentClustersMutationError = ErrorType<void>
-    export type AiIncidentClustersMutationVariables = {data?: BodyType<IncidentClustersInput>}
+    export type OperationsIncidentPatternsMutationResult = NonNullable<Awaited<ReturnType<typeof operationsIncidentPatterns>>>
+    export type OperationsIncidentPatternsMutationBody = BodyType<IncidentClustersInput> | undefined
+    export type OperationsIncidentPatternsMutationError = ErrorType<void>
+    export type OperationsIncidentPatternsMutationVariables = {data?: BodyType<IncidentClustersInput>}
 
     /**
- * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
-export const useAiIncidentClusters = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,AiIncidentClustersMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsIncidentPatterns = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsIncidentPatterns>>, TError,OperationsIncidentPatternsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiIncidentClusters>>,
+        Awaited<ReturnType<typeof operationsIncidentPatterns>>,
         TError,
-        AiIncidentClustersMutationVariables,
+        OperationsIncidentPatternsMutationVariables,
         TContext
       > => {
-      return useMutation(getAiIncidentClustersMutationOptions(options));
+      return useMutation(getOperationsIncidentPatternsMutationOptions(options));
     }
 
-export const getAiAnomaliesUrl = () => {
+export const getOperationsAnomalyDetectionUrl = () => {
 
 
 
 
-  return `/api/ai/anomalies`
+  return `/api/operations-insights/anomalies`
 }
 
 /**
- * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. The drift detection is computed server-side and is fully deterministic; the AI is only asked to NARRATE a short plain-language summary, and only when at least one anomaly is flagged (no flags → no AI call). Read-only and advisory — never edits or commits run data. Fail-safe: if the AI is unavailable, the deterministic anomaly list is still returned with an empty narration.
- * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. Detection and descriptions are fully deterministic. Read-only — never edits or commits run data.
+ * @summary Flag production runs that drifted from their historical norm; read-only
  */
-export const aiAnomalies = async (anomalyInput: AnomalyInput, options?: Parameters<typeof customFetch>[1]): Promise<AnomalyResult> => {
+export const operationsAnomalyDetection = async (anomalyInput: AnomalyInput, options?: Parameters<typeof customFetch>[1]): Promise<AnomalyResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -4583,7 +4296,7 @@ export const aiAnomalies = async (anomalyInput: AnomalyInput, options?: Paramete
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<AnomalyResult>(getAiAnomaliesUrl(),
+return customFetch<AnomalyResult>(getOperationsAnomalyDetectionUrl(),
   {
     ...options,
     method: 'POST',
@@ -4596,11 +4309,11 @@ return customFetch<AnomalyResult>(getAiAnomaliesUrl(),
 
 
 
-export const getAiAnomaliesMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,AiAnomaliesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,AiAnomaliesMutationVariables, TContext> => {
+export const getOperationsAnomalyDetectionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsAnomalyDetection>>, TError,OperationsAnomalyDetectionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsAnomalyDetection>>, TError,OperationsAnomalyDetectionMutationVariables, TContext> => {
 
-const mutationKey = ['aiAnomalies'];
+const mutationKey = ['operationsAnomalyDetection'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4610,10 +4323,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiAnomalies>>, AiAnomaliesMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsAnomalyDetection>>, OperationsAnomalyDetectionMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiAnomalies(data,requestOptions)
+          return  operationsAnomalyDetection(data,requestOptions)
         }
 
 
@@ -4623,38 +4336,38 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiAnomaliesMutationResult = NonNullable<Awaited<ReturnType<typeof aiAnomalies>>>
-    export type AiAnomaliesMutationBody = BodyType<AnomalyInput>
-    export type AiAnomaliesMutationError = ErrorType<void>
-    export type AiAnomaliesMutationVariables = {data: BodyType<AnomalyInput>}
+    export type OperationsAnomalyDetectionMutationResult = NonNullable<Awaited<ReturnType<typeof operationsAnomalyDetection>>>
+    export type OperationsAnomalyDetectionMutationBody = BodyType<AnomalyInput>
+    export type OperationsAnomalyDetectionMutationError = ErrorType<void>
+    export type OperationsAnomalyDetectionMutationVariables = {data: BodyType<AnomalyInput>}
 
     /**
- * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ * @summary Flag production runs that drifted from their historical norm; read-only
  */
-export const useAiAnomalies = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,AiAnomaliesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsAnomalyDetection = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsAnomalyDetection>>, TError,OperationsAnomalyDetectionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiAnomalies>>,
+        Awaited<ReturnType<typeof operationsAnomalyDetection>>,
         TError,
-        AiAnomaliesMutationVariables,
+        OperationsAnomalyDetectionMutationVariables,
         TContext
       > => {
-      return useMutation(getAiAnomaliesMutationOptions(options));
+      return useMutation(getOperationsAnomalyDetectionMutationOptions(options));
     }
 
-export const getAiScheduleOptimizeUrl = () => {
+export const getOperationsScheduleOrderingUrl = () => {
 
 
 
 
-  return `/api/ai/schedule-optimize`
+  return `/api/operations-insights/schedule-order`
 }
 
 /**
- * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side and are fully deterministic (shared @workspace/schedule-optimize lib); the AI is only asked to NARRATE a short plain-language explanation, and only when a better order exists (no improvement → no AI call). Read-only and advisory — never edits or commits the schedule. Fail-safe: if the AI is unavailable, the deterministic suggested order is still returned with an empty narration.
- * @summary Suggest an optimal run order for the day (AI narration); read-only
+ * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side by the shared @workspace/schedule-optimize library. Read-only — never edits or commits the schedule.
+ * @summary Suggest a deterministic run order for the day; read-only
  */
-export const aiScheduleOptimize = async (scheduleOptimizeInput: ScheduleOptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<ScheduleOptimizeResponse> => {
+export const operationsScheduleOrdering = async (scheduleOptimizeInput: ScheduleOptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<ScheduleOptimizeResponse> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -4662,7 +4375,7 @@ export const aiScheduleOptimize = async (scheduleOptimizeInput: ScheduleOptimize
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-return customFetch<ScheduleOptimizeResponse>(getAiScheduleOptimizeUrl(),
+return customFetch<ScheduleOptimizeResponse>(getOperationsScheduleOrderingUrl(),
   {
     ...options,
     method: 'POST',
@@ -4675,11 +4388,11 @@ return customFetch<ScheduleOptimizeResponse>(getAiScheduleOptimizeUrl(),
 
 
 
-export const getAiScheduleOptimizeMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,AiScheduleOptimizeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,AiScheduleOptimizeMutationVariables, TContext> => {
+export const getOperationsScheduleOrderingMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsScheduleOrdering>>, TError,OperationsScheduleOrderingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof operationsScheduleOrdering>>, TError,OperationsScheduleOrderingMutationVariables, TContext> => {
 
-const mutationKey = ['aiScheduleOptimize'];
+const mutationKey = ['operationsScheduleOrdering'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4689,10 +4402,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiScheduleOptimize>>, AiScheduleOptimizeMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof operationsScheduleOrdering>>, OperationsScheduleOrderingMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  aiScheduleOptimize(data,requestOptions)
+          return  operationsScheduleOrdering(data,requestOptions)
         }
 
 
@@ -4702,23 +4415,23 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AiScheduleOptimizeMutationResult = NonNullable<Awaited<ReturnType<typeof aiScheduleOptimize>>>
-    export type AiScheduleOptimizeMutationBody = BodyType<ScheduleOptimizeInput>
-    export type AiScheduleOptimizeMutationError = ErrorType<void>
-    export type AiScheduleOptimizeMutationVariables = {data: BodyType<ScheduleOptimizeInput>}
+    export type OperationsScheduleOrderingMutationResult = NonNullable<Awaited<ReturnType<typeof operationsScheduleOrdering>>>
+    export type OperationsScheduleOrderingMutationBody = BodyType<ScheduleOptimizeInput>
+    export type OperationsScheduleOrderingMutationError = ErrorType<void>
+    export type OperationsScheduleOrderingMutationVariables = {data: BodyType<ScheduleOptimizeInput>}
 
     /**
- * @summary Suggest an optimal run order for the day (AI narration); read-only
+ * @summary Suggest a deterministic run order for the day; read-only
  */
-export const useAiScheduleOptimize = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,AiScheduleOptimizeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useOperationsScheduleOrdering = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof operationsScheduleOrdering>>, TError,OperationsScheduleOrderingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof aiScheduleOptimize>>,
+        Awaited<ReturnType<typeof operationsScheduleOrdering>>,
         TError,
-        AiScheduleOptimizeMutationVariables,
+        OperationsScheduleOrderingMutationVariables,
         TContext
       > => {
-      return useMutation(getAiScheduleOptimizeMutationOptions(options));
+      return useMutation(getOperationsScheduleOrderingMutationOptions(options));
     }
 
 export const getAiFillMissingUrl = () => {
@@ -5521,6 +5234,242 @@ export const useDeleteDeniedMerges = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteDeniedMergesMutationOptions(options));
+    }
+
+export const getListDuplicateReviewsUrl = () => {
+
+
+
+
+  return `/api/duplicate-reviews`
+}
+
+/**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
+export const listDuplicateReviews = async ( options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
+
+  return customFetch<DuplicateReviewList>(getListDuplicateReviewsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDuplicateReviewsQueryKey = () => {
+    return [
+    `/api/duplicate-reviews`
+    ] as const;
+    }
+
+
+export const getListDuplicateReviewsQueryOptions = <TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDuplicateReviewsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDuplicateReviews>>> = ({ signal }) => listDuplicateReviews({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDuplicateReviewsQueryResult = NonNullable<Awaited<ReturnType<typeof listDuplicateReviews>>>
+export type ListDuplicateReviewsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List outstanding duplicate-review groups
+ */
+
+export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDuplicateReviewsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveDuplicateReviewsUrl = () => {
+
+
+
+
+  return `/api/duplicate-reviews`
+}
+
+/**
+ * Adds newly observed duplicate groups to the current facility's pending review ledger. Existing groups are left unchanged, including groups already resolved or ignored, so stale scans cannot reopen work.
+ * @summary Record duplicate groups for manager review
+ */
+export const saveDuplicateReviews = async (saveDuplicateReviewsInput: SaveDuplicateReviewsInput, options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<DuplicateReviewList>(getSaveDuplicateReviewsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(saveDuplicateReviewsInput)
+  }
+);}
+
+
+
+
+
+export const getSaveDuplicateReviewsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDuplicateReviews>>, TError,SaveDuplicateReviewsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveDuplicateReviews>>, TError,SaveDuplicateReviewsMutationVariables, TContext> => {
+
+const mutationKey = ['saveDuplicateReviews'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveDuplicateReviews>>, SaveDuplicateReviewsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveDuplicateReviews(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveDuplicateReviewsMutationResult = NonNullable<Awaited<ReturnType<typeof saveDuplicateReviews>>>
+    export type SaveDuplicateReviewsMutationBody = BodyType<SaveDuplicateReviewsInput>
+    export type SaveDuplicateReviewsMutationError = ErrorType<void>
+    export type SaveDuplicateReviewsMutationVariables = {data: BodyType<SaveDuplicateReviewsInput>}
+
+    /**
+ * @summary Record duplicate groups for manager review
+ */
+export const useSaveDuplicateReviews = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDuplicateReviews>>, TError,SaveDuplicateReviewsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveDuplicateReviews>>,
+        TError,
+        SaveDuplicateReviewsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveDuplicateReviewsMutationOptions(options));
+    }
+
+export const getResolveDuplicateReviewUrl = () => {
+
+
+
+
+  return `/api/duplicate-reviews/resolve`
+}
+
+/**
+ * Explicitly closes one pending group after a manager reviewed it. This endpoint does not merge or delete master data.
+ * @summary Resolve or ignore one duplicate-review group
+ */
+export const resolveDuplicateReview = async (resolveDuplicateReviewInput: ResolveDuplicateReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<DuplicateReviewList>(getResolveDuplicateReviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(resolveDuplicateReviewInput)
+  }
+);}
+
+
+
+
+
+export const getResolveDuplicateReviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDuplicateReview>>, TError,ResolveDuplicateReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resolveDuplicateReview>>, TError,ResolveDuplicateReviewMutationVariables, TContext> => {
+
+const mutationKey = ['resolveDuplicateReview'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveDuplicateReview>>, ResolveDuplicateReviewMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  resolveDuplicateReview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveDuplicateReviewMutationResult = NonNullable<Awaited<ReturnType<typeof resolveDuplicateReview>>>
+    export type ResolveDuplicateReviewMutationBody = BodyType<ResolveDuplicateReviewInput>
+    export type ResolveDuplicateReviewMutationError = ErrorType<void>
+    export type ResolveDuplicateReviewMutationVariables = {data: BodyType<ResolveDuplicateReviewInput>}
+
+    /**
+ * @summary Resolve or ignore one duplicate-review group
+ */
+export const useResolveDuplicateReview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDuplicateReview>>, TError,ResolveDuplicateReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resolveDuplicateReview>>,
+        TError,
+        ResolveDuplicateReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResolveDuplicateReviewMutationOptions(options));
     }
 
 export const getListMergedAwayUrl = () => {
@@ -7340,7 +7289,7 @@ export const getSaveRunTemplatesUrl = () => {
 }
 
 /**
- * Upserts a batch of run templates by id. Each template is normalized and validated server-side; malformed templates are dropped. Any signed-in user may save (matching the previous local behavior where anyone could create a template).
+ * Upserts a batch of run templates by id and revision. A write applies only when its revision is strictly newer than the stored revision; equal revisions are idempotent. Any signed-in user may save.
  * @summary Create or update run templates
  */
 export const saveRunTemplates = async (saveRunTemplatesInput: SaveRunTemplatesInput, options?: Parameters<typeof customFetch>[1]): Promise<RunTemplateList> => {
@@ -7419,8 +7368,8 @@ export const getDeleteRunTemplatesUrl = () => {
 }
 
 /**
- * Removes a batch of run templates by id. Any signed-in user may delete.
- * @summary Delete run templates by id
+ * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
+ * @summary Tombstone run templates by id and revision
  */
 export const deleteRunTemplates = async (deleteRunTemplatesInput: DeleteRunTemplatesInput, options?: Parameters<typeof customFetch>[1]): Promise<RunTemplateList> => {
 
@@ -7476,7 +7425,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteRunTemplatesMutationVariables = {data: BodyType<DeleteRunTemplatesInput>}
 
     /**
- * @summary Delete run templates by id
+ * @summary Tombstone run templates by id and revision
  */
 export const useDeleteRunTemplates = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRunTemplates>>, TError,DeleteRunTemplatesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -9927,9 +9876,9 @@ export const getGetProfileDataHealthWorkspaceUrl = () => {
 /**
  * @summary Read the manager data-health workspace
  */
-export const getProfileDataHealthWorkspace = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+export const getProfileDataHealthWorkspace = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetProfileDataHealthWorkspace200> => {
 
-  return customFetch<void>(getGetProfileDataHealthWorkspaceUrl(),
+  return customFetch<GetProfileDataHealthWorkspace200>(getGetProfileDataHealthWorkspaceUrl(),
   {
     ...options,
     method: 'GET'
@@ -10298,163 +10247,6 @@ export const useSaveFacilityKnowledge = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveFacilityKnowledgeMutationOptions(options));
-    }
-
-export const getGetConversationHistoryUrl = () => {
-
-
-
-
-  return `/api/ai-memory/conversation`
-}
-
-/**
- * Returns the signed-in user's most recent AI conversation turns (oldest first), a rolling per-user window so follow-up questions keep context. Scoped to the caller only — never another user's history.
- * @summary Get the current user's recent AI conversation turns
- */
-export const getConversationHistory = async ( options?: Parameters<typeof customFetch>[1]): Promise<ConversationHistory> => {
-
-  return customFetch<ConversationHistory>(getGetConversationHistoryUrl(),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetConversationHistoryQueryKey = () => {
-    return [
-    `/api/ai-memory/conversation`
-    ] as const;
-    }
-
-
-export const getGetConversationHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getConversationHistory>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetConversationHistoryQueryKey();
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationHistory>>> = ({ signal }) => getConversationHistory({ signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversationHistory>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetConversationHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getConversationHistory>>>
-export type GetConversationHistoryQueryError = ErrorType<unknown>
-
-
-/**
- * @summary Get the current user's recent AI conversation turns
- */
-
-export function useGetConversationHistory<TData = Awaited<ReturnType<typeof getConversationHistory>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetConversationHistoryQueryOptions(options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getAppendConversationUrl = () => {
-
-
-
-
-  return `/api/ai-memory/conversation`
-}
-
-/**
- * Appends one or more turns (user and/or assistant messages) to the signed-in user's conversation memory, then trims to the rolling window so the log never grows without bound. Scoped to the caller only.
- * @summary Append turns to the current user's AI conversation memory
- */
-export const appendConversation = async (appendConversationInput: AppendConversationInput, options?: Parameters<typeof customFetch>[1]): Promise<ConversationHistory> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<ConversationHistory>(getAppendConversationUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(appendConversationInput)
-  }
-);}
-
-
-
-
-
-export const getAppendConversationMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof appendConversation>>, TError,AppendConversationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof appendConversation>>, TError,AppendConversationMutationVariables, TContext> => {
-
-const mutationKey = ['appendConversation'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof appendConversation>>, AppendConversationMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  appendConversation(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AppendConversationMutationResult = NonNullable<Awaited<ReturnType<typeof appendConversation>>>
-    export type AppendConversationMutationBody = BodyType<AppendConversationInput>
-    export type AppendConversationMutationError = ErrorType<void>
-    export type AppendConversationMutationVariables = {data: BodyType<AppendConversationInput>}
-
-    /**
- * @summary Append turns to the current user's AI conversation memory
- */
-export const useAppendConversation = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof appendConversation>>, TError,AppendConversationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof appendConversation>>,
-        TError,
-        AppendConversationMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAppendConversationMutationOptions(options));
     }
 
 export const getListSpecImportAliasesUrl = () => {
@@ -11608,6 +11400,310 @@ export const useDeletePremixSheet = <TError = ErrorType<unknown>,
       return useMutation(getDeletePremixSheetMutationOptions(options));
     }
 
+export const getListServerJobsUrl = () => {
+
+
+
+
+  return `/api/server-jobs`
+}
+
+/**
+ * @summary List the authenticated user's retained server jobs
+ */
+export const listServerJobs = async ( options?: Parameters<typeof customFetch>[1]): Promise<ServerJob[]> => {
+
+  return customFetch<ServerJob[]>(getListServerJobsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListServerJobsQueryKey = () => {
+    return [
+    `/api/server-jobs`
+    ] as const;
+    }
+
+
+export const getListServerJobsQueryOptions = <TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListServerJobsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listServerJobs>>> = ({ signal }) => listServerJobs({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListServerJobsQueryResult = NonNullable<Awaited<ReturnType<typeof listServerJobs>>>
+export type ListServerJobsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the authenticated user's retained server jobs
+ */
+
+export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListServerJobsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateServerJobUrl = () => {
+
+
+
+
+  return `/api/server-jobs`
+}
+
+/**
+ * @summary Enqueue a bounded, idempotent server job
+ */
+export const createServerJob = async (createServerJobInput: CreateServerJobInput, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<ServerJob>(getCreateServerJobUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createServerJobInput)
+  }
+);}
+
+
+
+
+
+export const getCreateServerJobMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext> => {
+
+const mutationKey = ['createServerJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createServerJob>>, CreateServerJobMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createServerJob(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateServerJobMutationResult = NonNullable<Awaited<ReturnType<typeof createServerJob>>>
+    export type CreateServerJobMutationBody = BodyType<CreateServerJobInput>
+    export type CreateServerJobMutationError = ErrorType<void>
+    export type CreateServerJobMutationVariables = {data: BodyType<CreateServerJobInput>}
+
+    /**
+ * @summary Enqueue a bounded, idempotent server job
+ */
+export const useCreateServerJob = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createServerJob>>,
+        TError,
+        CreateServerJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateServerJobMutationOptions(options));
+    }
+
+export const getGetServerJobUrl = (id: string,) => {
+
+
+
+
+  return `/api/server-jobs/${id}`
+}
+
+/**
+ * @summary Read an owned server job
+ */
+export const getServerJob = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
+
+  return customFetch<ServerJob>(getGetServerJobUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetServerJobQueryKey = (id: string,) => {
+    return [
+    `/api/server-jobs/${id}`
+    ] as const;
+    }
+
+
+export const getGetServerJobQueryOptions = <TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetServerJobQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getServerJob>>> = ({ signal }) => getServerJob(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetServerJobQueryResult = NonNullable<Awaited<ReturnType<typeof getServerJob>>>
+export type GetServerJobQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read an owned server job
+ */
+
+export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetServerJobQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCancelServerJobUrl = (id: string,) => {
+
+
+
+
+  return `/api/server-jobs/${id}/cancel`
+}
+
+/**
+ * @summary Request cancellation of an owned running or queued server job
+ */
+export const cancelServerJob = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
+
+  return customFetch<ServerJob>(getCancelServerJobUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelServerJobMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext> => {
+
+const mutationKey = ['cancelServerJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelServerJob>>, CancelServerJobMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  cancelServerJob(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelServerJobMutationResult = NonNullable<Awaited<ReturnType<typeof cancelServerJob>>>
+
+    export type CancelServerJobMutationError = ErrorType<void>
+    export type CancelServerJobMutationVariables = {id: string}
+
+    /**
+ * @summary Request cancellation of an owned running or queued server job
+ */
+export const useCancelServerJob = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelServerJob>>,
+        TError,
+        CancelServerJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCancelServerJobMutationOptions(options));
+    }
+
 export const getListImportHistoryUrl = (params?: ListImportHistoryParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -12634,6 +12730,79 @@ export const useConfirmHardwareFieldCheck = <TError = ErrorType<void>,
       return useMutation(getConfirmHardwareFieldCheckMutationOptions(options));
     }
 
+export const getApplyAiRetentionCleanupUrl = () => {
+
+
+
+
+  return `/api/profile-data/ai-retention/apply`
+}
+
+/**
+ * Manager-only, scope-aware cleanup. Returns the dry-run-compatible report, records a bounded per-run audit marker, and can be repeated as retained operational records age into the policy cutoffs.
+ * @summary Apply the bounded retired-AI retention cleanup
+ */
+export const applyAiRetentionCleanup = async ( options?: Parameters<typeof customFetch>[1]): Promise<ApplyAiRetentionCleanup200> => {
+
+  return customFetch<ApplyAiRetentionCleanup200>(getApplyAiRetentionCleanupUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getApplyAiRetentionCleanupMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, TError,void, TContext> => {
+
+const mutationKey = ['applyAiRetentionCleanup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, void> = () => {
+
+
+          return  applyAiRetentionCleanup(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyAiRetentionCleanupMutationResult = NonNullable<Awaited<ReturnType<typeof applyAiRetentionCleanup>>>
+
+    export type ApplyAiRetentionCleanupMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Apply the bounded retired-AI retention cleanup
+ */
+export const useApplyAiRetentionCleanup = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyAiRetentionCleanup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyAiRetentionCleanup>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getApplyAiRetentionCleanupMutationOptions(options));
+    }
+
 export const getReportIncidentUrl = () => {
 
 
@@ -12643,8 +12812,8 @@ export const getReportIncidentUrl = () => {
 }
 
 /**
- * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
- * @summary Report an issue or a crash and get an AI diagnosis
+ * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
+ * @summary Report an issue or a crash for manager review
  */
 export const reportIncident = async (reportIncidentInput: ReportIncidentInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentDiagnosis> => {
 
@@ -12700,7 +12869,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReportIncidentMutationVariables = {data: BodyType<ReportIncidentInput>}
 
     /**
- * @summary Report an issue or a crash and get an AI diagnosis
+ * @summary Report an issue or a crash for manager review
  */
 export const useReportIncident = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportIncident>>, TError,ReportIncidentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -14481,6 +14650,168 @@ export const useDeleteStaffMember = <TError = ErrorType<void>,
       return useMutation(getDeleteStaffMemberMutationOptions(options));
     }
 
+export const getListCompletedHistoryUrl = (params?: ListCompletedHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/completed-history?${stringifiedParams}` : `/api/completed-history`
+}
+
+/**
+ * @summary List immutable completed-run history for the authenticated scope
+ */
+export const listCompletedHistory = async (params?: ListCompletedHistoryParams, options?: Parameters<typeof customFetch>[1]): Promise<CompletedHistoryList> => {
+
+  return customFetch<CompletedHistoryList>(getListCompletedHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompletedHistoryQueryKey = (params?: ListCompletedHistoryParams,) => {
+    return [
+    `/api/completed-history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCompletedHistoryQueryOptions = <TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(params?: ListCompletedHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompletedHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompletedHistory>>> = ({ signal }) => listCompletedHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCompletedHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof listCompletedHistory>>>
+export type ListCompletedHistoryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List immutable completed-run history for the authenticated scope
+ */
+
+export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(
+ params?: ListCompletedHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCompletedHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getFinalizeCompletedRunUrl = () => {
+
+
+
+
+  return `/api/completed-history`
+}
+
+/**
+ * @summary Append an immutable completed-run snapshot idempotently
+ */
+export const finalizeCompletedRun = async (completedRunFinalization: CompletedRunFinalization, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<void>(getFinalizeCompletedRunUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(completedRunFinalization)
+  }
+);}
+
+
+
+
+
+export const getFinalizeCompletedRunMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext> => {
+
+const mutationKey = ['finalizeCompletedRun'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finalizeCompletedRun>>, FinalizeCompletedRunMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  finalizeCompletedRun(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinalizeCompletedRunMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeCompletedRun>>>
+    export type FinalizeCompletedRunMutationBody = BodyType<CompletedRunFinalization>
+    export type FinalizeCompletedRunMutationError = ErrorType<void>
+    export type FinalizeCompletedRunMutationVariables = {data: BodyType<CompletedRunFinalization>}
+
+    /**
+ * @summary Append an immutable completed-run snapshot idempotently
+ */
+export const useFinalizeCompletedRun = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof finalizeCompletedRun>>,
+        TError,
+        FinalizeCompletedRunMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFinalizeCompletedRunMutationOptions(options));
+    }
+
 export const getGetSyncTodayUrl = (params?: GetSyncTodayParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -14736,4 +15067,3 @@ export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
       > => {
       return useMutation(getClaimAutoTrackEventMutationOptions(options));
     }
-

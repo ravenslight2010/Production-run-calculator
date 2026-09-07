@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recomputeCheeseSharesFromLbs } from "./dataHeals";
+import { recomputeCheeseSharesFromLbs } from "./repairs/remainingCheeseRecipeNormalizationRepairs";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 
 function makeRecipe(

@@ -25,11 +25,15 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
+import { signToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let mergedAwayTable: DbModule["mergedAwayTable"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let seedRoles: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -67,6 +71,11 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   mergedAwayTable = dbMod.mergedAwayTable;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
+  const { requireAuth } = await import("../middlewares/requireAuth");
+  const { requireCapability } = await import("../middlewares/requireCapability");
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -75,7 +84,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  app.use("/api", routerMod.default);
+  app.use("/api", requireAuth, requireCapability("manage-profiles"), routerMod.default);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -100,11 +109,14 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${mergedAwayTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${mergedAwayTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await seedRoles();
+  await db.insert(usersTable).values({ id: "profile-user", username: "profile-user", passwordHash: "x" });
+  await db.insert(userRolesTable).values({ userId: "profile-user", role: "manager" });
 });
 
 async function list(): Promise<string[]> {
-  const res = await fetch(`${baseUrl}/api/merged-away`);
+  const res = await fetch(`${baseUrl}/api/merged-away`, { headers: authHeaders() });
   expect(res.status).toBe(200);
   return ((await res.json()) as { names: string[] }).names;
 }
@@ -112,7 +124,7 @@ async function list(): Promise<string[]> {
 async function add(names: string[]): Promise<Response> {
   return fetch(`${baseUrl}/api/merged-away`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ names }),
   });
 }
@@ -120,9 +132,13 @@ async function add(names: string[]): Promise<Response> {
 async function remove(names: string[]): Promise<Response> {
   return fetch(`${baseUrl}/api/merged-away`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ names }),
   });
+}
+
+function authHeaders(): Record<string, string> {
+  return { authorization: `Bearer ${signToken("profile-user")}` };
 }
 
 describe("merged-away routes", () => {
@@ -157,7 +173,7 @@ describe("merged-away routes", () => {
   it("rejects a malformed body with 400", async () => {
     const res = await fetch(`${baseUrl}/api/merged-away`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ nope: true }),
     });
     expect(res.status).toBe(400);

@@ -14,7 +14,15 @@ import { useIdle } from "./useIdle";
 // Idle throttling: steps from 20 s down to 2 min after 3 min of no activity.
 // Startup jitter: polling begins after a random 0–10 s delay so a fresh page
 // load doesn't fire all badge queries simultaneously.
-export function usePendingResetCount(): number {
+export type AttentionCountState = {
+  count: number;
+  isLoading: boolean;
+  isUnavailable: boolean;
+  isStale: boolean;
+  checkedAt: number | null;
+};
+
+export function usePendingResetSummary(): AttentionCountState {
   const { hasCapability } = useMe();
   const canApprove = hasCapability("approve-password-resets");
   const isIdle = useIdle();
@@ -26,11 +34,21 @@ export function usePendingResetCount(): number {
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { data } = useQuery({
+  const { data, isLoading, isError, dataUpdatedAt } = useQuery({
     queryKey: ["passwordResetRequests"],
     queryFn: fetchPasswordResetRequests,
     enabled: canApprove,
     refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
-  return canApprove ? (data ?? []).length : 0;
+  return {
+    count: canApprove ? (data ?? []).length : 0,
+    isLoading: canApprove && isLoading,
+    isUnavailable: canApprove && isError,
+    isStale: canApprove && dataUpdatedAt > 0 && Date.now() - dataUpdatedAt > 5 * 60_000,
+    checkedAt: canApprove && dataUpdatedAt > 0 ? dataUpdatedAt : null,
+  };
+}
+
+export function usePendingResetCount(): number {
+  return usePendingResetSummary().count;
 }

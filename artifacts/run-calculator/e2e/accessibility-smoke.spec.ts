@@ -12,6 +12,15 @@ import {
 } from "./onboarding";
 
 const testUsernames = new Set<string>();
+const DOCUMENT_SHELL_RULES = ["landmark-one-main", "region"] as const;
+const SCREEN_RULES: Record<string, readonly string[]> = {
+  "sign-in": [],
+  "live run": ["button-name", "color-contrast", "heading-order"],
+  "warehouse attention hierarchy": ["button-name", "color-contrast", "landmark-unique"],
+  "manager setup dialog": ["button-name", "landmark-unique"],
+  "setup profiles dialog": ["button-name", "label", "landmark-unique"],
+  "reported issues field checks": ["button-name", "color-contrast", "heading-order"],
+};
 
 function signupCode(): string {
   if (!process.env.STAFF_SIGNUP_CODE) {
@@ -25,18 +34,25 @@ async function scan(
   screen: string,
   additionalDisabledRules: string[] = [],
 ): Promise<void> {
+  const documentedRules = new Set([
+    ...DOCUMENT_SHELL_RULES,
+    ...Object.values(SCREEN_RULES).flat(),
+    // Import dialogs share the same narrowly-scoped legacy shell exceptions.
+    "button-name",
+    "label",
+    "landmark-unique",
+  ]);
+  const undocumentedRules = additionalDisabledRules.filter(
+    (rule) => !documentedRules.has(rule),
+  );
+  expect(
+    undocumentedRules,
+    `Accessibility scan on ${screen} used an undocumented rule suppression`,
+  ).toEqual([]);
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "best-practice"])
-    // These three rules describe known app-shell baseline work rather than
-    // regressions in the tested workflow. The focused checks below still
-    // enforce labels, keyboard focus, dialog behavior, and target size.
-    .disableRules([
-      "landmark-one-main",
-      "region",
-      "meta-viewport",
-      "page-has-heading-one",
-      ...additionalDisabledRules,
-    ])
+    .exclude("#replit-dev-banner")
+    .disableRules(additionalDisabledRules)
     .analyze();
   const details = results.violations.map((violation) => {
     const nodes = violation.nodes
@@ -96,8 +112,8 @@ async function assertKeyboardTraversal(
   tabCount = 8,
 ): Promise<void> {
   const firstControl = page.locator(
-    "button:visible, input:visible, select:visible, textarea:visible, [role='button']:visible, [role='tab']:visible",
-  ).first();
+    "button, input, select, textarea, [role='button'], [role='tab']",
+  ).filter({ visible: true }).first();
   await expect(firstControl, `${screen} should expose keyboard controls`).toBeVisible();
   await firstControl.focus();
 
@@ -141,8 +157,8 @@ async function assertDialogContract(
   await expect(close, `${screen} should have a close action`).toBeVisible();
 
   const controls = dialog.locator(
-    "button:not([disabled]):visible, input:not([disabled]):visible, select:not([disabled]):visible, textarea:not([disabled]):visible, [role='button']:not([aria-disabled='true']):visible, [role='tab']:not([aria-disabled='true']):visible",
-  );
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [role='button']:not([aria-disabled='true']), [role='tab']:not([aria-disabled='true'])",
+  ).filter({ visible: true });
   const controlCount = await controls.count();
   expect(controlCount, `${screen} should expose focusable dialog controls`).toBeGreaterThan(0);
 

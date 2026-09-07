@@ -13,7 +13,10 @@ router.get("/master-data/health", canReview, async (req: Request, res: Response)
     const [latest] = await db.select().from(masterDataHealthScansTable)
       .where(eq(masterDataHealthScansTable.scope, currentScope()))
       .orderBy(desc(masterDataHealthScansTable.completedAt)).limit(1);
-    const report = latest?.report ?? await buildMasterDataHealthReport(db, currentScope());
+    const persisted = latest?.report as { coverage?: unknown } | null | undefined;
+    const report = latest && persisted?.coverage
+      ? latest.report
+      : await buildMasterDataHealthReport(db, currentScope());
     res.json({ report, persistedAt: latest?.completedAt ?? null });
   } catch (err) {
     req.log.error({ err }, "failed to read master-data health");

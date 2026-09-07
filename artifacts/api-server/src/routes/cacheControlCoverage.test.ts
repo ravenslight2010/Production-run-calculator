@@ -100,11 +100,12 @@ describe("no-store exclusion list cannot grow without review", () => {
   // intentionally REMOVED from the exclusion list: caching them caused a
   // production bug where a live user's schedule rendered empty (stale/304) and
   // risked cross-scope contamination (URL cache key carries no scope). They are
-  // no-store now. Only the SSE streams and the two genuinely-cacheable public
-  // GETs remain excluded. See `.agents/memory/no-store-cache-headers.md`.
+  // no-store now. The reviewed exclusions are the two SSE streams, two public
+  // GETs, and the authenticated bootstrap's private revalidation contract.
   const KNOWN_SAFE_EXCLUSIONS = [
     "/healthz",
     "/auth/username-available",
+    "/master-data/bootstrap",
     "/sync/events",
     "/inventory/events",
   ].sort();

@@ -1407,7 +1407,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "33";
+export const SPEC_PARSE_VERSION = "37";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -2768,7 +2768,8 @@ export async function commitSpecImport(
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
   // kept) so it can later be cross-referenced against the current recipe library
-  // (see /ai/spec-reconcile) and diffed by the next re-import of the same file
+  // (see /operations-insights/spec-reconciliation) and diffed by the next
+  // re-import of the same file
   // (see the prune above). Profile-only sheets snapshot too so their re-imports
   // can also skip unchanged profiles. Best-effort: the import already applied
   // locally, so a failed snapshot must never surface as an import error.

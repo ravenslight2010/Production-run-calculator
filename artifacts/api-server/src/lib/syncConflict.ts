@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { canonicalSyncJson } from "./syncContract";
 
 export interface ConflictInfo {
   fieldsWithConflicts: string[];
@@ -10,7 +11,7 @@ export interface ConflictInfo {
 
 function shortHash(v: unknown): string {
   return createHash("sha256")
-    .update(JSON.stringify(v) ?? "")
+    .update(canonicalSyncJson(v))
     .digest("hex")
     .slice(0, 16);
 }
@@ -47,7 +48,7 @@ export function detectConflicts(
       ? merObj.runValues as Record<string, unknown>
       : {};
   for (const id of Object.keys(inVals)) {
-    if (JSON.stringify(inVals[id]) !== JSON.stringify(merVals[id])) {
+    if (canonicalSyncJson(inVals[id]) !== canonicalSyncJson(merVals[id])) {
       fields.push(`runValues:${id}`);
     }
   }
@@ -65,7 +66,7 @@ export function detectConflicts(
       ? merObj.packagingProgress as Record<string, unknown>
       : {};
   for (const id of Object.keys(inProgress)) {
-    if (JSON.stringify(inProgress[id]) !== JSON.stringify(mergedProgress[id])) {
+    if (canonicalSyncJson(inProgress[id]) !== canonicalSyncJson(mergedProgress[id])) {
       fields.push(`packagingProgress:${id}`);
     }
   }
@@ -86,7 +87,7 @@ export function detectConflicts(
     if (typeof id !== "string" || !id) continue;
     if (!inRunMap.has(id)) {
       appendedCount++;
-    } else if (JSON.stringify(run) !== JSON.stringify(inRunMap.get(id))) {
+    } else if (canonicalSyncJson(run) !== canonicalSyncJson(inRunMap.get(id))) {
       fields.push(`dayState.runs.meta:${id}`);
     }
   }

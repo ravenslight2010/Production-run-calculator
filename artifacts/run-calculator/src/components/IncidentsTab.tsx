@@ -11,8 +11,6 @@ import {
   ChevronRight,
   Lock,
   History,
-  Sparkles,
-  Network,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,107 +20,14 @@ import {
   confirmHardwareFieldCheck,
   markIncidentReviewed,
   markIncidentResolved,
-  requestIncidentClusters,
   fetchIncidentAssignees,
   updateIncidentWorkflow,
   type Incident,
-  type IncidentCluster,
-  type IncidentClustersResult,
   type FieldCheckSummary,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
-
-const SEVERITY_STYLE: Record<IncidentCluster["severity"], string> = {
-  high: "bg-red-500/15 text-red-400",
-  medium: "bg-amber-500/15 text-amber-400",
-  low: "bg-sky-500/15 text-sky-400",
-};
-
-// Manager-only AI root-cause clustering. On demand, asks the server to group the
-// incident log into recurring themes; advisory and read-only. The server falls
-// back to a deterministic grouping when the AI is unavailable, so this always
-// returns something useful. Mirrors the mobile ClustersPanel (replit.md parity).
-function ClustersPanel({ disabled }: { disabled: boolean }) {
-  const [result, setResult] = useState<IncidentClustersResult | null>(null);
-  const find = useMutation({
-    mutationFn: () => requestIncidentClusters(),
-    onSuccess: setResult,
-  });
-
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Network className="w-4 h-4 text-primary shrink-0" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Find patterns</p>
-            <p className="text-xs text-muted-foreground">
-              Group recurring reports & crashes into likely root causes. Advisory only.
-            </p>
-          </div>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => find.mutate()}
-          disabled={disabled || find.isPending}
-        >
-          {find.isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Sparkles className="w-4 h-4 mr-2" />
-          )}
-          {result ? "Refresh" : "Analyze"}
-        </Button>
-      </div>
-
-      {find.isError && (
-        <p className="flex items-center gap-2 text-sm text-red-400">
-          <AlertTriangle className="w-4 h-4" /> Couldn't analyze the incident log.
-        </p>
-      )}
-
-      {result && (
-        <div className="space-y-2" data-testid="incident-clusters-result">
-          {result.note ? (
-            <p className="text-sm text-muted-foreground">{result.note}</p>
-          ) : (
-            result.clusters.map((c, i) => (
-              <div key={i} className="rounded-md border border-border bg-card p-3 space-y-1.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${SEVERITY_STYLE[c.severity]}`}
-                  >
-                    {c.severity}
-                  </span>
-                  <span className="text-sm font-medium text-foreground">{c.theme}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {c.incidentCount} {c.incidentCount === 1 ? "incident" : "incidents"}
-                  </span>
-                </div>
-                {c.rootCauseHypothesis && (
-                  <p className="text-sm text-muted-foreground">{c.rootCauseHypothesis}</p>
-                )}
-                {c.recommendedAction && (
-                  <p className="text-sm text-foreground">
-                    <span className="font-medium">Next step: </span>
-                    {c.recommendedAction}
-                  </p>
-                )}
-              </div>
-            ))
-          )}
-          {!result.aiGenerated && !result.note && (
-            <p className="text-[11px] text-muted-foreground">
-              Showing a computed grouping (AI narration unavailable).
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
 type PlatformFilter = "all" | "web" | "mobile";
@@ -252,6 +157,22 @@ function IncidentRow({
                 : "Seen before"}
             </div>
           )}
+          <div className="rounded-md border border-border bg-muted/20 p-2 text-xs text-muted-foreground">
+            <p><span className="font-semibold text-foreground">Diagnostic reference:</span>{" "}
+              <code className="select-all">{ctx.correlationId ?? "Unavailable for older reports"}</code>
+            </p>
+            {ctx.relatedCorrelationId && (
+              <p className="mt-1"><span className="font-semibold text-foreground">Failed request:</span>{" "}
+                <code className="select-all">{ctx.relatedCorrelationId}</code>
+              </p>
+            )}
+            <p className="mt-1">
+              {ctx.action ?? "unknown action"} · {ctx.outcome ?? "unknown outcome"} · retry {ctx.retryCount ?? 0} ·
+              {" "}{ctx.connectivity ?? "unknown connection"} · {ctx.syncState ?? "unknown sync"} ·
+              {" "}{ctx.browserFamily ?? incident.appPlatform}/{ctx.deviceClass ?? "unknown device"} · build {incident.appVersion ?? "unknown"}
+            </p>
+            <p className="mt-1">Next step: retry once; if it repeats, reload or update the app, then give this reference to a developer.</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">
             <label className="text-xs text-muted-foreground">Priority
               <select className="ml-1 rounded border border-border bg-background px-1.5 py-1 text-xs" value={incident.priority}
@@ -286,26 +207,6 @@ function IncidentRow({
             <input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-sm" placeholder="Add an operational note…" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
             <Button size="sm" variant="outline" disabled={!note.trim() || busy} onClick={() => { workflow.mutate({ note }); setNote(""); }}>Add note</Button>
           </div>
-          {incident.diagnosis && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Diagnosis
-              </p>
-              <p className="text-sm text-foreground whitespace-pre-wrap mt-0.5">
-                {incident.diagnosis}
-              </p>
-            </div>
-          )}
-          {incident.workaround && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Suggested workaround
-              </p>
-              <p className="text-sm text-foreground whitespace-pre-wrap mt-0.5">
-                {incident.workaround}
-              </p>
-            </div>
-          )}
           <div className="flex flex-wrap items-center gap-2">
             {incident.status === "new" && (
               <Button size="sm" variant="outline" onClick={() => review.mutate()} disabled={busy}>
@@ -371,10 +272,12 @@ function FieldChecksPanel({
   canConfirmHardware: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad">("android-phone");
+  const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad" | "iphone">("android-phone");
   const confirmation = useMutation({
     mutationFn: (input: {
-      checkName: "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery";
+      checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
+        "safe-area-clearance" | "camera-file-selection" | "update-handoff" |
+        "process-kill-recovery";
       outcome: "success" | "failure" | "incomplete";
     }) => confirmHardwareFieldCheck({
       ...input,
@@ -400,7 +303,7 @@ function FieldChecksPanel({
             Field checks
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Passive evidence from normal staff use, scoped to this facility. No run data is collected.
+            Advisory evidence scoped to this facility. No run data, screenshots, or device fingerprints are collected.
           </p>
         </div>
         {report && (
@@ -418,13 +321,16 @@ function FieldChecksPanel({
       ) : (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
+            <p className="sm:col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Browser-observed checks
+            </p>
             {browserChecks.map((check) => (
               <FieldCheckCard key={check.name} check={check} />
             ))}
           </div>
           <div className="rounded-md border border-border bg-card/60 p-2.5">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Hardware-only checks
+              Guided hardware confirmations
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Browser evidence cannot confirm these. Follow the physical-device protocol without entering production data, then record only the device category, protocol version, outcome, and time.
@@ -440,12 +346,13 @@ function FieldChecksPanel({
                   <option value="android-phone">Android phone</option>
                   <option value="android-tablet">Android tablet</option>
                   <option value="ipad">iPad</option>
+                  <option value="iphone">iPhone</option>
                 </select>
               </label>
             )}
             <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
               <li>Use a clean training or idle screen; do not start or edit a production run.</li>
-              <li>Check touch targets, keyboard clearance, or fully close and reopen the app as described in the protocol.</li>
+              <li>Perform only the named check: rotate, inspect clearance, open and cancel a picker, update/reopen, or test the listed interaction.</li>
               <li>Record Pass, Fail, or Incomplete below immediately after the physical check.</li>
             </ol>
             <div className="mt-3 space-y-2">
@@ -465,7 +372,10 @@ function FieldChecksPanel({
                             className="h-7 px-2 text-[11px]"
                             disabled={confirmation.isPending}
                             onClick={() => confirmation.mutate({
-                              checkName: check.name as "touch-accuracy" | "keyboard-clearance" | "process-kill-recovery",
+                              checkName: check.name as "touch-accuracy" | "keyboard-clearance" |
+                                "orientation-layout" | "safe-area-clearance" |
+                                "camera-file-selection" | "update-handoff" |
+                                "process-kill-recovery",
                               outcome,
                             })}
                           >
@@ -503,7 +413,7 @@ function FieldChecksPanel({
                       {failure.outcome === "incomplete" ? "Repeatedly incomplete" : "Failed"} · build {failure.appBuild} · {failure.deviceCategory}
                     </p>
                     <p className="text-muted-foreground">
-                      Browser-observed evidence only; measurements are bounded and contain no production payload.
+                      {check.observedBy === "browser" ? "Browser-observed" : "Guided hardware"} evidence only; measurements are bounded and contain no production payload.
                     </p>
                   </div>
                 )),
@@ -543,9 +453,8 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
   );
 }
 
-// Review queue of reported issues and auto-captured crashes, each with its
-// stored AI diagnosis + workaround. Access is capability-gated; operators
-// never see this tab.
+// Review queue of privacy-redacted reports and auto-captured failures.
+// Access is capability-gated; operators never see this tab.
 export default function IncidentsTab() {
   const { hasCapability, role, isLoading: roleLoading } = useMe();
   const canReview = hasCapability("review-incidents");
@@ -627,9 +536,13 @@ export default function IncidentsTab() {
           error={fieldChecksError}
           canConfirmHardware={canConfirmHardware}
         />
-        {hasIncidents && source !== "field_check" && <ClustersPanel disabled={isLoading} />}
-        {hasAnyIssues && (
-          <div className="space-y-2 pb-1">
+        {hasIncidents && <IncidentPatternsPanel disabled={isLoading} />}
+        <section aria-labelledby="incident-list-heading" className="space-y-3">
+          <h2 id="incident-list-heading" className="text-sm font-semibold text-foreground">
+            Incident list
+          </h2>
+          {hasAnyIssues && (
+            <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
             <FilterRow
               label="Status"
               value={status}
@@ -664,8 +577,8 @@ export default function IncidentsTab() {
                 ["field_check", "Field checks"],
               ] as [SourceFilter, string][]}
             />
-          </div>
-        )}
+            </div>
+          )}
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -696,15 +609,18 @@ export default function IncidentsTab() {
             No issues match these filters.
           </p>
         ) : (
-          filtered.map((incident) => (
+          <div className="space-y-3">
+          {filtered.map((incident) => (
             <IncidentRow
               key={incident.id}
               incident={incident}
               assignees={assignees}
               initiallyExpanded={incident.id === selectedIncidentId}
             />
-          ))
+          ))}
+          </div>
         )}
+        </section>
       </CardContent>
     </Card>
   );

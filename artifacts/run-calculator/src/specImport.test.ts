@@ -325,7 +325,8 @@ describe("sanitizeParsedSpecImport", () => {
       profiles: [
         { brand: "Tombstone", flavor: "Pepperoni",
           pizzasPerCase: "16", sauceBarrelLbs: 500,
-          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 55 }],
+          targetDoughballWeight: "12.5", doughballsPerTray: "20",
+          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 55, slot: 3, recipeName: "House Blend" }],
           pepperonis: [{ type: "Pep", sticks: 2, ozPerPizza: 1.5, batchLbs: 25 }] },
       ],
       recipes: [
@@ -336,7 +337,11 @@ describe("sanitizeParsedSpecImport", () => {
     const p = out.profiles[0];
     expect(p.pizzasPerCase).toBe(16);
     expect(p.sauceBarrelLbs).toBe(500);
+    expect(p.targetDoughballWeight).toBe(12.5);
+    expect(p.doughballsPerTray).toBe(20);
     expect(p.applicators[0].batchLbs).toBe(55);
+    expect(p.applicators[0].slot).toBe(3);
+    expect(p.applicators[0].recipeName).toBe("House Blend");
     expect(p.pepperonis[0].batchLbs).toBe(25);
     const dough = out.recipes.find((r) => r.kind === "dough");
     expect(dough?.doughBatchYield).toBe(640);
@@ -347,7 +352,8 @@ describe("sanitizeParsedSpecImport", () => {
       profiles: [
         { brand: "Tombstone", flavor: "Cheese",
           pizzasPerCase: 0, sauceBarrelLbs: 0,
-          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 0 }],
+          targetDoughballWeight: 0, doughballsPerTray: 0,
+          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 0, recipeName: "" }],
           pepperonis: [] },
       ],
       recipes: [
@@ -358,7 +364,10 @@ describe("sanitizeParsedSpecImport", () => {
     const p = out.profiles[0];
     expect(p.pizzasPerCase).toBeUndefined();
     expect(p.sauceBarrelLbs).toBeUndefined();
+    expect(p.targetDoughballWeight).toBeUndefined();
+    expect(p.doughballsPerTray).toBeUndefined();
     expect(p.applicators[0].batchLbs).toBeUndefined();
+    expect(p.applicators[0].recipeName).toBeUndefined();
     const dough = out.recipes.find((r) => r.kind === "dough");
     expect(dough?.doughBatchYield).toBeUndefined();
     expect(dough?.doughballsPerTray).toBeUndefined();
@@ -395,12 +404,12 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.profiles[3].allergen).toBe("milk allergen");
     expect(out.profiles[4].allergen).toBeUndefined();
   });
-  it("treats dough/sauce rows as OUNCES by default (converts to lbs); cheese rows stay verbatim per-pizza oz", () => {
+  it("preserves raw recipe row numbers for dough, sauce, and cheese", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [
-        // Cheese-kind rows carry per-pizza OUNCES verbatim in the lbs field
-        // (SpecCheeseRecipeDraft contract) — never ÷16 converted.
+        // Every recipe kind carries the source sheet's raw number in the lbs
+        // field; rowsUnit is descriptive provenance only.
         { kind: "cheese", name: "Fajita Blend", rowsUnit: "oz",
           rows: [{ ingredient: "Mozz", lbs: 1.5 }, { ingredient: "Onion", lbs: 0.5 }] },
         { kind: "dough", name: "Std Dough", rowsUnit: "OUNCES",
@@ -413,10 +422,10 @@ describe("sanitizeParsedSpecImport", () => {
       { ingredient: "Mozz", lbs: 1.5 },
       { ingredient: "Onion", lbs: 0.5 },
     ]);
-    expect(out.recipes[1].rows).toEqual([{ ingredient: "Flour", lbs: 31.25 }]);
-    expect(out.recipes[2].rows).toEqual([{ ingredient: "Tomato", lbs: 2 }]);
+    expect(out.recipes[1].rows).toEqual([{ ingredient: "Flour", lbs: 500 }]);
+    expect(out.recipes[2].rows).toEqual([{ ingredient: "Tomato", lbs: 32 }]);
   });
-  it("keeps recipe rows as-is ONLY when the sheet explicitly marks them as pounds", () => {
+  it("keeps recipe rows as-is regardless of the reported unit", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [

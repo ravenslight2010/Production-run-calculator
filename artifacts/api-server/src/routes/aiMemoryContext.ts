@@ -76,6 +76,8 @@ const UNTRUSTED_FREEFORM_DOMAINS = new Set([INCIDENT_MEMORY_DOMAIN]);
 // `use-ai-tools` (optimize, proactive-alert, forecast, schedule-optimize, etc.)
 // pass `allowPrivileged: true` to keep seeing this data — that's unchanged
 // behavior for the audience the raw endpoint already trusts.
+// Historical records remain until the separate retention decision. Keep their
+// original privilege boundary even though no retired feature writes new facts.
 const PRIVILEGED_FACILITY_DOMAINS = new Set(["forecast", "proactive-alerts"]);
 
 function excludeUntrustedFreeformDomains(

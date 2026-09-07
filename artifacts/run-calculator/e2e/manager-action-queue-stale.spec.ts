@@ -472,7 +472,7 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   await expect(page.getByTestId("manager-action-queue")).toContainText("Sync");
   await page.screenshot({ path: testInfo.outputPath("queue-source-before.png") });
 
-  const visibleQueue = page.locator('[data-testid="manager-action-queue"]:visible');
+  const visibleQueue = page.getByTestId("manager-action-queue").filter({ visible: true });
   const syncHeader = visibleQueue
     .getByText(title, { exact: true })
     .locator("xpath=../../..");
@@ -514,7 +514,7 @@ test("opens an incident queue item in the matching incident review surface", asy
   await expect(page.getByTestId("manager-action-queue")).toContainText("Incident");
   await page.screenshot({ path: testInfo.outputPath("incident-queue-source-before.png"), fullPage: true });
 
-  const visibleQueue = page.locator('[data-testid="manager-action-queue"]:visible');
+  const visibleQueue = page.getByTestId("manager-action-queue").filter({ visible: true });
   const incidentHeader = visibleQueue
     .getByText(`Incident source ${incidentFixtureId}`, { exact: true })
     .locator("xpath=../../..");

@@ -193,12 +193,21 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
   const recoveredGrids = readWorkbook(writeWorkbook(exported));
   const { mixes: recovered, allResolved } = importMixes(recoveredGrids);
 
-  it("exports one tab per mix, grounded on the product, with duplicate tabs deduped", () => {
+  it("exports one grouped tab per brand", () => {
     expect(recoveredGrids.map((g) => g.name)).toEqual([
-      "Bobo's Deluxe",
-      "Lowes 7in Supreme",
-      "Basha's Ultra Thin Crust Cheese",
-      "Bobo's Deluxe (2)",
+      "Basha's Ultra Thin Crust",
+      "Bobo's",
+      "Lowes 7in",
+    ]);
+  });
+
+  it("writes explicit brand/flavor markers for every grouped mix block", () => {
+    const parsed = parsePremixWorkbook(recoveredGrids);
+    expect(parsed.map((mix) => [mix.name, mix.productBrand, mix.productFlavor])).toEqual([
+      ["Ultra Cheese Blend", "Basha's Ultra Thin Crust", "Cheese"],
+      ["Bobo's Deluxe Mix", "Bobo's", "Deluxe"],
+      ["Bobo's Deluxe Veggie Mix", "Bobo's", "Deluxe"],
+      ["Topping Blend", "Lowes 7in", "Supreme"],
     ]);
   });
 
@@ -278,7 +287,7 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
   it("negative control: layout regressions ARE caught by this guard", () => {
     // Mangle the "Per Pizza" anchor on one tab → that mix vanishes entirely.
     const noAnchor = recoveredGrids.map((g) =>
-      g.name === "Lowes 7in Supreme"
+      g.name === "Lowes 7in"
         ? {
             name: g.name,
             rows: g.rows.map((r) => r.map((c) => (c === "Per Pizza" ? "PP" : c))),
@@ -289,7 +298,7 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
 
     // Mangle the "Total" row label → that mix's batchSize is lost.
     const noTotal = recoveredGrids.map((g) =>
-      g.name === "Basha's Ultra Thin Crust Cheese"
+      g.name === "Basha's Ultra Thin Crust"
         ? {
             name: g.name,
             rows: g.rows.map((r) => (r[0] === "Total" ? ["Subtotal", ...r.slice(1)] : r)),
@@ -302,21 +311,27 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
 
     // Drop the pull note → daysEarly is lost.
     const noNote = recoveredGrids.map((g) =>
-      g.name === "Lowes 7in Supreme"
+      g.name === "Lowes 7in"
         ? { name: g.name, rows: g.rows.filter((r) => !/pull/i.test(r[0] ?? "")) }
         : g,
     );
     const lostNote = importMixes(noNote).mixes.find((m) => m.name === "Topping Blend");
     expect(lostNote?.daysEarly).toBe(0);
 
-    // Mangle the tab name AND strip the brand from the mix name → grounding
-    // can no longer resolve the product deterministically.
+    // Remove explicit markers and mangle the grouped tab/name fallback for the
+    // Bobo's sheet → those blocks can no longer resolve deterministically.
     const noGrounding = recoveredGrids.map((g) =>
-      g.name === "Bobo's Deluxe (2)"
+      g.name === "Bobo's"
         ? {
             name: "Sheet9",
             rows: g.rows.map((r) =>
-              r.map((c) => (c === "Bobo's Deluxe Mix" ? "Mystery Mix" : c)),
+              r[0] === "Product Brand" || r[0] === "Product Flavor"
+                ? [r[0], ""]
+                : r.map((c) =>
+                    c === "Bobo's Deluxe Mix" || c === "Bobo's Deluxe Veggie Mix"
+                      ? "Mystery Mix"
+                      : c,
+                  ),
             ),
           }
         : g,

@@ -4,8 +4,9 @@ Date: 2026-08-25
 
 ## Reviewed
 
-Reviewed all 24 editable `SKILL.md` files under `.agents/skills/` and
-`.local/custom_skills/`. Checked frontmatter identifiers and descriptions,
+Reviewed the then-current editable `SKILL.md` files under `.agents/skills/` and
+`.local/custom_skills/`. The current catalog contains 28 editable skills
+(18 project-owned and 10 custom). Checked frontmatter identifiers and descriptions,
 trigger clarity, scope, imperative guidance, progressive-disclosure pointers,
 overlap, safety boundaries, and output contracts.
 
@@ -18,16 +19,16 @@ overlap, safety boundaries, and output contracts.
 - Made `review-before-shipping` compose with `release-checklist` instead of
   duplicating repository-specific gates.
 - Added maintenance-mode, safety, and completion guidance to `skill-creator`.
-- Added focused evals with assertions for `skill-creator`, `release-checklist`,
-  and `review-before-shipping`.
+- Added focused evals for selected release and authoring skills. The current
+  repository-wide audit supersedes this snapshot for exact coverage counts.
 
 ## Passed
 
 - All editable skill files have YAML frontmatter with `name` and `description`.
 - All names match `^[a-z0-9-]{1,64}$`; descriptions are specific and under
   the 1024-character limit.
-- Every materially changed high-risk skill has two realistic eval prompts and
-  objective assertions.
+- Materially changed skills received focused eval prompts. This was not a claim
+  that every editable skill had its own eval file.
 - No application code, platform-managed skill, or release behavior was changed.
 
 ## Deferred intentionally

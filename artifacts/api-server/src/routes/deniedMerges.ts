@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db, deniedMergesTable, type DeniedMerge as DeniedMergeRow } from "@workspace/db";
 import { SaveDeniedMergesBody, DeleteDeniedMergesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 import { deniedPairKey, type MergeSuggestCategory } from "@workspace/merge-suggest";
 
 const router: IRouter = Router();
@@ -103,7 +104,7 @@ router.get("/denied-merges", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/denied-merges", async (req: Request, res: Response) => {
+router.post("/denied-merges", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveDeniedMergesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -148,7 +149,7 @@ router.post("/denied-merges", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/denied-merges", async (req: Request, res: Response) => {
+router.delete("/denied-merges", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = DeleteDeniedMergesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

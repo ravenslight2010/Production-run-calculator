@@ -33,7 +33,7 @@ export function extractTraceContext(req: Request): TraceContext {
  * - Proactive alert nudge acceptance rates
  */
 export interface AiMetrics {
-  endpoint: string; // e.g. 'diagnose-issue', 'cluster-incidents'
+  endpoint: string; // e.g. 'parse-spec-sheet', 'match-import'
   model: string; // e.g. 'gpt-4', 'gemini-pro'
   durationMs: number;
   inputTokens: number;

@@ -5,10 +5,17 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AiModelStatus } from './aiModelStatus';
+import type { AiStatus } from './aiStatus';
+import type { ParseSpecImagesResultDecision } from './parseSpecImagesResultDecision';
 
 export interface ParseSpecImagesResult {
   /** Bounded workbook-style transcription suitable for the existing spec parser */
   workbookText: string;
   generatedAt: number;
   note?: string;
+  decision: ParseSpecImagesResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
 }

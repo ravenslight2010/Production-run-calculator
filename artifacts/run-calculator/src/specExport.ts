@@ -5,19 +5,20 @@
 // pure @workspace/spec-export builders (which lay them out so the SAME importers
 // re-read them without data loss), writes .xlsx workbooks, and downloads them.
 //
-// Two files on purpose (the two importers have different formats): the
-// spec/recipe workbook goes back through "Import Spec Sheet" (AI); the mixes
-// workbook goes back through "Import Premix Sheet" (deterministic). All layout
-// logic lives in the shared lib so mobile can mirror this glue later (parity is
-// PAUSED per .local/parity-pause-log.md — web-first).
+// Five files on purpose: Specs, Dough, Sauce, and Cheese go back through
+// "Import Spec Sheet" (AI); Mixes goes back through "Import Premix Sheet"
+// (deterministic). All layout logic lives in the shared lib so mobile can mirror
+// this glue later (parity is PAUSED per .local/parity-pause-log.md — web-first).
 
-import * as XLSX from "xlsx";
 import {
-  buildSpecExportGrids,
+  buildCheeseExportGrids,
+  buildDoughExportGrids,
   buildMixExportGrids,
+  buildSauceExportGrids,
+  buildSpecsExportGrids,
   type SheetGrid,
   type SpecExportInput,
-  type SpecExportSelection,
+  type ExportWorkbookKind,
   type ExportProfile,
   type ExportRecipe,
 } from "@workspace/spec-export";
@@ -30,9 +31,10 @@ import {
 } from "./storage";
 import { fetchMixes } from "./mixes";
 import type { FormValues, RecipeRow } from "./types";
+import { downloadWorkbook } from "./specExportWorkbook";
 
 /** Which kinds of data the user can pick to export. */
-export type ExportSelection = SpecExportSelection & { mixes: boolean };
+export type ExportSelection = Record<ExportWorkbookKind, boolean>;
 
 function rowsFrom(recipe: ReadonlyArray<{ ingredient: string; lbs: number }> | undefined): RecipeRow[] {
   return (recipe ?? [])
@@ -127,65 +129,62 @@ function gatherSpecInput(): SpecExportInput {
   };
 }
 
-/** Turn a SheetGrid[] into a workbook and trigger a download. */
-function downloadWorkbook(grids: SheetGrid[], filename: string): void {
-  const wb = XLSX.utils.book_new();
-  for (const g of grids) {
-    const ws = XLSX.utils.aoa_to_sheet(g.rows);
-    // Apply bold styling to rows that the lib flagged (header row, recipe labels).
-    if (g.boldRows && g.boldRows.length > 0) {
-      const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
-      for (const rowIdx of g.boldRows) {
-        if (rowIdx < 0 || rowIdx > range.e.r) continue;
-        for (let c = range.s.c; c <= range.e.c; c++) {
-          const addr = XLSX.utils.encode_cell({ r: rowIdx, c });
-          if (!ws[addr]) continue;
-          ws[addr].s = { font: { bold: true } };
-        }
-      }
-    }
-    // Sheet names are already sanitised + de-duped by the lib.
-    XLSX.utils.book_append_sheet(wb, ws, g.name);
-  }
-  XLSX.writeFile(wb, filename);
-}
-
-export type ExportResult = { specSheets: number; mixSheets: number };
+export type ExportResult = {
+  downloaded: Partial<Record<ExportWorkbookKind, number>>;
+  failed: ExportWorkbookKind[];
+};
 
 /**
- * Export the selected spec/recipe/mix data as up to two .xlsx downloads (a
- * spec/recipe workbook and a mixes workbook). Returns how many sheets each held
- * so the caller can message an empty selection. Filenames are dated with the
- * caller-supplied string.
+ * Export each selected category as its own dated workbook. One failed download
+ * does not prevent the remaining selected workbooks from being attempted.
  */
 export async function exportSpecRecipes(
   selection: ExportSelection,
   dateStr: string,
 ): Promise<ExportResult> {
-  let specSheets = 0;
-  let mixSheets = 0;
-
-  if (selection.profiles || selection.dough || selection.sauce || selection.cheese) {
-    const grids = buildSpecExportGrids(gatherSpecInput(), {
-      profiles: selection.profiles,
-      dough: selection.dough,
-      sauce: selection.sauce,
-      cheese: selection.cheese,
-    });
-    if (grids.length) {
-      downloadWorkbook(grids, `spec-recipes-${dateStr}.xlsx`);
-      specSheets = grids.length;
+  const downloaded: Partial<Record<ExportWorkbookKind, number>> = {};
+  const failed: ExportWorkbookKind[] = [];
+  const specInput =
+    selection.specs || selection.dough || selection.sauce || selection.cheese
+      ? gatherSpecInput()
+      : null;
+  const jobs: Array<{ kind: ExportWorkbookKind; filename: string; grids: () => Promise<SheetGrid[]> }> = [
+    {
+      kind: "specs",
+      filename: `specs-${dateStr}.xlsx`,
+      grids: async () => buildSpecsExportGrids(specInput!),
+    },
+    {
+      kind: "dough",
+      filename: `dough-recipes-${dateStr}.xlsx`,
+      grids: async () => buildDoughExportGrids(specInput!),
+    },
+    {
+      kind: "sauce",
+      filename: `sauce-recipes-${dateStr}.xlsx`,
+      grids: async () => buildSauceExportGrids(specInput!),
+    },
+    {
+      kind: "cheese",
+      filename: `cheese-recipes-${dateStr}.xlsx`,
+      grids: async () => buildCheeseExportGrids(specInput!),
+    },
+    {
+      kind: "mixes",
+      filename: `mixes-${dateStr}.xlsx`,
+      grids: async () => buildMixExportGrids(await fetchMixes()),
+    },
+  ];
+  for (const job of jobs) {
+    if (!selection[job.kind]) continue;
+    try {
+      const grids = await job.grids();
+      if (!grids.length) continue;
+      downloadWorkbook(grids, job.filename);
+      downloaded[job.kind] = grids.length;
+    } catch {
+      failed.push(job.kind);
     }
   }
-
-  if (selection.mixes) {
-    const mixes = await fetchMixes();
-    const grids = buildMixExportGrids(mixes);
-    if (grids.length) {
-      downloadWorkbook(grids, `mixes-${dateStr}.xlsx`);
-      mixSheets = grids.length;
-    }
-  }
-
-  return { specSheets, mixSheets };
+  return { downloaded, failed };
 }

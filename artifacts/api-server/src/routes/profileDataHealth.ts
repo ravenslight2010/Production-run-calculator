@@ -3,7 +3,6 @@ import { and, desc, eq, gte } from "drizzle-orm";
 import {
   auditLogsTable,
   brandProfilesTable,
-  dataHealsTable,
   dataHealthRepairBatchesTable,
   dailySyncTable,
   db,
@@ -16,7 +15,14 @@ import {
 } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
-import { buildMasterDataHealthReport, type MasterDataHealthReport } from "../lib/masterDataHealth";
+import {
+  buildMasterDataHealthReport,
+  masterDataRepairFingerprint,
+  type MasterDataHealthReport,
+} from "../lib/masterDataHealth";
+import { applyAiRetentionCleanup, buildAiRetentionReport, type AiRetentionReport } from "../lib/aiRetention";
+import { sourceLibraryReconciliationStatus, type SourceLibraryReconciliationStatus } from "../lib/sourceLibraryReconciliationHeal";
+import { findRepairResult } from "../lib/repairResultsRepository";
 
 type JsonRecord = Record<string, unknown>;
 type RecipeKind = "dough" | "sauce";
@@ -66,6 +72,7 @@ export type DataHealthFinding = {
   protectedValue: boolean;
   source: "profile-health" | "master-data" | "saved-spec" | "cleanup";
   sourceRoute: "setupProfiles" | "import" | "merge" | "audit" | "dough" | "sauce" | "cheeseRecipes" | "mixes" | "ingredientTypes";
+  reconciliationCategory?: SourceLibraryReconciliationStatus["findings"][number]["category"];
   preview?: {
     before: string;
     after: string;
@@ -84,6 +91,10 @@ export type DataHealthRepair =
     externalName: string;
     canonicalName: string;
     context: string | null;
+    fingerprint: string;
+    owner: "import-review";
+    preview: { before: string; after: string };
+    undo: "data-health-repair-batch";
   };
 
 export type DataHealthWorkspace = {
@@ -103,6 +114,25 @@ export type DataHealthWorkspace = {
     id: string; actor: string; appliedAt: Date; undoneAt: Date | null; status: string;
     summary: { applied: number; skipped: number; failed: number; repairedRuns: number };
   }>;
+  aiRetention: AiRetentionReport;
+  sourceReconciliation: SourceLibraryReconciliationStatus;
+};
+
+export type DataHealthActor = {
+  userId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+};
+
+export type DataHealthUndoResult =
+  | { status: 200; body: Record<string, unknown> }
+  | { status: 404 | 409; body: { error: string } };
+
+export type ProfileDataHealthService = {
+  buildReport(): Promise<ProfileDataHealthReport>;
+  buildWorkspace(): Promise<DataHealthWorkspace>;
+  applyRepairs(findingIds: string[], actor: DataHealthActor): Promise<Record<string, unknown>>;
+  undoRepairBatch(batchId: string): Promise<DataHealthUndoResult>;
 };
 
 const router = Router();
@@ -305,16 +335,13 @@ function previewValue(value: unknown): string {
 
 export async function dataHealthWorkspace(executor: HealthExecutor): Promise<DataHealthWorkspace> {
   const scope = currentScope();
-  const report = await profileDataHealthReport(executor);
-  const master = await buildMasterDataHealthReport(executor, scope);
-  const [marker] = await executor
-    .select({
-      appliedAt: dataHealsTable.appliedAt,
-      result: dataHealsTable.result,
-    })
-    .from(dataHealsTable)
-    .where(eq(dataHealsTable.id, "profile-name-link-stub-purge-v1"))
-    .limit(1);
+  const [report, master, aiRetention, sourceReconciliation] = await Promise.all([
+    profileDataHealthReport(executor),
+    buildMasterDataHealthReport(executor, scope),
+    buildAiRetentionReport(executor),
+    sourceLibraryReconciliationStatus(executor, scope),
+  ]);
+  const marker = await findRepairResult(executor, "profile-name-link-stub-purge-v1");
   const result = record(marker?.result);
   const removed = record(result.removedStubs);
   const cleanupHistory = marker ? {
@@ -391,6 +418,29 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
       preview: repairPreview,
     });
   }
+  for (const item of sourceReconciliation.findings) {
+    findings.push({
+      id: item.id,
+      category: item.category === "alias-gap" ? "aliases"
+        : item.category === "stale-profile-link" ? "profiles"
+          : item.category === "stale-pending-run-link" ? "scheduled-runs"
+            : item.sourceRoute === "dough" ? "dough"
+              : item.sourceRoute === "sauce" ? "sauce"
+                : item.sourceRoute === "mixes" ? "mixes" : "cheese",
+      severity: item.severity,
+      repairability: "review",
+      brand: "",
+      flavor: "",
+      recipe: "Authoritative source reconciliation",
+      message: item.currentValue,
+      proposedRepair: item.proposedOutcome,
+      affectedRecord: item.affectedRecord,
+      protectedValue: item.protectedValue,
+      source: "master-data",
+      sourceRoute: item.sourceRoute,
+      reconciliationCategory: item.category,
+    });
+  }
   if (cleanupHistory) {
     for (const [kind, count] of Object.entries(cleanupHistory.summary.removedStubs)) {
       if (count === 0) continue;
@@ -436,6 +486,8 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     ],
     summary,
     cleanupHistory,
+    aiRetention,
+    sourceReconciliation,
     repairBatches: batches.map((batch) => {
       const value = record(batch.summary);
       return { ...batch, summary: {
@@ -454,34 +506,29 @@ function repairStillMatches(values: JsonRecord, updatedAtMs: number | null, repa
   return hash({ updatedAt: updatedAtMs ?? 0, name: currentName, rows: currentRows, expectedName }) === repair.fingerprint;
 }
 
-router.get("/profile-data/health-check", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+router.post("/profile-data/ai-retention/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
   try {
-    res.json({ report: await profileDataHealthReport(db) });
+    const report = await applyAiRetentionCleanup();
+    req.log.info({
+      policyVersion: report.policyVersion,
+      scope: report.scope,
+      candidateCounts: report.candidates,
+    }, "AI retention cleanup completed");
+    res.json({ report });
   } catch (err) {
-    req.log.error({ err }, "failed to audit profile data health");
-    res.status(500).json({ error: "Failed to audit profile data health" });
+    req.log.error({ err }, "AI retention cleanup failed");
+    res.status(409).json({ error: "AI retention cleanup could not run within its bounded batch" });
   }
 });
 
-router.get("/profile-data/health-workspace", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
-    res.json({ workspace: await dataHealthWorkspace(db) });
-  } catch (err) {
-    req.log.error({ err }, "failed to load data health workspace");
-    res.status(500).json({ error: "Failed to load data health workspace" });
-  }
-});
-
-router.post("/profile-data/health-check/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
+export function createProfileDataHealthService(database: typeof db = db): ProfileDataHealthService {
+  return {
+    buildReport: () => profileDataHealthReport(database),
+    buildWorkspace: () => dataHealthWorkspace(database),
+    async applyRepairs(findingIds, actor) {
     const scope = currentScope();
-    if (!Array.isArray(req.body?.findingIds) || req.body.findingIds.length === 0 || req.body.findingIds.length > 100
-      || req.body.findingIds.some((id: unknown) => typeof id !== "string" || id.length === 0 || id.length > 240)) {
-      res.status(400).json({ error: "Select between 1 and 100 valid health findings" });
-      return;
-    }
-    const requested = new Set(req.body.findingIds as string[]);
-    const result = await db.transaction(async (tx) => {
+    const requested = new Set(findingIds);
+    return database.transaction(async (tx) => {
       const before = await profileDataHealthReport(tx);
       const master = await buildMasterDataHealthReport(tx, scope);
       const supportedIds = new Set([
@@ -583,7 +630,14 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
             && String(rowValues.externalName ?? "") === repair.externalName
             && String(rowValues.canonicalName ?? "") === repair.canonicalName
             && String(rowValues.context ?? rowValues.brandContext ?? "") === String(repair.context ?? "");
-          if (!sameMapping) { skipped++; continue; }
+          const currentFingerprint = masterDataRepairFingerprint({
+            source: repair.source,
+            rowId: repair.rowId,
+            externalName: rowValues.externalName ?? "",
+            canonicalName: rowValues.canonicalName ?? "",
+            context: rowValues.context ?? rowValues.brandContext ?? null,
+          });
+          if (!sameMapping || currentFingerprint !== repair.fingerprint) { skipped++; continue; }
           await tx.delete(table).where(and(eq(table.id, repair.rowId), eq(table.scope, scope)));
           const previousValues = repair.source === "import"
             ? { scope, type: rowValues.type, externalName: rowValues.externalName, canonicalName: rowValues.canonicalName, brandContext: rowValues.brandContext ?? null }
@@ -602,12 +656,12 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
       if (applied.length > 0) {
         batchId = `profile-data-health:${now}:${Math.random().toString(36).slice(2, 10)}`;
         await tx.insert(dataHealthRepairBatchesTable).values({
-           id: batchId, scope, actor: req.userId ?? "unknown", records: [...applied, ...runRecords],
+           id: batchId, scope, actor: actor.userId ?? "unknown", records: [...applied, ...runRecords],
           summary: { applied: applied.length, skipped, failed: 0, repairedRuns },
         });
         await tx.insert(auditLogsTable).values({
           scope,
-          actor: req.userId ?? "unknown",
+          actor: actor.userId ?? "unknown",
           action: "profile_data_health_repair",
           resource: "brand_profiles",
           changes: {
@@ -619,8 +673,8 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
               .map((repair) => ({ source: repair.source, rowId: repair.rowId })),
             repairedRuns,
           },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent") ?? undefined,
+          ipAddress: actor.ipAddress,
+          userAgent: actor.userAgent,
         });
       }
        return {
@@ -635,19 +689,12 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
          },
        };
     });
-    res.json(result);
-  } catch (err) {
-    req.log.error({ err }, "failed to apply profile data health repairs");
-    res.status(500).json({ error: "Failed to apply profile data health repairs" });
-  }
-});
-
-router.post("/profile-data/health-check/batches/:batchId/undo", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
+    },
+    async undoRepairBatch(batchId) {
     const scope = currentScope();
-    const result = await db.transaction(async (tx) => {
+    return database.transaction(async (tx) => {
       const [batch] = await tx.select().from(dataHealthRepairBatchesTable)
-        .where(and(eq(dataHealthRepairBatchesTable.id, String(req.params.batchId)), eq(dataHealthRepairBatchesTable.scope, scope))).for("update");
+        .where(and(eq(dataHealthRepairBatchesTable.id, batchId), eq(dataHealthRepairBatchesTable.scope, scope))).for("update");
       if (!batch) return { status: 404 as const, body: { error: "Repair batch not found" } };
       if (batch.status === "undone") {
         const value = record(batch.summary);
@@ -802,6 +849,51 @@ router.post("/profile-data/health-check/batches/:batchId/undo", requireCapabilit
         .where(eq(dataHealthRepairBatchesTable.id, batch.id));
       return { status: 200 as const, body: { batchId: batch.id, summary } };
     });
+    },
+  };
+}
+
+const dataHealthService = createProfileDataHealthService();
+
+router.get("/profile-data/health-check", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    res.json({ report: await dataHealthService.buildReport() });
+  } catch (err) {
+    req.log.error({ err }, "failed to audit profile data health");
+    res.status(500).json({ error: "Failed to audit profile data health" });
+  }
+});
+
+router.get("/profile-data/health-workspace", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    res.json({ workspace: await dataHealthService.buildWorkspace() });
+  } catch (err) {
+    req.log.error({ err }, "failed to load data health workspace");
+    res.status(500).json({ error: "Failed to load data health workspace" });
+  }
+});
+
+router.post("/profile-data/health-check/apply", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    if (!Array.isArray(req.body?.findingIds) || req.body.findingIds.length === 0 || req.body.findingIds.length > 100
+      || req.body.findingIds.some((id: unknown) => typeof id !== "string" || id.length === 0 || id.length > 240)) {
+      res.status(400).json({ error: "Select between 1 and 100 valid health findings" });
+      return;
+    }
+    res.json(await dataHealthService.applyRepairs(req.body.findingIds as string[], {
+      userId: req.userId,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") ?? undefined,
+    }));
+  } catch (err) {
+    req.log.error({ err }, "failed to apply profile data health repairs");
+    res.status(500).json({ error: "Failed to apply profile data health repairs" });
+  }
+});
+
+router.post("/profile-data/health-check/batches/:batchId/undo", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  try {
+    const result = await dataHealthService.undoRepairBatch(String(req.params.batchId));
     res.status(result.status).json(result.body);
   } catch (err) {
     req.log.error({ err }, "failed to undo profile data health repairs");

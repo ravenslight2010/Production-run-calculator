@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
 import {
@@ -38,8 +38,9 @@ import {
 } from "@workspace/api-zod";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
-import { rateLimit } from "../middlewares/rateLimit";
+import { rateLimit, type RateLimitStore } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
+import { aiCostLimit } from "../middlewares/costLimitMiddleware";
 import { requireCapability } from "../middlewares/requireCapability";
 import { getOrCreateUserRole, getStaffMember } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
@@ -65,13 +66,11 @@ import {
   validateRecordQualityCheckBody,
 } from "./qualityChecks";
 import {
-  buildWastePrompt,
   flagExpiringItems,
-  sanitizeWasteSuggestion,
   validateWasteInsightBody,
   type FlaggableItem,
 } from "./wasteInsight";
-import { groundPromptWithMemory, recordFacilityKnowledge } from "./aiMemoryContext";
+import { groundPromptWithMemory } from "./aiMemoryContext";
 import {
   ApplyCountObservationBody,
   CountObservationBody,
@@ -121,9 +120,9 @@ const photoRateStore =
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
 
-// The quality-check (vision) and waste-insight (text) AI endpoints get their own
-// cost caps so they can't starve each other or the stock-intake limiter. Same
-// per-user posture and Postgres-in-prod backing as the photo limiter above.
+// The quality-check (vision) endpoint gets its own cost cap so it can't starve
+// the stock-intake limiter. Waste insight retains a request limiter below, but
+// no longer uses the paid AI budget.
 const qualityRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
@@ -144,6 +143,16 @@ const labelVerifyRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
+
+export type InventoryRouterOptions = {
+  /**
+   * Override the retained-count limiters when constructing an isolated router
+   * (for example, to represent a second API instance in an integration test).
+   * The application default remains the production-aware middleware above.
+   */
+  countObservationRateStore?: RateLimitStore;
+  countObservationCostLimit?: RequestHandler;
+};
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
 type SseClient = { res: Response; clientId: string; scope: string };
@@ -601,71 +610,102 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 // ── Photo count observations ────────────────────────────────────────────────
 // Analysis and review are deliberately separate from restock. A cancelled or
 // abandoned observation has no inventory side effects.
-router.post(
-  "/inventory/count-observations",
-  requireCapability("manage-inventory"),
-  rateLimit({
-    windowMs: PHOTO_RATE_WINDOW_MS,
-    max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => `inv-count:${req.userId ?? req.ip ?? "unknown"}`,
-    store: photoRateStore,
-  }),
-  async (req, res): Promise<void> => {
-    const parsed = CountObservationBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Attach one to three valid photos." });
-      return;
-    }
-    const { photos, candidates } = parsed.data;
-    const candidateLines = candidates.map((c) =>
-      `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`).join("\n");
-    const prompt = buildCountPrompt(candidateLines);
-    const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
-      { type: "text", text: prompt.user },
-      ...photos.map((p) => ({ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.imageBase64}` } })),
-    ];
-    const result = await fetchModelJsonWithRetry({
-      label: "inventory-count vision",
-      log: req.log,
-      call: async () => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("full"),
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: prompt.system },
-            { role: "user", content },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-    });
-    if (!result.ok) {
-      if (result.reason === "malformed") {
+function registerCountObservationRoute(
+  target: IRouter,
+  options: InventoryRouterOptions = {},
+): void {
+  target.post(
+    "/inventory/count-observations",
+    requireCapability("manage-inventory"),
+    rateLimit({
+      windowMs: PHOTO_RATE_WINDOW_MS,
+      max: PHOTO_RATE_MAX,
+      keyGenerator: (req) => `inv-count:${req.userId ?? req.ip ?? "unknown"}`,
+      store: options.countObservationRateStore ?? photoRateStore,
+    }),
+    options.countObservationCostLimit ?? aiCostLimit,
+    async (req, res): Promise<void> => {
+      const parsed = CountObservationBody.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Attach one to three valid photos." });
+        return;
+      }
+      const { photos, candidates } = parsed.data;
+      const candidateLines = candidates.map((c) =>
+        `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`).join("\n");
+      const prompt = buildCountPrompt(candidateLines);
+      const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+        { type: "text", text: prompt.user },
+        ...photos.map((p) => ({ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.imageBase64}` } })),
+      ];
+      const result = await fetchModelJsonWithRetry({
+        label: "inventory-count vision",
+        log: req.log,
+        call: async () => {
+          const response = await openai.chat.completions.create({
+            model: pickModel("full"),
+            max_completion_tokens: 4096,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: prompt.system },
+              { role: "user", content },
+            ],
+          });
+          return response.choices[0]?.message?.content ?? "";
+        },
+      });
+      if (!result.ok) {
+        if (result.reason === "malformed") {
+          res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
+          return;
+        }
+        const failure = aiCallFailureHttp(result, "Could not analyze these photos.");
+        res.status(failure.status).json({ error: failure.error });
+        return;
+      }
+      const draft = sanitizeCountDraft(result.raw, new Set(candidates.map((c) => c.key)));
+      if (!draft) {
         res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
         return;
       }
-      const failure = aiCallFailureHttp(result, "Could not analyze these photos.");
-      res.status(failure.status).json({ error: failure.error });
-      return;
-    }
-    const draft = sanitizeCountDraft(result.raw, new Set(candidates.map((c) => c.key)));
-    if (!draft) {
-      res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
-      return;
-    }
-    if (new Set(photos.map((p) => p.imageBase64)).size !== photos.length) {
-      draft.reviewFlags = [...new Set([...draft.reviewFlags, "Duplicate photo attached"])];
-    }
-    const [row] = await db.insert(inventoryObservationsTable).values({
-      scope: currentScope(),
-      status: "draft",
-      photos: photos.map((p, index) => ({ index, mimeType: p.mimeType })),
-      draft,
-    }).returning();
-    res.status(201).json(observationResponse(row));
+      if (new Set(photos.map((p) => p.imageBase64)).size !== photos.length) {
+        draft.reviewFlags = [...new Set([...draft.reviewFlags, "Duplicate photo attached"])];
+      }
+      const [row] = await db.insert(inventoryObservationsTable).values({
+        scope: currentScope(),
+        status: "draft",
+        photos: photos.map((p, index) => ({ index, mimeType: p.mimeType })),
+        draft,
+      }).returning();
+      res.status(201).json(observationResponse(row));
+    },
+  );
+}
+
+// The full application router keeps photo-driven inventory changes retired.
+// The isolated factory above remains available for the retained-budget
+// integration proof and for any future explicitly enabled deployment.
+router.post(
+  "/inventory/count-observations",
+  requireCapability("manage-inventory"),
+  (_req, res) => {
+    res.status(410).json({
+      error: "Photo inventory counts are disabled. Use typed or barcode inventory controls.",
+    });
   },
 );
+registerCountObservationRoute(router);
+
+/**
+ * Construct the retained-count route independently from the full application
+ * router. This is also useful for integration tests that model multiple API
+ * instances with separate middleware objects and a shared backing store.
+ */
+export function createInventoryRouter(options: InventoryRouterOptions = {}): IRouter {
+  const isolatedRouter: IRouter = Router();
+  registerCountObservationRoute(isolatedRouter, options);
+  return isolatedRouter;
+}
 
 router.get("/inventory/count-observations/:id", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const id = Number(req.params.id);
@@ -834,6 +874,11 @@ router.post(
 // the vision provider.
 router.post(
   "/inventory/quality-photo",
+  (_req, res) => {
+    res.status(410).json({
+      error: "AI quality checks are disabled. Use the human quality procedure and history.",
+    });
+  },
   requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
@@ -971,6 +1016,11 @@ router.post(
 // sanitizing live in ./labelVerify for unit testing.
 router.post(
   "/inventory/label-verify",
+  (_req, res) => {
+    res.status(410).json({
+      error: "AI label verification is disabled. Use the manual label procedure or barcode flow.",
+    });
+  },
   requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
@@ -1101,18 +1151,12 @@ router.get(
   },
 );
 
-// AI expiry & waste insight. The server reads current inventory + the global
-// expiry-soon lead time and flags items that are expired or expiring soon
-// (pure logic in ./wasteInsight). When nothing is at risk it returns an empty
-// result WITHOUT calling the model (no cost for a no-op). Otherwise it asks the
-// model — grounded in facility memory ("waste"/"inventory") and the optional
-// upcoming-plan items — for a plain-language run-order suggestion to consume the
-// at-risk stock first. Advisory only: it never reorders runs or touches stock.
-// A best-effort note is recorded back to facility memory so the insight informs
-// future grounding; a write failure never fails the request.
+// Deterministic expiry/use-first view. The server reads current inventory and
+// the global expiry-soon lead time, then returns expired/expiring lots in
+// urgency order. The historical route and response fields remain compatible,
+// but there is no model call, generated advice, or facility-memory write.
 router.post(
   "/inventory/waste-insight",
-  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
@@ -1125,8 +1169,6 @@ router.post(
       res.status(validation.status).json({ error: validation.error });
       return;
     }
-    const plannedItems = validation.data.plannedItems ?? [];
-
     const settings = await loadSettings();
     const soonDays = settings.expirySoonDays ?? 7;
 
@@ -1157,68 +1199,10 @@ router.post(
     }));
     const flagged = flagExpiringItems(flaggable, soonDays);
 
-    // Nothing at risk → no AI call, no cost.
-    if (flagged.length === 0) {
-      res.json({ flagged: [], suggestion: null, generatedAt: Date.now() });
-      return;
-    }
-
-    const { system, user } = buildWastePrompt(flagged, plannedItems);
-    const groundedUser = await groundPromptWithMemory(req.log, user, {
-      facilityDomains: ["waste", "inventory"],
-    });
-
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 4096,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: groundedUser },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "waste-insight AI call failed");
-      res.json({
-        flagged,
-        suggestion: null,
-        generatedAt: Date.now(),
-        note: "Could not generate a suggestion right now. The flagged items above are still accurate.",
-      });
-      return;
-    }
-
-    const { suggestion, note } = sanitizeWasteSuggestion(content);
-
-    // Best-effort: remember that these items trended toward waste so future
-    // insights are grounded in it. Never let a memory write fail the request.
-    if (suggestion) {
-      try {
-        const topNames = flagged
-          .slice(0, 5)
-          .map((f) => f.name)
-          .join(", ");
-        await recordFacilityKnowledge([
-          {
-            domain: "waste",
-            key: `at-risk:${todayStr()}`,
-            fact: `On ${todayStr()}, at-risk stock flagged: ${topNames}. Suggested run-order: ${suggestion}`,
-            source: "waste-insight",
-          },
-        ]);
-      } catch (err) {
-        req.log.warn({ err }, "waste-insight memory write failed (non-fatal)");
-      }
-    }
-
     res.json({
       flagged,
-      suggestion: suggestion || null,
+      suggestion: null,
       generatedAt: Date.now(),
-      ...(note ? { note } : {}),
     });
   },
 );
@@ -1401,18 +1385,33 @@ export async function consumeRun(
   runId: string,
   lines: ConsumeLine[],
 ): Promise<{ applied: boolean; consumed: number }> {
-  return db.transaction(async (tx) => {
-    // Production only ever pulls from onsite/line stock. `onsiteId` is null when
-    // no location rows exist (all stock implicitly onsite), in which case the
-    // drawdown spans the still-null lots — same result as before this feature.
-    const onsiteId = await resolveOnsiteLocationId();
-    const onsiteCond = onsiteLotCond(onsiteId);
-    return applyRunConsumption(
+  return db.transaction((tx) => consumeRunInTransaction(tx, runId, lines));
+}
+
+/**
+ * Apply a completed run's immutable consumption lines inside a caller-owned
+ * transaction. Finalization uses this so endedAt, the intent outcome, the
+ * run-once marker, lot drawdown, and ledger entries commit or roll back together.
+ */
+export async function consumeRunInTransaction(
+  tx: InventoryExecutor,
+  runId: string,
+  lines: ConsumeLine[],
+): Promise<{ applied: boolean; consumed: number }> {
+  const scope = currentScope();
+  // Production only ever pulls from onsite/line stock. Resolve this through the
+  // same transaction as the drawdown; no inventory read escapes finalization.
+  const [onsite] = await tx.select({ id: inventoryLocationsTable.id })
+    .from(inventoryLocationsTable)
+    .where(and(eq(inventoryLocationsTable.scope, scope), eq(inventoryLocationsTable.isOnsite, true)))
+    .limit(1);
+  const onsiteCond = onsiteLotCond(onsite?.id ?? null);
+  return applyRunConsumption(
       {
         claimRun: async (rid) => {
           const [claim] = await tx
             .insert(inventoryConsumedRunsTable)
-            .values({ runId: rid, scope: currentScope() })
+            .values({ runId: rid, scope })
             .onConflictDoNothing({
               target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
             })
@@ -1423,13 +1422,13 @@ export async function consumeRun(
           const parts = itemKey.match(/^ingredient:(.*):(lbs|batches)$/);
           const ingredients = await tx.select({
             id: ingredientsTable.id, name: ingredientsTable.name, mergedInto: ingredientsTable.mergedInto,
-          }).from(ingredientsTable).where(eq(ingredientsTable.scope, currentScope()));
+          }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope));
           const expectedName = parts?.[1]?.trim().toLowerCase();
           const expectedIngredient = expectedName
             ? ingredients.find((i) => i.name.trim().toLowerCase() === expectedName)
             : undefined;
           const allItems = await tx.select().from(inventoryItemsTable)
-            .where(eq(inventoryItemsTable.scope, currentScope()));
+            .where(eq(inventoryItemsTable.scope, scope));
           const candidates = allItems
             .filter((item) => {
               if (item.productionIngredientId && expectedIngredient) {
@@ -1461,7 +1460,7 @@ export async function consumeRun(
           for (const entry of entries) {
             await tx.insert(inventoryLedgerTable).values({
               itemId,
-              scope: currentScope(),
+              scope,
               lotId: entry.lotId,
               type: "consume",
               qtyDelta: -entry.qty,
@@ -1474,7 +1473,6 @@ export async function consumeRun(
       runId,
       lines,
     );
-  });
 }
 
 // Draw down one manually-confirmed sauce barrel. The barrel index is folded

@@ -870,7 +870,11 @@ export const ParseSpecImagesBody = zod.object({
 export const ParseSpecImagesResponse = zod.object({
   "workbookText": zod.string().describe('Bounded workbook-style transcription suitable for the existing spec parser'),
   "generatedAt": zod.number(),
-  "note": zod.string().optional()
+  "note": zod.string().optional(),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -1012,304 +1016,10 @@ export const WasteInsightResponse = zod.object({
 
 
 /**
- * Analyzes the current day's runs, scheduled runs, and recent history and returns grouped/ranked recommendation cards. Read-only — never applies any change.
- * @summary AI optimization recommendations for runs and break timing
+ * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), and returns the authoritative deterministic discrepancy list. Available to any signed-in user.
+ * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
-export const AiOptimizeBody = zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-
-export const AiOptimizeResponse = zod.object({
-  "recommendations": zod.array(zod.object({
-  "category": zod.enum(['run', 'break', 'efficiency']),
-  "title": zod.string(),
-  "detail": zod.string(),
-  "impact": zod.enum(['high', 'medium', 'low']),
-  "appliesTo": zod.string().nullable().describe('Run label or scope this applies to, or null for shift-wide'),
-  "action": zod.union([zod.object({
-  "kind": zod.enum(['set_target_time', 'set_run_target', 'reorder_run']),
-  "label": zod.string().describe('Short imperative button caption'),
-  "time": zod.string().optional().describe('Target finish time HH:MM (set_target_time)'),
-  "runId": zod.string().optional().describe('Target run id (set_run_target, reorder_run)'),
-  "casesNeeded": zod.number().optional().describe('New case target (set_run_target)'),
-  "beforeRunId": zod.string().nullish().describe('reorder_run: move runId immediately before this run id, or null to move it last')
-}).describe('Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today\'s run ids.'),zod.null()]).optional().describe('Optional one-tap action, or null when nothing is safely applicable'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
-})),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when data is insufficient for analysis')
-})
-
-
-/**
- * Answers a plain-language question grounded strictly in the day's real run data, the shared facility memory, and the asking user's recent conversation turns. Keeps per-user follow-up context, never invents data (says so when it can't answer), and records the exchange back into that user's conversation memory. Read-only — never applies any change.
- * @summary Ask the AI a free-form question about the day
- */
-export const AiAskBody = zod.object({
-  "question": zod.string().describe('The user\'s plain-language question about the day'),
-  "dayState": zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-}).describe('A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.')
-
-export const AiAskResponse = zod.object({
-  "answer": zod.string().describe('The grounded plain-language answer'),
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The asking user\'s recent conversation window (oldest first) after this exchange was recorded, so the client can render the thread from server truth.'),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when the question could not be answered from data')
-})
-
-
-/**
- * Takes a single spoken utterance plus the live day-state and classifies it as either a QUESTION (the client routes it to /ai/ask, unchanged) or a COMMAND. For a command, returns one or more structured actions drawn from a fixed vocabulary, with every fuzzy reference already resolved against the grounding (a run by brand/flavor → run id, an inventory item by name → item key/id) and a friendly label attached. Returns an explicit "none" when nothing actionable was understood. This endpoint never mutates anything itself — the client runs the actions through its existing handlers (with role gating and Undo).
- * @summary Classify a spoken phrase as a question or an executable command
- */
-export const AiCommandBody = zod.object({
-  "utterance": zod.string().describe('The user\'s spoken phrase (a question or an action command)'),
-  "dayState": zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-}).describe('A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data \/ai\/ask uses), letting the server resolve fuzzy run references to concrete run ids.')
-
-export const AiCommandResponse = zod.unknown()
-
-
-/**
- * Answers a plain-language question about the current run's recipes and ingredients — scaling a recipe, suggesting a substitution, or explaining a formula — grounded strictly in the supplied recipe rows, the known ingredient pool, the shared name-corrections, and the facility memory. Advisory only: never edits or commits a recipe, never invents ingredients or quantities (says so plainly when the data is insufficient). Read-only.
- * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
- */
-export const AiRecipeAssistantBody = zod.object({
-  "question": zod.string().describe('The user\'s plain-language recipe\/ingredient question'),
-  "recipes": zod.array(zod.object({
-  "id": zod.string().optional().describe('Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an \"apply\" suggestion target this exact recipe deterministically.'),
-  "kind": zod.string().describe('What the recipe is for (dough, sauce, cheese, other)'),
-  "name": zod.string().describe('The recipe\'s name (may be empty if unnamed)'),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number().describe('Pounds of this ingredient in the recipe\/batch')
-}).describe('One ingredient line of a recipe (ingredient name + pounds).'))
-}).describe('One of the current run\'s recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).')).describe('The current run\'s recipes (dough\/sauce\/cheese), may be empty'),
-  "ingredientNames": zod.array(zod.string()).optional().describe('Known ingredient names, so substitutions stay within the app\'s pool'),
-  "context": zod.object({
-  "brand": zod.string().optional(),
-  "flavor": zod.string().optional(),
-  "casesNeeded": zod.number().optional(),
-  "pizzasPerCase": zod.number().optional(),
-  "doughballWeightOz": zod.number().optional().describe('Target weight of one doughball in ounces')
-}).optional().describe('Optional run numbers the model may use to ground scaling math so its answer is consistent with what the app computes.')
-}).describe('A plain-language recipe\/ingredient question plus the real recipe rows, the known ingredient pool, and optional run context the answer must be grounded in. Both clients send identically-shaped data.')
-
-export const AiRecipeAssistantResponse = zod.object({
-  "answer": zod.string().describe('The grounded plain-language answer'),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when the question could not be answered from data'),
-  "suggestion": zod.object({
-  "kind": zod.enum(['scale', 'substitute']).describe('Whether this resizes a recipe (scale) or swaps an ingredient (substitute)'),
-  "recipeId": zod.string().describe('The id of the recipe to apply this to, copied from the matching RecipeAssistRecipe.id sent in the request.'),
-  "recipeName": zod.string().optional().describe('The target recipe\'s display name (for the confirmation UI)'),
-  "summary": zod.string().optional().describe('A short button\/label describing the change (e.g. \"Apply scaled dough 1.5x\")'),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number().describe('Pounds of this ingredient in the recipe\/batch')
-}).describe('One ingredient line of a recipe (ingredient name + pounds).')).describe('The COMPLETE new set of ingredient rows for that recipe after the change')
-}).optional().describe('An optional structured, confirm-first edit the worker can apply in one tap — the exact resulting ingredient rows of a scaled or substituted recipe. Present only for SCALE\/SUBSTITUTE questions where the model could produce exact rows; absent for EXPLAIN questions or when it is unsure. Advisory: nothing is applied until the worker confirms.')
-})
-
-
-/**
- * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), then asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: the deterministic discrepancy list is always returned even if the AI summary is unavailable. Available to any signed-in user.
- * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
- */
-export const AiSpecReconcileBody = zod.object({
+export const OperationsSpecReconciliationBody = zod.object({
   "specSheetId": zod.number().int().describe('The id of the saved spec sheet to check against'),
   "currentRecipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1336,7 +1046,7 @@ export const AiSpecReconcileBody = zod.object({
 }).describe('A brand+flavor profile reduced to the run-setup spec fields the reconcile diff needs (die type, sauce oz\/pizza, applicator and pepperoni slots). Extra fields are allowed so a richer profile object passes through.')).optional().describe('The app\'s current brand+flavor profiles, so the diff can also compare profile spec fields (die\/sauce\/applicators\/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared.')
 })
 
-export const AiSpecReconcileResponse = zod.object({
+export const OperationsSpecReconciliationResponse = zod.object({
   "specSheetId": zod.number().int(),
   "discrepancies": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1347,18 +1057,15 @@ export const AiSpecReconcileResponse = zod.object({
   "currentLbs": zod.number().optional(),
   "message": zod.string()
 })),
-  "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
 /**
- * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint takes that exact discrepancy list and asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: an AI error simply yields an empty summary, never an error. It never invents or applies anything. Available to any signed-in user.
- * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint validates and returns that exact deterministic discrepancy list. It never invents or applies anything. Available to any signed-in user.
+ * @summary Return already-computed mix discrepancies; read-only
  */
-export const AiMixReconcileBody = zod.object({
+export const OperationsMixReconciliationBody = zod.object({
   "label": zod.string().optional().describe('Optional label for what was compared (e.g. the sheet name)'),
   "discrepancies": zod.array(zod.object({
   "source": zod.enum(['premix', 'spec']),
@@ -1373,220 +1080,27 @@ export const AiMixReconcileBody = zod.object({
 })).describe('The deterministic discrepancies computed client-side')
 })
 
-export const AiMixReconcileResponse = zod.object({
-  "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI supplied the advisory summary; false for deterministic-only or unavailable responses'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+export const OperationsMixReconciliationResponse = zod.object({
+  "discrepancies": zod.array(zod.object({
+  "source": zod.enum(['premix', 'spec']),
+  "type": zod.enum(['missing-mix', 'missing-component', 'extra-component', 'amount-mismatch', 'pull-timing-mismatch']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "mixName": zod.string(),
+  "ingredient": zod.string().optional(),
+  "sheetPerPizza": zod.number().optional(),
+  "mixPerPizza": zod.number().optional(),
+  "message": zod.string()
+})).describe('The validated deterministic discrepancies supplied by the client'),
+  "generatedAt": zod.number()
 })
 
 
 /**
- * Answers a plain-language question grounded strictly in the current mix definitions and the facility memory. Advisory only: it explains and computes but never edits a mix or applies anything (no structured suggestion). Available to any signed-in user.
- * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
+ * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, deterministic plain-language recap for floor staff and managers. Read-only — never writes or commits run data.
+ * @summary Plain-language end-of-day / weekly production recap; read-only
  */
-export const AiMixAssistantBody = zod.object({
-  "question": zod.string(),
-  "mixes": zod.array(zod.object({
-  "name": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "batchSize": zod.number().optional(),
-  "daysEarly": zod.number().optional(),
-  "amountAlreadyMade": zod.number().optional(),
-  "enabled": zod.boolean().optional(),
-  "components": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
-  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch, retained from the source workbook')
-}))
-}))
-})
-
-export const AiMixAssistantResponse = zod.object({
-  "answer": zod.string(),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional()
-})
-
-
-/**
- * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
- * @summary At-most-one proactive shift alert (AI); read-only
- */
-export const AiProactiveAlertBody = zod.object({
-  "date": zod.string(),
-  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
-  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
-  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
-  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
-  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
-  "runs": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).describe('Today\'s runs (running, upcoming, and finished)'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Future planned runs'),
-  "historyRuns": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "status": zod.enum(['running', 'upcoming', 'finished']),
-  "casesNeeded": zod.number(),
-  "casesMade": zod.number().describe('Recorded\/cased output only; excludes work still in the freezer or on the line'),
-  "casesOnLine": zod.number().optional().describe('Lifecycle-aware cases pressed but not yet cased (freezer\/on-line work in progress); optional for older clients'),
-  "casesLeft": zod.number(),
-  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
-  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
-  "minutesRemaining": zod.number().nullable(),
-  "netElapsedSec": zod.number(),
-  "downtimeSec": zod.number(),
-  "stoppages": zod.array(zod.object({
-  "reason": zod.string(),
-  "durationSec": zod.number(),
-  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-})),
-  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
-  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
-})).optional().describe('Recent finished runs from prior days'),
-  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
-})
-
-export const AiProactiveAlertResponse = zod.object({
-  "alert": zod.union([zod.object({
-  "key": zod.string().describe('Stable de-dup slug for the kind of nudge'),
-  "category": zod.enum(['run', 'break', 'efficiency']),
-  "title": zod.string().describe('Short glanceable headline'),
-  "detail": zod.string().describe('One or two plain-language sentences a manager can act on'),
-  "impact": zod.enum(['high', 'medium', 'low'])
-}).describe('A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. \"behind-plan\", \"break-window\") so repeats of the same situation can be de-duped\/cooled down client-side; it is never run-instance or timestamp specific.'),zod.null()]).describe('The single nudge to surface now, or null when nothing applies'),
-  "generatedAt": zod.number(),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional message when no alert could be produced')
-})
-
-
-/**
- * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
- */
-export const GetProactiveAlertSettingsResponse = zod.object({
-  "enabled": zod.boolean(),
-  "pollSeconds": zod.number().int(),
-  "cooldownSeconds": zod.number().int()
-})
-
-
-/**
- * @summary Update global proactive-alert settings (manager only)
- */
-export const UpdateProactiveAlertSettingsBody = zod.object({
-  "enabled": zod.boolean(),
-  "pollSeconds": zod.number().int(),
-  "cooldownSeconds": zod.number().int()
-})
-
-export const UpdateProactiveAlertSettingsResponse = zod.object({
-  "enabled": zod.boolean(),
-  "pollSeconds": zod.number().int(),
-  "cooldownSeconds": zod.number().int()
-})
-
-
-/**
- * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
- * @summary Predict an upcoming day's run plan (AI); read-only
- */
-export const aiForecastBodyHorizonDaysMax = 7;
-
-
-
-export const AiForecastBody = zod.object({
-  "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the first upcoming day to forecast'),
-  "horizonDays": zod.number().int().min(1).max(aiForecastBodyHorizonDaysMax).optional().describe('How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday\'s history.'),
-  "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
-  "history": zod.array(zod.object({
-  "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when unknown'),
-  "cases": zod.number().describe('Cases actually produced for this run'),
-  "netRunMin": zod.number().describe('Net run minutes (excludes downtime); a throughput signal')
-}).describe('A finished run from a past day, used to learn demand patterns.'))
-}).describe('One past production day with its finished runs.')).describe('Recent finished production days, most useful when several weeks deep'),
-  "scheduledRuns": zod.array(zod.object({
-  "date": zod.string(),
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string(),
-  "casesNeeded": zod.number()
-})).optional().describe('Runs already planned for future days (incl. any existing plan for the target day)')
-})
-
-export const AiForecastResponse = zod.object({
-  "forecast": zod.union([zod.object({
-  "targetDate": zod.string(),
-  "confidence": zod.enum(['high', 'medium', 'low']).describe('Honest confidence given how much history supports the prediction'),
-  "summary": zod.string().describe('Plain-language rationale for the whole plan, incl. caveats'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when the model is unsure'),
-  "casesNeeded": zod.number().describe('Rough suggested case target'),
-  "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
-}).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
-}),zod.null()]).describe('The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present.'),
-  "forecasts": zod.array(zod.object({
-  "targetDate": zod.string(),
-  "confidence": zod.enum(['high', 'medium', 'low']).describe('Honest confidence given how much history supports the prediction'),
-  "summary": zod.string().describe('Plain-language rationale for the whole plan, incl. caveats'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when the model is unsure'),
-  "casesNeeded": zod.number().describe('Rough suggested case target'),
-  "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
-}).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
-})).optional().describe('One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon.'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI produced a forecast; false when no forecast was produced'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Explanation when no forecast could responsibly be produced')
-})
-
-
-/**
- * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, plain-language recap for floor staff and managers. The numeric stats are computed deterministically server-side; the AI only narrates them and never invents figures. Read-only — never writes or commits run data. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic plain-language summary built from the same stats is returned instead, so the caller always gets a usable recap.
- * @summary Plain-language end-of-day / weekly production recap (AI); read-only
- */
-export const AiSummaryBody = zod.object({
+export const OperationsRecapBody = zod.object({
   "scope": zod.enum(['day', 'week']).describe('Whether to recap a single day or a rolling week'),
   "date": zod.string().describe('ISO date for the day, or the week-ending date for a weekly recap'),
   "nowMs": zod.number().describe('Client clock in epoch ms'),
@@ -1603,8 +1117,8 @@ export const AiSummaryBody = zod.object({
   "wasteFlaggedCount": zod.number().optional().describe('Inventory items flagged at-risk \/ waste within the scope (optional)')
 })
 
-export const AiSummaryResponse = zod.object({
-  "summary": zod.string().describe('Plain-language recap (AI narration, or deterministic fallback)'),
+export const OperationsRecapResponse = zod.object({
+  "summary": zod.string().describe('Deterministic plain-language recap'),
   "stats": zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string(),
@@ -1624,14 +1138,12 @@ export const AiSummaryResponse = zod.object({
   "wasteFlaggedCount": zod.number(),
   "hasData": zod.boolean()
 }).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates production facts derived from every canonical scoped daily-sync snapshot in the requested date range. The legacy runs field is accepted for compatibility but ignored; clients cannot supply report production facts. The report enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReportBodyRunsMax = 600;
@@ -1649,7 +1161,7 @@ export const ExportOperationalReportBody = zod.object({
   "finished": zod.boolean().describe('Whether the run was completed'),
   "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
-}).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax)
+}).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
 
 export const ExportOperationalReportResponse = zod.object({
@@ -1701,6 +1213,353 @@ export const ExportOperationalReportResponse = zod.object({
   "flaggedItems": zod.number().int().optional()
 }).nullable(),
   "note": zod.string().optional()
+})
+})
+
+
+/**
+ * Re-derives the canonical report from server-side scoped records and appends it to the audit archive. Client report JSON is never accepted. Repeating a finalization for the same scope and reporting period returns the original immutable record and never replaces it.
+ * @summary Finalize an immutable authoritative operational report
+ */
+export const finalizeOperationalReportBodyRunsMax = 600;
+
+
+
+export const FinalizeOperationalReportBody = zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string().describe('ISO date, or week-ending date for a weekly report'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
+  "finished": zod.boolean().describe('Whether the run was completed'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
+  "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
+}).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
+})
+
+export const FinalizeOperationalReportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
+}).and(zod.object({
+  "scope": zod.enum(['live', 'sandbox']),
+  "idempotent": zod.boolean().optional(),
+  "report": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "periodStart": zod.string(),
+  "periodEnd": zod.string(),
+  "generatedAt": zod.coerce.date(),
+  "production": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "runsPlanned": zod.number(),
+  "runsFinished": zod.number(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "attainmentPct": zod.number(),
+  "totalDowntimeMinutes": zod.number(),
+  "totalStoppages": zod.number(),
+  "topDowntime": zod.union([zod.object({
+  "label": zod.string(),
+  "minutes": zod.number()
+}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
+  "unfinishedRuns": zod.array(zod.string()),
+  "incidentCount": zod.number(),
+  "wasteFlaggedCount": zod.number(),
+  "hasData": zod.boolean()
+}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
+  "quality": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "incidents": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "inventory": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "flaggedItems": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+})
+})
+}))
+
+
+/**
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
+ */
+export const ListFinalizedOperationalReportsQueryParams = zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.date()
+})
+
+export const ListFinalizedOperationalReportsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
+})
+export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
+
+
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
+export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
+export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+
+
+
+export const SearchFinalizedOperationalReportsQueryParams = zod.object({
+  "startDate": zod.date(),
+  "endDate": zod.date(),
+  "scope": zod.enum(['day', 'week']).optional(),
+  "limit": zod.coerce.number().int().min(1).max(searchFinalizedOperationalReportsQueryLimitMax).default(searchFinalizedOperationalReportsQueryLimitDefault)
+})
+
+export const SearchFinalizedOperationalReportsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
+})
+export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinalizedOperationalReportsResponseItem)
+
+
+/**
+ * @summary Retrieve one immutable finalized operational report
+ */
+export const GetFinalizedOperationalReportParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const GetFinalizedOperationalReportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
+}).and(zod.object({
+  "scope": zod.enum(['live', 'sandbox']),
+  "idempotent": zod.boolean().optional(),
+  "report": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "periodStart": zod.string(),
+  "periodEnd": zod.string(),
+  "generatedAt": zod.coerce.date(),
+  "production": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "runsPlanned": zod.number(),
+  "runsFinished": zod.number(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "attainmentPct": zod.number(),
+  "totalDowntimeMinutes": zod.number(),
+  "totalStoppages": zod.number(),
+  "topDowntime": zod.union([zod.object({
+  "label": zod.string(),
+  "minutes": zod.number()
+}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
+  "unfinishedRuns": zod.array(zod.string()),
+  "incidentCount": zod.number(),
+  "wasteFlaggedCount": zod.number(),
+  "hasData": zod.boolean()
+}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
+  "quality": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "checks": zod.number().int().optional(),
+  "issues": zod.number().int().optional(),
+  "failed": zod.number().int().optional(),
+  "warnings": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "incidents": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "total": zod.number().int().optional(),
+  "unresolved": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "inventory": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "flaggedItems": zod.number().int().optional()
+}).nullable(),
+  "note": zod.string().optional()
+})
+})
+}))
+
+
+/**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
+export const DownloadCanonicalOperationalReportParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const DownloadCanonicalOperationalReportQueryParams = zod.object({
+  "format": zod.enum(['csv', 'xlsx', 'print']),
+  "jobId": zod.coerce.string().uuid().optional().describe('Completed export-package job whose pre-generated retained artifact should be served.')
+})
+
+export const DownloadCanonicalOperationalReportResponse = zod.unknown()
+
+
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
+export const GetOperationalRunViewQueryParams = zod.object({
+  "date": zod.date(),
+  "runId": zod.coerce.string()
+})
+
+export const GetOperationalRunViewResponse = zod.object({
+  "version": zod.literal(1),
+  "date": zod.coerce.date(),
+  "runId": zod.string(),
+  "observed": zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "status": zod.enum(['not-started', 'running', 'paused', 'ended']),
+  "startedAt": zod.number().optional(),
+  "pausedAt": zod.number().optional(),
+  "endedAt": zod.number().optional(),
+  "elapsedBatchSec": zod.number(),
+  "substitutionsApplied": zod.number().int(),
+  "packagingProgress": zod.union([zod.object({
+  "skidsCompleted": zod.number(),
+  "casesOnCurrentSkid": zod.number()
+}),zod.null()]),
+  "temporaryOverrides": zod.object({
+  "freezerTime": zod.boolean(),
+  "crustsPerCycle": zod.boolean(),
+  "cycleSpeed": zod.boolean()
+}),
+  "stoppages": zod.object({
+  "count": zod.number().int(),
+  "downtimeSeconds": zod.number()
+})
+}),
+  "recap": zod.object({
+  "casesNeeded": zod.number(),
+  "casesCompleted": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressDone": zod.boolean(),
+  "extraCases": zod.number()
+}),
+  "elapsed": zod.object({
+  "batchSec": zod.number(),
+  "phase": zod.object({
+  "stage1": zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['filling', 'active', 'paused', 'draining', 'resuming', 'empty']),
+  "remainMs": zod.number()
+}),
+  "stage2": zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['filling', 'active', 'paused', 'draining', 'resuming', 'empty']),
+  "remainMs": zod.number()
+}),
+  "stage3": zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['filling', 'active', 'paused', 'draining', 'resuming', 'empty']),
+  "remainMs": zod.number()
+})
+})
+}),
+  "pace": zod.object({
+  "ppm": zod.number(),
+  "paceStatus": zod.enum(['on-pace', 'ahead', 'behind']).nullable(),
+  "paceDelta": zod.number(),
+  "catchUpPpm": zod.union([zod.number(),zod.null()])
+}),
+  "advisory": zod.object({
+  "freezer": zod.object({
+  "cases": zod.number(),
+  "configuredMinutes": zod.number()
+}),
+  "line": zod.object({
+  "cases": zod.number()
+})
+}).describe('Read-only projections; never authoritative counter or inventory writes.'),
+  "calculatedAt": zod.number(),
+  "freshness": zod.object({
+  "status": zod.enum(['fresh', 'stale']),
+  "snapshotId": zod.string(),
+  "capturedAt": zod.number(),
+  "ageMs": zod.number(),
+  "maxAgeMs": zod.number()
+}),
+  "formulaProvenance": zod.object({
+  "policy": zod.enum(['operational-run-view']),
+  "policyVersion": zod.literal(1),
+  "calculator": zod.enum(['computeServerCalc']),
+  "calculatorVersion": zod.literal(1),
+  "temporaryOverrides": zod.enum(['applyTemporaryOverrides']),
+  "inventory": zod.array(zod.enum(['computeCasesOnLine', 'computeCasesInFreezer'])),
+  "linePhases": zod.enum(['computeLinePhases']),
+  "linePhasesVersion": zod.literal(1)
 })
 })
 
@@ -1761,67 +1620,14 @@ export const GetShiftHandoffDigestResponse = zod.object({
 
 
 /**
- * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
- * @summary Review how accurate past forecasts were vs. what actually ran; read-only
+ * Reads the recorded incident log and deterministically groups recurring reports and crashes by screen and platform. Counts and descriptions come only from recorded incidents; the endpoint never invents incidents or edits anything. Read-only and advisory.
+ * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
-export const AiForecastAccuracyBody = zod.object({
-  "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
-  "history": zod.array(zod.object({
-  "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().describe('May be empty when unknown'),
-  "cases": zod.number().describe('Cases actually produced for this run'),
-  "netRunMin": zod.number().describe('Net run minutes (excludes downtime); a throughput signal')
-}).describe('A finished run from a past day, used to learn demand patterns.'))
-}).describe('One past production day with its finished runs.')).describe('Recent finished production days (the actual results to compare forecasts to)')
-}).describe('Actual finished production history to grade past forecasts against.')
-
-export const AiForecastAccuracyResponse = zod.object({
-  "reviews": zod.array(zod.object({
-  "date": zod.string().describe('ISO date (YYYY-MM-DD) the forecast was for'),
-  "confidence": zod.enum(['high', 'medium', 'low']).describe('Confidence the forecast was issued with'),
-  "predictedTotalCases": zod.number(),
-  "actualTotalCases": zod.number(),
-  "caseAccuracyPct": zod.number().describe('0–100 closeness of predicted total cases to actual total cases'),
-  "products": zod.array(zod.object({
-  "label": zod.string().describe('Product label (brand + flavor) as recorded\/run'),
-  "predictedCases": zod.number().describe('Cases the forecast predicted (0 if it was not predicted)'),
-  "actualCases": zod.number().describe('Cases actually produced (0 if it did not run)'),
-  "status": zod.enum(['hit', 'over', 'under', 'missed', 'unexpected']).describe('hit = predicted ≈ actual; over\/under = predicted more\/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted')
-}).describe('One product\'s predicted vs. actual cases for a reviewed day.'))
-}).describe('One past forecast graded against the day\'s actual finished runs.')).describe('Per-date reviews, most recent first'),
-  "trend": zod.object({
-  "daysScored": zod.number().describe('Number of reviewed (forecast + finished) days included'),
-  "averageCaseAccuracyPct": zod.number().describe('Mean case-accuracy across the reviewed days (0–100)'),
-  "chronicOver": zod.array(zod.object({
-  "label": zod.string().describe('Product label (brand + flavor)'),
-  "daysOver": zod.number().describe('Reviewed days this product was over-predicted'),
-  "daysUnder": zod.number().describe('Reviewed days this product was under-predicted'),
-  "daysScored": zod.number().describe('Reviewed days this product appeared in at all')
-}).describe('A product the forecast consistently mis-predicts across reviewed days.')).describe('Products repeatedly over-predicted, most frequent first'),
-  "chronicUnder": zod.array(zod.object({
-  "label": zod.string().describe('Product label (brand + flavor)'),
-  "daysOver": zod.number().describe('Reviewed days this product was over-predicted'),
-  "daysUnder": zod.number().describe('Reviewed days this product was under-predicted'),
-  "daysScored": zod.number().describe('Reviewed days this product appeared in at all')
-}).describe('A product the forecast consistently mis-predicts across reviewed days.')).describe('Products repeatedly under-predicted, most frequent first')
-}).describe('Cross-day calibration summary rolled up from the per-day reviews.'),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Explanation when there is nothing to review yet')
-})
-
-
-/**
- * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
- * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
- */
-export const AiIncidentClustersBody = zod.object({
+export const OperationsIncidentPatternsBody = zod.object({
   "lookbackDays": zod.number().optional().describe('Only cluster incidents created within this many days (default 30)')
 }).describe('No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.')
 
-export const AiIncidentClustersResponse = zod.object({
+export const OperationsIncidentPatternsResponse = zod.object({
   "clusters": zod.array(zod.object({
   "theme": zod.string().describe('Short human-readable label for the grouped issue'),
   "rootCauseHypothesis": zod.string().describe('Plain-language guess at what these incidents share'),
@@ -1832,16 +1638,15 @@ export const AiIncidentClustersResponse = zod.object({
 })),
   "totalIncidents": zod.number().describe('How many incidents were considered'),
   "note": zod.string().optional().describe('Optional explanation (e.g. too few incidents to cluster)'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI proposed the grouping; false for the deterministic fallback')
+  "generatedAt": zod.number()
 })
 
 
 /**
- * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. The drift detection is computed server-side and is fully deterministic; the AI is only asked to NARRATE a short plain-language summary, and only when at least one anomaly is flagged (no flags → no AI call). Read-only and advisory — never edits or commits run data. Fail-safe: if the AI is unavailable, the deterministic anomaly list is still returned with an empty narration.
- * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. Detection and descriptions are fully deterministic. Read-only — never edits or commits run data.
+ * @summary Flag production runs that drifted from their historical norm; read-only
  */
-export const AiAnomaliesBody = zod.object({
+export const OperationsAnomalyDetectionBody = zod.object({
   "today": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -1860,7 +1665,7 @@ export const AiAnomaliesBody = zod.object({
 }).describe('One finished run, in the flat shape both apps produce for summaries.')).describe('Recent finished runs from prior days (baseline pool)')
 })
 
-export const AiAnomaliesResponse = zod.object({
+export const OperationsAnomalyDetectionResponse = zod.object({
   "anomalies": zod.array(zod.object({
   "runLabel": zod.string(),
   "brand": zod.string(),
@@ -1874,19 +1679,17 @@ export const AiAnomaliesResponse = zod.object({
 })),
   "checkedRuns": zod.number(),
   "baselineRuns": zod.number(),
-  "summary": zod.string().describe('Plain-language narration (AI), or empty when nothing was flagged \/ AI unavailable'),
+  "summary": zod.string().describe('Deterministic summary, or empty when nothing was flagged'),
   "note": zod.string().optional().describe('Optional explanation (e.g. not enough history to judge)'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
 /**
- * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side and are fully deterministic (shared @workspace/schedule-optimize lib); the AI is only asked to NARRATE a short plain-language explanation, and only when a better order exists (no improvement → no AI call). Read-only and advisory — never edits or commits the schedule. Fail-safe: if the AI is unavailable, the deterministic suggested order is still returned with an empty narration.
- * @summary Suggest an optimal run order for the day (AI narration); read-only
+ * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side by the shared @workspace/schedule-optimize library. Read-only — never edits or commits the schedule.
+ * @summary Suggest a deterministic run order for the day; read-only
  */
-export const AiScheduleOptimizeBody = zod.object({
+export const OperationsScheduleOrderingBody = zod.object({
   "runs": zod.array(zod.object({
   "id": zod.string(),
   "label": zod.string().describe('Human label for messaging, e.g. \"Run 2 · Margherita\"'),
@@ -1907,7 +1710,7 @@ export const AiScheduleOptimizeBody = zod.object({
 }).describe('A factory sequence production rule (only sequence-type rules affect ordering).')).optional().describe('Factory production rules (optional; only sequence rules apply)')
 })
 
-export const AiScheduleOptimizeResponse = zod.object({
+export const OperationsScheduleOrderingResponse = zod.object({
   "order": zod.array(zod.string()).describe('Suggested run order (run ids), best-first'),
   "changed": zod.boolean().describe('True when the suggested order differs from the input order'),
   "improved": zod.boolean().describe('True when the suggested order is strictly better than the input'),
@@ -1921,11 +1724,9 @@ export const AiScheduleOptimizeResponse = zod.object({
   "ruleViolations": zod.number(),
   "changeovers": zod.number()
 }),
-  "summary": zod.string().describe('Plain-language narration (AI), or empty when no improvement \/ AI unavailable'),
+  "summary": zod.string().describe('Deterministic summary, or empty when no improvement is available'),
   "note": zod.string().optional().describe('Optional explanation (e.g. already optimally ordered)'),
-  "generatedAt": zod.number(),
-  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration')
+  "generatedAt": zod.number()
 })
 
 
@@ -1962,7 +1763,11 @@ export const AiFillMissingResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when no suggestions could be made')
+  "note": zod.string().optional().describe('Optional message when no suggestions could be made'),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2035,7 +1840,9 @@ export const AiMatchImportResponse = zod.object({
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional message when no matches could be made')
+  "note": zod.string().optional().describe('Optional message when no matches could be made'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2062,7 +1869,9 @@ export const AiMatchPremixResponse = zod.object({
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional message when no matches could be made')
+  "note": zod.string().optional().describe('Optional message when no matches could be made'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2094,6 +1903,13 @@ export const AiParseSpecSheetBody = zod.object({
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).optional().describe('Learned spec-import aliases to ground name mapping')
 })
 
+export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
+
+
+export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
+
+
+
 export const AiParseSpecSheetResponse = zod.object({
   "profiles": zod.array(zod.object({
   "brand": zod.string(),
@@ -2101,12 +1917,17 @@ export const AiParseSpecSheetResponse = zod.object({
   "dieType": zod.string().optional(),
   "sauceOzPerPizza": zod.number().optional(),
   "sauceName": zod.string().optional().describe('Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought\/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name.'),
+  "doughName": zod.string().optional().describe('Exact dough or crust recipe name assigned to this product profile.'),
+  "targetDoughballWeight": zod.number().gt(aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin).optional().describe('Product-specific target doughball weight in ounces.'),
+  "doughballsPerTray": zod.number().int().min(1).optional().describe('Product-specific number of doughballs per tray.'),
   "pizzasPerCase": zod.number().optional().describe('Case pack: how many pizzas go in one case, when the sheet states it. Optional.'),
   "sauceBarrelLbs": zod.number().optional().describe('Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional.'),
   "applicators": zod.array(zod.object({
   "type": zod.string(),
   "ozPerPizza": zod.number(),
-  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese\/topping recipe for this slot derives the batch size from its row sum instead. Optional.')
+  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese\/topping recipe for this slot derives the batch size from its row sum instead. Optional.'),
+  "slot": zod.number().int().min(1).max(aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax).optional().describe('Physical applicator slot when the workbook identifies it.'),
+  "recipeName": zod.string().optional().describe('Exact cheese or mix recipe linked to this applicator slot.')
 })),
   "pepperonis": zod.array(zod.object({
   "type": zod.string(),
@@ -2147,7 +1968,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "flavor": zod.string().describe('Final (post-correction) flavor of the profile the warning concerns'),
   "message": zod.string().describe('Human-readable explanation of the correction\/flag')
 })).optional().describe('Flavor-grounding corrections\/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row.'),
-  "generatedAt": zod.number()
+  "generatedAt": zod.number(),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2178,7 +2003,9 @@ export const AiSuggestMergesResponse = zod.object({
   "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
   "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional brief overall comment from the model')
+  "note": zod.string().optional().describe('Optional brief overall comment from the model'),
+  "decision": zod.enum(['suggestion']),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
 
@@ -2276,6 +2103,109 @@ export const DeleteDeniedMergesResponse = zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
 }).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+})
+
+
+/**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
+export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
+
+
+
+export const listDuplicateReviewsResponseCountMin = 0;
+
+
+
+export const ListDuplicateReviewsResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(listDuplicateReviewsResponseGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})),
+  "count": zod.number().int().min(listDuplicateReviewsResponseCountMin)
+})
+
+
+/**
+ * Adds newly observed duplicate groups to the current facility's pending review ledger. Existing groups are left unchanged, including groups already resolved or ignored, so stale scans cannot reopen work.
+ * @summary Record duplicate groups for manager review
+ */
+export const saveDuplicateReviewsBodyGroupsItemGroupKeyMax = 500;
+
+
+
+export const saveDuplicateReviewsBodyGroupsMax = 1000;
+
+
+
+export const SaveDuplicateReviewsBody = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(saveDuplicateReviewsBodyGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})).max(saveDuplicateReviewsBodyGroupsMax)
+})
+
+export const saveDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
+
+
+
+export const saveDuplicateReviewsResponseCountMin = 0;
+
+
+
+export const SaveDuplicateReviewsResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(saveDuplicateReviewsResponseGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})),
+  "count": zod.number().int().min(saveDuplicateReviewsResponseCountMin)
+})
+
+
+/**
+ * Explicitly closes one pending group after a manager reviewed it. This endpoint does not merge or delete master data.
+ * @summary Resolve or ignore one duplicate-review group
+ */
+export const resolveDuplicateReviewBodyGroupKeyMax = 500;
+
+
+
+export const ResolveDuplicateReviewBody = zod.object({
+  "groupKey": zod.string().min(1).max(resolveDuplicateReviewBodyGroupKeyMax),
+  "outcome": zod.enum(['resolved', 'ignored'])
+})
+
+export const resolveDuplicateReviewResponseGroupsItemGroupKeyMax = 500;
+
+
+
+export const resolveDuplicateReviewResponseCountMin = 0;
+
+
+
+export const ResolveDuplicateReviewResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "groupKey": zod.string().min(1).max(resolveDuplicateReviewResponseGroupsItemGroupKeyMax),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().nullish(),
+  "target": zod.string().min(1),
+  "sources": zod.array(zod.string()).min(1),
+  "status": zod.enum(['pending', 'resolved', 'ignored'])
+})),
+  "count": zod.number().int().min(resolveDuplicateReviewResponseCountMin)
 })
 
 
@@ -2858,6 +2788,11 @@ export const DeleteDieTypesResponse = zod.object({
  * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
  * @summary List facility-wide run templates
  */
+export const listRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const listRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+
+export const listRunTemplatesResponseTemplatesItemDeletedDefault = false;
+
 export const ListRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -2865,15 +2800,22 @@ export const ListRunTemplatesResponse = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(listRunTemplatesResponseTemplatesItemRevisionMin).max(listRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(listRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
 /**
- * Upserts a batch of run templates by id. Each template is normalized and validated server-side; malformed templates are dropped. Any signed-in user may save (matching the previous local behavior where anyone could create a template).
+ * Upserts a batch of run templates by id and revision. A write applies only when its revision is strictly newer than the stored revision; equal revisions are idempotent. Any signed-in user may save.
  * @summary Create or update run templates
  */
+export const saveRunTemplatesBodyTemplatesItemRevisionMin = 0;
+export const saveRunTemplatesBodyTemplatesItemRevisionMax = 9007199254740991;
+
+export const saveRunTemplatesBodyTemplatesItemDeletedDefault = false;
+
 export const SaveRunTemplatesBody = zod.object({
   "templates": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -2881,9 +2823,16 @@ export const SaveRunTemplatesBody = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
-}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).')).describe('The batch of run templates to create or update (by id)')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(saveRunTemplatesBodyTemplatesItemRevisionMin).max(saveRunTemplatesBodyTemplatesItemRevisionMax).optional().describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(saveRunTemplatesBodyTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
+}).describe('A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.')).describe('The batch of run templates to create or update (by id)')
 })
+
+export const saveRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const saveRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+
+export const saveRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const SaveRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -2892,18 +2841,52 @@ export const SaveRunTemplatesResponse = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(saveRunTemplatesResponseTemplatesItemRevisionMin).max(saveRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(saveRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
 
 /**
- * Removes a batch of run templates by id. Any signed-in user may delete.
- * @summary Delete run templates by id
+ * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
+ * @summary Tombstone run templates by id and revision
  */
-export const DeleteRunTemplatesBody = zod.object({
-  "ids": zod.array(zod.string()).describe('The ids of the run templates to delete')
-})
+export const deleteRunTemplatesBodyOneItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyOneItemsItemRevisionMax = 9007199254740991;
+
+export const deleteRunTemplatesBodyTwoItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyTwoItemsItemRevisionMax = 9007199254740991;
+
+export const deleteRunTemplatesBodyThreeItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
+
+
+
+export const DeleteRunTemplatesBody = zod.union([zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "revision": zod.number().int().min(deleteRunTemplatesBodyOneItemsItemRevisionMin).max(deleteRunTemplatesBodyOneItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+})).describe('Deletion tombstones to apply by id and revision'),
+  "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
+}),zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "revision": zod.number().int().min(deleteRunTemplatesBodyTwoItemsItemRevisionMin).max(deleteRunTemplatesBodyTwoItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+})).optional().describe('Deletion tombstones to apply by id and revision'),
+  "ids": zod.array(zod.string()).describe('Legacy deletion ids. The server atomically assigns a newer revision.')
+})]).and(zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "revision": zod.number().int().min(deleteRunTemplatesBodyThreeItemsItemRevisionMin).max(deleteRunTemplatesBodyThreeItemsItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)')
+})).optional().describe('Deletion tombstones to apply by id and revision'),
+  "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
+})).describe('Revisioned deletion tombstones and\/or legacy template ids. At least one of `items` or `ids` must be supplied.')
+
+export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+
+export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const DeleteRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -2912,7 +2895,9 @@ export const DeleteRunTemplatesResponse = zod.object({
   "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
-  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created'),
+  "revision": zod.number().int().min(deleteRunTemplatesResponseTemplatesItemRevisionMin).max(deleteRunTemplatesResponseTemplatesItemRevisionMax).describe('Monotonically increasing client revision (a JS-safe integer)'),
+  "deleted": zod.boolean().default(deleteRunTemplatesResponseTemplatesItemDeletedDefault).describe('Whether this record is a deletion tombstone')
 }).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
 })
 
@@ -3855,7 +3840,187 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
 /**
  * @summary Read the manager data-health workspace
  */
-export const GetProfileDataHealthWorkspaceResponse = zod.unknown()
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
+
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+
+
+
+
+export const GetProfileDataHealthWorkspaceResponse = zod.object({
+  "workspace": zod.object({
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "category": zod.string(),
+  "severity": zod.enum(['info', 'warning', 'error']),
+  "repairability": zod.enum(['safe', 'review']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "recipe": zod.string(),
+  "message": zod.string(),
+  "proposedRepair": zod.string(),
+  "affectedRecord": zod.string(),
+  "protectedValue": zod.boolean(),
+  "source": zod.enum(['profile-health', 'master-data', 'saved-spec', 'cleanup']),
+  "sourceRoute": zod.string(),
+  "reconciliationCategory": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']).nullish(),
+  "preview": zod.record(zod.string(), zod.unknown()).nullish()
+})),
+  "safeRepairs": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "fingerprint": zod.string(),
+  "fields": zod.array(zod.string()),
+  "previousValues": zod.record(zod.string(), zod.unknown()),
+  "nextValues": zod.record(zod.string(), zod.unknown())
+})),
+  "summary": zod.record(zod.string(), zod.number().int()),
+  "cleanupHistory": zod.object({
+
+}).passthrough().nullable(),
+  "repairBatches": zod.array(zod.record(zod.string(), zod.unknown())),
+  "aiRetention": zod.object({
+  "policyVersion": zod.string(),
+  "scope": zod.enum(['live', 'sandbox']),
+  "batchLimit": zod.number().int().min(1),
+  "canApply": zod.boolean(),
+  "alreadyApplied": zod.boolean(),
+  "appliedAt": zod.coerce.date().nullable(),
+  "candidates": zod.object({
+  "conversationTurns": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin),
+  "retiredFacilityFacts": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin),
+  "incidentGeneratedTextToLabel": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin),
+  "qualityThumbnailsToRedact": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin),
+  "closedObservationsToRedact": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin),
+  "total": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin)
+}),
+  "protected": zod.object({
+  "correctionAndAliasRecords": zod.string(),
+  "operationalIncidentRows": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin),
+  "confirmedQualityRows": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin),
+  "openInventoryObservations": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin),
+  "inventoryLedgerEffects": zod.string()
+}),
+  "cutoffs": zod.object({
+  "conversationBefore": zod.coerce.date(),
+  "thumbnailBefore": zod.coerce.date(),
+  "observationBefore": zod.coerce.date()
+})
+}),
+  "sourceReconciliation": zod.object({
+  "report": zod.object({
+  "path": zod.string(),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp),
+  "formatVersion": zod.number().int(),
+  "automaticProposals": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin),
+  "stubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin),
+  "planSha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp),
+  "snapshot": zod.object({
+  "path": zod.string(),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp),
+  "capturedAt": zod.coerce.date()
+}),
+  "manifest": zod.object({
+  "path": zod.string(),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp),
+  "retained": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin),
+  "excludedOlderDuplicates": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin)
+})
+}),
+  "heal": zod.object({
+  "id": zod.string(),
+  "fromDate": zod.coerce.date(),
+  "appliedAt": zod.coerce.date().nullable(),
+  "markerValid": zod.boolean(),
+  "result": zod.object({
+  "replacements": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin),
+  "aliasesInserted": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin),
+  "repointedProfiles": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin),
+  "repointedRuns": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin),
+  "deletedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin)
+})
+}),
+  "checkedAt": zod.coerce.date(),
+  "status": zod.enum(['clean', 'warning', 'error', 'not-verified']),
+  "freshness": zod.enum(['current', 'stale']),
+  "summary": zod.object({
+  "poolMismatches": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin),
+  "aliasGaps": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin),
+  "staleProfileLinks": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin),
+  "stalePendingRunLinks": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin),
+  "protectedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin),
+  "unexpectedStubs": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin),
+  "protectedHistoryReferences": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin),
+  "omittedFindings": zod.number().int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin),
+  "findingLimitPerCategory": zod.number().int().min(1)
+}),
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "category": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']),
+  "severity": zod.enum(['info', 'warning', 'error']),
+  "affectedRecord": zod.string(),
+  "currentValue": zod.string(),
+  "proposedOutcome": zod.string(),
+  "protectedValue": zod.boolean(),
+  "sourceRoute": zod.enum(['dough', 'sauce', 'cheeseRecipes', 'mixes', 'import', 'setupProfiles', 'audit'])
+}))
+})
+})
+})
 
 
 /**
@@ -3922,37 +4087,6 @@ export const SaveFacilityKnowledgeResponse = zod.object({
   "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
   "fact": zod.string().describe('The durable observation in plain language')
 }).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.'))
-})
-
-
-/**
- * Returns the signed-in user's most recent AI conversation turns (oldest first), a rolling per-user window so follow-up questions keep context. Scoped to the caller only — never another user's history.
- * @summary Get the current user's recent AI conversation turns
- */
-export const GetConversationHistoryResponse = zod.object({
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The user\'s recent conversation turns, oldest first')
-})
-
-
-/**
- * Appends one or more turns (user and/or assistant messages) to the signed-in user's conversation memory, then trims to the rolling window so the log never grows without bound. Scoped to the caller only.
- * @summary Append turns to the current user's AI conversation memory
- */
-export const AppendConversationBody = zod.object({
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('One or more turns to append to the current user\'s conversation memory')
-})
-
-export const AppendConversationResponse = zod.object({
-  "turns": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
-  "text": zod.string().describe('The message text')
-}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The user\'s recent conversation turns, oldest first')
 })
 
 
@@ -4437,6 +4571,150 @@ export const DeletePremixSheetResponse = zod.object({
 
 
 /**
+ * @summary List the authenticated user's retained server jobs
+ */
+export const listServerJobsResponseProgressMin = 0;
+export const listServerJobsResponseProgressMax = 100;
+
+
+
+export const ListServerJobsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(listServerJobsResponseProgressMin).max(listServerJobsResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+export const ListServerJobsResponse = zod.array(ListServerJobsResponseItem)
+
+
+/**
+ * @summary Enqueue a bounded, idempotent server job
+ */
+export const createServerJobBodyTypeRegExp = new RegExp('^[a-z][a-z0-9-]{1,63}$');
+export const createServerJobBodyIdempotencyKeyMin = 8;
+export const createServerJobBodyIdempotencyKeyMax = 128;
+
+export const createServerJobBodySnapshotIdMax = 200;
+
+
+
+export const CreateServerJobBody = zod.object({
+  "type": zod.string().regex(createServerJobBodyTypeRegExp),
+  "idempotencyKey": zod.string().min(createServerJobBodyIdempotencyKeyMin).max(createServerJobBodyIdempotencyKeyMax),
+  "input": zod.unknown().optional(),
+  "snapshotId": zod.string().max(createServerJobBodySnapshotIdMax).optional()
+})
+
+export const createServerJobResponseProgressMin = 0;
+export const createServerJobResponseProgressMax = 100;
+
+
+
+export const CreateServerJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(createServerJobResponseProgressMin).max(createServerJobResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Read an owned server job
+ */
+export const GetServerJobParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const getServerJobResponseProgressMin = 0;
+export const getServerJobResponseProgressMax = 100;
+
+
+
+export const GetServerJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(getServerJobResponseProgressMin).max(getServerJobResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Request cancellation of an owned running or queued server job
+ */
+export const CancelServerJobParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const cancelServerJobResponseProgressMin = 0;
+export const cancelServerJobResponseProgressMax = 100;
+
+
+
+export const CancelServerJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "type": zod.string(),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "snapshotId": zod.string().nullish(),
+  "progress": zod.number().int().min(cancelServerJobResponseProgressMin).max(cancelServerJobResponseProgressMax),
+  "progressMessage": zod.string().nullish(),
+  "attempt": zod.number().int(),
+  "maxAttempts": zod.number().int(),
+  "cancelRequested": zod.boolean(),
+  "result": zod.unknown().optional(),
+  "error": zod.object({
+  "code": zod.string().optional(),
+  "message": zod.string().nullish()
+}).nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List recent workbook import review records
  */
 export const ListImportHistoryQueryParams = zod.object({
@@ -4764,8 +5042,65 @@ export const ConfirmHardwareFieldCheckResponse = zod.object({
 
 
 /**
- * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
- * @summary Report an issue or a crash and get an AI diagnosis
+ * Manager-only, scope-aware cleanup. Returns the dry-run-compatible report, records a bounded per-run audit marker, and can be repeated as retained operational records age into the policy cutoffs.
+ * @summary Apply the bounded retired-AI retention cleanup
+ */
+
+export const applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin = 0;
+
+export const applyAiRetentionCleanupResponseReportCandidatesTotalMin = 0;
+
+export const applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin = 0;
+
+export const applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin = 0;
+
+
+
+export const ApplyAiRetentionCleanupResponse = zod.object({
+  "report": zod.object({
+  "policyVersion": zod.string(),
+  "scope": zod.enum(['live', 'sandbox']),
+  "batchLimit": zod.number().int().min(1),
+  "canApply": zod.boolean(),
+  "alreadyApplied": zod.boolean(),
+  "appliedAt": zod.coerce.date().nullable(),
+  "candidates": zod.object({
+  "conversationTurns": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin),
+  "retiredFacilityFacts": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin),
+  "incidentGeneratedTextToLabel": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin),
+  "qualityThumbnailsToRedact": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin),
+  "closedObservationsToRedact": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin),
+  "total": zod.number().int().min(applyAiRetentionCleanupResponseReportCandidatesTotalMin)
+}),
+  "protected": zod.object({
+  "correctionAndAliasRecords": zod.string(),
+  "operationalIncidentRows": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin),
+  "confirmedQualityRows": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin),
+  "openInventoryObservations": zod.number().int().min(applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin),
+  "inventoryLedgerEffects": zod.string()
+}),
+  "cutoffs": zod.object({
+  "conversationBefore": zod.coerce.date(),
+  "thumbnailBefore": zod.coerce.date(),
+  "observationBefore": zod.coerce.date()
+})
+})
+})
+
+
+/**
+ * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
+ * @summary Report an issue or a crash for manager review
  */
 export const reportIncidentBodyScreenMax = 200;
 
@@ -4779,6 +5114,13 @@ export const reportIncidentBodyErrorStackMax = 8000;
 
 export const reportIncidentBodyUserAgentMax = 500;
 
+export const reportIncidentBodyDiagnosticsActionMax = 80;
+
+export const reportIncidentBodyDiagnosticsRetryCountMin = 0;
+export const reportIncidentBodyDiagnosticsRetryCountMax = 10;
+
+export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
+
 
 
 export const ReportIncidentBody = zod.object({
@@ -4789,17 +5131,28 @@ export const ReportIncidentBody = zod.object({
   "description": zod.string().max(reportIncidentBodyDescriptionMax).optional().describe('The user\'s description of the problem (user reports)'),
   "errorMessage": zod.string().max(reportIncidentBodyErrorMessageMax).optional().describe('Uncaught error message (crashes)'),
   "errorStack": zod.string().max(reportIncidentBodyErrorStackMax).optional().describe('Uncaught error stack (crashes)'),
-  "userAgent": zod.string().max(reportIncidentBodyUserAgentMax).optional()
+  "userAgent": zod.string().max(reportIncidentBodyUserAgentMax).optional(),
+  "diagnostics": zod.object({
+  "action": zod.string().max(reportIncidentBodyDiagnosticsActionMax).optional(),
+  "outcome": zod.enum(['error', 'rejected', 'degraded']).optional(),
+  "retryCount": zod.number().int().min(reportIncidentBodyDiagnosticsRetryCountMin).max(reportIncidentBodyDiagnosticsRetryCountMax).optional(),
+  "connectivity": zod.enum(['online', 'offline', 'unstable', 'unknown']).optional(),
+  "syncState": zod.enum(['idle', 'pending', 'retrying', 'blocked', 'unknown']).optional(),
+  "signalKind": zod.enum(['user_report', 'crash', 'rejected_promise', 'api_failure', 'startup', 'update', 'sync']).optional(),
+  "correlationId": zod.string().max(reportIncidentBodyDiagnosticsCorrelationIdMax).optional()
+}).optional()
 })
 
 export const ReportIncidentResponse = zod.object({
   "incidentId": zod.string(),
-  "diagnosis": zod.string().describe('Plain-language explanation of what likely went wrong'),
-  "workaround": zod.string().describe('Suggested next step \/ workaround for the user'),
+  "correlationId": zod.string(),
+  "diagnosis": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
+  "workaround": zod.string().nullable().describe('Retained compatibility field; null for new reports'),
   "recurrence": zod.union([zod.object({
   "count": zod.number().int().describe('How many prior similar incidents were found'),
   "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
-}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+  "aiGenerated": zod.literal(false).describe('New reports do not use automated diagnosis')
 })
 
 
@@ -4820,7 +5173,16 @@ export const ListIncidentsResponseItem = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -4901,7 +5263,16 @@ export const GetIncidentResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -4953,7 +5324,16 @@ export const ReviewIncidentResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5006,7 +5386,16 @@ export const ResolveIncidentResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5149,7 +5538,16 @@ export const UpdateIncidentWorkflowResponse = zod.object({
   "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
   "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
   "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
-  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+  "browserFamily": zod.string().optional(),
+  "deviceClass": zod.string().optional(),
+  "correlationId": zod.string().optional(),
+  "relatedCorrelationId": zod.string().optional(),
+  "action": zod.string().optional(),
+  "outcome": zod.string().optional(),
+  "retryCount": zod.number().int().optional(),
+  "connectivity": zod.string().optional(),
+  "syncState": zod.string().optional(),
+  "signalKind": zod.string().optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -5428,6 +5826,53 @@ export const DeleteStaffMemberResponse = zod.void()
 
 
 /**
+ * @summary List immutable completed-run history for the authenticated scope
+ */
+export const ListCompletedHistoryQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional()
+})
+
+export const listCompletedHistoryResponseHistoryItemOneOperationIdMax = 300;
+
+export const listCompletedHistoryResponseHistoryItemOneRunIdMax = 500;
+
+
+
+export const ListCompletedHistoryResponse = zod.object({
+  "history": zod.array(zod.object({
+  "operationId": zod.string().max(listCompletedHistoryResponseHistoryItemOneOperationIdMax),
+  "runId": zod.string().max(listCompletedHistoryResponseHistoryItemOneRunIdMax),
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date(),
+  "snapshot": zod.record(zod.string(), zod.unknown())
+}).and(zod.object({
+  "snapshotHash": zod.string()
+})))
+})
+
+
+/**
+ * @summary Append an immutable completed-run snapshot idempotently
+ */
+export const finalizeCompletedRunBodyOperationIdMax = 300;
+
+export const finalizeCompletedRunBodyRunIdMax = 500;
+
+
+
+export const FinalizeCompletedRunBody = zod.object({
+  "operationId": zod.string().max(finalizeCompletedRunBodyOperationIdMax),
+  "runId": zod.string().max(finalizeCompletedRunBodyRunIdMax),
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date(),
+  "snapshot": zod.record(zod.string(), zod.unknown())
+})
+
+export const FinalizeCompletedRunResponse = zod.unknown()
+
+
+/**
  * @summary Read the client-local current-day sync snapshot
  */
 export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -5570,5 +6015,3 @@ export const ClaimAutoTrackEventResponse = zod.object({
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp)
 })
-
-

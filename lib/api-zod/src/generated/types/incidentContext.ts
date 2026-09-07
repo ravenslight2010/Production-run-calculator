@@ -16,6 +16,14 @@ export interface IncidentContext {
   errorMessage?: string;
   /** The uncaught error's stack/component trace (crashes) */
   errorStack?: string;
-  /** Client user-agent / device string, when available */
-  userAgent?: string;
+  browserFamily?: string;
+  deviceClass?: string;
+  correlationId?: string;
+  relatedCorrelationId?: string;
+  action?: string;
+  outcome?: string;
+  retryCount?: number;
+  connectivity?: string;
+  syncState?: string;
+  signalKind?: string;
 }

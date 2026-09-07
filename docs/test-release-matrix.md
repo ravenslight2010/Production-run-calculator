@@ -15,12 +15,13 @@ reported gap, not evidence of coverage.
 | Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
 | Concurrent sync and inventory mutations | Disposable-Postgres integration tests for live and scheduled-day sync merge retries, cross-date scheduled-write isolation, plus inventory row-lock/idempotency boundaries | `@workspace/api-server run test:release:concurrency` | Required only when sync conflict/retry (including future scheduled-day writes and cross-date isolation), inventory locking, consumption idempotency, or related transaction boundaries change; bounded to 180 seconds |
 | Web rendering and client state | Run Calculator components/hooks | `@workspace/run-calculator test`, typecheck, and focused rendered tests | Required for client or shared UI/state changes |
-| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Smoke, main E2E, department, management-performance, photo-count, and sync-convergence commands; full release mode enumerates 113 cases with a 30-minute timeout and 25-minute warning | Required when navigation, reload, auth, persistence, or user-visible behavior changes; release browser stages remain serial |
+| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Chromium smoke plus the bounded `test:e2e:webkit` contract; main E2E, department, management-performance, photo-count, and sync-convergence remain focused commands; full release mode enumerates the main-suite contract | Required when navigation, reload, auth, persistence, or user-visible behavior changes; release browser stages remain serial |
 | Passive field verification | Field-check contract/unit coverage, API validation/scoping tests, and manager Reported Issues browser coverage at desktop/tablet/phone widths | Focused client/API tests plus `test:e2e:a11y` | Required for lifecycle observation, field-check ingestion, or manager-panel changes; browser evidence is limited to signals the browser can observe |
 | Accessibility | `accessibility-smoke.spec.ts` and axe checks | `test:e2e:a11y` | Required for interactive UI, semantic, focus, or layout changes |
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
-| PWA/service-worker handoff | `pwa-handoff.spec.ts` self-contained fixture | `test:pwa-handoff` | Required for PWA, service-worker, cache, or update-prompt changes |
+| PWA/service-worker handoff | `pwa-handoff.spec.ts` and `pwa-morning` fixture owners | `test:pwa-handoff`, `test:e2e:pwa-morning` | Explicitly out of the standard browser gate; required for PWA, service-worker, cache, or update-prompt changes |
 | Import and export pipelines | Import/export libraries and corpus fixtures | `pnpm --filter @workspace/spec-import run test`, `test:spec-reconcile`, `test:spec-export`, `test:corpus`, package-specific import tests | Required for import parsing, linking, aliases, merge, or export changes |
+| Import lifecycle integrity | Import-family parser/apply tests, merge-backfill libraries, reconciliation libraries, and saved-source API routes | `docs/import-lifecycle-integrity-audit-2026-09-06.md` and the focused suites listed there | Required when changing recipe-row identity, replacement/union rules, merge backfill, source snapshot retention, or re-import resurrection guards |
 | Startup and preview health | Workflow startup and clean-start harness | `check:clean-start` | Required before browser evidence and for run-command, proxy, or workflow changes |
 
 ## Required release sets by change category
@@ -61,6 +62,14 @@ test gates are `run-calculator`, `production-rules`, `inventory-math`,
 - Main, accessibility, visual, phone, performance, department, sync, and PWA
   projects use separate configs where their setup boundaries differ. This
   prevents a destructive live-day reset from leaking into isolated checks.
+- The minimum cross-browser release contract is Chromium smoke plus the
+  single-project WebKit smoke. WebKit owns only authentication, current-run
+  lifecycle, failed-pull/reconnect recovery, and manager report preview; it
+  does not duplicate the full Chromium inventory.
+- The WebKit fixture uses unique accounts, a disposable database guard, one
+  worker, no inherited destructive global setup, and teardown cleanup. Its
+  `browser-smoke/webkit-result.json` artifact records revision, environment,
+  test status, and a bounded failure classification.
 - SSE readers and long-lived browser routes are explicitly aborted/closed by
   their owning test. An abort caused by test cleanup is not a product failure;
   an unexpected stream close must be surfaced by the assertion.
@@ -68,6 +77,8 @@ test gates are `run-calculator`, `production-rules`, `inventory-math`,
 ## Evidence and failure classification
 
 The release harness retains the allowlisted clean-start evidence and report.
+The WebKit lane additionally retains its own revision-bound JSON evidence; it
+must never write the full-browser report path.
 Visual failures retain expected/actual/diff artifacts in Playwright output;
 baseline updates must use an explicit local `--update-snapshots` invocation
 and be reviewed, never enabled in CI. Accessibility output identifies the
@@ -102,8 +113,12 @@ command:
    lane is intentionally opt-in for changes to the affected concurrency
    boundary, rather than a check on every release.
 4. The standard release command does not run visual, PWA, department,
-   photo-count, or full E2E suites; run the category-specific commands when
-   those surfaces change or use the full browser mode for broader review.
+   station-specific physical-device, responsive visual, photo-count, or full
+   E2E suites; run the category-specific commands when those surfaces change
+   or use the full browser mode for broader review. Responsive ownership is
+   split: compact Chromium smoke is the minimum layout signal, while phone,
+   tablet, visual, and physical-device evidence remain owned by their focused
+   suites.
 
 The owner of each gap is the team changing that boundary. A gap becomes a
 release blocker when the corresponding feature is changed, not merely because

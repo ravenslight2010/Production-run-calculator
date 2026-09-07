@@ -79,6 +79,22 @@ function findFunctionSource(source: string, functionName: string): string {
     ts.ScriptKind.TSX,
   );
   let found = "";
+  const functionExpressionSource = (node: ts.Expression): string | null => {
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      return node.getText(sourceFile);
+    }
+    let implementation: string | null = null;
+    const findImplementation = (child: ts.Node) => {
+      if (implementation) return;
+      if (ts.isArrowFunction(child) || ts.isFunctionExpression(child)) {
+        implementation = child.getText(sourceFile);
+        return;
+      }
+      ts.forEachChild(child, findImplementation);
+    };
+    findImplementation(node);
+    return implementation;
+  };
   const visit = (node: ts.Node) => {
     if (
       ts.isFunctionDeclaration(node)
@@ -86,6 +102,22 @@ function findFunctionSource(source: string, functionName: string): string {
     ) {
       found = node.getText(sourceFile);
       return;
+    }
+    // Home provider actions may be ordinary declarations or stable callback
+    // wrappers, e.g. `const replaceRunSurplus = useEvent(async () => ...)`.
+    // Return the actual function expression rather than merely matching the
+    // variable name so the boundary assertions below still inspect its body.
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.name.text === functionName
+      && node.initializer
+    ) {
+      const implementation = functionExpressionSource(node.initializer);
+      if (implementation) {
+        found = implementation;
+        return;
+      }
     }
     ts.forEachChild(node, visit);
   };

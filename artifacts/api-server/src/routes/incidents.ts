@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
+import { randomUUID } from "node:crypto";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -15,31 +15,19 @@ import {
   updateIncidentWorkflow,
 } from "../lib/incidents";
 import {
-  analyzeIncidentHistory,
-  appendIncidentHistoryBlock,
-  buildDiagnosisPrompt,
   buildIncidentContext,
-  buildIncidentMemoryFact,
-  FALLBACK_DIAGNOSIS,
-  FALLBACK_WORKAROUND,
-  INCIDENT_MEMORY_DOMAIN,
-  sanitizeDiagnosis,
+  redactDiagnosticText,
+  safeIncidentLogMetadata,
   validateReportBody,
 } from "./incidentsAi";
 import {
-  loadFacilityKnowledge,
-  appendFacilityMemoryBlock,
-  recordFacilityKnowledge,
-} from "./aiMemoryContext";
-import {
-  buildClustersPrompt,
   buildFallbackClusters,
   CLUSTER_MIN_INCIDENTS,
   DEFAULT_LOOKBACK_DAYS,
-  sanitizeClusterResponse,
   shapeIncidents,
   validateClustersBody,
 } from "./aiIncidentClusters";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -91,6 +79,17 @@ router.post(
     }
     const data = validation.data;
     const context = buildIncidentContext(data);
+    const correlationId = String(
+      (req as typeof req & { correlationId?: string }).correlationId
+      ?? req.id
+      ?? randomUUID(),
+    );
+    res.setHeader("X-Correlation-ID", correlationId);
+    context.correlationId = correlationId;
+    const safeScreen = redactDiagnosticText(data.screen.split("?")[0] ?? "", 120) || "unknown";
+    const safeAppVersion = data.appVersion
+      ? redactDiagnosticText(data.appVersion, 64) || null
+      : null;
 
     // Snapshot the reporter's identity so the manager view survives even if the
     // account is later removed.
@@ -110,108 +109,56 @@ router.post(
     // Ask the AI for a plain-language diagnosis + safe workaround. Any failure
     // (provider error, non-JSON) falls back to canned text; the incident is
     // still recorded with that same text so the manager sees what the user saw.
-    const { system, user } = buildDiagnosisPrompt({
-      source: data.source,
-      screen: data.screen,
-      appPlatform: data.appPlatform,
-      appVersion: data.appVersion ?? null,
-      context,
-    });
-    // Ground the diagnosis in history: pull the shared facility-memory pool,
-    // match this report against past incidents, and inject both the general
-    // operational facts AND a focused, ranked "similar past incidents" block so
-    // recurring problems get history-aware recovery steps. The incidents domain
-    // is excluded from the general block so it isn't double-listed alongside the
-    // focused one. This route is open to EVERY signed-in user (no capability
-    // required to report a problem), so privileged domains (e.g. "forecast",
-    // "proactive-alerts") must be excluded from the general block the same way
-    // /ai/ask and /ai/summary are — otherwise reporting an issue becomes a
-    // side-channel for reading manager-gated facility knowledge.
-    const knowledge = await loadFacilityKnowledge(req.log);
-    const history = analyzeIncidentHistory(knowledge, {
-      screen: data.screen,
-      appPlatform: data.appPlatform,
-      context,
-    });
-    const generalKnowledge = knowledge.filter(
-      (k) => k.domain.trim().toLowerCase() !== INCIDENT_MEMORY_DOMAIN,
-    );
-    let userPrompt = appendFacilityMemoryBlock(user, generalKnowledge, undefined, false);
-    userPrompt = appendIncidentHistoryBlock(userPrompt, history.similar);
-
-    let diagnosis = FALLBACK_DIAGNOSIS;
-    let workaround = FALLBACK_WORKAROUND;
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      const content = response.choices[0]?.message?.content ?? "";
-      const parsed = JSON.parse(content);
-      const sanitized = sanitizeDiagnosis(parsed);
-      diagnosis = sanitized.diagnosis;
-      workaround = sanitized.workaround;
-    } catch (err) {
-      req.log.warn({ err }, "incident diagnosis failed; using fallback");
-    }
+    // Generated diagnosis was retired before retention cleanup. Incident capture,
+    // human notes, assignment, and workflow history remain fully operational.
+    const history = { recurrence: null as null };
+    const diagnosis = null;
+    const workaround = null;
 
     const incident = await createIncident({
       source: data.source,
       reporterId: userId,
       reporterName,
       reporterRole,
-      screen: data.screen,
+      screen: safeScreen,
       appPlatform: data.appPlatform,
-      appVersion: data.appVersion ?? null,
+      appVersion: safeAppVersion,
       context,
       diagnosis,
       workaround,
       recurrence: history.recurrence,
     });
-
-    // Contribute this incident back into the shared facility-memory pool so the
-    // next similar report is grounded in it. Best-effort: a memory write failure
-    // must never fail the report the user just submitted.
-    void recordFacilityKnowledge([
-      {
-        domain: INCIDENT_MEMORY_DOMAIN,
-        key: history.signature,
-        fact: buildIncidentMemoryFact(
-          { screen: data.screen, appPlatform: data.appPlatform, context },
-          history.priorExactCount + 1,
-          workaround,
-        ),
-        source: "incident-diagnosis",
-      },
-    ]).catch((err) => {
-      req.log.warn({ err }, "failed to record incident to facility memory");
-    });
+    logger.info({
+      event: "incident_captured",
+      correlationId,
+      incidentId: incident.id,
+      operationType: "incident",
+      ...safeIncidentLogMetadata(data, context),
+    }, "privacy-safe incident captured");
 
     res.json({
       incidentId: incident.id,
+      correlationId,
       diagnosis,
       workaround,
       recurrence: history.recurrence,
+      aiGenerated: false,
     });
   },
 );
 
-// POST /ai/incident-clusters — manager-only root-cause clustering across the
-// incident log. The server reads the incidents itself, asks the AI to PROPOSE a
-// grouping, then verifies every id and recomputes counts deterministically.
-// Advisory, read-only, fail-safe (deterministic grouping when AI is unavailable).
+// Manager-only deterministic grouping across the incident log. The stable
+// Operations Insights route exposes only deterministic fields; the historical
+// /ai URL retains compatibility metadata. Advisory and read-only; groups are
+// keyed by platform and screen.
 router.post(
-  "/ai/incident-clusters",
+  ["/operations-insights/incident-patterns", "/ai/incident-clusters"],
   requireCapability("review-incidents"),
   rateLimit({
     windowMs: CLUSTERS_RATE_WINDOW_MS,
     max: CLUSTERS_RATE_MAX,
-    keyGenerator: (req) => `ai-incident-clusters:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) =>
+      `operations-incident-patterns:${req.userId ?? req.ip ?? "unknown"}`,
     store: clustersRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -226,10 +173,19 @@ router.post(
         : DEFAULT_LOOKBACK_DAYS;
 
     const incidents = await listIncidents();
-    const { shaped, byId } = shapeIncidents(incidents, lookbackDays, Date.now());
+    const { shaped } = shapeIncidents(incidents, lookbackDays, Date.now());
+    const shapedIds = new Set(shaped.map((item) => item.id));
+    const evidenceIncidents = incidents.filter((item) => shapedIds.has(item.id));
+    const evidence = {
+      windowDays: lookbackDays,
+      sampleCount: shaped.length,
+      platforms: [...new Set(evidenceIncidents.map((item) => item.appPlatform))].slice(0, 6),
+      builds: [...new Set(evidenceIncidents.map((item) => item.appVersion).filter((value): value is string => Boolean(value)))].slice(0, 8),
+      screens: [...new Set(shaped.map((item) => item.screen))].slice(0, 8),
+      confidence: shaped.length < 5 ? "limited" : shaped.length < 15 ? "moderate" : "strong",
+    };
 
-    // Too few to cluster — return an empty, honest result rather than spend a
-    // paid call inventing patterns out of one or two reports.
+    // Too few to cluster — return an empty, honest deterministic result.
     if (shaped.length < CLUSTER_MIN_INCIDENTS) {
       res.json({
         clusters: [],
@@ -239,36 +195,22 @@ router.post(
             ? "No incidents in the selected window yet."
             : "Not enough incidents yet to find a pattern.",
         generatedAt: Date.now(),
-        aiGenerated: false,
+        evidence,
+        ...(req.path.startsWith("/ai/")
+          ? { aiGenerated: false, aiStatus: "deterministic" as const }
+          : {}),
       });
       return;
     }
 
-    const { system, user } = buildClustersPrompt(shaped);
-    let clusters = null;
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      });
-      const content = response.choices[0]?.message?.content ?? "";
-      clusters = sanitizeClusterResponse(JSON.parse(content), byId);
-    } catch (err) {
-      req.log.warn({ err }, "incident clustering failed; using deterministic fallback");
-    }
-
-    const aiGenerated = clusters !== null;
-    const finalClusters = clusters ?? buildFallbackClusters(shaped);
     res.json({
-      clusters: finalClusters,
+      clusters: buildFallbackClusters(shaped),
       totalIncidents: shaped.length,
       generatedAt: Date.now(),
-      aiGenerated,
+      evidence,
+      ...(req.path.startsWith("/ai/")
+        ? { aiGenerated: false, aiStatus: "deterministic" as const }
+        : {}),
     });
   },
 );

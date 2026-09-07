@@ -74,6 +74,7 @@ const input: SpecExportInput = {
       pepperonis: [],
       doughRecipeName: "Standard Dough",
       targetDoughballWeight: 19.5,
+      doughballsPerTray: 24,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", "Cheese Blend B", undefined, undefined],
     },
@@ -86,6 +87,7 @@ const input: SpecExportInput = {
       pepperonis: [{ type: "Cup Char Pepperoni", sticks: 2, ozPerPizza: 1.2 }],
       doughRecipeName: "Standard Dough",
       targetDoughballWeight: 19.5,
+      doughballsPerTray: 24,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", undefined, undefined, undefined],
     },
@@ -98,6 +100,7 @@ const input: SpecExportInput = {
       pepperonis: [],
       doughRecipeName: "Thin Crust Dough",
       targetDoughballWeight: 11,
+      doughballsPerTray: 30,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: ["Cheese Blend A", undefined, undefined, undefined],
     },
@@ -112,7 +115,8 @@ const input: SpecExportInput = {
       ],
       pepperonis: [{ type: "Standard Pepperoni", sticks: 1, ozPerPizza: 0.6 }],
       doughRecipeName: "Standard Dough",
-      targetDoughballWeight: 19.5,
+      targetDoughballWeight: 10.25,
+      doughballsPerTray: 20,
       sauceRecipeName: "Classic Pizza Sauce",
       cheeseRecipeNames: [undefined, "Cheese Blend B", undefined, undefined],
     },
@@ -283,6 +287,18 @@ for (const p of input.profiles) {
   }
   if ((got.applicators ?? []).length !== wantApps.length)
     fail(`profile ${id}: applicator count ${(got.applicators ?? []).length} != ${wantApps.length}`);
+  if (!close(got.targetDoughballWeight, p.targetDoughballWeight))
+    fail(`profile ${id}: targetDoughballWeight ${got.targetDoughballWeight} != ${p.targetDoughballWeight}`);
+  if (!close(got.doughballsPerTray, p.doughballsPerTray))
+    fail(`profile ${id}: doughballsPerTray ${got.doughballsPerTray} != ${p.doughballsPerTray}`);
+  for (let slot = 1; slot <= 4; slot++) {
+    const expected = p.cheeseRecipeNames?.[slot - 1];
+    if (!expected) continue;
+    const gotSlot = (got.applicators ?? []).find((a) => a.slot === slot);
+    if (!gotSlot || ci(gotSlot.recipeName) !== ci(expected)) {
+      fail(`profile ${id}: applicator ${slot} recipe ${gotSlot?.recipeName} != ${expected}`);
+    }
+  }
   const wantPeps = p.pepperonis.filter((x) => x.type);
   for (const pep of wantPeps) {
     const g = (got.pepperonis ?? []).find((x) => ci(x.type) === ci(pep.type));
@@ -304,7 +320,6 @@ type WantRecipe = {
   name: string;
   rows: { ingredient: string; lbs: number }[];
   targets: { brand: string; flavor: string }[];
-  doughballOz?: number;
   app?: number;
 };
 const wantRecipes: WantRecipe[] = [];
@@ -316,8 +331,6 @@ for (const r of input.doughRecipes)
     targets: input.profiles
       .filter((p) => ci(p.doughRecipeName) === ci(r.name))
       .map((p) => ({ brand: p.brand, flavor: p.flavor })),
-    doughballOz: input.profiles.find((p) => ci(p.doughRecipeName) === ci(r.name))
-      ?.targetDoughballWeight,
   });
 for (const r of input.sauceRecipes)
   wantRecipes.push({
@@ -358,8 +371,6 @@ for (const w of wantRecipes) {
   }
   if ((got.rows ?? []).length !== w.rows.length)
     fail(`${id}: row count ${(got.rows ?? []).length} != ${w.rows.length}`);
-  if (w.doughballOz != null && !close(got.doughballOz, w.doughballOz))
-    fail(`${id}: doughballOz ${got.doughballOz} != ${w.doughballOz}`);
   if (w.app != null && got.app !== w.app) fail(`${id}: app slot ${got.app} != ${w.app}`);
   const gotTargets = recipeTargets(got);
   const anchors = (got.brandAnchors ?? []).map(ci);

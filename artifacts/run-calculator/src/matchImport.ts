@@ -52,6 +52,9 @@ export type MatchImportResult = {
   generatedAt: number;
   note?: string;
   aiStatus?: AiStatus;
+  /** Advisory-only response discriminator retained across deterministic and AI paths. */
+  decision: "suggestion";
+  modelStatus?: "completed" | "provider-unavailable" | "rate-limited" | "malformed";
 };
 
 export async function requestMatchImport(input: MatchImportInput): Promise<MatchImportResult> {

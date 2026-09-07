@@ -2,6 +2,8 @@
 // per file below.
 export * from "./runs";
 export * from "./sync";
+export * from "./operationalReports";
+export * from "./operationalIntentLedger";
 export * from "./dataReset";
 export * from "./dataHeals";
 export * from "./inventory";
@@ -24,6 +26,7 @@ export * from "./savedCheeseSheets";
 export * from "./importHistory";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
+export * from "./duplicateReviewGroups";
 export * from "./mergedAway";
 export * from "./aiCorrections";
 export * from "./facilityKnowledge";
@@ -53,3 +56,5 @@ export * from "./masterDataHealth";
 export * from "./aiResultCache";
 export * from "./cacheMaintenance";
 export * from "./fieldChecks";
+export * from "./webPush";
+export * from "./serverJobs";
