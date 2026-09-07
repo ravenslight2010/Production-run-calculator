@@ -6545,7 +6545,7 @@ components:
 
     FinalizedOperationalReportSummary:
       type: object
-      required: [id, reportScope, periodStart, periodEnd, generatedAt, generatedBy, finalizedAt, finalizedBy, contentHash]
+      required: [id, reportScope, periodStart, periodEnd, generatedAt, generatedBy, finalizedAt, finalizedBy, contentHash, hashContract]
       properties:
         id: { type: string, format: uuid }
         reportScope: { type: string, enum: [day, week] }
@@ -6556,6 +6556,10 @@ components:
         finalizedAt: { type: string, format: date-time }
         finalizedBy: { type: string }
         contentHash: { type: string }
+        hashContract:
+          type: string
+          enum: [json-v1, canonical-json-v2, unrecognized]
+          description: Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.
 
     FinalizedOperationalReport:
       allOf:

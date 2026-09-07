@@ -1465,6 +1465,18 @@ export const FinalizedOperationalReportSummaryReportScope = {
   week: 'week',
 } as const;
 
+/**
+ * Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.
+ */
+export type FinalizedOperationalReportSummaryHashContract = typeof FinalizedOperationalReportSummaryHashContract[keyof typeof FinalizedOperationalReportSummaryHashContract];
+
+
+export const FinalizedOperationalReportSummaryHashContract = {
+  'json-v1': 'json-v1',
+  'canonical-json-v2': 'canonical-json-v2',
+  unrecognized: 'unrecognized',
+} as const;
+
 export interface FinalizedOperationalReportSummary {
   id: string;
   reportScope: FinalizedOperationalReportSummaryReportScope;
@@ -1475,6 +1487,8 @@ export interface FinalizedOperationalReportSummary {
   finalizedAt: string;
   finalizedBy: string;
   contentHash: string;
+  /** Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it. */
+  hashContract: FinalizedOperationalReportSummaryHashContract;
 }
 
 export type FinalizedOperationalReportScope = typeof FinalizedOperationalReportScope[keyof typeof FinalizedOperationalReportScope];

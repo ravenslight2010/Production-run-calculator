@@ -302,25 +302,175 @@ describe("operational report endpoints", () => {
       report: { production: { casesProduced: 999999 } },
     });
     expect(created.status).toBe(201);
-    const archived = await created.json() as { id: string; contentHash: string; report: { production: { casesProduced: number }; productionRows: Array<{ run: string }> } };
+    const archived = await created.json() as { id: string; contentHash: string; hashContract: string; report: { production: { casesProduced: number }; productionRows: Array<{ run: string }> } };
     expect(archived.report.production.casesProduced).not.toBe(999999);
     expect(archived.report.productionRows[0]?.run).toMatch(/Original Snapshot/);
     expect(archived.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(archived.hashContract).toBe("canonical-json-v2");
 
     await db.update(dailySyncTable).set({
       data: snapshot({ id: "live-final", brand: "Mutated", flavor: "Source", startedAt: 1_000, endedAt: 2_000 }, 500),
     }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, "2026-09-06")));
     const retry = await req(MANAGER, "POST", "/api/reports/operational/finalize", { scope: "day", date: "2026-09-06" });
     expect(retry.status).toBe(200);
-    expect((await retry.json() as { id: string; idempotent: boolean; report: { productionRows: Array<{ run: string }> } })).toMatchObject({
-      id: archived.id, idempotent: true, report: { productionRows: [{ run: "Original Snapshot" }] },
+    expect((await retry.json() as { id: string; idempotent: boolean; hashContract: string; report: { productionRows: Array<{ run: string }> } })).toMatchObject({
+      id: archived.id,
+      idempotent: true,
+      hashContract: "canonical-json-v2",
+      report: { productionRows: [{ run: "Original Snapshot" }] },
     });
     const listed = await req(MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06");
     expect((await listed.json() as Array<{ id: string }>).map((row) => row.id)).toEqual([archived.id]);
     const retrieved = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
-    expect((await retrieved.json() as { report: { productionRows: Array<{ run: string }> } }).report.productionRows[0]?.run).toBe("Original Snapshot");
+    const retrievedArchive = await retrieved.json() as {
+      hashContract: string;
+      report: { productionRows: Array<{ run: string }> };
+    };
+    expect(retrievedArchive.hashContract).toBe("canonical-json-v2");
+    expect(retrievedArchive.report.productionRows[0]?.run).toBe("Original Snapshot");
     expect((await req(SANDBOX_MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`)).status).toBe(404);
     expect((await req(SANDBOX_MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06")).status).toBe(200);
+  });
+
+  it("verifies and classifies legacy JSON hashes while still rejecting tampered legacy payloads", async () => {
+    const legacyPayload = {
+      scope: "day",
+      date: "2026-09-05",
+      periodStart: "2026-09-05",
+      periodEnd: "2026-09-05",
+      generatedAt: "2026-09-05T12:00:00.000Z",
+      attribution: { generatedBy: MANAGER, source: "canonical-server" },
+      freshness: {
+        status: "current",
+        asOf: "2026-09-05T11:59:00.000Z",
+        note: "Released v1 fixture.",
+      },
+      calculation: {
+        period: "2026-09-05 through 2026-09-05, inclusive.",
+        production: "Canonical production facts.",
+        quality: "Recorded quality checks.",
+        incidents: "Recorded incidents.",
+        inventory: "Recorded inventory state.",
+      },
+      production: {
+        scope: "day",
+        date: "2026-09-05",
+        runsPlanned: 1,
+        runsFinished: 1,
+        casesPlanned: 100,
+        casesProduced: 100,
+        attainmentPct: 100,
+        totalDowntimeMinutes: 0,
+        totalStoppages: 0,
+        topDowntime: null,
+        unfinishedRuns: [],
+        incidentCount: 0,
+        wasteFlaggedCount: 0,
+        hasData: true,
+      },
+      productionRows: [{
+        id: "2026-09-05:legacy-run",
+        date: "2026-09-05",
+        run: "Legacy Snapshot",
+        status: "finished",
+        casesPlanned: 100,
+        casesProduced: 100,
+        attainmentPct: 100,
+        downtimeMinutes: 0,
+        stoppages: 0,
+      }],
+      quality: {
+        availability: "available",
+        value: { checks: 0, issues: 0, failed: 0, warnings: 0, rows: [] },
+        note: "No quality checks were recorded.",
+      },
+      incidents: {
+        availability: "available",
+        value: { total: 0, unresolved: 0, rows: [] },
+        note: "No incidents were recorded.",
+      },
+      inventory: {
+        availability: "available",
+        value: {
+          flaggedItems: 0,
+          rows: [],
+          historical: {
+            availability: "available",
+            value: {
+              totalEvents: 0,
+              consumptionEvents: 0,
+              wasteEvents: 0,
+              adjustmentEvents: 0,
+            },
+            note: "No inventory events were recorded.",
+          },
+        },
+        note: "Current inventory snapshot.",
+      },
+      unresolvedActions: {
+        availability: "available",
+        value: { total: 0, rows: [] },
+        note: "No unresolved actions were recorded.",
+      },
+      evidence: {
+        release: { version: "1.0.0", revision: "legacy-fixture", environment: "test" },
+        recovery: {
+          generatedAt: "2026-09-05T12:00:00.000Z",
+          source: "live-database",
+          complete: true,
+        },
+      },
+    };
+    const legacyHash = "017a9102a419302571a8f18ef3f055bd3f3c9af3a2c73889d33d9d5c0d47bae2";
+    const legacyId = "10000000-0000-4000-8000-000000000001";
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    await db.insert(finalizedOperationalReportsTable).values({
+      id: legacyId,
+      scope: "live",
+      reportScope: "day",
+      periodStart: "2026-09-05",
+      periodEnd: "2026-09-05",
+      generatedAt: finalizedAt,
+      generatedBy: MANAGER,
+      finalizedAt,
+      finalizedBy: MANAGER,
+      contentHash: legacyHash,
+      payload: legacyPayload,
+    });
+
+    const retrieved = await req(MANAGER, "GET", `/api/reports/operational/finalized/${legacyId}`);
+    expect(retrieved.status).toBe(200);
+    expect(await retrieved.json()).toMatchObject({
+      id: legacyId,
+      contentHash: legacyHash,
+      hashContract: "json-v1",
+      report: legacyPayload,
+    });
+    const listed = await req(
+      MANAGER,
+      "GET",
+      "/api/reports/operational/finalized?scope=day&date=2026-09-05",
+    );
+    const listedRows = await listed.json() as Array<Record<string, unknown>>;
+    expect(listedRows).toMatchObject([{
+      id: legacyId,
+      contentHash: legacyHash,
+      hashContract: "json-v1",
+    }]);
+    expect(listedRows[0]).not.toHaveProperty("report");
+
+    await db.update(finalizedOperationalReportsTable).set({
+      payload: { ...legacyPayload, tampered: true },
+    }).where(eq(finalizedOperationalReportsTable.id, legacyId));
+
+    const tampered = await req(MANAGER, "GET", `/api/reports/operational/finalized/${legacyId}`);
+    expect(tampered.status).toBe(409);
+    expect(await tampered.json()).toEqual({
+      error: {
+        code: "finalized-report-integrity-failure",
+        message: "The finalized report failed integrity verification and cannot be exported.",
+      },
+    });
   });
 
   it("searches a bounded date range across day and week reports within the manager facility", async () => {

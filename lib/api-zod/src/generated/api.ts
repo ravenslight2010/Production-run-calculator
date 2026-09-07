@@ -1248,7 +1248,8 @@ export const FinalizeOperationalReportResponse = zod.object({
   "generatedBy": zod.string(),
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
-  "contentHash": zod.string()
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),
@@ -1324,7 +1325,8 @@ export const ListFinalizedOperationalReportsResponseItem = zod.object({
   "generatedBy": zod.string(),
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
-  "contentHash": zod.string()
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
 })
 export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
 
@@ -1354,7 +1356,8 @@ export const SearchFinalizedOperationalReportsResponseItem = zod.object({
   "generatedBy": zod.string(),
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
-  "contentHash": zod.string()
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
 })
 export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinalizedOperationalReportsResponseItem)
 
@@ -1375,7 +1378,8 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "generatedBy": zod.string(),
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
-  "contentHash": zod.string()
+  "contentHash": zod.string(),
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),

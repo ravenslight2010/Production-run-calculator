@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FinalizedOperationalReportSummaryHashContract } from './finalizedOperationalReportSummaryHashContract';
 import type { FinalizedOperationalReportSummaryReportScope } from './finalizedOperationalReportSummaryReportScope';
 
 export interface FinalizedOperationalReportSummary {
@@ -17,4 +18,6 @@ export interface FinalizedOperationalReportSummary {
   finalizedAt: Date;
   finalizedBy: string;
   contentHash: string;
+  /** Serialization contract that matches the stored hash, or unrecognized when metadata inspection cannot verify it. */
+  hashContract: FinalizedOperationalReportSummaryHashContract;
 }

@@ -73,6 +73,12 @@ const RangeFinalizedReportQuery = z.object({
 });
 const FinalizedReportId = z.object({ id: z.string().uuid() });
 
+const LEGACY_JSON_HASH_CONTRACT = "json-v1" as const;
+const CURRENT_HASH_CONTRACT = "canonical-json-v2" as const;
+type FinalizedReportHashContract =
+  | typeof LEGACY_JSON_HASH_CONTRACT
+  | typeof CURRENT_HASH_CONTRACT;
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -83,23 +89,135 @@ function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(value) ?? "null";
 }
-function reportHash(report: OperationalReport): string {
-  return createHash("sha256").update(canonicalJson(report)).digest("hex");
+
+function hashSerializedReport(serialized: string): string {
+  return createHash("sha256").update(serialized).digest("hex");
 }
 
-function finalizedReportIntegrity(row: typeof finalizedOperationalReportsTable.$inferSelect): {
-  ok: true;
-  actualHash: string;
-} | {
-  ok: false;
-  actualHash: string;
-} {
-  const actualHash = reportHash(row.payload as OperationalReport);
-  return actualHash === row.contentHash
-    ? { ok: true, actualHash }
-    : { ok: false, actualHash };
+// PostgreSQL jsonb normalizes object-key order, so reading a row and calling
+// JSON.stringify cannot reproduce hashes created from the pre-insert report.
+// Rebuild the released v1 report shapes in their original construction order.
+const LEGACY_REPORT_KEY_ORDER: Record<string, readonly string[]> = {
+  report: [
+    "scope", "date", "periodStart", "periodEnd", "generatedAt", "attribution",
+    "freshness", "calculation", "production", "productionRows", "quality",
+    "incidents", "inventory", "unresolvedActions", "narrative", "evidence",
+  ],
+  "report.attribution": ["generatedBy", "source"],
+  "report.freshness": ["status", "asOf", "note"],
+  "report.calculation": ["period", "production", "quality", "incidents", "inventory"],
+  "report.production": [
+    "scope", "date", "runsPlanned", "runsFinished", "casesPlanned",
+    "casesProduced", "attainmentPct", "totalDowntimeMinutes", "totalStoppages",
+    "topDowntime", "unfinishedRuns", "incidentCount", "wasteFlaggedCount", "hasData",
+  ],
+  "report.production.topDowntime": ["label", "minutes"],
+  "report.productionRows[]": [
+    "id", "date", "run", "status", "casesPlanned", "casesProduced",
+    "attainmentPct", "downtimeMinutes", "stoppages",
+  ],
+  "report.quality": ["availability", "value", "note"],
+  "report.quality.value": ["checks", "issues", "failed", "warnings", "rows"],
+  "report.quality.value.rows[]": [
+    "id", "occurredAt", "product", "status", "issues", "summary",
+  ],
+  "report.incidents": ["availability", "value", "note"],
+  "report.incidents.value": ["total", "unresolved", "rows"],
+  "report.incidents.value.rows[]": [
+    "id", "occurredAt", "status", "priority", "reporter", "summary",
+  ],
+  "report.inventory": ["availability", "value", "note"],
+  "report.inventory.value": ["flaggedItems", "rows", "historical"],
+  "report.inventory.value.rows[]": [
+    "id", "item", "unit", "onHand", "reorderThreshold", "state",
+  ],
+  "report.inventory.value.historical": ["availability", "value", "note"],
+  "report.inventory.value.historical.value": [
+    "totalEvents", "consumptionEvents", "wasteEvents", "adjustmentEvents",
+  ],
+  "report.unresolvedActions": ["availability", "value", "note"],
+  "report.unresolvedActions.value": ["total", "rows"],
+  "report.unresolvedActions.value.rows[]": [
+    "id", "source", "priority", "action", "detail",
+  ],
+  "report.narrative": ["text", "source"],
+  "report.evidence": ["release", "recovery"],
+  "report.evidence.release": ["version", "revision", "environment"],
+  "report.evidence.recovery": ["generatedAt", "source", "complete"],
+};
+
+function restoreLegacyReportKeyOrder(value: unknown, path: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((child) => restoreLegacyReportKeyOrder(child, `${path}[]`));
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = LEGACY_REPORT_KEY_ORDER[path] ?? [];
+  const preferredKeySet = new Set(preferredKeys);
+  const keys = [
+    ...preferredKeys.filter((key) => Object.hasOwn(record, key)),
+    ...Object.keys(record).filter((key) => !preferredKeySet.has(key)),
+  ];
+  return Object.fromEntries(keys.map((key) => [
+    key,
+    restoreLegacyReportKeyOrder(record[key], `${path}.${key}`),
+  ]));
 }
-function finalizedReportResponse(row: typeof finalizedOperationalReportsTable.$inferSelect) {
+
+function legacyReportHash(report: unknown): string {
+  return hashSerializedReport(
+    JSON.stringify(restoreLegacyReportKeyOrder(report, "report")) ?? "null",
+  );
+}
+
+function reportHash(report: unknown): string {
+  return hashSerializedReport(canonicalJson(report));
+}
+
+type FinalizedReportIntegrity =
+  | {
+      ok: true;
+      actualHash: string;
+      hashContract: FinalizedReportHashContract;
+    }
+  | {
+      ok: false;
+      actualHashes: Record<FinalizedReportHashContract, string>;
+    };
+
+function finalizedReportIntegrity(
+  row: typeof finalizedOperationalReportsTable.$inferSelect,
+): FinalizedReportIntegrity {
+  const canonicalHash = reportHash(row.payload);
+  if (canonicalHash === row.contentHash) {
+    return {
+      ok: true,
+      actualHash: canonicalHash,
+      hashContract: CURRENT_HASH_CONTRACT,
+    };
+  }
+  const legacyHash = legacyReportHash(row.payload);
+  if (legacyHash === row.contentHash) {
+    return {
+      ok: true,
+      actualHash: legacyHash,
+      hashContract: LEGACY_JSON_HASH_CONTRACT,
+    };
+  }
+  return {
+    ok: false,
+    actualHashes: {
+      [CURRENT_HASH_CONTRACT]: canonicalHash,
+      [LEGACY_JSON_HASH_CONTRACT]: legacyHash,
+    },
+  };
+}
+
+function finalizedReportResponse(
+  row: typeof finalizedOperationalReportsTable.$inferSelect,
+  integrity: Extract<FinalizedReportIntegrity, { ok: true }>,
+) {
   return {
     id: row.id,
     scope: row.scope,
@@ -111,7 +229,26 @@ function finalizedReportResponse(row: typeof finalizedOperationalReportsTable.$i
     finalizedAt: row.finalizedAt.toISOString(),
     finalizedBy: row.finalizedBy,
     contentHash: row.contentHash,
+    hashContract: integrity.hashContract,
     report: row.payload as OperationalReport,
+  };
+}
+
+function finalizedReportMetadata(
+  row: typeof finalizedOperationalReportsTable.$inferSelect,
+) {
+  const integrity = finalizedReportIntegrity(row);
+  return {
+    id: row.id,
+    reportScope: row.reportScope,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    generatedAt: row.generatedAt.toISOString(),
+    generatedBy: row.generatedBy,
+    finalizedAt: row.finalizedAt.toISOString(),
+    finalizedBy: row.finalizedBy,
+    contentHash: row.contentHash,
+    hashContract: integrity.ok ? integrity.hashContract : "unrecognized",
   };
 }
 
@@ -119,14 +256,14 @@ function sendFinalizedReportIntegrityError(
   req: import("express").Request,
   res: import("express").Response,
   row: typeof finalizedOperationalReportsTable.$inferSelect,
-  actualHash: string,
+  integrity: Extract<FinalizedReportIntegrity, { ok: false }>,
 ): void {
   req.log.error({
     event: "finalized_report_integrity_failed",
     scope: row.scope,
     reportId: row.id,
     expectedHash: row.contentHash,
-    actualHash,
+    actualHashes: integrity.actualHashes,
   }, "Finalized operational report failed integrity verification");
   operationalError(
     res,
@@ -135,6 +272,7 @@ function sendFinalizedReportIntegrityError(
     "The finalized report failed integrity verification and cannot be exported.",
   );
 }
+
 function addDays(iso: string, amount: number): string {
   const d = new Date(`${iso}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + amount);
@@ -763,10 +901,10 @@ router.post(
     if (existing.length === 1) {
       const integrity = finalizedReportIntegrity(existing[0]);
       if (!integrity.ok) {
-        sendFinalizedReportIntegrityError(req, res, existing[0], integrity.actualHash);
+        sendFinalizedReportIntegrityError(req, res, existing[0], integrity);
         return;
       }
-      res.status(200).json({ ...finalizedReportResponse(existing[0]), idempotent: true });
+      res.status(200).json({ ...finalizedReportResponse(existing[0], integrity), idempotent: true });
       return;
     }
     if (existing.length > 1) {
@@ -800,10 +938,10 @@ router.post(
       if (concurrent.length === 1) {
         const integrity = finalizedReportIntegrity(concurrent[0]);
         if (!integrity.ok) {
-          sendFinalizedReportIntegrityError(req, res, concurrent[0], integrity.actualHash);
+          sendFinalizedReportIntegrityError(req, res, concurrent[0], integrity);
           return;
         }
-        res.status(200).json({ ...finalizedReportResponse(concurrent[0]), idempotent: true });
+        res.status(200).json({ ...finalizedReportResponse(concurrent[0], integrity), idempotent: true });
         return;
       }
       throw error;
@@ -813,7 +951,7 @@ router.post(
       periodStart: row.periodStart, periodEnd: row.periodEnd,
       generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
       finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy,
-      contentHash: row.contentHash, report,
+      contentHash: row.contentHash, hashContract: CURRENT_HASH_CONTRACT, report,
     });
   },
 );
@@ -831,11 +969,7 @@ router.get("/reports/operational/finalized", requireCapability("review-incidents
     eq(finalizedOperationalReportsTable.periodStart, periodStart),
     eq(finalizedOperationalReportsTable.periodEnd, periodEnd),
   )).orderBy(desc(finalizedOperationalReportsTable.finalizedAt));
-  res.json(rows.map((row) => ({
-    id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
-    generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
-    finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy, contentHash: row.contentHash,
-  })));
+  res.json(rows.map(finalizedReportMetadata));
 });
 
 router.get("/reports/operational/finalized/search", requireCapability("review-incidents"), async (req, res): Promise<void> => {
@@ -853,11 +987,7 @@ router.get("/reports/operational/finalized/search", requireCapability("review-in
     desc(finalizedOperationalReportsTable.periodEnd),
     desc(finalizedOperationalReportsTable.finalizedAt),
   ).limit(parsed.data.limit);
-  res.json(rows.map((row) => ({
-    id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
-    generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
-    finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy, contentHash: row.contentHash,
-  })));
+  res.json(rows.map(finalizedReportMetadata));
 });
 
 router.get("/reports/operational/finalized/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {
@@ -876,10 +1006,10 @@ router.get("/reports/operational/finalized/:id", requireCapability("review-incid
   }
   const integrity = finalizedReportIntegrity(rows[0]);
   if (!integrity.ok) {
-    sendFinalizedReportIntegrityError(req, res, rows[0], integrity.actualHash);
+    sendFinalizedReportIntegrityError(req, res, rows[0], integrity);
     return;
   }
-  res.json(finalizedReportResponse(rows[0]));
+  res.json(finalizedReportResponse(rows[0], integrity));
 });
 
 export default router;
