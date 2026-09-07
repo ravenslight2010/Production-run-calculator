@@ -256,4 +256,28 @@ describe("commitSpecImport snapshot hash persistence", () => {
     expect(saveSheetSpy.mock.calls[0][2]).toBe("specs");
     expect(saveSheetSpy.mock.calls[0][3]).toBe("abc123");
   });
+
+  it("saves manager-confirmed recipe unit provenance without changing row values", async () => {
+    const rows = [{ ingredient: "Flour", lbs: 41.625 }];
+    const prepared = {
+      parsed: {
+        profiles: [],
+        recipes: [{
+          kind: "dough",
+          name: "Confirmed Dough",
+          rowsUnit: "unclear",
+          confirmedRowsUnit: "lbs",
+          rows,
+        }],
+      },
+      newAliases: [],
+      sourceNames: ["dough.xlsx"],
+    } as unknown as Parameters<typeof commitSpecImport>[0];
+
+    await commitSpecImport(prepared);
+
+    const saved = saveSheetSpy.mock.calls[0]?.[1] as ParsedSpecImport;
+    expect(saved.recipes[0]?.confirmedRowsUnit).toBe("lbs");
+    expect(saved.recipes[0]?.rows).toEqual(rows);
+  });
 });

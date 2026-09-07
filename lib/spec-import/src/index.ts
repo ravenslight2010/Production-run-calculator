@@ -120,6 +120,11 @@ export type ParsedRecipe = {
    * Provenance only: consumers must never convert or reinterpret `rows` from it.
    */
   rowsUnit?: string;
+  /**
+   * Canonical unit a manager confirmed from the source workbook during import
+   * review. This is provenance only and must never rescale `rows`.
+   */
+  confirmedRowsUnit?: "lbs" | "oz";
   /** Single brand/flavor this recipe ties to (simple case). */
   brand?: string;
   flavor?: string;
@@ -396,10 +401,11 @@ function mergeRecipePair(prev: ParsedRecipe, next: ParsedRecipe): ParsedRecipe {
   const merged = overlayDefined(prev, next);
   if (next.rows?.length) {
     merged.rows = next.rows;
-    // Unit provenance belongs to the selected row set. If the later workbook
-    // replaces the rows without stating a unit, do not retain a clear-looking
-    // label from the earlier workbook.
+    // Unit provenance and manager confirmation belong to the selected row set.
+    // If the later workbook replaces the rows without either field, do not
+    // retain metadata from the earlier workbook.
     if (next.rowsUnit == null) delete merged.rowsUnit;
+    if (next.confirmedRowsUnit == null) delete merged.confirmedRowsUnit;
   } else {
     merged.rows = prev.rows ?? [];
   }
@@ -4919,6 +4925,10 @@ export function sanitizeParsedSpecImport(
     const recipe: ParsedRecipe = { kind, name, rows };
     const rowsUnit = clampName(o.rowsUnit, 32);
     if (rowsUnit) recipe.rowsUnit = rowsUnit;
+    const confirmedRowsUnit = clampName(o.confirmedRowsUnit, 8).toLowerCase();
+    if (confirmedRowsUnit === "lbs" || confirmedRowsUnit === "oz") {
+      recipe.confirmedRowsUnit = confirmedRowsUnit;
+    }
     // Grounding backstop for RECIPE brands, same semantics as profiles: a
     // paraphrased recipe brand silently attaches a dough/sauce/cheese recipe
     // to a wrong/new brand, so it never shows on the intended products.

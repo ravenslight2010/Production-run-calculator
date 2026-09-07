@@ -85,6 +85,52 @@ describe("sanitizeParsedSpecImport recipe row raw units", () => {
     });
   });
 
+  it.each([
+    ["dough", "lbs"],
+    ["sauce", "oz"],
+    ["cheese", "lbs"],
+  ] as const)("preserves %s manager unit confirmation without rescaling rows", (kind, unit) => {
+    const rows = [{ ingredient: `${kind} ingredient`, lbs: 7.375 }];
+    const parsed = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [{
+        kind,
+        name: `${kind} recipe`,
+        rowsUnit: "unclear",
+        confirmedRowsUnit: unit,
+        rows,
+      }],
+    });
+
+    expect(parsed.recipes[0]?.confirmedRowsUnit).toBe(unit);
+    expect(parsed.recipes[0]?.rows).toEqual(rows);
+  });
+
+  it("drops stale confirmation when a later workbook replaces the row set", () => {
+    const merged = mergeParsedSpecImports([
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "sauce",
+          name: "Shared Sauce",
+          confirmedRowsUnit: "lbs",
+          rows: [{ ingredient: "Paste", lbs: 20 }],
+        }],
+      }),
+      sanitizeParsedSpecImport({
+        profiles: [],
+        recipes: [{
+          kind: "sauce",
+          name: "Shared Sauce",
+          rows: [{ ingredient: "Paste", lbs: 24 }],
+        }],
+      }),
+    ]);
+
+    expect(merged.recipes[0]?.rows).toEqual([{ ingredient: "Paste", lbs: 24 }]);
+    expect(merged.recipes[0]?.confirmedRowsUnit).toBeUndefined();
+  });
+
   it("preserves raw dough and sauce values after per-chunk sanitizing and merging", () => {
     const chunks = [
       sanitizeParsedSpecImport({
