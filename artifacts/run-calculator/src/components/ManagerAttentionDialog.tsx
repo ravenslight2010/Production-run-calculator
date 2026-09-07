@@ -6,7 +6,7 @@ import {
   LifeBuoy,
   Settings2,
 } from "lucide-react";
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -114,14 +114,18 @@ const ManagerAttentionDialog = memo(function ManagerAttentionDialog({
   onResolve: (kind: ManagerAttentionKind) => void;
   authorized?: boolean;
 }) {
-  // Keep the dialog out of the tree immediately when capabilities disappear.
-  // This prevents a stale open state from exposing manager work during an auth
-  // transition while leaving the parent hook order unchanged.
-  if (!authorized) return null;
+  // The parent owns `open`, so capability loss must close that state rather
+  // than abruptly unmounting an open Radix portal. The effective-open guard
+  // removes protected content in the same render; this effect then clears the
+  // stale controlled value exactly once so access restoration cannot reopen it.
+  useEffect(() => {
+    if (!authorized && open) onOpenChange(false);
+  }, [authorized, onOpenChange, open]);
+
   const total = managerAttentionCount(items);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={authorized && open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
