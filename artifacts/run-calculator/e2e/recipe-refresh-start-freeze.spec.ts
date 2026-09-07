@@ -153,6 +153,43 @@ async function holdNextProfileRefresh(page: Page): Promise<{
   return holdNextDelayedCompletion(page, "/api/brand-profiles", "GET");
 }
 
+async function signIn(page: Page, username: string): Promise<void> {
+  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+  await page.locator("#username").fill(username);
+  await page.locator("#password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+}
+
+async function readServerProfileValue(
+  page: Page,
+  brand: string,
+  flavor: string,
+): Promise<Record<string, unknown> | null> {
+  const key = `${brand.trim().toLowerCase()}__${flavor.trim().toLowerCase()}`;
+  return (await readServerProfileValues(page, key)) ?? null;
+}
+
+async function readServerIngredientBatchWeight(
+  page: Page,
+  ingredient: string,
+): Promise<number | null> {
+  const response = await page.request.get("/api/ingredient-batch-weights", {
+    headers: { "Cache-Control": "no-cache" },
+  });
+  if (!response.ok()) {
+    throw new Error(`Read canonical ingredient batch weight failed (${response.status()})`);
+  }
+  const payload = await response.json() as {
+    weights?: Array<{ name?: string; lbs?: number }>;
+  };
+  const match = payload.weights?.find(
+    (row) => row.name?.trim().toLowerCase() === ingredient.trim().toLowerCase(),
+  );
+  return match?.lbs ?? null;
+}
+
 async function setNamedRecipeLbs(
   page: Page,
   kind: "dough" | "sauce",
@@ -1611,5 +1648,204 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
     ).toBe(activeBefore);
   } finally {
     await peerContext.close();
+  }
+});
+
+test("remembered plain ingredient batch weights survive a fresh sign-in", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const username = uniqueTestId("e2e_batch_weight_sign_in");
+  const rememberedIngredient = `Remembered Ingredient ${uniqueTestId("ingredient")}`;
+  const activeIngredient = `Active Ingredient ${uniqueTestId("ingredient")}`;
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
+  const pendingBrand = `Batch Weight Pending ${uniqueTestId("brand")}`;
+  const activeFlavor = "Active Snapshot";
+  const pendingFlavor = "Pending Snapshot";
+  const activeRunId = uniqueTestId("active-run");
+  const pendingRunId = uniqueTestId("pending-run");
+  const now = Date.now();
+  const account = await fixtures.createAccount({
+    username,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
+  });
+
+  const baseValues = {
+    casesNeeded: 100,
+    pizzasPerCase: 1,
+    casesPerSkid: 10,
+    casesPerLayer: 0,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    app1OzPerPizza: 1,
+    app1CheeseRecipe: [],
+  };
+  const activeValues = {
+    ...baseValues,
+    app1Type: activeIngredient,
+    app1BatchLbs: 5,
+  };
+  const pendingValues = {
+    ...baseValues,
+    app1Type: rememberedIngredient,
+    app1BatchLbs: 0,
+  };
+
+  await fixtures.seedBrandProfile(account, {
+    brand: activeBrand,
+    flavor: activeFlavor,
+    values: activeValues,
+    updatedAt: now,
+  });
+  await fixtures.seedBrandProfile(account, {
+    brand: pendingBrand,
+    flavor: pendingFlavor,
+    values: pendingValues,
+    updatedAt: now,
+  });
+  await fixtures.seedTodaySync({
+    token: account.token,
+    senderId: `batch-weight-sign-in-${username}`,
+    date: TODAY,
+    payload: {
+      dayState: {
+        date: TODAY,
+        runs: [
+          {
+            id: activeRunId,
+            brand: activeBrand,
+            flavor: activeFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+          {
+            id: pendingRunId,
+            brand: pendingBrand,
+            flavor: pendingFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+        ],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+      },
+      runValues: {
+        [activeRunId]: activeValues,
+        [pendingRunId]: pendingValues,
+      },
+      runValuesUpdatedAt: {
+        [activeRunId]: now,
+        [pendingRunId]: now,
+      },
+      packagingProgress: {},
+    },
+  });
+
+  await page.addInitScript(({ ingredients }) => {
+    localStorage.setItem("run-calc-ingredient-types", JSON.stringify(ingredients));
+  }, { ingredients: [activeIngredient, rememberedIngredient] });
+  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  await page.getByRole("button", { name: /^More/ }).click();
+  await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+  await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
+  await expect(page.getByTestId("input-app1BatchLbs")).toHaveValue("5");
+  await page.getByTestId("tab-run").click();
+  await page.getByTestId("button-start-run").click();
+  await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
+
+  await page.getByRole("button", { name: "Select run 2" }).click();
+  await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^More/ }).click();
+  await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+  const batchWeight = page.getByTestId("input-app1BatchLbs");
+  await expect(batchWeight).toHaveValue("0");
+  const savedWeight = page.waitForResponse((response) =>
+    response.url().endsWith("/api/ingredient-batch-weights")
+      && response.request().method() === "POST"
+      && response.status() === 200,
+  );
+  await batchWeight.fill("12");
+  await batchWeight.blur();
+  await savedWeight;
+  await expect(batchWeight).toHaveValue("12");
+  await page.getByRole("button", { name: "Close settings" }).click();
+
+  await expect.poll(
+    () => readServerIngredientBatchWeight(page, rememberedIngredient),
+    { timeout: 25_000 },
+  ).toBe(12);
+  await expect.poll(
+    async () => (await readServerProfileValue(page, pendingBrand, pendingFlavor))?.app1BatchLbs,
+    { timeout: 25_000 },
+  ).toBe(12);
+  await expect.poll(
+    () => readServerRunField(page, pendingRunId, "app1BatchLbs"),
+    { timeout: 25_000 },
+  ).toBe(12);
+  await expect.poll(
+    () => readServerRunField(page, activeRunId, "app1BatchLbs"),
+    { timeout: 25_000 },
+  ).toBe(5);
+  await expect.poll(
+    async () => (await readServerProfileValue(page, activeBrand, activeFlavor))?.app1BatchLbs,
+    { timeout: 25_000 },
+  ).toBe(5);
+
+  await page.getByRole("button", { name: /^More/ }).click();
+  await Promise.all([
+    page.waitForResponse((response) =>
+      response.url().includes("/api/auth/sign-out")
+        && response.request().method() === "POST"
+        && response.status() === 200,
+    ),
+    page.getByText("Sign out", { exact: true }).click(),
+  ]);
+  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+
+  const freshContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  const freshPage = await freshContext.newPage();
+  try {
+    await signIn(freshPage, username);
+    await freshPage.getByRole("button", { name: "Select run 1" }).click();
+    await expect(freshPage.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await freshPage.getByRole("button", { name: /^More/ }).click();
+    await freshPage.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    await expect(freshPage.getByTestId("input-app1BatchLbs")).toHaveValue("5");
+    await freshPage.getByTestId("tab-run").click();
+
+    await freshPage.getByRole("button", { name: "Select run 2" }).click();
+    await expect(freshPage.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+    await freshPage.getByRole("button", { name: /^More/ }).click();
+    await freshPage.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    await expect(freshPage.getByTestId("input-app1BatchLbs")).toHaveValue("12");
+
+    await expect.poll(
+      () => readServerIngredientBatchWeight(freshPage, rememberedIngredient),
+      { timeout: 25_000 },
+    ).toBe(12);
+    await expect.poll(
+      () => readServerRunField(freshPage, activeRunId, "app1BatchLbs"),
+      { timeout: 25_000 },
+    ).toBe(5);
+    await expect.poll(
+      () => readServerRunField(freshPage, pendingRunId, "app1BatchLbs"),
+      { timeout: 25_000 },
+    ).toBe(12);
+  } finally {
+    await freshContext.close();
   }
 });

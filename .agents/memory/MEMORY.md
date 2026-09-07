@@ -142,10 +142,9 @@
 - [Import lifecycle row identity](import-lifecycle-row-identity.md) — compare repeated ingredient rows by totals, but preserve structure; ambiguous manager fields stay review-only.
 - [Scoped offline master-data queues](scoped-offline-master-data-queues.md) — partition caches/outboxes by auth scope, fence async handoffs, and reserve revision zero for non-overwriting legacy seeds.
 - [Historical repair compatibility](historical-repair-compatibility.md) — preserve released marker-first transactions; validate stored nested results with bounded recursive telemetry.
-- [Bundle boundary manifests](bundle-boundary-manifests.md) — Vite’s standard manifest omits same-chunk module membership; dependency guards need Rollup chunk.modules.
+- [Bundle boundary manifests](bundle-boundary-manifests.md) — chunk dependency guards need Rollup module membership.
 - [Tailwind source scanning and Playwright](tailwind-playwright-visible-selectors.md) — Playwright `:visible` locator strings can become invalid production CSS; use locator visibility filters.
-- [Completed history durability](completed-history-durability.md) — immutable run completions use scope-bound caches/outboxes; normal resets and undo must preserve pending uploads.
-- [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
+- [Completed history + repair fingerprints](completed-history-durability.md) + [repair-definition-fingerprints.md] — preserve immutable operational history and hash metadata/contracts, never callbacks.
 - [Replit production detection](replit-production-detection.md) — `REPLIT_ENVIRONMENT=production` can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
 - [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through `/sync/today`; generic dated writes are protected scheduling and must not trust client date claims.
