@@ -19,7 +19,7 @@ let retryTimer: number | undefined;
 let activeOwner: string | undefined;
 let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void) | undefined;
 
-export type OperationalIntentState = "pending" | "sending" | "accepted" | "rebased" | "review-required" | "blocked" | "permanently-rejected";
+export type OperationalIntentState = "pending" | "sending" | "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected";
 export type OperationalIntentFailure = "network" | "rate-limited" | "server" | "authentication" | "permission" | "validation" | "quota";
 export type PreEndLifecycle = {
   startedAt?: number; pausedAt?: number; pausedStoppageId?: string; endedAt?: number;
@@ -77,7 +77,7 @@ function valid(item: unknown): item is OperationalIntent {
     && ["pause", "resume", "lifecycle", "correction"].includes(String(x.action))
     && (x.lifecycle !== "end" || (Array.isArray(x.inventoryLines) && x.inventoryLines.length <= 200))
     && (x.lifecycle !== "end" || x.preEndLifecycle === undefined || validPreEndLifecycle(x.preEndLifecycle))
-    && ["pending", "sending", "accepted", "rebased", "review-required", "blocked", "permanently-rejected"].includes(String(x.state));
+    && ["pending", "sending", "accepted", "superseded", "rebased", "conflicted", "review-required", "blocked", "permanently-rejected"].includes(String(x.state));
 }
 function notify(): void { window.dispatchEvent(new Event(OPERATIONAL_INTENT_OUTBOX_EVENT)); }
 function readKeys(prefix: string): OperationalIntent[] {
@@ -110,7 +110,7 @@ function migrate(): void {
     try {
       const records = JSON.parse(raw);
       if (Array.isArray(records)) for (const item of records.filter(valid)) {
-        const prefix = ["accepted", "rebased", "review-required", "blocked", "permanently-rejected"].includes(item.state) ? TERMINAL_PREFIX : PENDING_PREFIX;
+        const prefix = ["accepted", "superseded", "rebased", "conflicted", "review-required", "blocked", "permanently-rejected"].includes(item.state) ? TERMINAL_PREFIX : PENDING_PREFIX;
         if (!localStorage.getItem(`${prefix}${item.id}`)) localStorage.setItem(`${prefix}${item.id}`, JSON.stringify(item));
       }
       localStorage.removeItem(KEY);
@@ -136,7 +136,7 @@ function pruneTerminals(): void {
   // Review-required records are unresolved production evidence and are never
   // part of the bounded display-history eviction.
   const terminals = readKeys(TERMINAL_PREFIX)
-    .filter((item) => item.state !== "review-required")
+    .filter((item) => item.state !== "review-required" && item.state !== "conflicted")
     .sort((a, b) => (a.resolvedAt ?? a.effectiveAt) - (b.resolvedAt ?? b.effectiveAt));
   for (const item of terminals.slice(0, Math.max(0, terminals.length - MAX_TERMINAL))) localStorage.removeItem(`${TERMINAL_PREFIX}${item.id}`);
 }
@@ -152,7 +152,7 @@ function currentDeliveryMatches(item: OperationalIntent): boolean {
     return false;
   }
 }
-function terminalize(item: OperationalIntent, state: Extract<OperationalIntentState, "accepted" | "rebased" | "review-required" | "blocked" | "permanently-rejected">, fields: Partial<OperationalIntent> = {}): void {
+function terminalize(item: OperationalIntent, state: Extract<OperationalIntentState, "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected">, fields: Partial<OperationalIntent> = {}): void {
   if (!currentDeliveryMatches(item)) return;
   const record = { ...item, ...fields, state, resolvedAt: Date.now() };
   localStorage.setItem(`${TERMINAL_PREFIX}${item.id}`, JSON.stringify(record));
@@ -172,7 +172,7 @@ function canonicalInventoryLines(lines: Array<{ itemKey: string; qty: number }> 
   return output;
 }
 export function operationalIntentSummary(): Record<OperationalIntentState, number> {
-  const result: Record<OperationalIntentState, number> = { pending: 0, sending: 0, accepted: 0, rebased: 0, "review-required": 0, blocked: 0, "permanently-rejected": 0 };
+  const result: Record<OperationalIntentState, number> = { pending: 0, sending: 0, accepted: 0, superseded: 0, rebased: 0, conflicted: 0, "review-required": 0, blocked: 0, "permanently-rejected": 0 };
   for (const item of readOperationalIntentOutbox()) result[item.state]++;
   return result;
 }
@@ -188,7 +188,7 @@ export function retryOperationalIntent(id: string): boolean {
   const terminalKey = `${TERMINAL_PREFIX}${id}`;
   try {
     const item = JSON.parse(localStorage.getItem(`${PENDING_PREFIX}${id}`) ?? localStorage.getItem(terminalKey) ?? "null");
-    if (!valid(item) || item.state === "sending" || ["accepted", "rebased", "review-required"].includes(item.state)) return false;
+    if (!valid(item) || item.state === "sending" || ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(item.state)) return false;
     if (item.owner && item.owner !== activeOwner) return false;
     if (item.failure === "rate-limited" && (item.nextRetryAt ?? 0) > Date.now()) return false;
     persistPending({ ...item, owner: activeOwner, state: "pending", deliveryToken: undefined, nextRetryAt: 0, failure: undefined, guidance: undefined });
@@ -200,7 +200,7 @@ export function discardOperationalIntent(id: string): boolean {
   try {
     const raw = localStorage.getItem(`${PENDING_PREFIX}${id}`) ?? localStorage.getItem(`${TERMINAL_PREFIX}${id}`);
     const item = JSON.parse(raw ?? "null");
-    if (!valid(item) || (item.owner && item.owner !== activeOwner) || ["sending", "review-required"].includes(item.state)) return false;
+    if (!valid(item) || (item.owner && item.owner !== activeOwner) || ["sending", "conflicted", "review-required"].includes(item.state)) return false;
     localStorage.removeItem(`${PENDING_PREFIX}${id}`); localStorage.removeItem(`${TERMINAL_PREFIX}${id}`); notify(); return true;
   } catch { return false; }
 }
@@ -303,8 +303,8 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
           const res = await fetch(`/api/sync/operational-intents?today=${encodeURIComponent(item.date)}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: deliveryController.signal, body: JSON.stringify({ senderId, intent: (({ state: _state, owner: _owner, deliveryToken: _token, preEndLifecycle: _local, attempts: _a, nextRetryAt: _n, lastAttemptAt: _l, failure: _f, guidance: _g, resolvedAt: _r, ...wire }) => wire)(item) }) });
           let body: { outcome?: string; data?: unknown } = {}; try { body = await res.json(); } catch { /* status classification still applies */ }
           if (activeOwner !== ownerAtStart || !currentDeliveryMatches(item)) continue;
-          if (res.ok && ["accepted", "rebased", "review-required"].includes(body.outcome ?? "")) {
-            const outcome = body.outcome as "accepted" | "rebased" | "review-required";
+          if (res.ok && ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(body.outcome ?? "")) {
+            const outcome = body.outcome as "accepted" | "superseded" | "rebased" | "conflicted" | "review-required";
             if (body.data) adoptCanonical?.(body.data, item, outcome);
             terminalize(item, outcome); continue;
           }

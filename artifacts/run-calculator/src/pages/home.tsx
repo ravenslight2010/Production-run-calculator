@@ -7683,11 +7683,16 @@ export default function Home() {
         applySyncCallbackRef.current(payload);
         return;
       }
-      if (outcome !== "accepted" && outcome !== "rebased" && outcome !== "review-required") {
+      if (
+        outcome !== "accepted"
+        && outcome !== "superseded"
+        && outcome !== "rebased"
+        && outcome !== "conflicted"
+        && outcome !== "review-required"
+      ) {
         applySyncCallbackRef.current(payload);
         return;
       }
-
       // A finalization/review/rebase response is authoritative for the command it resolves,
       // even when the rejected browser edit minted a newer LWW stamp. Restore
       // only that command's lifecycle/correction fields before ordinary inbound
@@ -11664,10 +11669,6 @@ export default function Home() {
     );
     const nextIndex = index + 1 < base.runs.length ? index + 1 : index;
     const newDs = { ...base, runs: newRuns, currentIndex: nextIndex };
-    const completedRun = newRuns[index];
-    // Completion is durable locally before any network dependency. The outbox
-    // retries independently, so stopping production never waits on connectivity.
-    queueCompletedRun(base.date || todayStr(), completedRun, cur);
     dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);

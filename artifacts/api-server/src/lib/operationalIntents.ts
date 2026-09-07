@@ -23,7 +23,12 @@ export type OperationalIntent = {
   values?: Record<string, number>;
   inventoryLines?: Array<{ itemKey: string; qty: number }>;
 };
-export type OperationalIntentOutcome = "accepted" | "rebased" | "review-required";
+export type OperationalIntentOutcome =
+  | "accepted"
+  | "superseded"
+  | "rebased"
+  | "conflicted"
+  | "review-required";
 
 export function parseOperationalIntent(input: unknown, now = Date.now()): OperationalIntent | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
@@ -99,31 +104,32 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
     // anything else against another lifecycle generation needs a manager.
     const alreadyApplied = (intent.action === "pause" && !!run.pausedAt)
       || (intent.action === "resume" && !run.pausedAt && !!run.startedAt)
-      || (intent.action === "lifecycle" && intent.lifecycle === "start" && !!run.startedAt);
+      || (intent.action === "lifecycle" && intent.lifecycle === "start" && !!run.startedAt)
+      || (intent.action === "lifecycle" && intent.lifecycle === "end" && !!run.endedAt);
     if (exactGeneration || alreadyApplied || safeResumeRebase) {
-      outcome = exactGeneration ? "accepted" : "rebased";
+      outcome = alreadyApplied ? "superseded" : exactGeneration ? "accepted" : "rebased";
       if (!alreadyApplied && intent.action !== "correction") {
         if (intent.action === "pause" && run.startedAt && !run.endedAt) {
-          run.pausedAt = intent.effectiveAt;
-          run.stoppages = [...(Array.isArray(run.stoppages) ? run.stoppages : []), { id: `offline:${intent.id}`, type: "pause", reason: "Offline pause", startedAt: intent.effectiveAt }];
-        } else if (intent.action === "resume" && run.pausedAt && !run.endedAt && intent.effectiveAt >= run.pausedAt) {
+          run.pausedAt = now;
+          run.stoppages = [...(Array.isArray(run.stoppages) ? run.stoppages : []), { id: `offline:${intent.id}`, type: "pause", reason: "Offline pause", startedAt: now }];
+        } else if (intent.action === "resume" && run.pausedAt && !run.endedAt && now >= run.pausedAt) {
           const pauseId = run.pausedStoppageId ?? (Array.isArray(run.stoppages)
             ? run.stoppages.filter((s: any) => s?.type === "pause" && !s.endedAt && s.startedAt === run.pausedAt)
               .sort((a: any, b: any) => String(b.id).localeCompare(String(a.id)))[0]?.id : undefined);
-          run.startedAt = Number(run.startedAt) + (intent.effectiveAt - Number(run.pausedAt));
+          run.startedAt = Number(run.startedAt) + (now - Number(run.pausedAt));
           run.stoppages = (Array.isArray(run.stoppages) ? run.stoppages : []).map((s: any) =>
-            s?.id === pauseId ? { ...s, endedAt: intent.effectiveAt } : s);
+            s?.id === pauseId ? { ...s, endedAt: now } : s);
           delete run.pausedAt;
           delete run.pausedStoppageId;
-        } else if (intent.action === "lifecycle" && intent.lifecycle === "start" && !run.startedAt) run.startedAt = intent.effectiveAt;
+        } else if (intent.action === "lifecycle" && intent.lifecycle === "start" && !run.startedAt) run.startedAt = now;
         else if (intent.action === "lifecycle" && intent.lifecycle === "end" && run.startedAt && !run.endedAt) {
-          run.endedAt = intent.effectiveAt;
+          run.endedAt = now;
           delete run.pausedAt;
           delete run.pausedStoppageId;
         }
         else outcome = "review-required";
         if (outcome !== "review-required") {
-          run.metaUpdatedAt = Math.max(now, Number(run.metaUpdatedAt) || 0);
+          run.metaUpdatedAt = Math.max(now, (Number(run.metaUpdatedAt) || 0) + 1);
           runList[index] = run; data.dayState = { ...data.dayState, runs: runList };
         }
       }
@@ -131,6 +137,8 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
         const values = obj(data.runValues); values[intent.runId] = { ...obj(values[intent.runId]), ...intent.values };
         data.runValues = values; data.runValuesUpdatedAt = { ...obj(data.runValuesUpdatedAt), [intent.runId]: now };
       }
+    } else {
+      outcome = "conflicted";
     }
   }
   const record = { id: intent.id, outcome, at: now, effectiveAt: intent.effectiveAt, runId: intent.runId };

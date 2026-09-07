@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   db,
   dailySyncTable,
@@ -675,12 +675,84 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
             };
           }
           const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
+          applied.data.dayState = { ...applied.data.dayState, date: intent.date };
           if (
             applied.outcome === "accepted" &&
             intent.action === "lifecycle" &&
             intent.lifecycle === "end"
           ) {
+            const [legacyCompletion] = await tx.select().from(completedRunHistoryTable).where(and(
+              eq(completedRunHistoryTable.scope, scope),
+              eq(completedRunHistoryTable.date, intent.date),
+              eq(completedRunHistoryTable.runId, intent.runId),
+            )).for("update");
+            const lockedRun = (existing?.data as any)?.dayState?.runs?.find(
+              (run: any) => run?.id === intent.runId,
+            );
+            const legacySnapshotRun = (legacyCompletion?.snapshot as any)?.dayState?.runs?.filter(
+              (run: any) => run?.id === intent.runId,
+            );
+            const legacyAgeMs = legacyCompletion
+              ? now - legacyCompletion.createdAt.getTime()
+              : Number.POSITIVE_INFINITY;
+            const compatibleLegacyCompletion = !!legacyCompletion
+              && legacyCompletion.operationId === `completed:${intent.date}:${intent.runId}`
+              && legacyAgeMs >= 0
+              && legacyAgeMs <= 10 * 60_000
+              && Array.isArray(legacySnapshotRun)
+              && legacySnapshotRun.length === 1
+              && Number(legacySnapshotRun[0].startedAt) === Number(lockedRun?.startedAt)
+              && Number(legacySnapshotRun[0].endedAt) === legacyCompletion.completedAt.getTime()
+              && legacyCompletion.completedAt.getTime() >= Number(lockedRun?.startedAt)
+              && Math.abs(legacyCompletion.completedAt.getTime() - intent.effectiveAt) <= 10 * 60_000;
+            // During the bounded migration window, an older client may have
+            // uploaded immutable history just before its canonical End intent.
+            // Only that exact, recently server-observed, fact-compatible record
+            // may bridge the migration; arbitrary history never controls a run.
+            if (compatibleLegacyCompletion) {
+              applied.data.dayState = {
+                ...applied.data.dayState,
+                runs: (applied.data.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+                  run.id === intent.runId
+                    ? { ...run, endedAt: legacyCompletion!.completedAt.getTime() }
+                    : run
+                ),
+              };
+            } else if (legacyCompletion) {
+              applied.data = (existing?.data ?? emptySyncData(intent.date)) as Record<string, any>;
+              applied.outcome = "review-required";
+            }
+            if (applied.outcome === "accepted") {
+              const snapshot = JSON.parse(JSON.stringify(applied.data, (_key, value) => value)) as Record<string, unknown>;
+            const stable = (value: unknown): unknown => {
+              if (Array.isArray(value)) return value.map(stable);
+              if (value && typeof value === "object") {
+                return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, child]) => [key, stable(child)]));
+              }
+              return value;
+            };
+            const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
+            const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
+            const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
+              .find((run) => run.id === intent.runId);
+            const completedAt = Number(canonicalRun?.endedAt);
+            if (!compatibleLegacyCompletion) {
+              await tx.insert(completedRunHistoryTable).values({
+                id: randomUUID(),
+                scope,
+                operationId: intent.id,
+                runId: intent.runId,
+                date: intent.date,
+                completedAt: new Date(completedAt),
+                snapshot: canonicalSnapshot,
+                snapshotHash,
+                actorId: req.userId ?? "unknown",
+              });
+            }
             await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
+            }
           }
           if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));

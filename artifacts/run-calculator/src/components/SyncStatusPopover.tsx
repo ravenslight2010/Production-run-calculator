@@ -138,9 +138,10 @@ export default function SyncStatusPopover(props: Props) {
                  : ""}
              </strong>
           </div>
-           {(intentSummary.accepted + intentSummary.rebased + intentSummary["review-required"]) > 0 && (
+           {(intentSummary.accepted + intentSummary.superseded + intentSummary.rebased + intentSummary.conflicted + intentSummary["review-required"]) > 0 && (
              <p className="mt-2 text-muted-foreground">
-               Offline actions: {intentSummary.accepted} accepted, {intentSummary.rebased} rebased
+               Offline actions: {intentSummary.accepted} accepted, {intentSummary.superseded} superseded, {intentSummary.rebased} rebased
+               {intentSummary.conflicted ? `, ${intentSummary.conflicted} conflicted` : ""}
                {intentSummary["review-required"] ? `, ${intentSummary["review-required"]} need manager review` : ""}.
              </p>
            )}
@@ -152,6 +153,7 @@ export default function SyncStatusPopover(props: Props) {
                    const label = intent.state === "pending" ? "Saved locally · pending"
                      : intent.state === "sending" ? "Sending"
                        : intent.state === "review-required" ? "Review required"
+                         : intent.state === "conflicted" ? "Conflict requires review"
                          : intent.state === "permanently-rejected" ? "Permanently rejected"
                            : intent.state === "blocked" ? "Blocked" : intent.state;
                    return (
@@ -161,13 +163,13 @@ export default function SyncStatusPopover(props: Props) {
                          <span className="text-muted-foreground">#{intent.id.slice(-6)}</span>
                        </div>
                        <p className="mt-1 text-muted-foreground">
-                         {intent.guidance ?? (intent.state === "review-required"
+                         {intent.guidance ?? (intent.state === "review-required" || intent.state === "conflicted"
                            ? "A manager must review this action. It is retained and cannot be discarded."
                            : `Attempt ${intent.attempts ?? 0}`)}
                        </p>
-                       {intent.state === "review-required" ? (
+                       {intent.state === "review-required" || intent.state === "conflicted" ? (
                          <p className="mt-1 font-medium text-amber-500">Open the manager conflict monitor for review guidance.</p>
-                        ) : !["accepted", "rebased", "sending"].includes(intent.state) && (
+                        ) : !["accepted", "superseded", "rebased", "sending"].includes(intent.state) && (
                          <div className="mt-2 flex gap-2">
                            <button type="button" onClick={() => { if (retryOperationalIntent(intent.id)) void flushOperationalIntentOutbox(); }}
                               className="min-h-11 rounded border border-border px-3 font-semibold hover:bg-muted/50">Retry</button>

@@ -104,6 +104,31 @@ describe("operational intent forced canonical reconciliation", () => {
     expect(shouldKeepLocalRunLifecycle(result.dayState.runs[0], canonicalRun)).toBe(false);
   });
 
+  it("restores canonical lifecycle for an explicit conflict despite a newer optimistic browser stamp", () => {
+    const localDay: DayState = {
+      runs: [{ id: "run1", brand: "Acme", flavor: "Pep", startedAt: 10, endedAt: 99, metaUpdatedAt: 999 }],
+      currentIndex: 0,
+    };
+    const canonicalRun = {
+      id: "run1", brand: "Acme", flavor: "Pep", startedAt: 10, metaUpdatedAt: 40,
+    };
+    const result = reconcileOperationalIntentCanonical({
+      dayState: localDay,
+      runValues: DEFAULT_VALUES,
+      runValuesUpdatedAt: { run1: 20 },
+      payload: {
+        dayState: { runs: [canonicalRun] },
+        runValues: { run1: DEFAULT_VALUES },
+        runValuesUpdatedAt: { run1: 20 },
+      },
+      intent: { runId: "run1", action: "lifecycle", lifecycle: "end" },
+      outcome: "conflicted",
+    });
+    expect(result.lifecycleChanged).toBe(true);
+    expect(result.dayState.runs[0].endedAt).toBeUndefined();
+    expect(result.dayState.runs[0].metaUpdatedAt).toBe(40);
+  });
+
   it("adopts the server-owned stamp for an accepted atomic End", () => {
     const localDay: DayState = {
       runs: [{ id: "run1", brand: "Acme", flavor: "Pep", startedAt: 10, endedAt: 90, metaUpdatedAt: 91 }],

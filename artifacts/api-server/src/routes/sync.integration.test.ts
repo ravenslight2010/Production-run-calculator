@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
@@ -29,6 +29,7 @@ let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
+let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
@@ -81,6 +82,7 @@ beforeAll(async () => {
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
+  completedRunHistoryTable = dbMod.completedRunHistoryTable;
   dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
@@ -126,7 +128,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -257,6 +259,16 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+    const [completion] = await db.select().from(completedRunHistoryTable);
+    expect(completion).toMatchObject({
+      scope: "live",
+      operationId: "offline:final-one",
+      runId: RUN,
+      date: DATE,
+      actorId: USER,
+    });
+    expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
+      .toBe(completion.completedAt.getTime());
 
     const replay = await postFinalization(finalization("offline:final-one"));
     expect(await replay.json()).toMatchObject({ outcome: "accepted", duplicate: true });
@@ -267,10 +279,71 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
   it("returns review-required for stale generation and leaves inventory unchanged", async () => {
     await seedFinalization();
     const response = await postFinalization(finalization("offline:stale-end", `${RUN}:99`));
-    expect(await response.json()).toMatchObject({ outcome: "review-required", duplicate: false });
+    expect(await response.json()).toMatchObject({ outcome: "conflicted", duplicate: false });
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+  });
+
+  it("finishes atomically when a bounded-window legacy history upload arrived first", async () => {
+    await seedFinalization();
+    const legacyCompletedAt = new Date();
+    await db.insert(completedRunHistoryTable).values({
+      id: "legacy-history",
+      scope: "live",
+      operationId: `completed:${DATE}:${RUN}`,
+      runId: RUN,
+      date: DATE,
+      completedAt: legacyCompletedAt,
+      snapshot: {
+        dayState: {
+          date: DATE,
+          currentIndex: 0,
+          runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 50, endedAt: legacyCompletedAt.getTime() }],
+        },
+        runValues: { [RUN]: { casesNeeded: 10 } },
+      },
+      snapshotHash: "legacy-hash",
+      actorId: USER,
+    });
+
+    const compatibleIntent = finalization("offline:after-legacy");
+    compatibleIntent.intent.effectiveAt = legacyCompletedAt.getTime();
+    const response = await postFinalization(compatibleIntent);
+    const body = await response.json() as any;
+    expect(body.outcome).toBe("accepted");
+    expect(body.data.dayState.runs.find((run: any) => run.id === RUN).endedAt).toBe(legacyCompletedAt.getTime());
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+  });
+
+  it("requires review when an unrelated immutable history row already exists", async () => {
+    await seedFinalization();
+    await db.insert(completedRunHistoryTable).values({
+      id: "unrelated-history",
+      scope: "live",
+      operationId: "other-operation",
+      runId: RUN,
+      date: DATE,
+      completedAt: new Date(),
+      snapshot: {
+        dayState: { date: DATE, runs: [{ id: RUN, startedAt: 999, endedAt: Date.now() }] },
+        runValues: { [RUN]: { casesNeeded: 10 } },
+      },
+      snapshotHash: "unrelated-hash",
+      actorId: USER,
+    });
+    const response = await postFinalization(finalization("offline:blocked-by-history"));
+    expect(await response.json()).toMatchObject({ outcome: "review-required", duplicate: false });
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).dayState.runs.find((run: any) => run.id === RUN).endedAt).toBeUndefined();
   });
 
   it("lets a reset holding the first lock force review without inventory side effects", async () => {
@@ -297,6 +370,85 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(await (await pending).json()).toMatchObject({ outcome: "review-required" });
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+});
+
+describe("POST /sync/operational-intents — canonical transitions", () => {
+  const DATE = "2030-03-10";
+  const RUN = "transition-run";
+
+  async function post(intent: Record<string, unknown>) {
+    return fetch(`${baseUrl}/api/sync/operational-intents?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "transition-client", intent }),
+    }).then((response) => response.json()) as Promise<any>;
+  }
+
+  function intent(
+    id: string,
+    observedGeneration: string,
+    action: "pause" | "resume" | "lifecycle" | "correction",
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      version: 1,
+      id,
+      date: DATE,
+      runId: RUN,
+      observedGeneration,
+      resetEpoch: 0,
+      // The occurrence time orders queued work, but the server clock must issue
+      // every accepted canonical lifecycle timestamp.
+      effectiveAt: Date.now() - 60_000,
+      action,
+      ...extra,
+    };
+  }
+
+  it("serializes Start, correction, Pause, and Resume with server-issued timestamps", async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, runs: [{ id: RUN, brand: "Acme", flavor: "Pep" }] },
+        runValues: { [RUN]: { traysOnLine: 2 } },
+        runValuesUpdatedAt: { [RUN]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const beforeStart = Date.now();
+    const started = await post(intent("ordered:start", `${RUN}:0`, "lifecycle", { lifecycle: "start" }));
+    const startedRun = started.data.dayState.runs.find((run: any) => run.id === RUN);
+    expect(started.outcome).toBe("accepted");
+    expect(startedRun.startedAt).toBeGreaterThanOrEqual(beforeStart);
+    expect(startedRun.startedAt).toBeLessThanOrEqual(Date.now());
+    expect(startedRun.startedAt).not.toBe(started.data.operationalIntentHistory.outcomes.at(-1).effectiveAt);
+
+    const startGeneration = `${RUN}:${startedRun.metaUpdatedAt}`;
+    const corrected = await post(intent("ordered:correct", startGeneration, "correction", {
+      values: { traysOnLine: 7 },
+    }));
+    expect(corrected).toMatchObject({ outcome: "accepted" });
+    expect(corrected.data.runValues[RUN].traysOnLine).toBe(7);
+
+    const beforePause = Date.now();
+    const paused = await post(intent("ordered:pause", startGeneration, "pause"));
+    const pausedRun = paused.data.dayState.runs.find((run: any) => run.id === RUN);
+    expect(paused.outcome).toBe("accepted");
+    expect(pausedRun.pausedAt).toBeGreaterThanOrEqual(beforePause);
+    expect(pausedRun.stoppages.at(-1).startedAt).toBe(pausedRun.pausedAt);
+
+    const pauseGeneration = `${RUN}:${pausedRun.metaUpdatedAt}`;
+    const beforeResume = Date.now();
+    const resumed = await post(intent("ordered:resume", pauseGeneration, "resume"));
+    const resumedRun = resumed.data.dayState.runs.find((run: any) => run.id === RUN);
+    expect(resumed.outcome).toBe("accepted");
+    expect(resumedRun.pausedAt).toBeUndefined();
+    expect(resumedRun.stoppages.at(-1).endedAt).toBeGreaterThanOrEqual(beforeResume);
+    expect(resumedRun.startedAt).toBeGreaterThan(startedRun.startedAt);
+
+    const stale = await post(intent("ordered:stale-pause", startGeneration, "pause"));
+    expect(stale.outcome).toBe("conflicted");
+    expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
   });
 });
 

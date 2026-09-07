@@ -193,7 +193,7 @@ export function reconcileOperationalIntentCanonical(args: {
   runValuesUpdatedAt: Record<string, number>;
   payload: OperationalCanonicalPayload;
   intent: OperationalCanonicalIntent;
-  outcome: "accepted" | "rebased" | "review-required";
+  outcome: "accepted" | "superseded" | "rebased" | "conflicted" | "review-required";
 }): {
   dayState: DayState;
   runValues: FormValues;
