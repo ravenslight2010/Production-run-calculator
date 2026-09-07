@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import * as z from "zod";
 import {
   aggregateDaySummary,
@@ -90,6 +90,7 @@ const FinalizedReportExportQuery = z.object({
 
 const LEGACY_JSON_HASH_CONTRACT = "json-v1" as const;
 const CURRENT_HASH_CONTRACT = "canonical-json-v2" as const;
+const CURRENT_PROOF_CONTRACT = "hmac-sha256-v1" as const;
 type FinalizedReportHashContract =
   | typeof LEGACY_JSON_HASH_CONTRACT
   | typeof CURRENT_HASH_CONTRACT;
@@ -98,6 +99,7 @@ function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => child !== undefined)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
       .join(",")}}`;
@@ -190,15 +192,89 @@ function reportHash(report: unknown): string {
   return hashSerializedReport(canonicalJson(report));
 }
 
+type ReportSigningKeyring = {
+  activeKeyId: string;
+  keys: Record<string, string>;
+};
+
+function reportSigningKey(
+  keyring: ReportSigningKeyring,
+  keyId: string,
+): string | null {
+  if (!Object.hasOwn(keyring.keys, keyId)) return null;
+  const key = keyring.keys[keyId];
+  return typeof key === "string" && key.length >= 32 ? key : null;
+}
+
+function reportSigningKeyring(): ReportSigningKeyring | null {
+  const configured = process.env.OPERATIONAL_REPORT_SIGNING_KEYS;
+  if (!configured) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(configured);
+  } catch {
+    return null;
+  }
+  const result = z.object({
+    activeKeyId: z.string().min(1),
+    keys: z.record(z.string(), z.string().min(32)),
+  }).safeParse(parsed);
+  if (!result.success || !reportSigningKey(result.data, result.data.activeKeyId)) return null;
+  return result.data;
+}
+
+function reportProofEnvelope(
+  row: Pick<typeof finalizedOperationalReportsTable.$inferSelect,
+    "id" | "scope" | "reportScope" | "periodStart" | "periodEnd" | "generatedAt"
+    | "generatedBy" | "finalizedAt" | "finalizedBy" | "contentHash" | "hashContract"
+    | "payload">,
+): unknown {
+  return {
+    contentHash: row.contentHash,
+    finalizedAt: row.finalizedAt.toISOString(),
+    finalizedBy: row.finalizedBy,
+    generatedAt: row.generatedAt.toISOString(),
+    generatedBy: row.generatedBy,
+    hashContract: row.hashContract,
+    id: row.id,
+    payload: row.payload,
+    periodEnd: row.periodEnd,
+    periodStart: row.periodStart,
+    reportScope: row.reportScope,
+    scope: row.scope,
+  };
+}
+
+function signFinalizedReport(
+  row: Parameters<typeof reportProofEnvelope>[0],
+  key: string,
+): string {
+  return createHmac("sha256", key)
+    .update(canonicalJson(reportProofEnvelope(row)))
+    .digest("hex");
+}
+
+function signaturesMatch(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual, "hex");
+  const expectedBuffer = Buffer.from(expected, "hex");
+  return actualBuffer.length === 32
+    && expectedBuffer.length === actualBuffer.length
+    && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
 type FinalizedReportIntegrity =
   | {
       ok: true;
       actualHash: string;
       hashContract: FinalizedReportHashContract;
+      proofContract: typeof CURRENT_PROOF_CONTRACT | null;
+      proofKeyId: string | null;
+      proofStatus: "verified" | "unsigned-legacy";
     }
   | {
       ok: false;
       actualHashes: Record<FinalizedReportHashContract, string>;
+      proofStatus: "invalid" | "key-unavailable";
     };
 
 function finalizedReportIntegrity(
@@ -215,28 +291,8 @@ function finalizedReportIntegrity(
         [CURRENT_HASH_CONTRACT]: "not-computed-for-unrecognized-contract",
         [LEGACY_JSON_HASH_CONTRACT]: "not-computed-for-unrecognized-contract",
       },
+      proofStatus: "invalid",
     };
-  }
-
-  if (row.hashContract === CURRENT_HASH_CONTRACT || row.hashContract === null) {
-    const canonicalHash = reportHash(row.payload);
-    if (canonicalHash === row.contentHash) {
-      return {
-        ok: true,
-        actualHash: canonicalHash,
-        hashContract: CURRENT_HASH_CONTRACT,
-      };
-    }
-  }
-  if (row.hashContract === LEGACY_JSON_HASH_CONTRACT || row.hashContract === null) {
-    const legacyHash = legacyReportHash(row.payload);
-    if (legacyHash === row.contentHash) {
-      return {
-        ok: true,
-        actualHash: legacyHash,
-        hashContract: LEGACY_JSON_HASH_CONTRACT,
-      };
-    }
   }
 
   const canonicalHash = row.hashContract === LEGACY_JSON_HASH_CONTRACT
@@ -245,12 +301,67 @@ function finalizedReportIntegrity(
   const legacyHash = row.hashContract === CURRENT_HASH_CONTRACT
     ? "not-computed-for-canonical-json-v2-contract"
     : legacyReportHash(row.payload);
+  const actualHashes = {
+    [CURRENT_HASH_CONTRACT]: canonicalHash,
+    [LEGACY_JSON_HASH_CONTRACT]: legacyHash,
+  };
+  const hasAnyProof = Boolean(row.proofContract || row.proofKeyId || row.proofSignature);
+  if (hasAnyProof) {
+    if (
+      row.proofContract !== CURRENT_PROOF_CONTRACT
+      || !row.proofKeyId
+      || !row.proofSignature
+      || row.hashContract !== CURRENT_HASH_CONTRACT
+      || canonicalHash !== row.contentHash
+    ) {
+      return { ok: false, actualHashes, proofStatus: "invalid" };
+    }
+    const keyring = reportSigningKeyring();
+    const key = keyring ? reportSigningKey(keyring, row.proofKeyId) : null;
+    if (!key) return { ok: false, actualHashes, proofStatus: "key-unavailable" };
+    const expectedSignature = signFinalizedReport(row, key);
+    if (!signaturesMatch(row.proofSignature, expectedSignature)) {
+      return { ok: false, actualHashes, proofStatus: "invalid" };
+    }
+    return {
+      ok: true,
+      actualHash: canonicalHash,
+      hashContract: CURRENT_HASH_CONTRACT,
+      proofContract: CURRENT_PROOF_CONTRACT,
+      proofKeyId: row.proofKeyId,
+      proofStatus: "verified",
+    };
+  }
+  if (
+    (row.hashContract === CURRENT_HASH_CONTRACT || row.hashContract === null)
+    && canonicalHash === row.contentHash
+  ) {
+    return {
+      ok: true,
+      actualHash: canonicalHash,
+      hashContract: CURRENT_HASH_CONTRACT,
+      proofContract: null,
+      proofKeyId: null,
+      proofStatus: "unsigned-legacy",
+    };
+  }
+  if (
+    (row.hashContract === LEGACY_JSON_HASH_CONTRACT || row.hashContract === null)
+    && legacyHash === row.contentHash
+  ) {
+    return {
+      ok: true,
+      actualHash: legacyHash,
+      hashContract: LEGACY_JSON_HASH_CONTRACT,
+      proofContract: null,
+      proofKeyId: null,
+      proofStatus: "unsigned-legacy",
+    };
+  }
   return {
     ok: false,
-    actualHashes: {
-      [CURRENT_HASH_CONTRACT]: canonicalHash,
-      [LEGACY_JSON_HASH_CONTRACT]: legacyHash,
-    },
+    actualHashes,
+    proofStatus: "invalid",
   };
 }
 
@@ -292,6 +403,9 @@ function finalizedReportResponse(
     finalizedBy: row.finalizedBy,
     contentHash: row.contentHash,
     hashContract: integrity.hashContract,
+    proofContract: integrity.proofContract,
+    proofKeyId: integrity.proofKeyId,
+    proofStatus: integrity.proofStatus,
     report: row.payload as OperationalReport,
   };
 }
@@ -307,6 +421,9 @@ const finalizedReportMetadataColumns = {
   finalizedBy: finalizedOperationalReportsTable.finalizedBy,
   contentHash: finalizedOperationalReportsTable.contentHash,
   hashContract: finalizedOperationalReportsTable.hashContract,
+  proofContract: finalizedOperationalReportsTable.proofContract,
+  proofKeyId: finalizedOperationalReportsTable.proofKeyId,
+  proofSignature: finalizedOperationalReportsTable.proofSignature,
 };
 
 function finalizedReportMetadata(
@@ -314,7 +431,15 @@ function finalizedReportMetadata(
     [K in keyof typeof finalizedReportMetadataColumns]:
       typeof finalizedOperationalReportsTable.$inferSelect[K];
   },
+  integrity?: FinalizedReportIntegrity,
 ) {
+  const hasAnyProof = Boolean(row.proofContract || row.proofKeyId || row.proofSignature);
+  const completeKnownProof = row.proofContract === CURRENT_PROOF_CONTRACT
+    && Boolean(row.proofKeyId && row.proofSignature);
+  const keyring = reportSigningKeyring();
+  const proofKeyAvailable = completeKnownProof && row.proofKeyId && keyring
+    ? Boolean(reportSigningKey(keyring, row.proofKeyId))
+    : false;
   return {
     id: row.id,
     reportScope: row.reportScope,
@@ -325,10 +450,27 @@ function finalizedReportMetadata(
     finalizedAt: row.finalizedAt.toISOString(),
     finalizedBy: row.finalizedBy,
     contentHash: row.contentHash,
-    hashContract: row.hashContract === CURRENT_HASH_CONTRACT
-      || row.hashContract === LEGACY_JSON_HASH_CONTRACT
-      ? row.hashContract
-      : "unrecognized",
+    hashContract: integrity
+      ? integrity.ok ? integrity.hashContract : "unrecognized"
+      : row.hashContract === CURRENT_HASH_CONTRACT
+        || row.hashContract === LEGACY_JSON_HASH_CONTRACT
+        ? row.hashContract
+        : "unrecognized",
+    proofContract: integrity?.ok
+      ? integrity.proofContract
+      : row.proofContract === CURRENT_PROOF_CONTRACT
+        ? row.proofContract
+        : null,
+    proofKeyId: row.proofKeyId,
+    proofStatus: integrity?.proofStatus ?? (
+      !hasAnyProof
+        ? "unsigned-legacy"
+        : !completeKnownProof
+          ? "invalid"
+          : proofKeyAvailable
+            ? "not-checked"
+            : "key-unavailable"
+    ),
   };
 }
 
@@ -344,6 +486,7 @@ function sendFinalizedReportIntegrityError(
     reportId: row.id,
     expectedHash: row.contentHash,
     actualHashes: integrity.actualHashes,
+    proofStatus: integrity.proofStatus,
   }, "Finalized operational report failed integrity verification");
   operationalError(
     res,
@@ -1022,7 +1165,25 @@ router.post(
       contentHash: reportHash(report),
       hashContract: CURRENT_HASH_CONTRACT,
       payload: report,
+      proofContract: CURRENT_PROOF_CONTRACT,
+      proofKeyId: "",
+      proofSignature: "",
     };
+    const keyring = reportSigningKeyring();
+    if (!keyring) {
+      operationalError(
+        res,
+        503,
+        "finalized-report-signing-unavailable",
+        "Finalized report signing is not configured. No report was finalized.",
+      );
+      return;
+    }
+    row.proofKeyId = keyring.activeKeyId;
+    row.proofSignature = signFinalizedReport(
+      row,
+      reportSigningKey(keyring, keyring.activeKeyId)!,
+    );
     try {
       await db.insert(finalizedOperationalReportsTable).values(row);
     } catch (error) {
@@ -1044,13 +1205,23 @@ router.post(
       }
       throw error;
     }
-    res.status(201).json({
-      id: row.id, scope: row.scope, reportScope: row.reportScope,
-      periodStart: row.periodStart, periodEnd: row.periodEnd,
-      generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
-      finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy,
-      contentHash: row.contentHash, hashContract: CURRENT_HASH_CONTRACT, report,
-    });
+    const persisted = await db.select().from(finalizedOperationalReportsTable)
+      .where(and(
+        eq(finalizedOperationalReportsTable.scope, scope),
+        eq(finalizedOperationalReportsTable.reportScope, report.scope),
+        eq(finalizedOperationalReportsTable.periodStart, report.periodStart),
+        eq(finalizedOperationalReportsTable.periodEnd, report.periodEnd),
+      ));
+    if (persisted.length !== 1) {
+      operationalError(res, 409, "finalized-report-ambiguous", "The finalized report could not be verified after storage.");
+      return;
+    }
+    const integrity = finalizedReportIntegrity(persisted[0]);
+    if (!integrity.ok) {
+      sendFinalizedReportIntegrityError(req, res, persisted[0], integrity);
+      return;
+    }
+    res.status(201).json(finalizedReportResponse(persisted[0], integrity));
   },
 );
 
@@ -1061,13 +1232,15 @@ router.get("/reports/operational/finalized", requireCapability("review-incidents
     return;
   }
   const [periodStart, periodEnd] = dateRange(parsed.data.scope, parsed.data.date);
-  const rows = await db.select(finalizedReportMetadataColumns).from(finalizedOperationalReportsTable).where(and(
+  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
     eq(finalizedOperationalReportsTable.scope, currentScope()),
     eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope),
     eq(finalizedOperationalReportsTable.periodStart, periodStart),
     eq(finalizedOperationalReportsTable.periodEnd, periodEnd),
   )).orderBy(desc(finalizedOperationalReportsTable.finalizedAt));
-  res.json(rows.map(finalizedReportMetadata));
+  res.json(await Promise.all(rows.map(async (row) => (
+    finalizedReportMetadata(row, await verifiedFinalizedReportIntegrity(row))
+  ))));
 });
 
 router.get("/reports/operational/finalized/search", requireCapability("review-incidents"), async (req, res): Promise<void> => {
@@ -1085,7 +1258,7 @@ router.get("/reports/operational/finalized/search", requireCapability("review-in
     desc(finalizedOperationalReportsTable.periodEnd),
     desc(finalizedOperationalReportsTable.finalizedAt),
   ).limit(parsed.data.limit);
-  res.json(rows.map(finalizedReportMetadata));
+  res.json(rows.map((row) => finalizedReportMetadata(row)));
 });
 
 router.get("/reports/operational/finalized/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {

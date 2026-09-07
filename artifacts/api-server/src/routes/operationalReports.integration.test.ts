@@ -34,8 +34,28 @@ const MANAGER = "operational-manager";
 const OPERATOR = "operational-operator";
 const SANDBOX_MANAGER = "operational-sandbox-manager";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const REPORT_SIGNING_KEYRING = {
+  activeKeyId: "test-current",
+  keys: {
+    "test-current": "test-operational-report-signing-key-current-0001",
+    "test-previous": "test-operational-report-signing-key-previous-0001",
+  },
+};
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => child !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
 
 beforeAll(async () => {
+  process.env.OPERATIONAL_REPORT_SIGNING_KEYS = JSON.stringify(REPORT_SIGNING_KEYRING);
   originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
   adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
@@ -91,6 +111,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  process.env.OPERATIONAL_REPORT_SIGNING_KEYS = JSON.stringify(REPORT_SIGNING_KEYRING);
   clearUserValidityCache();
   clearSandboxCache();
   await db.execute(sql`TRUNCATE ${finalizedOperationalReportsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
@@ -302,7 +323,7 @@ describe("operational report endpoints", () => {
       report: { production: { casesProduced: 999999 } },
     });
     expect(created.status).toBe(201);
-    const archived = await created.json() as { id: string; contentHash: string; hashContract: string; report: { production: { casesProduced: number }; productionRows: Array<{ run: string }> } };
+    const archived = await created.json() as { id: string; contentHash: string; hashContract: string; proofContract: string; proofKeyId: string; proofStatus: string; report: { production: { casesProduced: number }; productionRows: Array<{ run: string }> } };
     expect(archived.report.production.casesProduced).not.toBe(999999);
     expect(archived.report.productionRows[0]?.run).toMatch(/Original Snapshot/);
     expect(archived.contentHash).toMatch(/^[a-f0-9]{64}$/);
@@ -313,6 +334,9 @@ describe("operational report endpoints", () => {
       eq(finalizedOperationalReportsTable.id, archived.id),
     );
     expect(persistedCreated).toEqual([{ hashContract: "canonical-json-v2" }]);
+    expect(archived.proofContract).toBe("hmac-sha256-v1");
+    expect(archived.proofKeyId).toBe("test-current");
+    expect(archived.proofStatus).toBe("verified");
 
     await db.update(dailySyncTable).set({
       data: snapshot({ id: "live-final", brand: "Mutated", flavor: "Source", startedAt: 1_000, endedAt: 2_000 }, 500),
@@ -334,6 +358,33 @@ describe("operational report endpoints", () => {
     };
     expect(retrievedArchive.hashContract).toBe("canonical-json-v2");
     expect(retrievedArchive.report.productionRows[0]?.run).toBe("Original Snapshot");
+    expect(retrievedArchive).toMatchObject({
+      proofContract: "hmac-sha256-v1",
+      proofKeyId: "test-current",
+      proofStatus: "verified",
+    });
+    process.env.OPERATIONAL_REPORT_SIGNING_KEYS = JSON.stringify({
+      activeKeyId: "test-previous",
+      keys: REPORT_SIGNING_KEYRING.keys,
+    });
+    const afterRotation = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
+    expect(afterRotation.status).toBe(200);
+    expect(await afterRotation.json()).toMatchObject({
+      proofKeyId: "test-current",
+      proofStatus: "verified",
+    });
+    process.env.OPERATIONAL_REPORT_SIGNING_KEYS = JSON.stringify({
+      activeKeyId: "test-previous",
+      keys: { "test-previous": REPORT_SIGNING_KEYRING.keys["test-previous"] },
+    });
+    const afterOldKeyRemoval = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
+    expect(afterOldKeyRemoval.status).toBe(409);
+    const listedWithoutOldKey = await req(MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06");
+    expect(await listedWithoutOldKey.json()).toMatchObject([{
+      id: archived.id,
+      proofKeyId: "test-current",
+      proofStatus: "key-unavailable",
+    }]);
     expect((await req(SANDBOX_MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`)).status).toBe(404);
     expect((await req(SANDBOX_MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06")).status).toBe(200);
   });
@@ -450,6 +501,9 @@ describe("operational report endpoints", () => {
       id: legacyId,
       contentHash: legacyHash,
       hashContract: "json-v1",
+      proofContract: null,
+      proofKeyId: null,
+      proofStatus: "unsigned-legacy",
       report: legacyPayload,
     });
     const classifiedLegacy = await db.select({
@@ -468,8 +522,36 @@ describe("operational report endpoints", () => {
       id: legacyId,
       contentHash: legacyHash,
       hashContract: "json-v1",
+      proofStatus: "unsigned-legacy",
     }]);
     expect(listedRows[0]).not.toHaveProperty("report");
+
+    const canonicalId = "10000000-0000-4000-8000-000000000002";
+    await db.insert(finalizedOperationalReportsTable).values({
+      id: canonicalId,
+      scope: "live",
+      reportScope: "day",
+      periodStart: "2026-09-04",
+      periodEnd: "2026-09-04",
+      generatedAt: finalizedAt,
+      generatedBy: MANAGER,
+      finalizedAt,
+      finalizedBy: MANAGER,
+      contentHash: (await import("node:crypto"))
+        .createHash("sha256")
+        .update(canonicalJson(legacyPayload))
+        .digest("hex"),
+      payload: legacyPayload,
+    });
+    const canonicalLegacy = await req(MANAGER, "GET", `/api/reports/operational/finalized/${canonicalId}`);
+    expect(canonicalLegacy.status).toBe(200);
+    expect(await canonicalLegacy.json()).toMatchObject({
+      id: canonicalId,
+      hashContract: "canonical-json-v2",
+      proofContract: null,
+      proofKeyId: null,
+      proofStatus: "unsigned-legacy",
+    });
 
     await db.update(finalizedOperationalReportsTable).set({
       payload: { ...legacyPayload, tampered: true },
@@ -489,6 +571,94 @@ describe("operational report endpoints", () => {
       eq(finalizedOperationalReportsTable.id, legacyId),
     );
     expect(classificationAfterTamper).toEqual([{ hashContract: "json-v1" }]);
+  });
+
+  it("rejects a signed report when a database writer changes both payload and content hash", async () => {
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2026-09-06",
+      data: snapshot({ id: "signed-final", brand: "Signed", flavor: "Original", startedAt: 1_000, endedAt: 2_000 }),
+    });
+    const created = await req(MANAGER, "POST", "/api/reports/operational/finalize", {
+      scope: "day",
+      date: "2026-09-06",
+    });
+    expect(created.status).toBe(201);
+    const archived = await created.json() as { id: string; report: Record<string, unknown> };
+    const changedPayload = { ...archived.report, tamperedByDatabaseWriter: true };
+    const changedHash = (await import("node:crypto"))
+      .createHash("sha256")
+      .update(canonicalJson(changedPayload))
+      .digest("hex");
+    await db.update(finalizedOperationalReportsTable).set({
+      payload: changedPayload,
+      contentHash: changedHash,
+    }).where(eq(finalizedOperationalReportsTable.id, archived.id));
+    const stored = await db.select().from(finalizedOperationalReportsTable)
+      .where(eq(finalizedOperationalReportsTable.id, archived.id));
+    expect(stored[0]?.contentHash).toBe(changedHash);
+
+    const retrieved = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
+    expect(retrieved.status).toBe(409);
+    expect(await retrieved.json()).toMatchObject({
+      error: { code: "finalized-report-integrity-failure" },
+    });
+    const listed = await req(MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06");
+    expect(await listed.json()).toMatchObject([{
+      id: archived.id,
+      hashContract: "unrecognized",
+      proofStatus: "invalid",
+    }]);
+  });
+
+  it("does not finalize when the dedicated signing keyring is unavailable", async () => {
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2026-09-06",
+      data: snapshot({ id: "unsigned-final", brand: "Unsigned", flavor: "Blocked", startedAt: 1_000, endedAt: 2_000 }),
+    });
+    delete process.env.OPERATIONAL_REPORT_SIGNING_KEYS;
+    const response = await req(MANAGER, "POST", "/api/reports/operational/finalize", {
+      scope: "day",
+      date: "2026-09-06",
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "finalized-report-signing-unavailable" },
+    });
+    expect(await db.select().from(finalizedOperationalReportsTable)).toHaveLength(0);
+  });
+
+  it("verifies persisted proofs when JSONB omits undefined optional report fields", async () => {
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2026-09-06",
+      data: snapshot({
+        id: "unfinished-proof",
+        brand: "Pending",
+        flavor: "Follow-up",
+        startedAt: 1_000,
+      }),
+    });
+    const created = await req(MANAGER, "POST", "/api/reports/operational/finalize", {
+      scope: "day",
+      date: "2026-09-06",
+    });
+    expect(created.status).toBe(201);
+    const archived = await created.json() as {
+      id: string;
+      proofStatus: string;
+      report: { unresolvedActions: { value: { total: number } } };
+    };
+    expect(archived.proofStatus).toBe("verified");
+    expect(archived.report.unresolvedActions.value.total).toBeGreaterThan(0);
+
+    const retrieved = await req(MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`);
+    expect(retrieved.status).toBe(200);
+    expect(await retrieved.json()).toMatchObject({
+      id: archived.id,
+      proofStatus: "verified",
+    });
   });
 
   it("searches a bounded date range across day and week reports within the manager facility", async () => {

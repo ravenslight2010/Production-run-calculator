@@ -149,3 +149,4 @@
 - [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
 - [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through `/sync/today`; generic dated writes are protected scheduling and must not trust client date claims.
 - [Bounded archive range reads](bounded-archive-range-reads.md) — cap date spans and results, align the index, and split exact/range endpoints when OpenAPI cannot type query unions.
+- [Finalized report authenticity](finalized-report-authenticity.md) — sign canonical payload+audit envelopes with a dedicated retained-key keyring; verify persisted rows and classify unsigned legacy records.

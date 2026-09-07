@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FinalizedOperationalReportSummaryHashContract } from './finalizedOperationalReportSummaryHashContract';
+import type { FinalizedOperationalReportSummaryProofContract } from './finalizedOperationalReportSummaryProofContract';
+import type { FinalizedOperationalReportSummaryProofStatus } from './finalizedOperationalReportSummaryProofStatus';
 import type { FinalizedOperationalReportSummaryReportScope } from './finalizedOperationalReportSummaryReportScope';
 
 export interface FinalizedOperationalReportSummary {
@@ -20,4 +22,16 @@ export interface FinalizedOperationalReportSummary {
   contentHash: string;
   /** Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker. */
   hashContract: FinalizedOperationalReportSummaryHashContract;
+  /**
+     * Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+     * @nullable
+     */
+  proofContract: FinalizedOperationalReportSummaryProofContract;
+  /**
+     * Identifier used to select a retained verification key during safe rotation. This is not secret key material.
+     * @nullable
+     */
+  proofKeyId: string | null;
+  /** Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative. */
+  proofStatus: FinalizedOperationalReportSummaryProofStatus;
 }

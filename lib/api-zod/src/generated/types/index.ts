@@ -142,6 +142,8 @@ export * from './finalizedOperationalReport';
 export * from './finalizedOperationalReportScope';
 export * from './finalizedOperationalReportSummary';
 export * from './finalizedOperationalReportSummaryHashContract';
+export * from './finalizedOperationalReportSummaryProofContract';
+export * from './finalizedOperationalReportSummaryProofStatus';
 export * from './finalizedOperationalReportSummaryReportScope';
 export * from './followUpRunSuggestion200';
 export * from './forgotPasswordRequest';

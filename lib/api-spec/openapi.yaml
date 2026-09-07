@@ -6665,7 +6665,7 @@ components:
 
     FinalizedOperationalReportSummary:
       type: object
-      required: [id, reportScope, periodStart, periodEnd, generatedAt, generatedBy, finalizedAt, finalizedBy, contentHash, hashContract]
+      required: [id, reportScope, periodStart, periodEnd, generatedAt, generatedBy, finalizedAt, finalizedBy, contentHash, hashContract, proofContract, proofKeyId, proofStatus]
       properties:
         id: { type: string, format: uuid }
         reportScope: { type: string, enum: [day, week] }
@@ -6680,6 +6680,17 @@ components:
           type: string
           enum: [json-v1, canonical-json-v2, unrecognized]
           description: Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.
+        proofContract:
+          type: [string, "null"]
+          enum: [hmac-sha256-v1, null]
+          description: Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+        proofKeyId:
+          type: [string, "null"]
+          description: Identifier used to select a retained verification key during safe rotation. This is not secret key material.
+        proofStatus:
+          type: string
+          enum: [verified, unsigned-legacy, invalid, key-unavailable, not-checked]
+          description: Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.
 
     FinalizedOperationalReport:
       allOf:

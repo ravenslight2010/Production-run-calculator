@@ -1249,7 +1249,10 @@ export const FinalizeOperationalReportResponse = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),
@@ -1326,7 +1329,10 @@ export const ListFinalizedOperationalReportsResponseItem = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 })
 export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
 
@@ -1357,7 +1363,10 @@ export const SearchFinalizedOperationalReportsResponseItem = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 })
 export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinalizedOperationalReportsResponseItem)
 
@@ -1379,7 +1388,10 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "finalizedAt": zod.coerce.date(),
   "finalizedBy": zod.string(),
   "contentHash": zod.string(),
-  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.')
+  "hashContract": zod.enum(['json-v1', 'canonical-json-v2', 'unrecognized']).describe('Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker.'),
+  "proofContract": zod.union([zod.literal('hmac-sha256-v1'),zod.literal(null)]).nullable().describe('Keyed authenticity proof contract. Null identifies an unsigned legacy record.'),
+  "proofKeyId": zod.string().nullable().describe('Identifier used to select a retained verification key during safe rotation. This is not secret key material.'),
+  "proofStatus": zod.enum(['verified', 'unsigned-legacy', 'invalid', 'key-unavailable', 'not-checked']).describe('Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail\/export verification remains authoritative.')
 }).and(zod.object({
   "scope": zod.enum(['live', 'sandbox']),
   "idempotent": zod.boolean().optional(),

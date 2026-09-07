@@ -1477,6 +1477,31 @@ export const FinalizedOperationalReportSummaryHashContract = {
   unrecognized: 'unrecognized',
 } as const;
 
+/**
+ * Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+ * @nullable
+ */
+export type FinalizedOperationalReportSummaryProofContract = typeof FinalizedOperationalReportSummaryProofContract[keyof typeof FinalizedOperationalReportSummaryProofContract] | null;
+
+
+export const FinalizedOperationalReportSummaryProofContract = {
+  'hmac-sha256-v1': 'hmac-sha256-v1',
+} as const;
+
+/**
+ * Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative.
+ */
+export type FinalizedOperationalReportSummaryProofStatus = typeof FinalizedOperationalReportSummaryProofStatus[keyof typeof FinalizedOperationalReportSummaryProofStatus];
+
+
+export const FinalizedOperationalReportSummaryProofStatus = {
+  verified: 'verified',
+  'unsigned-legacy': 'unsigned-legacy',
+  invalid: 'invalid',
+  'key-unavailable': 'key-unavailable',
+  'not-checked': 'not-checked',
+} as const;
+
 export interface FinalizedOperationalReportSummary {
   id: string;
   reportScope: FinalizedOperationalReportSummaryReportScope;
@@ -1489,6 +1514,18 @@ export interface FinalizedOperationalReportSummary {
   contentHash: string;
   /** Persisted serialization contract verified against the stored hash, or unrecognized when a legacy row has not verified or carries an unsupported marker. */
   hashContract: FinalizedOperationalReportSummaryHashContract;
+  /**
+     * Keyed authenticity proof contract. Null identifies an unsigned legacy record.
+     * @nullable
+     */
+  proofContract: FinalizedOperationalReportSummaryProofContract;
+  /**
+     * Identifier used to select a retained verification key during safe rotation. This is not secret key material.
+     * @nullable
+     */
+  proofKeyId: string | null;
+  /** Verified means the keyed proof and content hash both match. Search results use not-checked to avoid loading full payloads; detail/export verification remains authoritative. */
+  proofStatus: FinalizedOperationalReportSummaryProofStatus;
 }
 
 export type FinalizedOperationalReportScope = typeof FinalizedOperationalReportScope[keyof typeof FinalizedOperationalReportScope];
