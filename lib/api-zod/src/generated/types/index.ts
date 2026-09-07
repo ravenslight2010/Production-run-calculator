@@ -460,6 +460,8 @@ export * from './scheduleOptimizeRuleInput';
 export * from './scheduleOptimizeRuleInputEnforcement';
 export * from './scheduleOptimizeRuleInputType';
 export * from './scheduleOptimizeRunInput';
+export * from './searchFinalizedOperationalReportsParams';
+export * from './searchFinalizedOperationalReportsScope';
 export * from './setFloorMode';
 export * from './setNotificationPrefs';
 export * from './setNotificationPrefsPrefs';

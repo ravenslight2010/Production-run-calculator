@@ -1097,7 +1097,10 @@ paths:
     get:
       operationId: listFinalizedOperationalReports
       tags: [audit]
-      summary: List finalized reports for a reporting period
+      summary: Search finalized operational reports
+      description: >-
+        Retrieves immutable summaries for one exact reporting period in the
+        authenticated facility.
       parameters:
         - name: scope
           in: query
@@ -1115,6 +1118,45 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/FinalizedOperationalReportSummary" }
+        "400": { description: Invalid query }
+        "403": { description: Manager capability required }
+
+  /reports/operational/finalized/search:
+    get:
+      operationId: searchFinalizedOperationalReports
+      tags: [audit]
+      summary: Search finalized operational reports across a date range
+      description: >-
+        Returns at most 100 immutable archive summaries from the authenticated
+        facility whose reporting end date falls within the inclusive range.
+        Searches are limited to 366 inclusive days and include both day and
+        week reports unless scope is supplied.
+      parameters:
+        - name: startDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: endDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [day, week] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        "200":
+          description: Immutable finalized report archive entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FinalizedOperationalReportSummary" }
+        "400": { description: Invalid query or date range }
         "403": { description: Manager capability required }
 
   /reports/operational/finalized/{id}:

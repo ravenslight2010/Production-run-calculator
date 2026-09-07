@@ -1,4 +1,4 @@
-import { jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // Finalized reports are an audit record, not a working document.  There are no
 // mutable columns: a period can be finalized once per scope and retries return
@@ -22,6 +22,9 @@ export const finalizedOperationalReportsTable = pgTable(
   (t) => [
     uniqueIndex("finalized_operational_reports_scope_period_idx").on(
       t.scope, t.reportScope, t.periodStart, t.periodEnd,
+    ),
+    index("finalized_operational_reports_scope_end_finalized_idx").on(
+      t.scope, t.periodEnd.desc(), t.finalizedAt.desc(),
     ),
   ],
 );

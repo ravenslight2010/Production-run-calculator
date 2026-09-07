@@ -198,6 +198,7 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  SearchFinalizedOperationalReportsParams,
   SetFloorMode,
   SetNotificationPrefs,
   ShiftHandoffDigest,
@@ -3702,7 +3703,8 @@ export const getListFinalizedOperationalReportsUrl = (params: ListFinalizedOpera
 }
 
 /**
- * @summary List finalized reports for a reporting period
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
  */
 export const listFinalizedOperationalReports = async (params: ListFinalizedOperationalReportsParams, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReportSummary[]> => {
 
@@ -3749,7 +3751,7 @@ export type ListFinalizedOperationalReportsQueryError = ErrorType<void>
 
 
 /**
- * @summary List finalized reports for a reporting period
+ * @summary Search finalized operational reports
  */
 
 export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
@@ -3758,6 +3760,91 @@ export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<ty
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListFinalizedOperationalReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSearchFinalizedOperationalReportsUrl = (params: SearchFinalizedOperationalReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/operational/finalized/search?${stringifiedParams}` : `/api/reports/operational/finalized/search`
+}
+
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
+export const searchFinalizedOperationalReports = async (params: SearchFinalizedOperationalReportsParams, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReportSummary[]> => {
+
+  return customFetch<FinalizedOperationalReportSummary[]>(getSearchFinalizedOperationalReportsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchFinalizedOperationalReportsQueryKey = (params?: SearchFinalizedOperationalReportsParams,) => {
+    return [
+    `/api/reports/operational/finalized/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchFinalizedOperationalReportsQueryOptions = <TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(params: SearchFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchFinalizedOperationalReportsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>> = ({ signal }) => searchFinalizedOperationalReports(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchFinalizedOperationalReportsQueryResult = NonNullable<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>>
+export type SearchFinalizedOperationalReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Search finalized operational reports across a date range
+ */
+
+export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(
+ params: SearchFinalizedOperationalReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchFinalizedOperationalReportsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

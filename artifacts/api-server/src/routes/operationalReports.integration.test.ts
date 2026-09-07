@@ -322,4 +322,61 @@ describe("operational report endpoints", () => {
     expect((await req(SANDBOX_MANAGER, "GET", `/api/reports/operational/finalized/${archived.id}`)).status).toBe(404);
     expect((await req(SANDBOX_MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-06")).status).toBe(200);
   });
+
+  it("searches a bounded date range across day and week reports within the manager facility", async () => {
+    const finalizedAt = new Date("2026-09-07T12:00:00.000Z");
+    const row = (
+      id: string,
+      scope: string,
+      reportScope: "day" | "week",
+      periodStart: string,
+      periodEnd: string,
+    ) => ({
+      id,
+      scope,
+      reportScope,
+      periodStart,
+      periodEnd,
+      generatedAt: finalizedAt,
+      generatedBy: MANAGER,
+      finalizedAt,
+      finalizedBy: MANAGER,
+      contentHash: id.padEnd(64, "a"),
+      payload: {},
+    });
+    await db.insert(finalizedOperationalReportsTable).values([
+      row("live-day-1", "live", "day", "2026-09-01", "2026-09-01"),
+      row("live-week-1", "live", "week", "2026-08-27", "2026-09-02"),
+      row("live-day-2", "live", "day", "2026-09-03", "2026-09-03"),
+      row("outside-range", "live", "day", "2026-08-31", "2026-08-31"),
+      row("sandbox-day", "sandbox", "day", "2026-09-03", "2026-09-03"),
+    ]);
+
+    expect((await req(OPERATOR, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03")).status).toBe(403);
+    const searched = await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03");
+    expect(searched.status).toBe(200);
+    expect((await searched.json() as Array<{ id: string; reportScope: string }>).map(({ id, reportScope }) => ({ id, reportScope }))).toEqual([
+      { id: "live-day-2", reportScope: "day" },
+      { id: "live-week-1", reportScope: "week" },
+      { id: "live-day-1", reportScope: "day" },
+    ]);
+
+    const dayOnly = await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03&scope=day&limit=1");
+    expect((await dayOnly.json() as Array<{ id: string }>).map(({ id }) => id)).toEqual(["live-day-2"]);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-03&endDate=2026-09-01")).status).toBe(400);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03&limit=101")).status).toBe(400);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-02-30&endDate=2026-09-03")).status).toBe(400);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01")).status).toBe(400);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2025-09-01&endDate=2026-09-03")).status).toBe(400);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized/search?startDate=2026-09-01&endDate=2026-09-03&date=2026-09-03")).status).toBe(400);
+    expect((await req(MANAGER, "GET", "/api/reports/operational/finalized?scope=day&date=2026-09-03&startDate=2026-09-01")).status).toBe(400);
+
+    const indexes = await db.execute(sql`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname = 'finalized_operational_reports_scope_end_finalized_idx'
+    `);
+    expect(indexes.rows[0]?.indexdef).toMatch(/\(scope, period_end DESC(?: NULLS LAST)?, finalized_at DESC(?: NULLS LAST)?\)/);
+  });
 });

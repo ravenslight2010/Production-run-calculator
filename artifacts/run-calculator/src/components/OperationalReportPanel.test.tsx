@@ -144,6 +144,8 @@ describe("OperationalReportPanel", () => {
     });
     const archived = {
       id: "11111111-1111-4111-8111-111111111111",
+      reportScope: "day",
+      periodStart: "2026-09-04", periodEnd: "2026-09-04",
       finalizedAt: "2026-09-04T13:00:00.000Z", finalizedBy: "manager",
       contentHash: "a".repeat(64), report,
     };
@@ -161,7 +163,9 @@ describe("OperationalReportPanel", () => {
       scope: "day", date: expect.any(String),
     });
     expect(await screen.findByText(/Authoritative report finalized/i)).toBeTruthy();
-    expect(screen.getByText(/Finalized reports for this period/i)).toBeTruthy();
+    expect(screen.getByText(/Finalized report results/i)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Finalized report history" }).textContent).toContain("Day");
+    expect(String(fetchMock.mock.calls[2][0])).toMatch(/startDate=.*&endDate=.*&limit=100/);
     await userEvent.click(screen.getByRole("button", { name: "View finalized report" }));
     expect(fetchMock.mock.calls[3][0]).toBe(`/api/reports/operational/finalized/${archived.id}`);
     expect(await screen.findByText(/Viewing immutable finalized report/i)).toBeTruthy();

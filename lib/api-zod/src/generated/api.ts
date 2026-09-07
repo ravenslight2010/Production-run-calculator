@@ -1307,7 +1307,8 @@ export const FinalizeOperationalReportResponse = zod.object({
 
 
 /**
- * @summary List finalized reports for a reporting period
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
  */
 export const ListFinalizedOperationalReportsQueryParams = zod.object({
   "scope": zod.enum(['day', 'week']),
@@ -1326,6 +1327,36 @@ export const ListFinalizedOperationalReportsResponseItem = zod.object({
   "contentHash": zod.string()
 })
 export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOperationalReportsResponseItem)
+
+
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
+export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
+export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+
+
+
+export const SearchFinalizedOperationalReportsQueryParams = zod.object({
+  "startDate": zod.date(),
+  "endDate": zod.date(),
+  "scope": zod.enum(['day', 'week']).optional(),
+  "limit": zod.coerce.number().int().min(1).max(searchFinalizedOperationalReportsQueryLimitMax).default(searchFinalizedOperationalReportsQueryLimitDefault)
+})
+
+export const SearchFinalizedOperationalReportsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "reportScope": zod.enum(['day', 'week']),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "generatedBy": zod.string(),
+  "finalizedAt": zod.coerce.date(),
+  "finalizedBy": zod.string(),
+  "contentHash": zod.string()
+})
+export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinalizedOperationalReportsResponseItem)
 
 
 /**

@@ -16,6 +16,7 @@ type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput
 export type OperationalReportDetailRange = { start: string; end: string; scope: "day" | "week" };
 type FinalizedReportListItem = {
   id: string;
+  reportScope: "day" | "week";
   periodStart: string;
   periodEnd: string;
   generatedAt: string;
@@ -124,6 +125,13 @@ export default function OperationalReportPanel({
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [history, setHistory] = useState<FinalizedReportListItem[]>([]);
+  const [historyStart, setHistoryStart] = useState(() => {
+    const start = new Date();
+    start.setDate(start.getDate() - 30);
+    return start.toISOString().slice(0, 10);
+  });
+  const [historyEnd, setHistoryEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [historyScope, setHistoryScope] = useState<"all" | "day" | "week">("all");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -178,15 +186,25 @@ export default function OperationalReportPanel({
     }
   }
   async function loadHistory() {
+    if (!historyStart || !historyEnd || historyStart > historyEnd) {
+      setError("Choose an archive start date on or before the end date.");
+      return;
+    }
     setHistoryBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/reports/operational/finalized?scope=${scope}&date=${encodeURIComponent(date)}`);
+      const params = new URLSearchParams({
+        startDate: historyStart,
+        endDate: historyEnd,
+        limit: "100",
+      });
+      if (historyScope !== "all") params.set("scope", historyScope);
+      const response = await fetch(`/api/reports/operational/finalized/search?${params.toString()}`);
       if (!response.ok) throw new Error("History request failed");
       setHistory(await response.json() as FinalizedReportListItem[]);
-      setStatus("Finalized reports loaded for the selected reporting period.");
+      setStatus("Finalized report archive loaded. Up to 100 matching reports are shown.");
     } catch {
-      setError("Could not load finalized reports for this reporting period.");
+      setError("Could not load finalized reports for this date range.");
     } finally {
       setHistoryBusy(false);
     }
@@ -273,9 +291,6 @@ export default function OperationalReportPanel({
         <button type="button" onClick={() => void generate()} disabled={busy || !date} className="h-9 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
           {busy ? <><Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> Building…</> : "Preview report"}
         </button>
-        <button type="button" onClick={() => void loadHistory()} disabled={historyBusy || !date} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50">
-          {historyBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Archive className="w-4 h-4 inline mr-1" />} Finalized reports
-        </button>
         {report && (
           <>
             <button type="button" onClick={() => void finalize()} disabled={finalizeBusy || reportSource !== "authoritative"} title={reportSource === "local-offline" ? "Offline fallback reports cannot be finalized." : undefined} className="h-9 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-50">
@@ -298,14 +313,44 @@ export default function OperationalReportPanel({
           </>
         )}
       </div>
+      <section className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-3" aria-labelledby="finalized-report-archive-heading">
+        <div>
+          <h3 id="finalized-report-archive-heading" className="text-sm font-bold">Finalized report archive</h3>
+          <p className="text-xs text-muted-foreground">Search retained day and week reports by their reporting date. Up to 100 results are shown.</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs font-semibold text-muted-foreground">
+            Start date
+            <input aria-label="Archive start date" type="date" value={historyStart} onChange={(e) => setHistoryStart(e.target.value)} className="block mt-1 h-9 rounded-md border border-border bg-background px-2 text-sm" />
+          </label>
+          <label className="text-xs font-semibold text-muted-foreground">
+            End date
+            <input aria-label="Archive end date" type="date" value={historyEnd} onChange={(e) => setHistoryEnd(e.target.value)} className="block mt-1 h-9 rounded-md border border-border bg-background px-2 text-sm" />
+          </label>
+          <label className="text-xs font-semibold text-muted-foreground">
+            Report type
+            <select aria-label="Archive report type" value={historyScope} onChange={(e) => setHistoryScope(e.target.value as "all" | "day" | "week")} className="block mt-1 h-9 rounded-md border border-border bg-background px-2 text-sm">
+              <option value="all">Day and week</option>
+              <option value="day">Day only</option>
+              <option value="week">Week only</option>
+            </select>
+          </label>
+          <button type="button" onClick={() => void loadHistory()} disabled={historyBusy || !historyStart || !historyEnd} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50">
+            {historyBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Archive className="w-4 h-4 inline mr-1" />} Search archive
+          </button>
+        </div>
+      </section>
       {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
       {status && <p className="text-sm text-muted-foreground" role="status" aria-live="polite">{status}</p>}
       {history.length > 0 && (
         <section aria-label="Finalized report history" className="rounded-lg border border-border/60 p-3">
-          <h3 className="text-sm font-bold">Finalized reports for this period</h3>
+          <h3 className="text-sm font-bold">Finalized report results</h3>
           <ul className="mt-2 space-y-2 text-xs">
             {history.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2">
-              <span>Finalized {new Date(item.finalizedAt).toLocaleString()} by {item.finalizedBy} · {item.contentHash.slice(0, 12)}</span>
+              <span>
+                <span className="mr-2 rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">{item.reportScope === "week" ? "Week" : "Day"}</span>
+                {fmtDate(item.periodStart)} – {fmtDate(item.periodEnd)} · Finalized {new Date(item.finalizedAt).toLocaleString()} by {item.finalizedBy} · {item.contentHash.slice(0, 12)}
+              </span>
               <button type="button" className="font-semibold text-primary hover:underline" onClick={() => void openFinalized(item.id)}>View finalized report</button>
             </li>)}
           </ul>

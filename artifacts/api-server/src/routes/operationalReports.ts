@@ -50,9 +50,26 @@ const BodySchema = z.object({
   // canonical daily_sync rows, so this compatibility field is intentionally ignored.
   runs: z.array(RunSchema).max(600).optional(),
 });
-const FinalizedReportQuery = z.object({
+const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, "Invalid calendar date");
+const ExactFinalizedReportQuery = z.object({
   scope: z.enum(["day", "week"]),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: CalendarDateSchema,
+}).strict();
+const RangeFinalizedReportQuery = z.object({
+  scope: z.enum(["day", "week"]).optional(),
+  startDate: CalendarDateSchema,
+  endDate: CalendarDateSchema,
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+}).strict().refine((value) => value.startDate <= value.endDate, {
+  message: "Start date must be on or before end date",
+}).refine((value) => (
+  new Date(`${value.endDate}T12:00:00Z`).getTime()
+  - new Date(`${value.startDate}T12:00:00Z`).getTime()
+) <= 365 * 24 * 60 * 60 * 1000, {
+  message: "Date range cannot exceed 366 inclusive days",
 });
 const FinalizedReportId = z.object({ id: z.string().uuid() });
 
@@ -750,7 +767,7 @@ router.post(
 );
 
 router.get("/reports/operational/finalized", requireCapability("review-incidents"), async (req, res): Promise<void> => {
-  const parsed = FinalizedReportQuery.safeParse(req.query);
+  const parsed = ExactFinalizedReportQuery.safeParse(req.query);
   if (!parsed.success) {
     operationalError(res, 400, "invalid-query", "Valid scope and date query parameters are required.");
     return;
@@ -762,6 +779,28 @@ router.get("/reports/operational/finalized", requireCapability("review-incidents
     eq(finalizedOperationalReportsTable.periodStart, periodStart),
     eq(finalizedOperationalReportsTable.periodEnd, periodEnd),
   )).orderBy(desc(finalizedOperationalReportsTable.finalizedAt));
+  res.json(rows.map((row) => ({
+    id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
+    generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,
+    finalizedAt: row.finalizedAt.toISOString(), finalizedBy: row.finalizedBy, contentHash: row.contentHash,
+  })));
+});
+
+router.get("/reports/operational/finalized/search", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const parsed = RangeFinalizedReportQuery.safeParse(req.query);
+  if (!parsed.success) {
+    operationalError(res, 400, "invalid-query", "Valid startDate and endDate parameters within a 366-day range are required. Limit must be between 1 and 100.");
+    return;
+  }
+  const rows = await db.select().from(finalizedOperationalReportsTable).where(and(
+    eq(finalizedOperationalReportsTable.scope, currentScope()),
+    parsed.data.scope ? eq(finalizedOperationalReportsTable.reportScope, parsed.data.scope) : undefined,
+    gte(finalizedOperationalReportsTable.periodEnd, parsed.data.startDate),
+    lte(finalizedOperationalReportsTable.periodEnd, parsed.data.endDate),
+  )).orderBy(
+    desc(finalizedOperationalReportsTable.periodEnd),
+    desc(finalizedOperationalReportsTable.finalizedAt),
+  ).limit(parsed.data.limit);
   res.json(rows.map((row) => ({
     id: row.id, reportScope: row.reportScope, periodStart: row.periodStart, periodEnd: row.periodEnd,
     generatedAt: row.generatedAt.toISOString(), generatedBy: row.generatedBy,

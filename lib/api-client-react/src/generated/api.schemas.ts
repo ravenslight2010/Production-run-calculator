@@ -4617,6 +4617,25 @@ export const ListFinalizedOperationalReportsScope = {
   week: 'week',
 } as const;
 
+export type SearchFinalizedOperationalReportsParams = {
+startDate: string;
+endDate: string;
+scope?: SearchFinalizedOperationalReportsScope;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
+
+export type SearchFinalizedOperationalReportsScope = typeof SearchFinalizedOperationalReportsScope[keyof typeof SearchFinalizedOperationalReportsScope];
+
+
+export const SearchFinalizedOperationalReportsScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
 export type GetOperationalRunViewParams = {
 date: string;
 runId: string;
