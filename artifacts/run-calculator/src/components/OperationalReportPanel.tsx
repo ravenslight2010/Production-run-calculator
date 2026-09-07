@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, BarChart2, Download, FileSpreadsheet, Lock, Loader2, Printer, Share2, Archive } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Archive, BarChart2, CheckCircle2, Download, FileSpreadsheet, Lock, Loader2, Printer, RefreshCw, Share2, ShieldAlert } from "lucide-react";
 import * as XLSX from "xlsx";
 import { aggregateDaySummary, type OperationalReport } from "@workspace/day-summary";
 import type { SummaryInput } from "../aiSummary";
@@ -26,6 +26,44 @@ type FinalizedReportListItem = {
   finalizedBy: string;
   contentHash: string;
 };
+type ProofKeyHealthResponse = {
+  status: "healthy" | "attention-required";
+  activeKeyId: string | null;
+  storedProofKeyIds: string[];
+  availableStoredProofKeyIds: string[];
+  missingStoredProofKeyIds: string[];
+  scan: {
+    limit: number;
+    checkedDistinctKeyIds: number;
+    truncated: boolean;
+  };
+  message: string;
+  remediation: string | null;
+};
+type ProofKeyHealthState =
+  | { status: "loading" }
+  | { status: "healthy"; data: ProofKeyHealthResponse }
+  | { status: "attention-required" | "partial"; data: ProofKeyHealthResponse }
+  | { status: "unauthorized" | "unavailable"; message: string };
+
+function isProofKeyHealthResponse(value: unknown): value is ProofKeyHealthResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ProofKeyHealthResponse>;
+  return (candidate.status === "healthy" || candidate.status === "attention-required")
+    && (candidate.activeKeyId === null || typeof candidate.activeKeyId === "string")
+    && Array.isArray(candidate.storedProofKeyIds)
+    && candidate.storedProofKeyIds.every((keyId) => typeof keyId === "string")
+    && Array.isArray(candidate.availableStoredProofKeyIds)
+    && candidate.availableStoredProofKeyIds.every((keyId) => typeof keyId === "string")
+    && Array.isArray(candidate.missingStoredProofKeyIds)
+    && candidate.missingStoredProofKeyIds.every((keyId) => typeof keyId === "string")
+    && Boolean(candidate.scan)
+    && typeof candidate.scan?.limit === "number"
+    && typeof candidate.scan.checkedDistinctKeyIds === "number"
+    && typeof candidate.scan.truncated === "boolean"
+    && typeof candidate.message === "string"
+    && (candidate.remediation === null || typeof candidate.remediation === "string");
+}
 
 function periodStartFor(scope: "day" | "week", date: string): string {
   if (scope === "day") return date;
@@ -138,8 +176,39 @@ export default function OperationalReportPanel({
   const [historyScope, setHistoryScope] = useState<"all" | "day" | "week">("all");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [proofKeyHealth, setProofKeyHealth] = useState<ProofKeyHealthState>({ status: "loading" });
 
   const input = useMemo(() => buildInput(scope, date), [buildInput, scope, date]);
+  async function loadProofKeyHealth() {
+    setProofKeyHealth({ status: "loading" });
+    try {
+      const response = await fetch("/api/reports/operational/finalized/proof-key-health");
+      if (response.status === 401 || response.status === 403) {
+        setProofKeyHealth({
+          status: "unauthorized",
+          message: "Verification health is available to managers only.",
+        });
+        return;
+      }
+      if (!response.ok) throw new Error("Verification health request failed");
+      const payload: unknown = await response.json();
+      if (!isProofKeyHealthResponse(payload)) throw new Error("Invalid verification health response");
+      setProofKeyHealth({
+        status: payload.scan.truncated
+          ? "partial"
+          : payload.status,
+        data: payload,
+      });
+    } catch {
+      setProofKeyHealth({
+        status: "unavailable",
+        message: "Verification health is temporarily unavailable. The archive remains available, but report verifiability could not be confirmed.",
+      });
+    }
+  }
+  useEffect(() => {
+    if (allowed) void loadProofKeyHealth();
+  }, [allowed]);
   async function generate() {
     setBusy(true);
     setError("");
@@ -346,7 +415,7 @@ export default function OperationalReportPanel({
               <FileSpreadsheet className="w-4 h-4 inline mr-1" /> Excel
             </button>
             <button type="button" onClick={() => void download("print")} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50">
-              <Printer className="w-4 h-4 inline mr-1" /> Print-ready
+              <Printer className="w-4 h-4 inline mr-1" /> Print / PDF
             </button>
             <button type="button" onClick={() => void share()} disabled={shareBusy} className="h-9 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted/50 disabled:opacity-50">
               {shareBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Share2 className="w-4 h-4 inline mr-1" />}
@@ -381,6 +450,72 @@ export default function OperationalReportPanel({
             {historyBusy ? <Loader2 className="w-4 h-4 inline mr-1 animate-spin" /> : <Archive className="w-4 h-4 inline mr-1" />} Search archive
           </button>
         </div>
+        <section
+          id="report-verification-health"
+          data-testid="report-verification-health"
+          aria-live="polite"
+          className={
+            proofKeyHealth.status === "healthy"
+              ? "rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs"
+              : proofKeyHealth.status === "loading"
+                ? "rounded-md border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground"
+                : "rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs"
+          }
+        >
+          {proofKeyHealth.status === "loading" && (
+            <p><Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Checking finalized report verification health…</p>
+          )}
+          {proofKeyHealth.status === "healthy" && (
+            <p>
+              <CheckCircle2 className="mr-1 inline h-4 w-4 text-emerald-600" />
+              <strong>Report verification healthy.</strong>{" "}
+              {proofKeyHealth.data.message} No signing key values are displayed.
+            </p>
+          )}
+          {(proofKeyHealth.status === "attention-required" || proofKeyHealth.status === "partial") && (
+            <>
+              <p>
+                <ShieldAlert className="mr-1 inline h-4 w-4 text-amber-600" />
+                <strong>
+                  {proofKeyHealth.status === "partial"
+                    ? "Verification health audit is partial."
+                    : "Report verification needs attention."}
+                </strong>{" "}
+                {proofKeyHealth.data.message}
+              </p>
+              {proofKeyHealth.data.missingStoredProofKeyIds.length > 0 && (
+                <p className="mt-1">
+                  Missing retained proof key ID{proofKeyHealth.data.missingStoredProofKeyIds.length === 1 ? "" : "s"}:{" "}
+                  <strong>{proofKeyHealth.data.missingStoredProofKeyIds.join(", ")}</strong>
+                </p>
+              )}
+              {proofKeyHealth.data.scan.truncated && (
+                <p className="mt-1">
+                  This bounded audit checked {proofKeyHealth.data.scan.checkedDistinctKeyIds} of more than {proofKeyHealth.data.scan.limit} distinct stored key IDs.
+                </p>
+              )}
+              {proofKeyHealth.data.remediation && <p className="mt-1">{proofKeyHealth.data.remediation}</p>}
+              <a className="mt-2 inline-block font-semibold text-primary hover:underline" href="#finalized-report-archive-heading">
+                Open the finalized report archive audit
+              </a>
+            </>
+          )}
+          {(proofKeyHealth.status === "unauthorized" || proofKeyHealth.status === "unavailable") && (
+            <>
+              <p>
+                {proofKeyHealth.status === "unauthorized"
+                  ? <Lock className="mr-1 inline h-4 w-4" />
+                  : <AlertTriangle className="mr-1 inline h-4 w-4 text-amber-600" />}
+                {proofKeyHealth.message}
+              </p>
+              {proofKeyHealth.status === "unavailable" && (
+                <button type="button" className="mt-2 inline-flex items-center font-semibold text-primary hover:underline" onClick={() => void loadProofKeyHealth()}>
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Check again
+                </button>
+              )}
+            </>
+          )}
+        </section>
       </section>
       {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
       {status && <p className="text-sm text-muted-foreground" role="status" aria-live="polite">{status}</p>}

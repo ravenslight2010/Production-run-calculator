@@ -41,3 +41,17 @@ Test files are excluded from `tsc` (`**/*.test.ts(x)` in tsconfig `exclude`)
 repo-wide, so test type errors never break `pnpm run typecheck`; rely on vitest
 (esbuild transform) for them. Validation command `test:client` =
 `pnpm --filter @workspace/run-calculator run test`.
+
+## DOM matcher boundary
+
+The web test harness does not load `@testing-library/jest-dom`. Prefer native
+DOM assertions such as `getAttribute`, `textContent`, `toBeTruthy`, and
+`queryBy*` rather than jest-dom matchers.
+
+**Why:** Jest-dom assertions fail at runtime even when the component and
+Vitest transform are otherwise healthy; the suite intentionally has no matcher
+setup file.
+
+**How to apply:** When adding component coverage, keep assertions compatible
+with the existing Vitest environment or add matcher setup as a deliberate,
+repo-wide harness change.
