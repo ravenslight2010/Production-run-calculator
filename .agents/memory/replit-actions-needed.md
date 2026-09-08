@@ -381,3 +381,68 @@ feature branch after Section 5 items land.
 4. **6C-5** (profile caching — complements 6B-1, completes the SSE migration)
 5. **6C-2 + 6C-3** (virtualize + lazy-load — performance on low-end devices)
 6. **6C-4** (optimistic writes — UX polish after the architecture is clean)
+
+## 7. Responsive design / visual quality (2026-09-08)
+
+The app looks large on phones, small on tablets, and overlaps on phones
+(can't read field names). Root cause analysis by Codex:
+
+- 567 fixed `text-[10px]/[11px]/[9px]` sizes tuned for desktop density — too
+  big on phone, too small on tablet.
+- 85+ `grid-cols-N` without responsive prefix (same 4 cols on 375px phone).
+- 126 `truncate` hide labels you need to read; fixed `max-w-[180px]` inputs
+  overflow narrow phone dialogs.
+- `grid-cols-6` tab bar squeezes 6 tabs to ~62px each on phones.
+
+### Do first (foundation — highest visual impact)
+1. **Replace fixed px font sizes with fluid `clamp()` scale** or set
+   `html { font-size }` per breakpoint (`14px` phone, `16px` tablet, `17px`
+   desktop) and convert `text-[10px]` / `w-[Npx]` to `em`/`rem`. One change
+   makes every density proportional.
+2. **Fix every `grid-cols-N` without responsive prefix** — add
+   `grid-cols-1 sm:grid-cols-N`. 85+ spots, mechanical to do, kills phone
+   overlap at the root.
+
+### Do second (layout correctness)
+3. **Dialog inputs** — change `max-w-[180px]` / `w-[240px]` to
+   `min-w-0 w-full sm:max-w-[...]` so phone fills width, tablet caps.
+4. **Dialogs** — use `max-h-[85dvh] sm:max-h-[90vh]` so phone keyboards /
+   notches never truncate content.
+5. **Tab bar** — on phones, use scrollable horizontal strip (swipe) or
+   `grid-cols-4 + More` menu so labels are readable.
+
+### Do third (device polish)
+6. **Viewport-safe areas on all fixed elements** (not just tab bar) —
+   notch / Dynamic Island overlap in headers, dialogs, fixed banners.
+7. **Touch targets: raise to ~40px min on phones** (Apple/Google HIG) so
+   mis-taps on the production floor go away.
+
+### Do alongside (tooling to keep it fixed)
+8. **Visual regression baseline** — pinned screenshot diffs at 375 / 768 /
+   1024 / 1440 using the existing `test:e2e:visual` config. Breaks CI on
+   regressions before they reach users.
+9. **Lint guard** — flag new `text-[NNpx]` / `w-[NNpx]` / `max-w-[NNpx]`
+   and require a responsive alternative (same pattern as
+   `check-workbook-boundary`).
+
+## 8. Additional improvement ideas (2026-09-08)
+
+Full details in `docs/idea-backlog.md` (10 sections, 60+ items). Summary:
+
+- **Battery**: pause 30s `schedulePush` when hidden; consolidate 3× 60s timers;
+  debounce localStorage writes.
+- **Server-side**: SSE-push profiles/config; server date rollover; passive
+  client auto-track.
+- **App quality**: break up `home.tsx` (<10K target); virtualize lists;
+  lazy-load tabs; optimistic writes.
+- **Imports**: parallel chunk parsing; fingerprint cache; diff-only re-import;
+  structured validation; per-cell confidence in review UI; import undo.
+- **Sync**: peer device presence; conflict ledger; delta sync; offline conflict
+  resolution; per-channel backpressure.
+- **Self-testing**: daily repair sweep; runtime invariant sentinel endpoint;
+  auto-track drift detection; System Health UI panel.
+- **Business value**: food cost / cost-per-pizza; manager digest via web push;
+  trend dashboard; AI cost guardrails UI.
+
+Working agreement unchanged: formula once in `lib/live-calc`, feature branch
++ PR, update memory, run skills before claiming done.
