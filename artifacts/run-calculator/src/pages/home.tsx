@@ -534,6 +534,7 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
+import { createPackagingManager } from "../packagingManager";
 import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -3135,43 +3136,22 @@ export default function Home() {
     });
     void flushOperationalIntentOutbox();
   }, []);
-  const persistManualPackagingProgress = useCallback((
-    runId: string,
-    skidsCompleted: number,
-    casesOnCurrentSkid: number,
-    manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
-  ) => {
-    const now = Date.now();
-    recordManualPackagingProgress({
-      runId,
-      skidsCompleted,
-      casesOnCurrentSkid,
-      manualOverrideUntil,
-      now,
-    });
-    markRunValuesUpdated(runId, now);
-    lastLocalEditRef.current = now;
-    queueManualCorrection(runId, {
-      skidsCompleted: Math.max(0, skidsCompleted),
-      casesOnCurrentSkid: Math.max(0, casesOnCurrentSkid),
-    });
-    if (runId === currentRunIdRef.current) {
-      autoSuppressUntilRef.current = Math.max(
-        autoSuppressUntilRef.current,
-        manualOverrideUntil,
-      );
-    }
-  }, [queueManualCorrection]);
-  const persistAutomaticPackagingProgress = useCallback((
-    skidsCompleted: number,
-    casesOnCurrentSkid: number,
-  ): boolean => (
-    recordAutomaticPackagingProgress({
-      runId: currentRunIdRef.current,
-      skidsCompleted,
-      casesOnCurrentSkid,
-    }) !== null
-  ), []);
+  const packagingManager = useMemo(() => createPackagingManager({
+    currentRunIdRef,
+    autoSuppressUntilRef,
+    dayStateRef,
+    autoSuppressMs: AUTO_SUPPRESS_MS,
+    loadRunValues,
+    saveRunValues,
+    markRunValuesUpdated,
+    markLocalEdit: (now) => { lastLocalEditRef.current = now; },
+    schedulePush,
+    queueManualCorrection,
+    recordManualProgress: recordManualPackagingProgress,
+    recordAutomaticProgress: recordAutomaticPackagingProgress,
+  }), [queueManualCorrection]);
+  const persistManualPackagingProgress = packagingManager.persistManualProgress;
+  const persistAutomaticPackagingProgress = packagingManager.persistAutomaticProgress;
   useEffect(() => {
     // A correction may arrive while this device is viewing another run. Adopt
     // that run's shared deadline when the operator later switches to it, rather
@@ -11632,42 +11612,7 @@ export default function Home() {
     });
   }
 
-  // Persist skid/case progress for a SPECIFIC (non-active) draining run. The
-  // active run writes through the live form + autosave effect; a just-ended run
-  // still draining its freezer is written here through the EXISTING per-run
-  // saveRunValues path (no new write surface), pushed to sync, and its shared
-  // write notification refreshes cached views. Manual logging only — we never
-  // auto-track a non-active ended run. Mirrored on mobile (replit.md parity).
-  function updateDrainingRunValues(
-    id: string,
-    partial: Partial<FormValues>,
-    source: "manual" | "auto" = "manual",
-  ) {
-    const vals = { ...DEFAULT_VALUES, ...loadRunValues(id), ...partial } as FormValues;
-    if (partial.skidsCompleted != null || partial.casesOnCurrentSkid != null) {
-      if (source === "auto") {
-        const accepted = recordAutomaticPackagingProgress({
-          runId: id,
-          skidsCompleted: vals.skidsCompleted,
-          casesOnCurrentSkid: vals.casesOnCurrentSkid,
-        });
-        if (!accepted) return;
-      } else {
-        persistManualPackagingProgress(
-          id,
-          vals.skidsCompleted,
-          vals.casesOnCurrentSkid,
-        );
-      }
-    }
-    saveRunValues(id, vals);
-    // Stamp: this run isn't the active form, so the autosave never stamps it;
-    // an unstamped value loses the per-run LWW merge to a peer's stale copy.
-    const now = Date.now();
-    markRunValuesUpdated(id, now);
-    lastLocalEditRef.current = now;
-    schedulePush(dayStateRef.current, 0);
-  }
+  const updateDrainingRunValues = packagingManager.updateDrainingRun;
 
   function flashSaved() {
     const el = savedFlashRef.current;
@@ -14194,7 +14139,7 @@ export default function Home() {
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
     premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
-    persistManualPackagingProgress, queueManualCorrection,
+    packagingManager, persistManualPackagingProgress, queueManualCorrection,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
     removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
@@ -19993,7 +19938,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
-    lastEndedRun, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
+    lastEndedRun, packagingManager, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
     ve, freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
     confirmRunSurplus, refreshFreezerSurplus,
   } = hx;
@@ -20017,75 +19962,24 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     if (!autoTrackProgress) return;
     const nowMs = nowTime.getTime();
 
-    // Identify the draining prior run — identical filter to the panel above.
-    let drainingRun: (typeof dayState.runs)[number] | undefined;
-    let dv: ReturnType<typeof withTempOverrides> | undefined;
-    for (const r of dayState.runs) {
-      if (!r.endedAt || r.id === currentRunId) continue;
-      const rv = withTempOverrides(loadRunValues(r.id));
-      const rfT = Number(rv.freezerTime) || 0;
-      if (rfT <= 0 || nowMs >= r.endedAt + rfT * 60000) continue;
-      const cps = Number(rv.casesPerSkid) || 0;
-      const cn = Number(rv.casesNeeded) || 0;
-      const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
-      if (cn > 0 && Math.max(0, cn - cDone) <= 0) continue;
-      if (!drainingRun?.endedAt || r.endedAt > drainingRun.endedAt) {
-        drainingRun = r;
-        dv = rv;
-      }
-    }
-
-    if (!drainingRun || !dv) {
+    const draining = packagingManager.selectDrainingRun(dayState.runs, currentRunId, nowMs);
+    if (!draining) {
       priorDrainFreezerRef.current = { id: "", cases: -1 };
       return;
     }
-
-    // Compute cases still in the tunnel for this run.
-    const subTab = drainingRun.subTab ?? "dough";
-    const ppm = computeEffectiveLineSpeed({
-      mode: subTab === "crusts" ? "crusts" : "dough",
-      approxLineSpeed: Number(dv.approxLineSpeed),
-      crustsPerCycle: Number(dv.crustsPerCycle),
-      cycleSpeed: Number(dv.cycleSpeed),
-      speedAdjustment: Number(dv.speedAdjustment),
-    });
-    const curFreezer = Math.max(0, Math.floor(computeCasesInFreezer({
-      startedAt: drainingRun.startedAt ?? undefined,
-      endedAt: drainingRun.endedAt ?? undefined,
-      pausedAt: drainingRun.pausedAt ?? undefined,
-      stoppages: drainingRun.stoppages,
-      now: nowMs,
-      ppm,
-      pizzasPerCase: Number(dv.pizzasPerCase) || 0,
-      freezerTimeMin: Number(dv.freezerTime) || 0,
-    })));
+    const curFreezer = packagingManager.casesInDrainingFreezer(draining, nowMs);
 
     const prev = priorDrainFreezerRef.current;
     // First tick for this run — just baseline, don't back-fill a catch-up jump.
-    if (prev.id !== drainingRun.id) {
-      priorDrainFreezerRef.current = { id: drainingRun.id, cases: curFreezer };
+    if (prev.id !== draining.run.id) {
+      priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
       return;
     }
-    priorDrainFreezerRef.current = { id: drainingRun.id, cases: curFreezer };
+    priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
 
     const exited = Math.max(0, prev.cases - curFreezer);
-    if (exited <= 0) return;
-
-    const cps = Number(dv.casesPerSkid) || 0;
-    if (cps <= 0) return;
-    const casesNeeded = Number(dv.casesNeeded) || 0;
-    const curTotal =
-      (Number(dv.skidsCompleted) || 0) * cps + (Number(dv.casesOnCurrentSkid) || 0);
-    const target = curTotal + exited;
-    const newTotal =
-      casesNeeded > 0 ? Math.min(target, Math.max(curTotal, casesNeeded)) : target;
-    if (newTotal !== curTotal) {
-      updateDrainingRunValues(drainingRun.id, {
-        skidsCompleted: Math.floor(newTotal / cps),
-        casesOnCurrentSkid: Math.round(newTotal % cps),
-      }, "auto");
-    }
-  }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, updateDrainingRunValues]);
+    packagingManager.advanceDrainingRun(draining, exited);
+  }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, packagingManager]);
 
   return (
     <>
@@ -20116,25 +20010,9 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   // newer ended-but-finished run can't hide an older still-draining one.
                   // (The active run shows its own emptying bar elsewhere.)
                   const nowMsT = nowTime.getTime();
-                  let drainingRun: RunMeta | undefined;
-                  let dv: FormValues | undefined;
-                  for (const r of dayState.runs) {
-                    if (!r.endedAt) continue;
-                    if (r.id === currentRunId) continue;
-                    const rv = withTempOverrides(loadRunValues(r.id));
-                    const rfT = Number(rv.freezerTime) || 0;
-                    if (rfT <= 0) continue;
-                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // Freeze tunnel fully empty
-                    const cps = Number(rv.casesPerSkid) || 0;
-                    const cn = Number(rv.casesNeeded) || 0;
-                    const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
-                    if (cn > 0 && Math.max(0, cn - cDone) <= 0) continue; // all packaged
-                    if (!drainingRun?.endedAt || r.endedAt > drainingRun.endedAt) {
-                      drainingRun = r;
-                      dv = rv;
-                    }
-                  }
-                  if (!drainingRun?.endedAt || !dv) return null;
+                  const draining = packagingManager.selectDrainingRun(dayState.runs, currentRunId, nowMsT);
+                  if (!draining?.run.endedAt) return null;
+                  const { run: drainingRun, values: dv } = draining;
                   const fT = Number(dv.freezerTime) || 0;
                   const freezerMs = fT * 60000;
                   const remainMs = Math.max(0, drainingRun.endedAt + freezerMs - nowTime.getTime());

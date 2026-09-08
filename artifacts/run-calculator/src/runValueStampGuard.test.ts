@@ -30,6 +30,7 @@ import { describe, expect, it } from "vitest";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
 const FORM_LIFECYCLE_FILE = path.join(__dirname, "hooks", "useHomeFormLifecycle.ts");
+const PACKAGING_MANAGER_FILE = path.join(__dirname, "packagingManager.ts");
 
 type CallSite = {
   line: number;
@@ -186,10 +187,14 @@ const formLifecycleSites = analyzeSource(
   fs.readFileSync(FORM_LIFECYCLE_FILE, "utf8"),
   "useHomeFormLifecycle.ts",
 );
+const packagingManagerSites = analyzeSource(
+  fs.readFileSync(PACKAGING_MANAGER_FILE, "utf8"),
+  "packagingManager.ts",
+);
 
 describe("source guard: run-value writes in home.tsx must stamp before they sync", () => {
   it("every saveRunValues call site stamps (markRunValuesUpdated / saveRunValuesUpdated) or is a pure form flush", () => {
-    const violations = [...homeSites, ...formLifecycleSites]
+    const violations = [...homeSites, ...formLifecycleSites, ...packagingManagerSites]
       .filter((s) => s.verdict === "VIOLATION");
     const report = violations
       .map((s) => `  home.tsx:${s.line} in ${s.enclosingName}() — ${s.detail}`)
@@ -209,7 +214,10 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     const byName = (n: string) => homeSites.filter((s) => s.enclosingName === n);
     expect(byName("applyCaseUpdateChoices").length, "re-import case-update accept").toBeGreaterThan(0);
     expect(byName("renameDoughIngredient").length, "master-data rename write").toBeGreaterThan(0);
-    expect(byName("updateDrainingRunValues").length, "draining-run write").toBeGreaterThan(0);
+    expect(
+      packagingManagerSites.filter((s) => s.enclosingName === "updateDrainingRun").length,
+      "draining-run write",
+    ).toBeGreaterThan(0);
     // Rollover pull-up + sync receive adopt REMOTE stamps rather than local ones.
     expect(homeSites.filter((s) => s.verdict === "stamped-remote").length).toBeGreaterThanOrEqual(2);
     // And the file still has a meaningful number of write sites overall.
@@ -242,7 +250,8 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
           rel === path.join("adapters", "browserRunPersistence.ts") ||
           rel === path.join("contexts", "LiveRunContext.tsx") ||
           rel === path.join("hooks", "useHomeFormLifecycle.ts") ||
-          rel === path.join("hooks", "useRunLifecycleManager.ts")
+          rel === path.join("hooks", "useRunLifecycleManager.ts") ||
+          rel === "packagingManager.ts"
         ) continue;
         const text = fs.readFileSync(full, "utf8");
         if (/\bsaveRunValues\b/.test(text)) offenders.push(rel);
