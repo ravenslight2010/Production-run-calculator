@@ -156,18 +156,39 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 ### Summary
 Inventory consumption is a single-point event (run-end) rather than continuous. 8 gaps identified. Comprehensive plan covers all critical + medium + non-ingredient packaging gaps.
 
-### What's Planned
+### What's Planned (Full 13-Item Packaging List)
 | Area | What | Status |
 |------|------|--------|
 | **A** | Overproduction inventory deduction | Planned (overproduction plan) |
 | **B** | Mix/prep mix inventory deduction | Planned (mix plan) |
 | **C** | Freezer pull → inventory deduction (fix double-counting) | Planned |
 | **D** | Use actual cases instead of planned | Planned |
-| **E1** | Labeled runs: circles, shippers, labels | Planned |
-| **E2** | Grip sheets consumption | Planned |
-| **E3** | Skid stacking materials | Planned |
-| **E4** | Film/wrap/tape (configurable supplies) | Planned |
-| **E5** | Pallets consumption | Planned |
+| **E** | **Full packaging inventory (13 items)** | Planned |
+
+**Complete packaging list** (most lot-tracked by QC):
+
+| Item | Currently Tracked |
+|------|-------------------|
+| Circles | ✓ cartoned only |
+| Shippers | ✓ cartoned only |
+| Cartons | ✓ cartoned only |
+| Slip sheets | ✗ |
+| Grip sheets | ✗ |
+| Top labels | ✗ |
+| Bottom labels | ✗ |
+| Shipper labels | ✗ |
+| Pallets | ✗ |
+| Tape | ✗ |
+| Glue | ✗ |
+| Glue sticks | ✗ |
+| Ink | ✗ |
+
+**Consumption by mode**:
+- `cartoned`: circles, shippers, cartons, grip/slip, pallets, tape/glue/ink
+- `labeled`: circles, shippers, top/bottom labels, shipper labels, grip/slip, pallets, tape/glue/ink
+- `n-a`: grip/slip, pallets only
+
+**QC lot tracking tie-in**: Packaging deductions carry lot numbers from QC lot entries → full traceability (QC entry → inventory deduction → run consumption → audit trail)
 
 ### Still Open (lower priority)
 - Waste/spoilage logging
@@ -177,7 +198,7 @@ Inventory consumption is a single-point event (run-end) rather than continuous. 
 ### Build Order
 1. Actual cases + overproduction deduction + mix deduction (Phase 1)
 2. Freezer pull double-counting fix (Phase 2)
-3. Packaging gaps — labeled runs, grip sheets, film, pallets (Phase 3)
+3. Full packaging gaps — all 13 items (Phase 3)
 4. Waste & returns (Phase 4)
 
 ---
