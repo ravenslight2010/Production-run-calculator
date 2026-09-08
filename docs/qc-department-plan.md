@@ -1,5 +1,35 @@
 # QC Department — Comprehensive Plan
 
+## Critical Requirements
+
+### QC Data Survives All Wipes
+The factory reset (`POST /sync/purge-all`) currently wipes ALL scoped tables including `qualityChecksTable`. QC data must survive both:
+- **Daily reset** (day-state clear at midnight) — already safe since QC tables are server-side, not in day-state
+- **Factory reset** (full purge-all) — QC tables must be **excluded** from the purge-all scopedTables list in `sync.ts` line ~1200, or moved to a separate audit DB/schema that the purge endpoint doesn't touch
+
+**Implementation**: Add QC tables to a new `auditedTables` group in the purge endpoint that gets `ON DELETE DO NOTHING` or is simply skipped. The purge-all handler at `artifacts/api-server/src/routes/sync.ts:1198` explicitly lists every table — QC tables must NOT appear in that list.
+
+### Full Audit Trail / Traceability / Accountability
+Every QC operation must produce an immutable audit record:
+- **Who** performed the action (user_id, username, role)
+- **What** was checked (ingredient name, lot number, weight value, pass/fail)
+- **When** (server-generated timestamp, not client)
+- **Where** (station, run_id, line position)
+- **Why** (if failed — reason code + free-text notes)
+- **Evidence** (photo URL if captured)
+
+QC audit records must be:
+- Append-only (no UPDATE/DELETE allowed on audit rows)
+- Retained indefinitely (not subject to any cleanup/purge)
+- Queryable by any manager/supervisor for compliance review
+- Exportable as CSV/PDF for external audits
+
+**Implementation**:
+- Each QC table gets `created_at` (server DEFAULT NOW()), `created_by` (user FK), `scope` (factory isolation)
+- Add a `qc_audit_log` table that fires on INSERT to any QC table (PostgreSQL trigger or application-level)
+- Audit log has its own retention policy: never deleted, ever
+- API routes for audit export: `GET /api/qc/audit?from=&to=&type=&ingredient=`
+
 ## Current State
 - **Existing tabs**: Quality (photo checks), Incidents, Downtime Trends
 - **Inventory lot tracking**: Basic — lot number field on inventory items, no workflow enforcement
@@ -136,12 +166,25 @@
 | `artifacts/run-calculator/src/pages/home.tsx` | Main app (tab rendering) |
 
 ## Database Tables to Add
-1. `run_lots` — per-run, per-station ingredient lot logging
-2. `weight_checks` — pre-run and periodic weight verification
-3. `component_checks` — once-per-run component verification
-4. `label_checks` — shipper label verification
-5. `date_checks` — pizza/carton date code verification
-6. `qc_checklists` — overall checklist state per run (computed from above)
+
+All QC tables share these audit columns:
+- `id` (uuid, PK)
+- `scope` (text, factory isolation — but **excluded from purge-all**)
+- `created_by` (text, username of who performed the check)
+- `created_at` (timestamptz, server DEFAULT NOW(), immutable)
+- `run_id` (uuid, FK to production_runs — nullable for planning tables)
+
+| # | Table | Purpose | Survives Reset |
+|---|-------|---------|---------------|
+| 1 | `run_lots` | Per-run, per-station ingredient lot logging | Yes |
+| 2 | `weight_checks` | Pre-run + periodic weight verification | Yes |
+| 3 | `component_checks` | Once-per-run component verification | Yes |
+| 4 | `label_checks` | Shipper label verification | Yes |
+| 5 | `date_checks` | Pizza/carton date code verification | Yes |
+| 6 | `qc_checklists` | Computed checklist state per run | Yes |
+| 7 | `qc_audit_log` | Immutable append-only audit trail for all QC ops | Yes, never deleted |
+| 8 | `qc_recipes` | QC-owned recipe versions (approval history) | Yes |
+| 9 | `qc_future_plans` | Upcoming brand/flavor planning entries | Yes |
 
 ## UI Components to Create
 1. `QcDashboard.tsx` — main QC status screen
@@ -154,12 +197,33 @@
 8. `FuturePlanningView.tsx` — upcoming brands/flavors/recipes
 
 ## API Routes to Add
-1. `POST /api/run-lots` — log a lot for a run
-2. `GET /api/run-lots?runId=X` — get lots for a run
-3. `POST /api/weight-checks` — record a weight check
-4. `GET /api/weight-checks?runId=X` — get weight checks for a run
-5. `POST /api/component-checks` — record component check
-6. `POST /api/label-checks` — record label check
-7. `POST /api/date-checks` — record date check
-8. `GET /api/qc/dashboard?runId=X` — aggregated QC status
-9. `PUT /api/import-approval/:id` — approve/reject import
+
+### CRUD (per check type)
+1. `POST /api/qc/run-lots` — log a lot for a run (server sets created_by, created_at)
+2. `GET /api/qc/run-lots?runId=X` — get lots for a run
+3. `POST /api/qc/weight-checks` — record a weight check
+4. `GET /api/qc/weight-checks?runId=X` — get weight checks for a run
+5. `POST /api/qc/component-checks` — record component check
+6. `GET /api/qc/component-checks?runId=X` — get component checks
+7. `POST /api/qc/label-checks` — record label check
+8. `GET /api/qc/label-checks?runId=X` — get label checks
+9. `POST /api/qc/date-checks` — record date check
+10. `GET /api/qc/date-checks?runId=X` — get date checks
+
+### Dashboard & Aggregation
+11. `GET /api/qc/dashboard?runId=X` — aggregated QC status for current run
+12. `GET /api/qc/dashboard/summary?from=&to=` — shift/day summary
+
+### Audit & Compliance (immutable, never purged)
+13. `GET /api/qc/audit?from=&to=&type=&ingredient=` — audit log query
+14. `GET /api/qc/audit/export?format=csv|pdf` — export for external audits
+15. `GET /api/qc/traceability?lot=X` — full chain: lot → run → checks → customer
+
+### Import & Recipe Approval
+16. `PUT /api/qc/import-approval/:id` — approve/reject import (audit logged)
+17. `POST /api/qc/recipe-approval` — approve/reject recipe change
+18. `GET /api/qc/future-plans` — upcoming brand/flavor plans
+19. `POST /api/qc/future-plans` — add a future plan entry
+
+### Protected (never purge-all'd)
+All routes under `/api/qc/*` are **excluded from the purge-all handler** in `sync.ts`. The QC tables are added to a separate `auditedTables` group that the purge endpoint skips.
