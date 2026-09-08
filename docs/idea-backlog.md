@@ -4,6 +4,66 @@ Master list of improvement ideas for the Production Run Calculator. Each idea in
 
 ---
 
+## 1. Mix Plan & Prep Mix Inventory
+
+**Status**: Planning  
+**Priority**: High — same root issue as overproduction inventory gap
+
+### Summary
+Mix plan is purely advisory today — when prep mixes are actually made, nothing deducts from inventory. Need:
+1. Ingredient deduction when prep mix is made
+2. Leftover tracking (like freezer surplus but for mixes)
+3. Auto-allocation to next matching run + reminder of freezer stock
+
+### The Problem
+- `lib/mixes/src/index.ts` says "Advisory only — this never moves stock"
+- When prep mixes are made, ingredients get used but inventory doesn't reflect it
+- "Already Made" input exists but has no inventory connection
+- No tracking of leftover/excess mix in the freezer
+- No reminder that there's mix stock available for the next run
+
+### Proposed Solution
+
+**A. Deduction on Mix-Made**
+- When "Already Made" is entered (or a new mix-made action is added) → deduct component ingredients from inventory
+- Same mechanism as `consume-run`: look up mix components → compute lbs needed → call `planDrawDown`
+- Audit-logged: "Prep mix made: {mix name} → deducted {qty} {ingredient} from inventory"
+
+**B. Mix Surplus / Leftover Tracking**
+- Like `FreezerSurplusLot` but for prep mixes
+- Track: mix name, brand/flavor, amount made, amount used, amount remaining, production date
+- Stored in freezer — shows up as a reminder: "You have 15 lbs of Bobo's Veggie Mix in the freezer"
+- When next matching run comes up → auto-suggest using leftover mix before making new
+- "Use leftover" reduces the "amount to make" for the next run
+
+**C. Auto-Allocation to Next Run**
+- Similar to freezer surplus "Use on Next Run"
+- If leftover mix exists for brand/flavor → automatically reduce the plan amount
+- Reminder/notification: "Freezer has {qty} lbs of {mix} — reduce production by {qty}?"
+- Manager confirms or overrides
+
+**D. Mix Surplus DB Table**
+- `mix_surplus` table: mix_id, brand, flavor, amount_made, amount_used, amount_remaining, production_date, location (freezer), created_at
+- `mix_surplus_allocations` table: surplus_id, run_id, amount_allocated, allocated_at
+- Excluded from purge-all (like QC tables — audit trail)
+
+### Build Order
+1. Add mix-made action that deducts from inventory
+2. Create `mix_surplus` table + API
+3. Leftover tracking UI (shows available mix stock)
+4. Auto-allocation to next matching run
+5. Freezer reminder/notification
+
+### Code References
+- `lib/mixes/src/index.ts` — mix model and plan math (pure, advisory)
+- `artifacts/run-calculator/src/components/MixesTabContent.tsx` — mix plan UI
+- `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx` — already-made input
+- `artifacts/run-calculator/src/components/MixesManager.tsx` — mix recipe editor
+- `lib/db/src/schema/` — add mix_surplus tables
+- `artifacts/api-server/src/routes/inventoryLogic.ts` — draw-down engine (reuse)
+
+---
+
 ## 1. QC Department (Comprehensive)
 
 **Status**: Planning  
