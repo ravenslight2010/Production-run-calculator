@@ -40,19 +40,18 @@ run's own anchors.
 so guarding only the successful value write does not protect retry and cleanup
 paths from cross-run contamination.
 
-Fresh server not-due schedules are short, generation-bound leases for every
-automatic channel, not just net-second counters. Suppressed wall-clock ticks
-advance due-time and elapsed baselines, but must not consume one-shot seeds,
-fractional remainders, or manual-correction state. Lifecycle rearming clears the
-lease, and missing, stale, reordered, or implausibly future schedule frames
-leave local fallback active.
+Synchronized browser clients are passive for every automatic channel. Only the
+server tick engine may apply automatic progress; clients display canonical
+sync/SSE values and remain read-only while offline rather than accumulating
+replayable deltas. The Auto/Manual switch is canonical run metadata and the
+locked claim application boundary must reject every claim while Manual is set.
+Automatic next-run staging is not a client exception.
 
-**Why:** Filtering only the emitted claim after local tick calculation silently
-marks an unclaimed seed as consumed and can leave an offline client unable to
-recover. Accepting reordered or future schedule times can also extend
-suppression beyond the bounded online handoff.
+**Why:** Expiring browser ownership leases let multiple awake or reconnecting
+devices race delayed claims. Builder-only Manual checks also allow an older
+client or already-built claim to bypass operator intent at the locked writer.
 
-**How to apply:** Evaluate server ownership independently for case, hopper,
-tray production/consumption, and batch production/consumption before mutating
-claim-only bookkeeping. Continue advancing cadence anchors while suppressed so
-lease expiry resumes from a normal interval rather than replaying a backlog.
+**How to apply:** Keep browser calculation for countdowns and suggestions only.
+Enforce Manual mode both when building schedules and when applying claims under
+the row lock. Bind server ticks to the row's live/sandbox scope before inventory
+side effects, and broadcast accepted canonical rows only within that scope.

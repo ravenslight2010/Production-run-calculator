@@ -18290,6 +18290,9 @@ export default function Home() {
         autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        onAutoTrackProgressChange={(enabled) => {
+          updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
+        }}
         operationalSnapshotReceipt={serverCalcReceipt}
         operationalServerCalc={serverCalc}
         operationalOnline={isOnline}

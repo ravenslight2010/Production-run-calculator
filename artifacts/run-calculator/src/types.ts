@@ -367,6 +367,8 @@ export type RunMeta = {
    */
   pausedStoppageId?: string;
   endedAt?: number;
+  /** Canonical per-run switch consumed by the server auto-track engine. */
+  autoTrackDisabled?: boolean;
   subTab?: "dough" | "crusts";
   notes?: string;
   actualCases?: number;

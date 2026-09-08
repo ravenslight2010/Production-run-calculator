@@ -53,6 +53,7 @@ function schedule(
   // an abandoned old running register must never restart net claims.
   const startedAt = number(run.startedAt);
   const endedAt = number(run.endedAt);
+  if (run.autoTrackDisabled === true) return null;
   const values = payload.runValues?.[run.id];
   if (!values) return null;
   const endedDrainActive = options.allowEndedDrain === true

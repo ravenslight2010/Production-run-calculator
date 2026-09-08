@@ -225,6 +225,16 @@ interface AutoTrackParams {
    */
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  /**
+   * The server is the sole automatic writer for synchronized clients. In this
+   * mode the hook still computes suggestions and countdowns, but never submits
+   * or locally applies an automatic counter mutation. Canonical sync/SSE values
+   * remain the only source for displayed progress. Offline operation is
+   * deliberately read-only so reconnect cannot replay duplicate production.
+   */
+  authoritativeServerAutoTrack?: boolean;
+  /** Canonical server-owned enable state for the selected run. */
+  autoTrackProgressEnabled?: boolean;
   /** Stop sauce completion once dough hands off to the next unstarted run. */
   nextRunPrepActive?: boolean;
 }
@@ -330,10 +340,19 @@ export function useAutoTrack({
   autoTrackRebaseAfterBlock = true,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  authoritativeServerAutoTrack = false,
+  autoTrackProgressEnabled,
   nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
   const productionNeedsAvailable = caseBasedProductionNeedsAvailable(v);
-  const [autoTrackProgress, setAutoTrackProgress] = useState(true);
+  const [autoTrackProgress, setAutoTrackProgress] = useState(
+    autoTrackProgressEnabled ?? true,
+  );
+  useEffect(() => {
+    if (typeof autoTrackProgressEnabled === "boolean") {
+      setAutoTrackProgress(autoTrackProgressEnabled);
+    }
+  }, [autoTrackProgressEnabled]);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
   // When set, tray/batch production and consumption ticks are suppressed
   // without affecting cases/skids or the global auto-track toggle.
@@ -704,6 +723,14 @@ useEffect(() => {
       });
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
+    if (authoritativeServerAutoTrack) {
+      // Do not queue a browser claim or apply its optimistic mutation. The
+      // server tick engine applies the canonical row under lock and SSE/sync
+      // adoption updates every display. This also defines the offline policy:
+      // counters stay at their last canonical value instead of accumulating a
+      // replayable local delta that could duplicate work after reconnect.
+      return;
+    }
     if (!claimAutoTrackEvent) {
       applyValues(localValues);
       return;
@@ -815,6 +842,7 @@ useEffect(() => {
       });
     coordinationClaimQueueRef.current = queuedClaim.then(() => {}, () => {});
   }, [
+    authoritativeServerAutoTrack,
     claimAutoTrackEvent,
     coordinationIdentity,
     endedAt,
@@ -1676,6 +1704,8 @@ useEffect(() => {
     resumeDoughTimers,
     coordinationStatus: coordinationDelayed
       ? "delayed"
+      : authoritativeServerAutoTrack && typeof navigator !== "undefined" && !navigator.onLine
+        ? "delayed"
       : coordinationPendingCount > 0
         ? "waiting"
         : "ready",

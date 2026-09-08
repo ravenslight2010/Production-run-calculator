@@ -159,7 +159,7 @@ export function buildAutoTrackSchedule(
   nowMs = Date.now(),
 ): AutoTrackSchedule | null {
   const run = payload?.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
-  if (!run || typeof run.id !== "string" || !calcResult) return null;
+  if (!run || typeof run.id !== "string" || run.autoTrackDisabled === true || !calcResult) return null;
   const runId = run.id;
   const rawValues = payload?.runValues?.[runId];
   if (!rawValues || typeof rawValues !== "object") return null;
@@ -1599,7 +1599,6 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
   const nowMs = opts.nowMs ?? Date.now();
   const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
   const rows = await db.select().from(dailySyncTable).where(and(
-    eq(dailySyncTable.scope, "live"),
     gte(dailySyncTable.date, serverTickStartDate(nowMs)),
     // Client-local dates may be one calendar day ahead of server UTC.
     lte(dailySyncTable.date, new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
@@ -1609,10 +1608,15 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
   const outcomes: Record<string, number> = {};
   for (const row of rows) {
     if (builtClaims >= maxClaims) break;
+    if (row.scope !== "live" && row.scope !== "sandbox") {
+      outcomes.invalidScope = (outcomes.invalidScope ?? 0) + 1;
+      continue;
+    }
+    const scope: Scope = row.scope;
     try {
-      const result = await db.transaction(async (tx) => {
+      const result = await runWithScope(scope, () => db.transaction(async (tx) => {
         const [locked] = await tx.select().from(dailySyncTable)
-          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live"))).for("update");
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope))).for("update");
         const stored = locked?.data ?? emptySyncData(row.date);
         const wall = buildWallClockServerClaims(stored, nowMs);
         const netClaims = buildNetSecondServerClaims(stored, nowMs);
@@ -1670,13 +1674,13 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
           data = { ...data, autoTrackServerState: { ...previous, version: 1, netOwnership: ownership } };
         }
         if (locked) await tx.update(dailySyncTable).set({ data: data as any, updatedAt: new Date() })
-          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live")));
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope)));
         return { data, claims: rawClaims.length, accepted: acceptedHere, outcomes: outcomesHere };
-      });
+      }));
       builtClaims += result.claims;
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
-      if (result.accepted) broadcast(result.data, "server:tick", "live", row.date);
+      if (result.accepted) broadcast(result.data, "server:tick", scope, row.date);
     } catch (err) {
       logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;

@@ -164,4 +164,52 @@ describe("useAutoTrack server schedule freshness", () => {
     });
     expect(claim).toHaveBeenCalled();
   });
+
+  it("never submits or applies an automatic mutation in authoritative server mode", async () => {
+    const { form, store } = makeForm();
+    const claim = vi.fn();
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const base: Props = {
+      runId: "passive-client",
+      runGeneration: "started",
+      runStatus: "running",
+      nowTime: new Date(T0),
+      elapsedBatchSec: 0,
+      calc: {
+        ppm: 600, perTray: 0, perBatch: 0, traysNeeded: 0,
+        batchesNeeded: 0, pressDone: false, casesInFreezer: 0,
+      },
+      v: {
+        casesPerSkid: 10, pizzasPerCase: 10, casesNeeded: 100, freezerTime: 0,
+        traysOnLine: 5, batchesReady: 2, sauceBarrelsMade: 0,
+        sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+        app1Type: "", app1OzPerPizza: 0, app1BatchLbs: 0, app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+        app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [], app2BatchesMade: 0, app2BatchAnchorNetSec: 0, app2BatchCorrectionGeneration: 0,
+        app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [], app3BatchesMade: 0, app3BatchAnchorNetSec: 0, app3BatchCorrectionGeneration: 0,
+        app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [], app4BatchesMade: 0, app4BatchAnchorNetSec: 0, app4BatchCorrectionGeneration: 0,
+      },
+      form,
+      claimAutoTrackEvent: claim,
+      authoritativeServerAutoTrack: true,
+      autoTrackRebaseAfterBlock: false,
+    };
+    const hook = renderHook((p: Props) => useAutoTrack(p), {
+      initialProps: { ...base, autoTrackBlocked: true },
+    });
+
+    await act(async () => {
+      vi.setSystemTime(T0 + 2_000);
+      hook.rerender({
+        ...base,
+        nowTime: new Date(T0 + 2_000),
+        elapsedBatchSec: 2,
+        autoTrackBlocked: false,
+      });
+      await Promise.resolve();
+    });
+
+    expect(claim).not.toHaveBeenCalled();
+    expect(form.setValue).not.toHaveBeenCalled();
+    expect(store.casesOnCurrentSkid).toBe(0);
+  });
 });
