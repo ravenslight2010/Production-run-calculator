@@ -458,10 +458,19 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 **Status**: Planning  
 **Full plan**: [docs/import-system-plan.md](import-system-plan.md)  
+**Redesign plan**: [docs/importer-redesign-plan.md](importer-redesign-plan.md)  
 **Priority**: High — QC is the primary source for imports
 
 ### Summary
-7 importers exist (spec, premix, cheese, shipping, sauce, dough, schedule) with AI-assisted matching, review stages, learned aliases, history, snapshots. 10 improvements planned.
+7 importers exist (spec, premix, cheese, shipping, sauce, dough, schedule) with AI-assisted matching, review stages, learned aliases, history, snapshots. 10 improvements planned + full importer redesign (deterministic-first, AI-fallback).
+
+### Redesign Goals
+More accurate, more automatic, more verifiable, less AI:
+- **Deterministic-first parse** — template files parse with NO AI; free-form falls back to AI
+- **Cell-level provenance** — every parsed value tagged with source cell
+- **Auto-verify** — cross-field rule checks; confident items auto-apply
+- **Verification report** — round-trip diff + corpus check + signed hash
+- **AI as fallback only** — lower cost, fewer rate limits, smaller hallucination surface
 
 ### What Exists
 - AI-assisted brand/flavor matching + fuzzy fallback
