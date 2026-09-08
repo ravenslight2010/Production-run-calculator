@@ -148,37 +148,37 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 
 ## 4. Inventory System Gap Fixes
 
-**Status**: Analysis complete  
-**Full plan**: [docs/inventory-gap-analysis.md](inventory-gap-analysis.md)  
+**Status**: Analysis + plan complete  
+**Full plan**: [docs/inventory-autodeduction-plan.md](inventory-autodeduction-plan.md)  
+**Analysis**: [docs/inventory-gap-analysis.md](inventory-gap-analysis.md)  
 **Priority**: High — foundational for all other systems
 
 ### Summary
-Inventory consumption is a single-point event (run-end) rather than continuous. 8 gaps identified where inventory should be affected but isn't.
+Inventory consumption is a single-point event (run-end) rather than continuous. 8 gaps identified. Comprehensive plan covers all critical + medium + non-ingredient packaging gaps.
 
-### Gaps by Priority
-| # | Gap | Impact | Status |
-|---|-----|--------|--------|
-| 1 | Overproduction ingredients not deducted | Critical | Planned (overproduction plan) |
-| 2 | Mix/prep mix ingredients not deducted | Critical | Planned (mix plan) |
-| 3 | Freezer pull not deducting from inventory | Medium | Needs planning |
-| 4 | Waste & spoilage not tracked | Medium | Needs planning |
-| 5 | Stoppages mid-run waste not tracked | Medium | Needs planning |
-| 6 | Use actual cases not planned cases | Medium | Needs planning |
-| 7 | Ingredient returns not tracked | Low-Med | Needs planning |
-| 8 | Non-cartoned packaging not consumed | Low | Needs planning |
+### What's Planned
+| Area | What | Status |
+|------|------|--------|
+| **A** | Overproduction inventory deduction | Planned (overproduction plan) |
+| **B** | Mix/prep mix inventory deduction | Planned (mix plan) |
+| **C** | Freezer pull → inventory deduction (fix double-counting) | Planned |
+| **D** | Use actual cases instead of planned | Planned |
+| **E1** | Labeled runs: circles, shippers, labels | Planned |
+| **E2** | Grip sheets consumption | Planned |
+| **E3** | Skid stacking materials | Planned |
+| **E4** | Film/wrap/tape (configurable supplies) | Planned |
+| **E5** | Pallets consumption | Planned |
 
-### Root Cause
-Single-point consumption at run-end instead of continuous tracking across the full production flow.
+### Still Open (lower priority)
+- Waste/spoilage logging
+- Stoppages mid-run waste
+- Ingredient returns at run-end
 
-### Fix Order
-1. Overproduction deduction (planned)
-2. Mix/prep mix deduction (planned)
-3. Freezer pull → inventory deduction
-4. Waste/spoilage logging
-5. Actual vs planned cases
-6. Stoppages waste
-7. Ingredient returns
-8. Non-cartoned packaging
+### Build Order
+1. Actual cases + overproduction deduction + mix deduction (Phase 1)
+2. Freezer pull double-counting fix (Phase 2)
+3. Packaging gaps — labeled runs, grip sheets, film, pallets (Phase 3)
+4. Waste & returns (Phase 4)
 
 ---
 
