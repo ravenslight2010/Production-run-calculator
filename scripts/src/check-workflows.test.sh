@@ -474,6 +474,7 @@ assert_stopped_summary_workflow_contract() {
   summary_block=$(workflow_step_block "$summary_step")
   assert_contains "$summary_block" "if: always()"
   assert_contains "$summary_block" "CHECKPOINT_DIR: ${checkpoint_dir}"
+  assert_contains "$summary_block" "CHECKPOINT_ARTIFACT_NAME: release-evidence-${mode}-\${{ github.run_id }}"
   assert_contains "$summary_block" \
     "CHECKPOINT_ARTIFACT_URL: \${{ steps.${artifact_step_id}.outputs.artifact-url }}"
   assert_contains "$summary_block" \
@@ -489,6 +490,12 @@ assert_stopped_summary_workflow_contract() {
 }
 
 test_release_workflow_preserves_stopped_summary_contract() {
+  local workflow_content
+  workflow_content=$(<"$RELEASE_WORKFLOW")
+  assert_contains "$workflow_content" \
+    'RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"'
+  assert_contains "$workflow_content" \
+    "A fresh service database cannot prove the retained production repair"
   assert_stopped_summary_workflow_contract \
     standard \
     "Upload standard release evidence" \

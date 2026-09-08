@@ -16,12 +16,14 @@ is_fork_pull_request() {
     "${RELEASE_BASE_REPOSITORY}" != "${RELEASE_HEAD_REPOSITORY}" ]]
 }
 
+artifact_link_verification_reason=""
 artifact_link_verification_failure() {
   local reason="$1"
+  artifact_link_verification_reason="$reason"
   if is_fork_pull_request; then
-    echo "Stopped-check artifact link verification failed for a forked pull request: ${reason} The read-only workflow token could not verify the uploaded artifact. Confirm that this workflow keeps actions: read permission and rerun the check; do not add secrets to the workflow."
+    echo "Stopped-check artifact verification failed for a forked pull request: ${reason} The base repository's read-only workflow token could not verify the uploaded artifact. Confirm that this workflow keeps actions: read permission and rerun the check; do not add secrets to the workflow."
   else
-    echo "Stopped-check artifact link verification failed: ${reason}"
+    echo "Stopped-check artifact verification failed: ${reason}"
   fi
   return 1
 }
@@ -39,15 +41,6 @@ verify_checkpoint_artifact_link() {
     return $?
   fi
 
-  if ! curl --fail --silent --location \
-    --header "Authorization: Bearer ${GITHUB_TOKEN}" \
-    --header "Accept: application/vnd.github+json" \
-    --output /dev/null \
-    "$CHECKPOINT_ARTIFACT_URL" 2>/dev/null; then
-    artifact_link_verification_failure "the artifact link did not resolve."
-    return $?
-  fi
-
   local artifact_api_response
   artifact_api_response="$(mktemp)"
   if ! curl --fail --silent --location \
@@ -57,12 +50,15 @@ verify_checkpoint_artifact_link() {
     "${GITHUB_API_URL%/}/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}" \
     2>/dev/null; then
     rm -f "$artifact_api_response"
-    artifact_link_verification_failure "artifact metadata was unavailable."
+    artifact_link_verification_failure "artifact metadata was unavailable; the artifact may be missing, expired, or inaccessible to this workflow token."
     return $?
   fi
 
   local actual_artifact_name
-  if ! actual_artifact_name="$(jq -er '.name' "$artifact_api_response" 2>/dev/null)"; then
+  local artifact_expired
+  if ! actual_artifact_name="$(jq -er '.name | select(type == "string" and length > 0)' "$artifact_api_response" 2>/dev/null)" ||
+    ! artifact_expired="$(jq -r '.expired | select(type == "boolean")' "$artifact_api_response" 2>/dev/null)" ||
+    [[ "$artifact_expired" != "true" && "$artifact_expired" != "false" ]]; then
     rm -f "$artifact_api_response"
     artifact_link_verification_failure "artifact metadata was malformed."
     return $?
@@ -73,13 +69,17 @@ verify_checkpoint_artifact_link() {
     artifact_link_verification_failure "the uploaded artifact name did not match."
     return $?
   fi
+  if [[ "$artifact_expired" == "true" ]]; then
+    artifact_link_verification_failure "the uploaded artifact has expired."
+    return $?
+  fi
 }
 
 artifact_link_verification_status=0
 if [[ "${VERIFY_CHECKPOINT_ARTIFACT_LINK:-0}" == "1" ]]; then
   if [[ -n "${CHECKPOINT_ARTIFACT_URL:-}" ]]; then
     verify_checkpoint_artifact_link || artifact_link_verification_status=$?
-  elif is_fork_pull_request; then
+  else
     artifact_link_verification_failure "no artifact link was provided by the upload step. Check that upload-artifact completed before relying on this stopped-check download." ||
       artifact_link_verification_status=$?
   fi
@@ -103,8 +103,10 @@ esac
   echo
   echo "$stopped_message"
   echo
-  if [[ -n "${CHECKPOINT_ARTIFACT_URL:-}" ]]; then
+  if [[ "$artifact_link_verification_status" -eq 0 && -n "${CHECKPOINT_ARTIFACT_URL:-}" ]]; then
     echo "[Download the stopped-check checkpoint artifact]($CHECKPOINT_ARTIFACT_URL)"
+  elif [[ -n "$artifact_link_verification_reason" ]]; then
+    echo "The checkpoint artifact is unavailable: $artifact_link_verification_reason"
   else
     echo "The checkpoint artifact was not uploaded successfully."
   fi

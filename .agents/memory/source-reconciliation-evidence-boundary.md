@@ -19,4 +19,6 @@ misrepresent a NO-GO as a GO.
 production status, keep local release evidence bound to its matching database
 and environment, and leave retained reports untouched when a development
 source gate fails. Record the exact remaining NO-GO counts instead of resetting
-markers, copying production data, or fabricating evidence.
+markers, copying production data, or fabricating evidence. Fresh disposable CI
+should run focused verifier fixtures and remain explicitly NO-GO; it must not
+query its empty database as a substitute for authoritative production history.

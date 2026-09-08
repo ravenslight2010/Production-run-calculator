@@ -489,6 +489,17 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
+export const SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP: ReleaseStep = {
+  label: "source-library reconciliation verifier fixture tests",
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "run",
+    "test:source-heal-verify",
+  ],
+  stage: "prerequisites",
+};
+
 /**
  * The reconciliation verifier proves a specific production repair, including
  * its historical rows. A newly-created CI database intentionally has none of
@@ -541,7 +552,7 @@ const steps: ReleaseStep[] = [
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   ...(requiresProductionSourceLibraryReconciliation
     ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
-    : []),
+    : [SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP]),
   {
     label: "shell lint inventory",
     args: ["run", "check:shell-inventory"],
@@ -949,6 +960,10 @@ export async function verifyReleaseEvidence(
   const requiresSourceLibraryEvidence = expectedGateLabels.includes(
     "source-library reconciliation verification",
   );
+  const requiresWebKitEvidence = expectedGateLabels.includes(
+    "browser WebKit smoke",
+  );
+  const requiresFullBrowserEvidence = evidenceMode === "full";
   const requiredEvidence = [
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
@@ -956,10 +971,12 @@ export async function verifyReleaseEvidence(
     ...(requiresSourceLibraryEvidence
       ? [SOURCE_LIBRARY_RECONCILIATION_EVIDENCE]
       : []),
-    ...(evidenceMode === "full"
+    ...(requiresFullBrowserEvidence
       ? ["browser-full/FINAL-REPORT.md" as const]
       : []),
-    "browser-smoke/webkit-result.json" as const,
+    ...(requiresWebKitEvidence
+      ? ["browser-smoke/webkit-result.json" as const]
+      : []),
   ];
   const missingEvidence = requiredEvidence.filter((file) => !files.includes(file));
   if (missingEvidence.length > 0) {
@@ -999,14 +1016,16 @@ export async function verifyReleaseEvidence(
       expectedEnvironment: expectedSourceLibraryEnvironment,
     });
   }
-  const webkitEvidence = await readFile(
-    resolve(evidenceRoot, "browser-smoke/webkit-result.json"),
-  );
-  validateWebKitBrowserEvidence(webkitEvidence, {
-    currentRevision: revision,
-    requirePass: /^Decision:\s*GO\s*$/m.test(report),
-  });
-  if (evidenceMode === "full") {
+  if (requiresWebKitEvidence) {
+    const webkitEvidence = await readFile(
+      resolve(evidenceRoot, "browser-smoke/webkit-result.json"),
+    );
+    validateWebKitBrowserEvidence(webkitEvidence, {
+      currentRevision: revision,
+      requirePass: /^Decision:\s*GO\s*$/m.test(report),
+    });
+  }
+  if (requiresFullBrowserEvidence) {
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
       "utf8",
@@ -2343,7 +2362,11 @@ async function main(): Promise<void> {
       ? "GO"
       : "NO-GO";
     try {
-      await promoteSourceLibraryEvidence();
+      if (steps.some(
+        (step) => step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label,
+      )) {
+        await promoteSourceLibraryEvidence();
+      }
       const reportPath = await writeReleaseReport(results, {
         revision,
         decision: releaseDecision,
