@@ -40,16 +40,18 @@
 
 ## Proposed System
 
-### 1. QC Approval Gate (from QC department plan)
-**Status**: Already planned in `docs/qc-department-plan.md` → "Shared Importers"
+### 1. QC Approval Gate (moved to QC department)
+**Status**: **DEPENDS ON QC DEPARTMENT** — moves to `docs/qc-department-plan.md` (Shared Importers section). Build only after the QC section exists.
 
-**Flow**:
+**Flow** (from QC plan):
 1. Anyone with import capability uploads
 2. Parsed data applies BUT flagged `qc_review_status = "pending"`
 3. QC sees pending imports in their Import Review queue (diff preview)
 4. Approve → fully verified (badge clears) | Reject → rollback offered
 
-**Impact**: Importers remain shared; QC is the quality gate.
+**Impact**: Importers remain shared; QC is the quality gate. The import system only needs to expose the `qc_review_status` field + the review queue API contract; the QC UI lives in the QC department.
+
+**Dependency note**: This item is NOT in the import plan's build order. It is owned by the QC department plan (Phase 3: Import approval queue). The import plan's Phases are standalone and can proceed before QC exists.
 
 ### 2. Rollback / Undo (new)
 **What**: Undo the last applied import (or any import with a snapshot).
@@ -145,22 +147,24 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 
 ## Recommended Build Order
 
-### Phase 1: Foundation (highest value)
-1. **QC approval gate** (pending → verified, unverified badge, QC review queue)
-2. **Rollback / undo** (snapshot + restore + conflict guard)
-3. **Structured preview diff** (change-by-change view before apply)
+### Phase 1: Foundation (standalone — no QC dependency)
+1. **Rollback / undo** (snapshot + restore + conflict guard)
+2. **Structured preview diff** (change-by-change view before apply)
+3. **Template download** (server-side, per importer)
 
-### Phase 2: Usability
-4. **Template download** (server-side, per importer)
-5. **Validation rules pre-check** (fail fast on file shape)
-6. **Cross-importer linking** (unified "import health" view)
+### Phase 2: Safety & Quality
+4. **Validation rules pre-check** (fail fast on file shape)
+5. **Cross-importer linking** (unified "import health" view)
+6. **Import → inventory impact** (projected consumption on review)
 
 ### Phase 3: Advanced
 7. **Batch import** (multi-file queue)
 8. **Data versioning** (re-import diff vs. last time)
-9. **Import → inventory impact** (projected consumption on review)
 
-### Phase 4: Deferred
+### Phase 4: QC Integration (after QC department is built)
+9. **QC approval gate** — owned by QC dept plan (Shared Importers). Import system exposes `qc_review_status` + review queue API; QC UI lives in QC department.
+
+### Phase 5: Deferred
 10. **Import scheduling** — only if a recurring file source exists
 
 ---

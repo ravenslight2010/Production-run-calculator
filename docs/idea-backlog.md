@@ -474,7 +474,7 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 ### What's Planned
 | # | Improvement | Status |
 |---|------------|--------|
-| 1 | QC approval gate (pending → verified) | Planned (QC dept) |
+| 1 | **QC approval gate** — moved to QC dept plan (Shared Importers); import system only needs to expose `qc_review_status` + review queue API | In QC dept (after QC built) |
 | 2 | Rollback / undo last import | Planned |
 | 3 | Structured preview diff (what will change) | Planned |
 | 4 | Batch import (multi-file) | Planned |
@@ -486,10 +486,11 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 | 10 | Data versioning (re-import diff) | Planned |
 
 ### Build Order
-1. QC approval gate + rollback + preview diff (Phase 1)
-2. Templates + validation + cross-import health (Phase 2)
-3. Batch import + versioning + inventory impact (Phase 3)
-4. Scheduling (deferred)
+1. Rollback + preview diff + templates (Phase 1 — standalone)
+2. Validation + cross-import health + inventory impact (Phase 2)
+3. Batch import + versioning (Phase 3)
+4. **QC approval gate** — after QC department is built (Phase 4)
+5. Scheduling (deferred)
 
 ### Code References
 - `artifacts/run-calculator/src/components/SpecImportDialog.tsx`
