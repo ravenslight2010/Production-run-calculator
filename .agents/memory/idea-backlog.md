@@ -13,6 +13,15 @@ Master list of improvement ideas for the Production Run Calculator. Each idea in
 ### Summary
 Full QC department with own section in the app, like managers have. Consolidates scattered QC features (quality photo checks, incidents, downtime) into one place. Adds lot tracking, weight checks, component checks, label/date verification, import approval queue, recipe approval, future planning, and a unified QC dashboard.
 
+### Features Moving In
+- Quality photo checks (existing Quality tab)
+- Incidents log (existing Incidents tab)
+- Downtime trends (existing Downtime tab)
+- Lot tracking (existing inventory lot field — extend to full per-run logging)
+- **Substitutions Manager** (currently in Inventory tab — temporary ingredient subs, manager/QC only)
+- **Substitution Log** (currently in Inventory tab — read-only history of today's sub actions)
+- All new QC features (weight checks, component checks, label/date verification, import approval, recipe approval)
+
 ### Key Constraints (locked in)
 - QC data survives daily reset + factory purge (excluded from purge-all)
 - Full immutable audit trail (who/what/when/where/why/evidence)

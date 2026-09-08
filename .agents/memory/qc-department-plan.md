@@ -64,6 +64,8 @@ Currently QC features are scattered across the app. Everything below moves into 
 | Bottom bar `downtime` tab | `QcDowntimeSurface` (downtime trends) | QC Department → Downtime |
 | Inventory tab | AI quality/defect photo check (`inventoryShared.ts` → `QualityCheckRecord`) | QC Department → Quality Checks |
 | Inventory tab | Lot number field on inventory batches | QC Department → Lot Tracking (plus keep read-only summary in inventory) |
+| Inventory tab | Substitutions Manager (temporary ingredient subs) | QC Department → Substitutions |
+| Inventory tab | Substitution Log (today's sub actions) | QC Department → Substitution Log |
 | Manager menu | Import dialogs (spec, premix, cheese, shipping, guides) | **Shared** — see below |
 
 **Tab placement**: The bottom nav bar gains a `qc` tab (replacing or joining `quality`/`incidents`/`downtime` which currently exist as secondary tabs). The QC tab becomes one of the 6 bottom-bar slots (Run, Dough, Sauce, Frontline, QC, Warehouse) — or the existing quality/incidents/downtime tabs consolidate into a single QC section with internal sub-tabs (QA Checks, Incidents, Downtime, Lot Tracking, Weight Checks). The second option is recommended to avoid nav overcrowding.
