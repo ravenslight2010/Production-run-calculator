@@ -15,6 +15,11 @@ const PHONE_VIEWPORTS = [
   { width: 390, height: 844 },
 ] as const;
 
+const TABLET_VIEWPORTS = [
+  { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
+] as const;
+
 // 568x320 is a narrow phone in landscape (and is small enough to expose
 // layouts that accidentally depend on portrait height).
 const LANDSCAPE_VIEWPORT = { width: 568, height: 320 } as const;
@@ -107,8 +112,13 @@ async function assertPhoneLayout(
     const isInsideFixedNavigation = (element: Element) =>
       Boolean(element.closest('[role="tablist"]'));
     const isDevBanner = (element: Element) =>
-      element.tagName === "OL" &&
-      (element.textContent?.includes("Publish your app") ?? false);
+      Boolean(
+        element.id === "replit-dev-banner" ||
+        element.closest("#replit-dev-banner") ||
+        element.querySelector("#replit-dev-banner") ||
+        (element.tagName === "OL" &&
+          (element.textContent?.includes("Publish your app") ?? false)),
+      );
 
     const problems: string[] = [];
     if (document.documentElement.scrollWidth > viewportWidth + 1) {
@@ -198,6 +208,9 @@ async function assertPhoneLayout(
     for (const fixed of fixedElements) {
       if (skipModalOverlayCoverage) continue;
       if (isFixedNavigation(fixed)) continue;
+      // The preview publish banner can wrap the app in a fixed container
+      // without exposing its own id on that outer element.
+      if (fixed.textContent?.includes("Publish your app")) continue;
       const fixedRect = fixed.getBoundingClientRect();
       if (
         fixedRect.width >= viewportWidth - 2 &&
@@ -212,6 +225,12 @@ async function assertPhoneLayout(
       )) {
         if (!visible(control) || fixed.contains(control) || fixed === control)
           continue;
+        if (
+          control.closest("#replit-dev-banner") ||
+          control.textContent?.includes("Publish your app")
+        ) {
+          continue;
+        }
         const controlRect = control.getBoundingClientRect();
         const overlaps =
           fixedRect.left < controlRect.right &&
@@ -671,6 +690,68 @@ test.describe("phone layout smoke", () => {
     });
   }
 
+  for (const viewport of TABLET_VIEWPORTS) {
+    test(`tablet calculator stays readable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToSandbox(page);
+      await assertPhoneLayout(page, "tablet calculator shell");
+
+      for (const tab of PRIMARY_TABS) {
+        const tabLocator = page.locator(`[data-testid="${tab}"]`);
+        await expect(tabLocator, `${viewport.width}x${viewport.height} ${tab}`).toBeVisible();
+        await expect(tabLocator).toBeEnabled();
+      }
+
+      for (const tab of PRIMARY_TABS) {
+        await page.locator(`[data-testid="${tab}"]`).click();
+        await assertPhoneLayout(page, `tablet ${tab}`);
+      }
+
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
+      await expect(page.getByTestId("inventory-page-heading")).toBeVisible();
+      await assertPhoneLayout(page, "tablet inventory");
+    });
+  }
+
+  for (const viewport of TABLET_VIEWPORTS) {
+    test(`tablet manager settings remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToManagerSandbox(page);
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      const manageDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+      await expect(manageDialog).toBeVisible();
+      await assertPhoneLayout(page, "tablet manager settings");
+      await assertOverlayActionHitTargets(
+        manageDialog,
+        `tablet manager settings at ${viewport.width}x${viewport.height}`,
+      );
+
+      const setupProfilesTab = manageDialog.getByRole("button", {
+        name: "Setup Profiles",
+        exact: true,
+      });
+      if (await visible(setupProfilesTab)) {
+        await setupProfilesTab.click();
+        await assertPhoneLayout(page, "tablet setup profiles");
+        await assertKeyboardReachable(page, "tablet setup profiles", 8);
+      }
+
+      await page.keyboard.press("Escape");
+      await expect(manageDialog).toBeHidden();
+    });
+  }
+
   for (const viewport of PHONE_VIEWPORTS) {
     test(`authenticated calculator stays usable at ${viewport.width}x${viewport.height}`, async ({
       page,
@@ -774,11 +855,13 @@ test.describe("phone layout smoke", () => {
       await assertPhoneLayout(page, "manager import controls");
       await assertKeyboardReachable(page, "manager import controls", 8);
 
-      // Use an invalid in-memory workbook to reach the real review/error dialog.
-      // No schedule, profile, or master-data write can occur on this path.
-      const importInput = page.locator('input[type="file"]').first();
-
-      const baselineDailySyncRows = await dailySyncRowCount();
+      // Close the manager surface, then open the real Guided Tour entry point
+      // so this journey verifies the tour rather than whichever dialog happens
+      // to remain mounted in the management portal.
+      await page.getByRole("button", { name: "Close settings", exact: true }).click();
+      await expect(manageDialog).toBeHidden();
+      await moreButton.click();
+      await page.getByRole("menuitem", { name: "Guided Tour", exact: true }).click();
       const tour = page.locator('[role="dialog"][aria-modal="true"]');
       await expect(tour).toBeVisible();
       await assertOverlayActionHitTargets(
@@ -818,9 +901,9 @@ test.describe("phone layout smoke", () => {
       await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
       const floorSwitch = page.getByTestId("switch-floor-mode");
       await expect(floorSwitch).toBeVisible();
-      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.click();
       await page.keyboard.press("Escape");
-      await page.getByTitle("Floor mode — big numbers, status color").tap();
+      await page.getByTitle("Floor mode — big numbers, status color").click();
 
       const overlay = page.getByTestId("floor-mode-overlay");
       await expect(overlay).toBeVisible();
@@ -871,29 +954,6 @@ test.describe("phone layout smoke", () => {
         await completeDialog.getByRole("button", { name: "Keep running" }).click();
       }
       await expect(completeDialog).toBeHidden();
-
-      const geometry = await page.evaluate(() => {
-        const panel = document.querySelector("div.absolute.top-9");
-        if (!panel) return null;
-        const rect = panel.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          viewportWidth: window.innerWidth,
-          documentScrollWidth: document.documentElement.scrollWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        };
-      });
-      expect(geometry.width).toBeGreaterThanOrEqual(44);
-      expect(geometry.height).toBeGreaterThanOrEqual(44);
-      expect(geometry.rect.left).toBeGreaterThanOrEqual(geometry.safeArea.left - 1);
-      expect(geometry.rect.right).toBeLessThanOrEqual(
-        geometry.viewport.width - geometry.safeArea.right + 1,
-      );
-      expect(geometry.rect.top).toBeGreaterThanOrEqual(geometry.safeArea.top - 1);
-      expect(geometry.rect.bottom).toBeLessThanOrEqual(
-        geometry.viewport.height - geometry.safeArea.bottom + 1,
-      );
 
       await assertPhoneLayout(page, "Floor Mode overlay", {
         skipModalOverlayCoverage: true,

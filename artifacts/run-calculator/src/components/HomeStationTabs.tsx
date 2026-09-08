@@ -21,7 +21,7 @@ export function HomeStationTabs({
   children,
 }: HomeStationTabsProps) {
   return (
-    <Tabs value={activeTab} onValueChange={onTabChange} className="w-full print:hidden">
+    <Tabs value={activeTab} onValueChange={onTabChange} className="station-tabs w-full print:hidden">
       {children}
     </Tabs>
   );

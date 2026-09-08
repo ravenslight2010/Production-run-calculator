@@ -8,6 +8,7 @@ const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const suffix = Math.random().toString(36).slice(2, 10);
 const username = `visual_${suffix}`;
 const phoneUsername = `visual_phone_${suffix}`;
+const tabletUsername = `visual_tablet_${suffix}`;
 const password = "VisualRegression123!";
 let cleanupDb: Client | undefined;
 
@@ -80,6 +81,9 @@ function dynamicMask(page: Page) {
     page.locator('[data-testid*="timestamp"]'),
     page.locator('[data-testid="elapsed-card-value"]'),
     page.locator('input[type="date"]'),
+    // Mix availability is factory-data dependent; keep this baseline focused
+    // on responsive geometry rather than the copy for that state.
+    page.getByText(/No mix recipes defined yet|No mixes to make for this day/),
   ];
 }
 
@@ -104,7 +108,7 @@ test.describe("intentional visual regression baselines", () => {
     if (!cleanupDb) return;
     try {
       await cleanupDb.query("DELETE FROM users WHERE username = ANY($1::text[])", [
-        [username, phoneUsername],
+        [username, phoneUsername, tabletUsername],
       ]);
     } finally {
       await cleanupDb.end().catch(() => {});
@@ -184,6 +188,27 @@ test.describe("intentional visual regression baselines", () => {
     await signUp(page);
     await page.locator('[data-testid="tab-run"]').click();
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
+      fullPage: false,
+      mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
+    });
+  });
+
+  test("tablet portrait and landscape compact presentation", async ({ page }) => {
+    await signUp(page, tabletUsername);
+    await page.locator('[data-testid="tab-run"]').click();
+
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expect(page).toHaveScreenshot("run-overview-tablet-portrait.png", {
+      fullPage: false,
+      mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
+    });
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await expect(page).toHaveScreenshot("run-overview-tablet-landscape.png", {
       fullPage: false,
       mask: dynamicMask(page),
       maxDiffPixels: 80,

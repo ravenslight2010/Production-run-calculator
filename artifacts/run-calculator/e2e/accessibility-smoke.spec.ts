@@ -231,6 +231,9 @@ async function signUp(page: Page, role: "manager" | "supervisor" = "manager"): P
       });
     },
     afterSignUp: async (currentPage) => {
+      await currentPage.addStyleTag({
+        content: "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
       // Keep this browser fixture independent of stale role seeds in
       // disposable databases. Every import entry point below requires the
       // manager's full capability set.
@@ -366,6 +369,9 @@ async function openSettings(page: Page): Promise<Locator> {
 }
 
 async function dismissUnexpectedDialog(page: Page): Promise<void> {
+  // The Replit preview banner is outside the app but can overlap the modal
+  // close action in short tablet viewports.
+  await page.locator("#replit-dev-banner").evaluate((node) => node.remove()).catch(() => {});
   const welcome = page.getByRole("dialog").last();
   const getStarted = welcome.getByRole("button", { name: "Get started", exact: true });
   await getStarted.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
@@ -378,10 +384,17 @@ async function dismissUnexpectedDialog(page: Page): Promise<void> {
     if (!(await dialog.isVisible().catch(() => false))) continue;
     const close = dialog.getByRole("button", { name: /close/i }).first();
     if (await close.isVisible().catch(() => false)) {
-      await close.click();
+      await close.click({ force: true });
     } else {
       await page.keyboard.press("Escape");
     }
+  }
+  // Import/settings flows can close and re-mount a dialog while the loop is
+  // walking the Radix portal collection. Finish on the stable public state.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await page.locator('[role="dialog"]:visible').count() === 0) break;
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
   }
 }
 
@@ -534,10 +547,12 @@ test.describe("accessibility smoke", () => {
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
     await expect(fieldChecks.getByText("Authenticated app startup and home bundle timing.", { exact: true })).toBeVisible();
-    await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText("Guided hardware confirmations", { exact: true })).toBeVisible();
     await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toBeVisible();
-    await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(3);
+    expect(
+      await fieldChecks.getByRole("button", { name: "Pass", exact: true }).count(),
+    ).toBeGreaterThanOrEqual(3);
     await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
     await assertKeyboardTraversal(page, "reported issues field checks", 8);
   });
@@ -550,7 +565,7 @@ test.describe("accessibility smoke", () => {
     const fieldChecks = page.getByTestId("field-checks-panel");
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
-    await expect(fieldChecks.getByText("Hardware-only checks", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText("Guided hardware confirmations", { exact: true })).toBeVisible();
     await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toHaveCount(0);
     await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(0);

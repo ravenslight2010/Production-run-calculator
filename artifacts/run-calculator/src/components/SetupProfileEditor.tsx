@@ -771,7 +771,7 @@ export default function SetupProfileEditor({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60 p-4"
+      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
       onClick={onClose}
     >
       <div
@@ -779,7 +779,7 @@ export default function SetupProfileEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-profile-dialog-title"
-        className="my-auto min-h-0 max-h-[calc(100dvh-2rem)] bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col"
+        className="responsive-dialog-card my-auto bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -800,7 +800,7 @@ export default function SetupProfileEditor({
           </p>
         ) : (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Brand</label>
                 <IngredientSelect

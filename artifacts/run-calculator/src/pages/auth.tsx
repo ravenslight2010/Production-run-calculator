@@ -267,15 +267,15 @@ function AuthForm({ mode }: { mode: Mode }) {
   return (
     <main
       data-testid="auth-screen"
-      className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground"
+      className="dark flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-background text-foreground"
       style={{
-        paddingTop: "max(3rem, env(safe-area-inset-top))",
-        paddingRight: "max(1.5rem, env(safe-area-inset-right))",
-        paddingBottom: "max(3rem, env(safe-area-inset-bottom))",
-        paddingLeft: "max(1.5rem, env(safe-area-inset-left))",
+        paddingTop: "max(2rem, env(safe-area-inset-top))",
+        paddingRight: "max(1rem, env(safe-area-inset-right))",
+        paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
+        paddingLeft: "max(1rem, env(safe-area-inset-left))",
       }}
     >
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm py-4 sm:py-8">
         <div className="mb-8 text-center">
           <img
             src={logoUrl}

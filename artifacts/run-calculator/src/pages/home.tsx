@@ -2375,7 +2375,7 @@ function SecondsField({
       name={name}
       render={({ field }) => (
         <FormItem className="min-w-0 space-y-0">
-          <FormLabel className="text-[9px] text-muted-foreground block truncate font-normal">{label}</FormLabel>
+          <FormLabel className="text-[10px] text-muted-foreground block truncate font-normal">{label}</FormLabel>
           <FormControl>
             <div className="flex items-center gap-1 mt-0.5">
               <input
@@ -2392,7 +2392,7 @@ function SecondsField({
                 className="h-7 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 data-testid={`input-${name}`}
               />
-              <span className="text-[9px] text-muted-foreground shrink-0 font-mono">= {fmtMS(Number(field.value) || 0)}</span>
+              <span className="text-[10px] text-muted-foreground shrink-0 font-mono">= {fmtMS(Number(field.value) || 0)}</span>
             </div>
           </FormControl>
         </FormItem>
@@ -3007,9 +3007,9 @@ async function encodeSpecPhoto(file: File): Promise<{ imageBase64: string; mimeT
 }
 
 const HOME_DIALOG_OVERLAY_CLASS =
-  "fixed inset-x-0 top-0 z-[70] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60 p-4";
+  "responsive-dialog-overlay fixed inset-x-0 top-0 z-[70] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60";
 const HOME_DIALOG_CARD_CLASS =
-  "my-auto max-h-[calc(100dvh-2rem)] min-h-0";
+  "responsive-dialog-card my-auto";
 const HOME_DIALOG_CARD_SCROLL_CLASS =
   `${HOME_DIALOG_CARD_CLASS} overflow-y-auto`;
 
@@ -16503,7 +16503,7 @@ export default function Home() {
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto space-y-5">
+      <div className="app-shell space-y-5">
         {/* ─── Compact run strip — shown on every tab except Run (graduated mockup) ─── */}
         {activeTab !== "run" && <CompactRunStrip />}
         {/* Sandbox scope banner — persistent while signed in as the test user */}
@@ -16539,7 +16539,7 @@ export default function Home() {
         )}
 
         {/* Header */}
-        <header className="flex items-center justify-between gap-2 print:mb-4">
+        <header className="responsive-row flex items-center justify-between gap-2 print:mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0 print:hidden">
               <Factory className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -16554,7 +16554,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="print:hidden flex items-center gap-1.5 shrink-0">
+          <div className="responsive-row print:hidden flex items-center gap-1.5 shrink-0">
             <SyncStatusPopover
               status={syncStatus}
               connected={syncConnected}
@@ -16945,7 +16945,7 @@ export default function Home() {
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid h-12 min-h-12 grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+              <TabsList className="station-nav fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden">
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Run</span>
@@ -22125,16 +22125,16 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           )}
                           <div className="grid grid-cols-3 gap-2">
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
+                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
                               <p className="text-xs font-semibold text-foreground mt-1">Waiting</p>
-                              <p className="text-[9px] text-muted-foreground mt-0.5">spins when mixer frees</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">spins when mixer frees</p>
                             </div>
                             <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
-                              <p className="text-[9px] uppercase tracking-wider text-primary">2 · Spinning</p>
+                              <p className="text-[10px] uppercase tracking-wider text-primary">2 · Spinning</p>
                               <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
                                 {isDoughTimerPaused ? "—:—" : spinLeft !== null ? fmtMS(spinLeft) : "—:—"}
                               </p>
-                              <p className="text-[9px] text-muted-foreground mt-0.5">
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
                                 {isDoughTimerPaused
                                   ? "timers paused"
                                   : spinTotalSec <= 0
@@ -22147,11 +22147,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               </p>
                             </div>
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
-                              <p className="text-[9px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
+                              <p className="text-[10px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
                               <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">
                                 {isDoughTimerPaused ? "—:—" : hopperLeft !== null ? fmtMS(hopperLeft) : "—:—"}
                               </p>
-                              <p className="text-[9px] text-muted-foreground mt-0.5">
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
                                 {isDoughTimerPaused
                                   ? "timers paused"
                                   : safeHopper > 0 ? "until batch is all balls" : "enter hopper time below"}
@@ -22181,10 +22181,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </div>
                       <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 mb-3">
                         <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
                             <Timer className="w-2.5 h-2.5" /> Machine Times
                           </p>
-                          <p className="text-[9px] text-muted-foreground font-mono truncate">
+                          <p className="text-[10px] text-muted-foreground font-mono truncate">
                             {spinTotalSec > 0 || safeHopper > 0
                               ? `spin ${fmtMS(spinTotalSec)} + hopper ${fmtMS(safeHopper)}`
                               : "time your mixer & hopper for live timers"}
