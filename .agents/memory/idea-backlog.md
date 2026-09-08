@@ -203,7 +203,106 @@ Inventory consumption is a single-point event (run-end) rather than continuous. 
 
 ---
 
-## 5. Production Line Map Dashboard
+## 5. Allergen Tracking
+
+**Status**: Planning  
+**Full plan**: [docs/allergen-tracking-plan.md](allergen-tracking-plan.md)  
+**Priority**: High — food safety
+
+### Summary
+Basic allergen field exists per run. Need ingredient-level allergen mapping, QC allergen verification, cleaning verification, label declarations, and daily allergen reports.
+
+### What Exists
+- Allergen per run (none/egg/soy/custom)
+- Sequence warnings (allergen → non-allergen cleaning)
+- Custom allergen support from spec sheets
+
+### What's Needed
+- Ingredient → allergen mapping
+- Auto-computed run allergen footprint from recipe
+- QC pre-run allergen checklist
+- Cleaning verification with system block
+- Allergen declaration for labels
+- Cross-contact risk alerts
+- Daily allergen report
+
+---
+
+## 6. Production Reporting
+
+**Status**: Planning  
+**Full plan**: [docs/production-reporting-plan.md](production-reporting-plan.md)  
+**Priority**: Medium
+
+### Summary
+Day/week summary exists with AI narration. Need automated end-of-day reports, PDF/CSV export, multi-day trends, cost tracking, waste cost, and comparison views.
+
+### What Exists
+- Day/week summary aggregation
+- AI summary narration + fallback
+- Server-authoritative operational report
+- Completed-run history DB
+
+### What's Needed
+- Automated end-of-day report
+- PDF/CSV export
+- Multi-day trends
+- Per-run cost tracking
+- Waste cost calculator
+- Comparison views
+
+---
+
+## 7. Stoppage & Downtime Analytics
+
+**Status**: Planning  
+**Full plan**: [docs/stoppage-analytics-plan.md](stoppage-analytics-plan.md)  
+**Priority**: Medium
+
+### Summary
+Downtime trends exist. Need real-time alerts, downtime cost, reason classification, recurring-issue detection, root-cause recommendations, and correlations.
+
+### What Exists
+- Stoppage logging per run
+- Downtime trends (by type/run/hour/reason)
+- Stall detection nudge
+
+### What's Needed
+- Real-time downtime alerts (threshold + live banner)
+- Downtime cost tracking
+- Free-text reason auto-classification
+- Recurring-issue detection (same reason 3+ times)
+- Root-cause recommendations
+- Correlations (shift, hour, brand)
+
+---
+
+## 8. Multi-Day Lookahead Dashboard
+
+**Status**: Planning  
+**Full plan**: [docs/multi-day-lookahead-plan.md](multi-day-lookahead-plan.md)  
+**Priority**: Medium
+
+### Summary
+Warehouse, mixes, freezer, and inventory are separate tabs with no unified upcoming-day view. Need a 7-day timeline combining runs, prep needs, availability, conflicts.
+
+### What Exists
+- Production schedule (upcoming days)
+- Freezer pull plan (days-early)
+- Mix plan (make-day)
+- Reorder alerts + use-first
+
+### What's Needed
+- Unified 7-day timeline view
+- Conflict detection (freezer capacity, mix overload, ingredient shortfall)
+- Ingredient availability for upcoming runs
+- Packaging availability (13 items)
+- Consolidated "what to prep today" checklist
+- Capacity planning
+
+---
+
+## 9. Production Line Map Dashboard
 
 **Status**: Built, pending merge  
 **Branch**: `feature/line-map-dashboard`
@@ -231,7 +330,7 @@ Dough (stone) → Sauce (red) → Press/Oven (gray) → Frontline (amber) → Fr
 
 ---
 
-## 6. Line Station Expansion
+## 10. Line Station Expansion
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -255,7 +354,7 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ---
 
-## 7. AI Improvements
+## 11. AI Improvements
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -280,7 +379,7 @@ Expand AI capabilities beyond current spec/premix/cheese/shipping import parsing
 
 ---
 
-## 8. Battery & Performance
+## 12. Battery & Performance
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -304,7 +403,7 @@ Reduce battery drain and improve performance, especially on mobile devices.
 
 ---
 
-## 9. Server-Side Migration
+## 13. Server-Side Migration
 
 **Status**: In progress (Replit working on it)  
 **Priority**: High
@@ -330,7 +429,7 @@ Move more logic from client to server to improve consistency, reduce battery, an
 
 ---
 
-## 10. Responsive Design & Visual Quality
+## 14. Responsive Design & Visual Quality
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -355,7 +454,7 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 ---
 
-## 11. Import System Improvements
+## 15. Import System Improvements
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -382,7 +481,7 @@ Improve the import pipeline for spec sheets, premix, cheese, and shipping guides
 
 ---
 
-## 12. Sync System Improvements
+## 16. Sync System Improvements
 
 **Status**: Ideas only  
 **Priority**: Medium
