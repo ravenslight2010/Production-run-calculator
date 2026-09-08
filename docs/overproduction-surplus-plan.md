@@ -64,20 +64,19 @@ overproduction_events {
 
 **Implementation**: Extend the existing run-values form with "actual produced" fields per station, compare against "planned needed."
 
-### 3. Disposition Decision Flow
-When overproduction is detected, guide the user through a decision:
+### 3. Disposition Flow (Store or Use Next)
+Overproduction has exactly **two** dispositions — simple, no guessing:
 
 ```
 Overproduction detected →
-├── Store in Freezer → allocate to freezer surplus lot (existing flow)
-├── Ship Early → mark as shippable, add to next shipment
-├── Donate → log donation (quantity, recipient, date)
-├── Use on Next Run → pre-allocate to next run of same brand/flavor
-├── Discard → log waste (quantity, reason, approved by)
-└── Other → free-text disposition
+├── Store in Freezer → existing freezer surplus lot flow (brand/flavor/date)
+└── Use on Next Run → pre-allocate surplus to next scheduled run of same brand/flavor
 ```
 
-Each disposition is audit-logged (who, when, why) and feeds into the surplus history.
+- **Store in Freezer**: Becomes a freezer lot (existing `FreezerSurplusPanel` flow). Warehouse can pull it for any matching run later.
+- **Use on Next Run**: Auto-allocates the excess cases to the next scheduled run of the same brand/flavor. That run's production target is reduced by the carried-in amount.
+
+Both actions are audit-logged (who, when, quantity, disposition). No donate/discard/ship-early complexity — if it's overproduced, it goes in the freezer and gets used next time that brand/flavor runs.
 
 ### 4. Surplus Dashboard
 A new view (inside Warehouse tab or QC department) showing:
@@ -117,10 +116,10 @@ Manager settings for overproduction tolerance:
 5. Extend existing `FreezerSurplusPanel` to auto-suggest disposition
 
 ### Phase 2: Disposition Flow
-6. Add disposition form (store/donate/ship/discard/use-next)
-7. Audit-log all dispositions
-8. Add disposition to overproduction event detail view
-9. Wire donation/discard to inventory adjustments
+6. Add disposition form (store in freezer / use on next run)
+7. Wire "use on next run" to freezer surplus allocation
+8. Audit-log all dispositions
+9. Add disposition to overproduction event detail view
 
 ### Phase 3: Dashboard & History
 10. Surplus dashboard card (today's surplus + recent history)
@@ -154,7 +153,7 @@ Manager settings for overproduction tolerance:
 
 ## API Routes to Add (6)
 1. `POST /api/overproduction/log` — log an overproduction event
-2. `PUT /api/overproduction/:id/dispose` — record disposition
+2. `PUT /api/overproduction/:id/dispose` — record disposition (store-in-freezer | use-on-next-run)
 3. `GET /api/overproduction?from=&to=&brand=&flavor=` — query overproduction history
 4. `GET /api/overproduction/dashboard` — aggregated surplus stats
 5. `GET /api/overproduction/alerts` — active overproduction alerts
