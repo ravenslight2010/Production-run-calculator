@@ -106,14 +106,59 @@ Manager settings for overproduction tolerance:
 
 ---
 
+## Critical: Inventory Auto-Adjustment on Overproduction
+
+### The Problem
+Currently, `POST /inventory/consume` deducts ingredients based on the **planned** `casesNeeded`, not the **actual** `casesCompleted`. When overproduction happens:
+- Extra ingredients get used (dough, sauce, cheese, apps, packaging)
+- Inventory only reflects the planned amount
+- The surplus lot exists in the freezer but the ingredient draw is understated
+- Over time, inventory drifts from reality
+
+### The Fix
+When overproduction is detected (or when a surplus lot is confirmed), the system must **also deduct the overproduced ingredients from inventory**.
+
+**Two approaches** (both should work together):
+
+**Approach A: Adjust consumption on surplus confirm**
+- When packaging confirms excess cases → compute the extra ingredient consumption for those cases
+- Call the same `planDrawDown` logic for the excess quantity
+- Deduct from inventory + record ledger entry
+- The surplus lot already exists; this just ensures inventory matches
+
+**Approach B: Use actual cases instead of planned**
+- Change `findExpectedConsumptionForRun` to use `casesCompleted` (actual) instead of `casesNeeded` (planned) when available
+- This is cleaner but requires the server to have the actual case count at run-end time
+- Need to handle the case where `casesCompleted` is not yet synced (race condition)
+
+**Recommended: Approach A** (adjust on surplus confirm) because:
+- It's additive — doesn't change existing consumption logic
+- It only fires when overproduction actually happens (not every run)
+- The surplus confirm moment already has the exact excess quantity
+- Cleaner audit trail: "consumed X for production, Y for overproduction"
+
+### Implementation
+1. When `FreezerSurplusPanel.onConfirm()` fires with excess cases:
+   - Look up the run's form values to get ingredient-per-case ratios
+   - Multiply ratios by excess cases to get extra consumption
+   - Call `applyRunConsumption` (or equivalent draw-down) for the excess
+   - Record a separate ledger entry labeled "overproduction consumption"
+2. If "Use on Next Run" is chosen instead:
+   - The excess still consumed ingredients — same deduction needed
+   - The carry-in just means those ingredients were used earlier than planned
+3. Audit log entry: "Overproduction: {excess} cases → deducted {qty} {item} from inventory"
+
+---
+
 ## Build Order
 
-### Phase 1: Detection & Logging
+### Phase 1: Detection & Inventory Sync
 1. Add `overproduction_threshold_cases` to run settings/form
 2. Add real-time alert banner when threshold exceeded
 3. Create `overproduction_events` table (DB schema + API)
-4. Log overproduction events (server-side, audit-tracked)
-5. Extend existing `FreezerSurplusPanel` to auto-suggest disposition
+4. **Auto-deduct overproduced ingredients from inventory** (the critical fix)
+5. Log overproduction events (server-side, audit-tracked)
+6. Extend existing `FreezerSurplusPanel` to auto-suggest disposition
 
 ### Phase 2: Disposition Flow
 6. Add disposition form (store in freezer / use on next run)
