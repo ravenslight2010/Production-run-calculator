@@ -5924,6 +5924,8 @@ export const putSyncTodayResponseCanonicalRevisionMin = 0;
 
 export const putSyncTodayResponseServerTimeMin = 0;
 
+export const putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin = 0;
+
 
 
 export const PutSyncTodayResponse = zod.object({
@@ -5937,7 +5939,56 @@ export const PutSyncTodayResponse = zod.object({
   "stale": zod.boolean().optional(),
   "epoch": zod.number().int().optional(),
   "canonicalRevision": zod.number().int().min(putSyncTodayResponseCanonicalRevisionMin).optional(),
-  "serverTime": zod.number().int().min(putSyncTodayResponseServerTimeMin).optional()
+  "serverTime": zod.number().int().min(putSyncTodayResponseServerTimeMin).optional(),
+  "operationalProjection": zod.union([zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string(),
+  "lifecycleGeneration": zod.string(),
+  "serverTimeMs": zod.number(),
+  "capturedAtServerMs": zod.number(),
+  "calculationRevision": zod.number().int().min(putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin),
+  "effectiveElapsedSec": zod.number(),
+  "timers": zod.object({
+  "nextBatchInSec": zod.number(),
+  "pressRemainingSec": zod.number(),
+  "freezerElapsedSec": zod.number(),
+  "freezerRemainingSec": zod.number()
+}),
+  "counters": zod.object({
+  "casesCompleted": zod.number(),
+  "casesInFreezer": zod.number(),
+  "casesOnLine": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressCasesLeft": zod.number(),
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number(),
+  "sauceBarrelsMade": zod.number(),
+  "app1BatchesMade": zod.number(),
+  "app2BatchesMade": zod.number(),
+  "app3BatchesMade": zod.number(),
+  "app4BatchesMade": zod.number()
+}),
+  "facts": zod.object({
+  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
+  "pressDone": zod.boolean(),
+  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
+  "paceDelta": zod.number()
+}),
+  "calc": zod.record(zod.string(), zod.unknown()),
+  "due": zod.object({
+  "runId": zod.string(),
+  "generation": zod.string(),
+  "atMs": zod.number(),
+  "entries": zod.array(zod.object({
+  "channel": zod.string(),
+  "dueAt": zod.number(),
+  "dueNow": zod.boolean(),
+  "nextDueAt": zod.number(),
+  "canonical": zod.boolean(),
+  "sequence": zod.number().optional()
+}))
+})
+}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()]).optional()
 })
 
 

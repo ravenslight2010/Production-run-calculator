@@ -354,6 +354,98 @@ export interface HealthStatus {
   status: string;
 }
 
+export type OperationalProjectionVersion = typeof OperationalProjectionVersion[keyof typeof OperationalProjectionVersion];
+
+
+export const OperationalProjectionVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalProjectionTimers = {
+  nextBatchInSec: number;
+  pressRemainingSec: number;
+  freezerElapsedSec: number;
+  freezerRemainingSec: number;
+};
+
+export type OperationalProjectionCounters = {
+  casesCompleted: number;
+  casesInFreezer: number;
+  casesOnLine: number;
+  casesLeftToRun: number;
+  pressCasesLeft: number;
+  traysOnLine: number;
+  batchesReady: number;
+  sauceBarrelsMade: number;
+  app1BatchesMade: number;
+  app2BatchesMade: number;
+  app3BatchesMade: number;
+  app4BatchesMade: number;
+};
+
+export type OperationalProjectionFactsRunStatus = typeof OperationalProjectionFactsRunStatus[keyof typeof OperationalProjectionFactsRunStatus];
+
+
+export const OperationalProjectionFactsRunStatus = {
+  pending: 'pending',
+  running: 'running',
+  paused: 'paused',
+  ended: 'ended',
+} as const;
+
+export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus];
+
+
+export const OperationalProjectionFactsPaceStatus = {
+  'on-pace': 'on-pace',
+  ahead: 'ahead',
+  behind: 'behind',
+} as const;
+
+export type OperationalProjectionFacts = {
+  runStatus: OperationalProjectionFactsRunStatus;
+  pressDone: boolean;
+  paceStatus: OperationalProjectionFactsPaceStatus;
+  paceDelta: number;
+};
+
+export type OperationalProjectionCalc = { [key: string]: unknown };
+
+export interface OperationalProjectionScheduleEntry {
+  channel: string;
+  dueAt: number;
+  dueNow: boolean;
+  nextDueAt: number;
+  canonical: boolean;
+  sequence?: number;
+}
+
+export interface OperationalProjectionSchedule {
+  runId: string;
+  generation: string;
+  atMs: number;
+  entries: OperationalProjectionScheduleEntry[];
+}
+
+/**
+ * Server-owned live operational read model returned beside the canonical sync snapshot.
+ */
+export interface OperationalProjection {
+  version: OperationalProjectionVersion;
+  runId: string;
+  lifecycleGeneration: string;
+  serverTimeMs: number;
+  capturedAtServerMs: number;
+  /** @minimum 0 */
+  calculationRevision: number;
+  effectiveElapsedSec: number;
+  timers: OperationalProjectionTimers;
+  counters: OperationalProjectionCounters;
+  facts: OperationalProjectionFacts;
+  calc: OperationalProjectionCalc;
+  due: OperationalProjectionSchedule;
+}
+
 export interface SyncUnchangedResponse {
   unchanged: true;
   /** @pattern ^[a-f0-9]{64}$ */
@@ -5164,6 +5256,7 @@ export type PutSyncToday200 = {
   canonicalRevision?: number;
   /** @minimum 0 */
   serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 };
 
 export type ClaimAutoTrackEventParams = {

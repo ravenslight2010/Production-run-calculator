@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OperationalProjection } from './operationalProjection';
 import type { SyncPayload } from './syncPayload';
 
 export type PutSyncToday200 = {
@@ -19,4 +20,5 @@ export type PutSyncToday200 = {
   canonicalRevision?: number;
   /** @minimum 0 */
   serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 };

@@ -4453,6 +4453,10 @@ paths:
                   epoch: { type: integer }
                   canonicalRevision: { type: integer, minimum: 0 }
                   serverTime: { type: integer, minimum: 0 }
+                  operationalProjection:
+                    oneOf:
+                      - $ref: "#/components/schemas/OperationalProjection"
+                      - { type: "null" }
 
   /sync/auto-track/claim:
     post:
@@ -4767,6 +4771,104 @@ components:
         dayState: { type: object, additionalProperties: true }
         runValues: { type: object, additionalProperties: true }
       additionalProperties: true
+
+    OperationalProjection:
+      type: object
+      description: Server-owned live operational read model returned beside the canonical sync snapshot.
+      required:
+        - version
+        - runId
+        - lifecycleGeneration
+        - serverTimeMs
+        - capturedAtServerMs
+        - calculationRevision
+        - effectiveElapsedSec
+        - timers
+        - counters
+        - facts
+        - calc
+        - due
+      properties:
+        version: { type: integer, enum: [1] }
+        runId: { type: string }
+        lifecycleGeneration: { type: string }
+        serverTimeMs: { type: number }
+        capturedAtServerMs: { type: number }
+        calculationRevision: { type: integer, minimum: 0 }
+        effectiveElapsedSec: { type: number }
+        timers:
+          type: object
+          required: [nextBatchInSec, pressRemainingSec, freezerElapsedSec, freezerRemainingSec]
+          properties:
+            nextBatchInSec: { type: number }
+            pressRemainingSec: { type: number }
+            freezerElapsedSec: { type: number }
+            freezerRemainingSec: { type: number }
+        counters:
+          type: object
+          required:
+            - casesCompleted
+            - casesInFreezer
+            - casesOnLine
+            - casesLeftToRun
+            - pressCasesLeft
+            - traysOnLine
+            - batchesReady
+            - sauceBarrelsMade
+            - app1BatchesMade
+            - app2BatchesMade
+            - app3BatchesMade
+            - app4BatchesMade
+          properties:
+            casesCompleted: { type: number }
+            casesInFreezer: { type: number }
+            casesOnLine: { type: number }
+            casesLeftToRun: { type: number }
+            pressCasesLeft: { type: number }
+            traysOnLine: { type: number }
+            batchesReady: { type: number }
+            sauceBarrelsMade: { type: number }
+            app1BatchesMade: { type: number }
+            app2BatchesMade: { type: number }
+            app3BatchesMade: { type: number }
+            app4BatchesMade: { type: number }
+        facts:
+          type: object
+          required: [runStatus, pressDone, paceStatus, paceDelta]
+          properties:
+            runStatus: { type: string, enum: [pending, running, paused, ended] }
+            pressDone: { type: boolean }
+            paceStatus:
+              oneOf:
+                - { type: string, enum: [on-pace, ahead, behind] }
+                - { type: "null" }
+            paceDelta: { type: number }
+        calc: { type: object, additionalProperties: true }
+        due:
+          $ref: "#/components/schemas/OperationalProjectionSchedule"
+
+    OperationalProjectionSchedule:
+      type: object
+      required: [runId, generation, atMs, entries]
+      properties:
+        runId: { type: string }
+        generation: { type: string }
+        atMs: { type: number }
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationalProjectionScheduleEntry"
+
+    OperationalProjectionScheduleEntry:
+      type: object
+      required: [channel, dueAt, dueNow, nextDueAt, canonical]
+      properties:
+        channel: { type: string }
+        dueAt: { type: number }
+        dueNow: { type: boolean }
+        nextDueAt: { type: number }
+        canonical: { type: boolean }
+        sequence: { type: number }
 
     SyncUnchangedResponse:
       type: object
