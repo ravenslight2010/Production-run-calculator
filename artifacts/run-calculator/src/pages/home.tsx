@@ -698,7 +698,8 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
+import { fetchSpecImportAliases, saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
+import { refreshPhotoAliasesCache } from "@/photoAliasesStore";
 
 import {
   Form,
@@ -3489,6 +3490,24 @@ export default function Home() {
 
   const [dieTypes, setDieTypes] = useState<string[]>(() => healDieTypesFromProfiles());
 
+  const reconcileServerDieTypes = useCallback(async (): Promise<void> => {
+    const serverNames = await fetchServerDieTypes();
+    const migrated = localStorage.getItem(DIE_TYPES_SERVER_MIGRATED_KEY) === "1";
+    const localNames = migrated ? scanProfileDieTypes() : healDieTypesFromProfiles();
+    const deletedMap = loadDeletedItems();
+    const { effective, toPush } = reconcileDieTypes(
+      serverNames,
+      localNames,
+      n => dropDeleted([n], deletedMap, "dieTypes").length === 0,
+    );
+    setDieTypes(effective);
+    if (!deepEqual(loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES), effective)) {
+      saveList(DIE_TYPES_KEY, effective);
+    }
+    const ok = toPush.length > 0 ? await pushDieTypesToServer(toPush) : true;
+    if (ok && !migrated) localStorage.setItem(DIE_TYPES_SERVER_MIGRATED_KEY, "1");
+  }, []);
+
   // Die types are a factory-wide SERVER pool (NOT in the day-state sync blob),
   // so they survive a factory data reset, a cleared browser, and a fresh device.
   // On load: fetch the server list, reconcile it with the local cache/profile
@@ -3501,20 +3520,8 @@ export default function Home() {
     let cancelled = false;
     (async () => {
       try {
-        const serverNames = await fetchServerDieTypes();
+        await reconcileServerDieTypes();
         if (cancelled) return;
-        const migrated = localStorage.getItem(DIE_TYPES_SERVER_MIGRATED_KEY) === "1";
-        const localNames = migrated ? scanProfileDieTypes() : healDieTypesFromProfiles();
-        const deletedMap = loadDeletedItems();
-        const { effective, toPush } = reconcileDieTypes(
-          serverNames,
-          localNames,
-          n => dropDeleted([n], deletedMap, "dieTypes").length === 0,
-        );
-        setDieTypes(effective);
-        saveList(DIE_TYPES_KEY, effective);
-        const ok = toPush.length > 0 ? await pushDieTypesToServer(toPush) : true;
-        if (ok && !migrated) localStorage.setItem(DIE_TYPES_SERVER_MIGRATED_KEY, "1");
       } catch {
         // Offline / server unreachable — the local cached list keeps working.
       }
@@ -3522,7 +3529,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reconcileServerDieTypes]);
 
   function addDieType(name: string) {
     const trimmed = name.trim();
@@ -8815,15 +8822,15 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Brand+flavor profile pool reconcile (boot + 60s poll) ──
+  // ── Brand+flavor profile pool reconcile (boot) ──
   // Profiles live in their own factory-wide server pool with per-profile
   // last-write-wins stamps (they are no longer part of the sync payload —
   // the old unstamped map let a stale device clobber fresh edits). On boot
   // this runs the marker-guarded one-time migration (existing local profiles
   // are pushed up with a floor stamp) and then reconciles: adopt server-newer
   // copies into the localStorage cache, push local-newer ones up, and drop
-  // local copies of profiles deleted remotely. The poll keeps long-lived tabs
-  // converged; queued pushes retry on each pass, so offline edits are safe.
+  // local copies of profiles deleted remotely. SSE invalidations and foreground
+  // recovery keep long-lived tabs converged; queued pushes retry on each pass.
   // Best-effort — a fetch failure changes nothing locally.
   useEffect(() => {
     let cancelled = false;
@@ -8838,15 +8845,9 @@ export default function Home() {
         applyProfileReconcileRef.current(result);
       } catch {}
     };
-    const unregister = visibleTabScheduler.register({
-      id: "profile-reconcile",
-      cadenceMs: 60_000,
-      runOnStart: true,
-      order: 30,
-      run: pass,
-    });
-    return () => { cancelled = true; unregister(); };
-  }, [visibleTabScheduler]);
+    void pass();
+    return () => { cancelled = true; };
+  }, []);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
@@ -8858,6 +8859,124 @@ export default function Home() {
 
   // SSE connection — receives updates from other clients
   useEffect(() => {
+    let cancelled = false;
+    let configurationGeneration = 0;
+    const pendingConfigurationFamilies = new Set<
+      "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away"
+    >();
+    let configurationFlight: Promise<void> | null = null;
+    // Configuration frames are only invalidation nudges. Fetch each bounded
+    // family from its existing canonical source; never make an SSE payload the
+    // authority for a profile, factory value, name link, or tombstone.
+    const reconcileConfigurationPass = async (
+      families: ReadonlySet<"master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away">,
+    ) => {
+      const generation = ++configurationGeneration;
+      const current = () => !cancelled && generation === configurationGeneration;
+      if (families.has("master-data")) {
+        await invalidateMasterDataBootstrap(cycleCountQc).catch(() => {});
+        if (!current()) return;
+      }
+      if (families.has("profiles")) {
+        try {
+          const result = await reconcileProfilesFromServerDetailed();
+          if (!current()) return;
+          if (result.changed) {
+            setDieTypes(healDieTypesFromProfiles());
+            applyProfileReconcileRef.current(result);
+          }
+        } catch {}
+        if (!current()) return;
+      }
+      if (families.has("factory-data")) {
+        try {
+          const data = await fetchFactoryData();
+          if (!current()) return;
+          hydrateFromServer(data);
+          refreshFactoryDataConsumers();
+          await flushFactoryQueue();
+        } catch {}
+        if (!current()) return;
+      }
+      if (families.has("die-types")) {
+        await reconcileServerDieTypes().catch(() => {});
+        if (!current()) return;
+      }
+      if (families.has("supervisor-pin")) {
+        await cycleCountQc.invalidateQueries({ queryKey: ["supervisorPin"] }).catch(() => {});
+        if (!current()) return;
+      }
+      if (families.has("name-links")) {
+        // Both stores reload from canonical endpoints. Photo intake is mounted
+        // against a shared cache so open stations adopt learned links at once;
+        // import aliases are read canonically by each import flow.
+        await Promise.all([
+          fetchSpecImportAliases().catch(() => []),
+          refreshPhotoAliasesCache().catch(() => []),
+        ]);
+        if (!current()) return;
+      }
+      if (families.has("merged-away")) {
+        try {
+          const remoteNames = await fetchMergedAwayNames();
+          if (!current()) return;
+          // This endpoint is the canonical durable tombstone list. Replace the
+          // local cache instead of unioning it: union would make a remote
+          // un-merge impossible to observe because the stale local name would
+          // be added straight back.
+          const canonicalTomb = [...new Set(remoteNames)];
+          if (!deepEqual(loadMergedAway(), canonicalTomb)) saveMergedAway(canonicalTomb);
+          setMergedAwayTomb(canonicalTomb);
+          const tombSet = new Set(canonicalTomb.map(n => n.trim().toLowerCase()));
+          const prune = (key: string, defaults: string[], setter: (v: string[]) => void) => {
+            const stored = loadList(key, defaults);
+            const pruned = dropMergedAway(stored, tombSet);
+            if (pruned.length !== stored.length) {
+              saveList(key, pruned);
+              setter(pruned);
+            }
+          };
+          prune(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES, setIngredientTypes);
+          prune(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, setPepTypes);
+          prune(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, setDieTypes);
+          prune(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, setCheeseIngredients);
+          prune(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, setDoughIngredients);
+          prune(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, setFrontlineIngredients);
+          prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
+        } catch {}
+      }
+    };
+    // Coalesce bursts without dropping an earlier family while another canonical
+    // read is in flight. Each pass is fenced by its generation and cleanup;
+    // newly-arrived families run in the next pass rather than applying stale
+    // results over them.
+    const reconcileConfiguration = (
+      families: ReadonlySet<"master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away">,
+    ): Promise<void> => {
+      for (const family of families) pendingConfigurationFamilies.add(family);
+      if (configurationFlight) return configurationFlight;
+      configurationFlight = (async () => {
+        while (!cancelled && pendingConfigurationFamilies.size > 0) {
+          const next = new Set(pendingConfigurationFamilies);
+          pendingConfigurationFamilies.clear();
+          await reconcileConfigurationPass(next);
+        }
+      })().finally(() => {
+        configurationFlight = null;
+        // A frame can arrive in the tiny gap after the loop observes an empty
+        // set and before this finally runs. Start its queued canonical pass.
+        if (!cancelled && pendingConfigurationFamilies.size > 0) {
+          void reconcileConfiguration(new Set());
+        }
+      });
+      return configurationFlight;
+    };
+    const allConfigurationFamilies = () => new Set<
+      "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away"
+    >([
+      "master-data", "profiles", "factory-data", "die-types", "supervisor-pin", "name-links", "merged-away",
+    ]);
+    const reconcileConfigurationBaseline = () => void reconcileConfiguration(allConfigurationFamilies());
     syncBaselineGateRef.current.beginConnection();
     const snapshot = syncSnapshotIdRef.current;
     const esUrl = snapshot
@@ -8884,6 +9003,8 @@ export default function Home() {
           serverCalc?: { runId: string; calc: Calc } | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
           masterDataChanged?: boolean;
+          configurationInvalidated?: boolean;
+          family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
         if (msg.serverCalc) {
@@ -8896,11 +9017,18 @@ export default function Home() {
           serverCalcReceiptRef.current = null;
           setServerCalcReceipt(null);
         }
-        if (
-          msg.masterDataChanged &&
+        if (msg.initial) {
+          // An initial frame is also the reconnect baseline: refresh every
+          // independent configuration family in case its nudge was missed while
+          // this EventSource was disconnected.
+          reconcileConfigurationBaseline();
+        } else if (
+          (msg.configurationInvalidated || msg.masterDataChanged) &&
           shouldRefreshMasterData(msg.senderId, clientId.current)
         ) {
-          void invalidateMasterDataBootstrap(cycleCountQc);
+          void reconcileConfiguration(new Set<"master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away">([
+            msg.family ?? "master-data",
+          ]));
         }
         if (msg.autoTrackSchedule) {
           autoTrackScheduleRef.current = msg.autoTrackSchedule;
@@ -8981,6 +9109,8 @@ export default function Home() {
       revalidate();
     };
     return () => {
+      cancelled = true;
+      configurationGeneration += 1;
       setSyncConnected(false);
       if (syncRetryTimerRef.current) {
         clearTimeout(syncRetryTimerRef.current);
@@ -9252,7 +9382,7 @@ export default function Home() {
   // ── Durable merged-away tombstone (once on mount) ──
   // The per-day sync blob can't carry a merge across a day boundary: a new day's
   // row starts empty and whichever device seeds it wins. So on load we fetch the
-  // factory-wide durable tombstone, union it into the local one, and strip those
+  // factory-wide durable tombstone, replace the local cache, and strip those
   // names from every master list. This makes a merge stick across days and
   // across a device that was offline during the merge. Best-effort: a failure
   // just leaves the existing local/sync behavior unchanged.
@@ -9265,11 +9395,13 @@ export default function Home() {
       } catch {
         return; // offline / server error — local + sync tombstones still apply
       }
-      if (cancelled || remoteNames.length === 0) return;
-      const mergedTomb = [...new Set([...loadMergedAway(), ...remoteNames])];
-      saveMergedAway(mergedTomb);
-      setMergedAwayTomb(mergedTomb);
-      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+      if (cancelled) return;
+      // The canonical empty list is meaningful: it clears names that a manager
+      // deliberately restored on another station.
+      const canonicalTomb = [...new Set(remoteNames)];
+      if (!deepEqual(loadMergedAway(), canonicalTomb)) saveMergedAway(canonicalTomb);
+      setMergedAwayTomb(canonicalTomb);
+      const tombSet = new Set(canonicalTomb.map(n => n.trim().toLowerCase()));
       const prune = (
         key: string,
         defaults: string[],

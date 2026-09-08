@@ -206,14 +206,63 @@ function broadcast(data: unknown, senderId: string, scope: Scope, date: string):
 // sync stream, but send a bounded nudge instead of the recipe payload. The
 // sender is excluded so its optimistic mutation result is not immediately
 // invalidated by its own echo.
-export function broadcastMasterDataChanged(senderId: string, scope: Scope = currentScope()): void {
-  const msg = `data: ${JSON.stringify({
-    type: "master-data",
+/**
+ * The only configuration invalidation families sent over the sync stream.
+ * Keep this enum deliberately small: this is a reload nudge, never a transport
+ * for the changed row, request body, or a secret such as the supervisor PIN.
+ */
+export const CONFIGURATION_INVALIDATION_FAMILIES = [
+  "master-data",
+  "profiles",
+  "factory-data",
+  "die-types",
+  "supervisor-pin",
+  "name-links",
+  "merged-away",
+] as const;
+export type ConfigurationInvalidationFamily =
+  (typeof CONFIGURATION_INVALIDATION_FAMILIES)[number];
+
+export function configurationInvalidationPayload(
+  senderId: string,
+  family: ConfigurationInvalidationFamily | string = "master-data",
+) {
+  // This is a runtime guard as route input is not constrained by TypeScript.
+  // Unknown families degrade to the broad compatibility nudge rather than
+  // creating an unbounded event vocabulary.
+  const safeFamily = CONFIGURATION_INVALIDATION_FAMILIES.includes(
+    family as ConfigurationInvalidationFamily,
+  )
+    ? family
+    : "master-data";
+  return {
+    // `type` and `masterDataChanged` are retained for deployed clients.
+    type: "master-data" as const,
     masterDataChanged: true,
+    configurationInvalidated: true,
+    family: safeFamily,
     senderId,
-  })}\n\n`;
+  };
+}
+
+/** Configuration is facility-wide, so unlike day-sync broadcasts watchDate is
+ * intentionally not part of this predicate. */
+export function shouldReceiveConfigurationInvalidation(
+  client: Pick<SseClient, "clientId" | "scope" | "watchDate">,
+  senderId: string,
+  scope: Scope,
+): boolean {
+  return client.scope === scope && client.clientId !== senderId;
+}
+
+export function broadcastMasterDataChanged(
+  senderId: string,
+  scope: Scope = currentScope(),
+  family: ConfigurationInvalidationFamily = "master-data",
+): void {
+  const msg = `data: ${JSON.stringify(configurationInvalidationPayload(senderId, family))}\n\n`;
   for (const client of clients) {
-    if (client.scope === scope && client.clientId !== senderId) {
+    if (shouldReceiveConfigurationInvalidation(client, senderId, scope)) {
       try { client.res.write(msg); } catch {}
     }
   }

@@ -87,7 +87,6 @@ import {
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
-  fetchPhotoAliases,
   savePhotoAliases,
   applyPhotoAliases,
   type PhotoAlias,
@@ -99,6 +98,7 @@ import {
   type PhotoGuess,
   type InventoryCategory,
 } from "../inventoryShared";
+import { setPhotoAliasesCache, usePhotoAliases } from "../photoAliasesStore";
 import { useMe } from "../useRole";
 import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
@@ -2317,23 +2317,8 @@ function PhotoIntakeCard({
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [noResults, setNoResults] = useState(false);
   const [committingId, setCommittingId] = useState<string | null>(null);
-  // Server-persisted learned photo aliases (guessName -> itemKey), factory-wide.
-  // Fetched once on mount; best-effort, so any failure leaves the list empty.
-  const [photoAliases, setPhotoAliases] = useState<PhotoAlias[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchPhotoAliases()
-      .then((a) => {
-        if (!cancelled) setPhotoAliases(a);
-      })
-      .catch(() => {
-        /* best-effort: proceed without learned aliases */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Shared so sync invalidations update an already-open intake card.
+  const photoAliases = usePhotoAliases();
 
   // Count down the rate-limit (429) cooldown so the retry button re-enables
   // exactly when the server will accept another request.
@@ -2520,12 +2505,10 @@ function PhotoIntakeCard({
         row.guessName.trim().toLowerCase() !== name.toLowerCase()
       ) {
         const alias: PhotoAlias = { guessName: row.guessName.trim(), itemKey: row.matchedKey };
-        setPhotoAliases((prev) => {
-          const others = prev.filter(
-            (a) => a.guessName.trim().toLowerCase() !== alias.guessName.toLowerCase(),
-          );
-          return [...others, alias];
-        });
+        const others = photoAliases.filter(
+          (a) => a.guessName.trim().toLowerCase() !== alias.guessName.toLowerCase(),
+        );
+        setPhotoAliasesCache([...others, alias]);
         void savePhotoAliases([alias]).catch(() => {
           /* best-effort */
         });

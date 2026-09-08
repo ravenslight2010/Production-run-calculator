@@ -3,6 +3,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db, factoryKvTable } from "@workspace/db";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { broadcastMasterDataChanged } from "./sync";
 
 // Factory-wide key-value store. Only managers with the manage-factory-settings
 // capability may read or write (GET and PUT are both gated). The value shape is
@@ -71,6 +72,7 @@ router.put(
         .select()
         .from(factoryKvTable)
         .where(and(eq(factoryKvTable.scope, scope), eq(factoryKvTable.key, key.trim())));
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "factory-data");
       res.json({
         updatedAt: current?.updatedAt.toISOString() ?? updatedAt.toISOString(),
         value: current?.value ?? value,

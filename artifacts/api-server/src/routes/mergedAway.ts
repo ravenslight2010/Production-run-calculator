@@ -4,6 +4,7 @@ import { db, mergedAwayTable } from "@workspace/db";
 import { SaveMergedAwayBody, DeleteMergedAwayBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -61,22 +62,24 @@ router.post("/merged-away", requireCapability("manage-profiles"), async (req: Re
   }
 
   try {
+    const scope = currentScope();
     if (byName.size > 0) {
       const existing = await db
         .select()
         .from(mergedAwayTable)
-        .where(eq(mergedAwayTable.scope, currentScope()));
+        .where(eq(mergedAwayTable.scope, scope));
       const have = new Set(existing.map((r) => r.name));
       const inserts = [...byName].filter((n) => !have.has(n));
       if (inserts.length > 0) {
         await db
           .insert(mergedAwayTable)
-          .values(inserts.map((name) => ({ name, scope: currentScope() })))
+          .values(inserts.map((name) => ({ name, scope })))
           .onConflictDoNothing();
       }
     }
 
     const names = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "merged-away");
     res.json({ names });
   } catch (err) {
     req.log.error({ err }, "failed to save merged-away names");
@@ -98,14 +101,16 @@ router.delete("/merged-away", requireCapability("manage-profiles"), async (req: 
   }
 
   try {
+    const scope = currentScope();
     for (const name of toRemove) {
       await db
         .delete(mergedAwayTable)
         .where(
-          and(eq(mergedAwayTable.name, name), eq(mergedAwayTable.scope, currentScope())),
+          and(eq(mergedAwayTable.name, name), eq(mergedAwayTable.scope, scope)),
         );
     }
     const names = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "merged-away");
     res.json({ names });
   } catch (err) {
     req.log.error({ err }, "failed to delete merged-away names");

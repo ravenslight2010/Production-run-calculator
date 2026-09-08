@@ -109,7 +109,7 @@ router.post(
         }
       });
       invalidateMasterDataBootstrapCache();
-      broadcastMasterDataChanged(req.header("x-client-id") ?? "");
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -146,7 +146,7 @@ router.delete(
           );
       }
       invalidateMasterDataBootstrapCache();
-      broadcastMasterDataChanged(req.header("x-client-id") ?? "");
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");
       const items = await listAll();
       res.json({ items });
     } catch (err) {

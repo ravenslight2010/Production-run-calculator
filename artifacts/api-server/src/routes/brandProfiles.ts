@@ -10,6 +10,7 @@ import { getUserCapabilities } from "../lib/roles";
 // "BBQ Sauce (Hoosier Daddy Sweet & Sassy)" stored only "BBQ Sauce").
 // Compared case-insensitively against the stored frontlineRecipeName.
 import { requireCapability } from "../middlewares/requireCapability";
+import { broadcastMasterDataChanged } from "./sync";
 export const GENERIC_SAUCE_NAMES = [
   "BBQ Sauce",
   "Ranch",
@@ -387,6 +388,7 @@ router.patch(
         flavor: p.flavor ?? "",
         values: (p.values ?? {}) as Record<string, unknown>,
       }));
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "profiles");
       res.json({ items: computeApplicatorAudit(remainingProfiles) });
     } catch (err) {
       req.log.error({ err }, "failed to clear applicator slot");
@@ -533,6 +535,7 @@ router.post("/brand-profiles", requireCapability("manage-profiles"), async (req:
         });
     }
     const items = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "profiles");
     res.json({ items });
   } catch (err) {
     req.log.error({ err }, "failed to save brand profiles");
@@ -553,17 +556,19 @@ router.delete("/brand-profiles", requireCapability("manage-profiles"), async (re
     .filter((k) => k.length > 0);
 
   try {
+    const scope = currentScope();
     if (keys.length > 0) {
       await db
         .delete(brandProfilesTable)
         .where(
           and(
             inArray(brandProfilesTable.key, keys),
-            eq(brandProfilesTable.scope, currentScope()),
+            eq(brandProfilesTable.scope, scope),
           ),
         );
     }
     const items = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "profiles");
     res.json({ items });
   } catch (err) {
     req.log.error({ err }, "failed to delete brand profiles");

@@ -22,7 +22,6 @@ import { inventoryClientId } from "./inventoryShared";
 import { useIdle } from "./hooks/useIdle";
 
 export const MASTER_DATA_QUERY_KEY = ["masterDataBootstrap"] as const;
-export const MASTER_DATA_ACTIVE_INTERVAL_MS = 60_000;
 export const MASTER_DATA_STALE_TIME_MS = 30_000;
 
 export type MasterDataBootstrap = {
@@ -146,10 +145,11 @@ function usePageVisibility(): boolean {
 }
 
 /**
- * Owns the one active master-data observer. The domain hooks below only select
+ * Owns the canonical master-data observer. The domain hooks below only select
  * from this query; they deliberately do not install their own polling timers.
- * Keeping this observer beside the authenticated calculator also prevents an
- * unauthenticated landing page from probing the protected endpoint.
+ * SSE invalidations handle peer writes while visibility revalidates a resumed
+ * page. Keeping this observer beside the authenticated calculator also prevents
+ * an unauthenticated landing page from probing the protected endpoint.
  */
 export function MasterDataPolling({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -170,7 +170,7 @@ export function MasterDataPolling({ children }: { children: ReactNode }) {
     queryFn: fetchMasterDataBootstrap,
     enabled: pollingReady,
     staleTime: MASTER_DATA_STALE_TIME_MS,
-    refetchInterval: active ? MASTER_DATA_ACTIVE_INTERVAL_MS : false,
+    refetchInterval: false,
     // Foreground return is handled below so it shares the same deduplicated
     // query as activity wake-up instead of adding a second focus refetch.
     refetchOnWindowFocus: false,
