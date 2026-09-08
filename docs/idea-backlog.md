@@ -456,27 +456,47 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 ## 15. Import System Improvements
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Planning  
+**Full plan**: [docs/import-system-plan.md](import-system-plan.md)  
+**Priority**: High — QC is the primary source for imports
 
 ### Summary
-Improve the import pipeline for spec sheets, premix, cheese, and shipping guides.
+7 importers exist (spec, premix, cheese, shipping, sauce, dough, schedule) with AI-assisted matching, review stages, learned aliases, history, snapshots. 10 improvements planned.
 
-### Ideas
-- **Batch import** — import multiple files at once
-- **Import preview** — show diff before applying
-- **Rollback** — undo last import
-- **Import history** — browse past imports, re-apply
-- **Template download** — download blank template for manual entry
-- **Validation rules** — pre-check data quality before import
-- **Import scheduling** — queue imports for specific times
-- **Cross-import linking** — auto-link ingredients across import types
+### What Exists
+- AI-assisted brand/flavor matching + fuzzy fallback
+- Second-pass AI review (ReviewBadge)
+- Learned aliases from past imports
+- Import history: browse, filter, reopen snapshots, retry
+- Audit recovery for pending records
+- Capability gates (canImportSpec, etc.)
+
+### What's Planned
+| # | Improvement | Status |
+|---|------------|--------|
+| 1 | QC approval gate (pending → verified) | Planned (QC dept) |
+| 2 | Rollback / undo last import | Planned |
+| 3 | Structured preview diff (what will change) | Planned |
+| 4 | Batch import (multi-file) | Planned |
+| 5 | Template download (per importer) | Planned |
+| 6 | Validation rules pre-check | Planned |
+| 7 | Import scheduling (deferred) | Later |
+| 8 | Cross-importer linking (import health view) | Planned |
+| 9 | Import → inventory impact projection | Planned |
+| 10 | Data versioning (re-import diff) | Planned |
+
+### Build Order
+1. QC approval gate + rollback + preview diff (Phase 1)
+2. Templates + validation + cross-import health (Phase 2)
+3. Batch import + versioning + inventory impact (Phase 3)
+4. Scheduling (deferred)
 
 ### Code References
 - `artifacts/run-calculator/src/components/SpecImportDialog.tsx`
 - `artifacts/run-calculator/src/components/PremixImportDialog.tsx`
 - `artifacts/run-calculator/src/components/CheeseImportDialog.tsx`
 - `artifacts/run-calculator/src/components/ShippingImportDialog.tsx`
+- `artifacts/run-calculator/src/components/ImportHistoryPanel.tsx`
 - `lib/spec-import/src/index.ts` — spec import parser
 
 ---
