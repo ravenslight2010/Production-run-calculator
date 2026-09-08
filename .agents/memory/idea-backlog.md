@@ -64,7 +64,7 @@ Mix plan is purely advisory today — when prep mixes are actually made, nothing
 
 ---
 
-## 1. QC Department (Comprehensive)
+## 2. QC Department (Comprehensive)
 
 **Status**: Planning  
 **Full plan**: [docs/qc-department-plan.md](qc-department-plan.md)  
@@ -113,7 +113,7 @@ CRUD for each check type, dashboard/aggregation, audit/compliance, import approv
 
 ---
 
-## 2. Overproduction & Surplus Management
+## 3. Overproduction & Surplus Management
 
 **Status**: Planning  
 **Full plan**: [docs/overproduction-surplus-plan.md](overproduction-surplus-plan.md)  
@@ -146,7 +146,7 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 - `lib/live-calc/src/index.ts` — calc engine (add detection)
 
 
-## 2. Production Line Map Dashboard
+## 4. Production Line Map Dashboard
 
 **Status**: Built, pending merge  
 **Branch**: `feature/line-map-dashboard`
@@ -174,7 +174,7 @@ Dough (stone) → Sauce (red) → Press/Oven (gray) → Frontline (amber) → Fr
 
 ---
 
-## 3. Line Station Expansion
+## 5. Line Station Expansion
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -198,7 +198,7 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ---
 
-## 4. AI Improvements
+## 6. AI Improvements
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -223,7 +223,7 @@ Expand AI capabilities beyond current spec/premix/cheese/shipping import parsing
 
 ---
 
-## 5. Battery & Performance
+## 7. Battery & Performance
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -247,7 +247,7 @@ Reduce battery drain and improve performance, especially on mobile devices.
 
 ---
 
-## 6. Server-Side Migration
+## 8. Server-Side Migration
 
 **Status**: In progress (Replit working on it)  
 **Priority**: High
@@ -273,7 +273,7 @@ Move more logic from client to server to improve consistency, reduce battery, an
 
 ---
 
-## 7. Responsive Design & Visual Quality
+## 9. Responsive Design & Visual Quality
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -298,7 +298,7 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 ---
 
-## 8. Import System Improvements
+## 10. Import System Improvements
 
 **Status**: Ideas only  
 **Priority**: Medium
@@ -325,7 +325,7 @@ Improve the import pipeline for spec sheets, premix, cheese, and shipping guides
 
 ---
 
-## 9. Sync System Improvements
+## 11. Sync System Improvements
 
 **Status**: Ideas only  
 **Priority**: Medium
