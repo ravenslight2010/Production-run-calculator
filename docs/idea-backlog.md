@@ -53,6 +53,38 @@ CRUD for each check type, dashboard/aggregation, audit/compliance, import approv
 
 ---
 
+## 2. Overproduction & Surplus Management
+
+**Status**: Planning  
+**Full plan**: [docs/overproduction-surplus-plan.md](overproduction-surplus-plan.md)  
+**Priority**: Medium
+
+### Summary
+Surplus system currently only handles freezer overproduction AFTER a run ends. Expand to real-time detection during runs, ingredient-level overages, disposition decisions (store/donate/ship/discard/use-next), surplus history, trend analysis, and configurable thresholds.
+
+### What Exists Already
+- Freezer surplus confirm (post-run excess → freezer lot)
+- Freezer surplus pull (allocate lots to upcoming runs)
+- Use First (expiry prioritization)
+- Reorder (stock alerts)
+
+### What's Missing
+- Real-time overproduction detection
+- Ingredient-level overages (dough, sauce, cheese)
+- Disposition decision flow
+- Surplus dashboard + history
+- Trend analysis + recurring-overproduction alerts
+
+### New Database Tables
+- `overproduction_events` — immutable log of all overproduction incidents + dispositions
+
+### Code References
+- `lib/freezer-pull/src/surplus.ts` — surplus math
+- `artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx` — surplus UI
+- `lib/db/src/schema/freezerSurplus.ts` — freezer surplus DB
+- `lib/live-calc/src/index.ts` — calc engine (add detection)
+
+
 ## 2. Production Line Map Dashboard
 
 **Status**: Built, pending merge  
