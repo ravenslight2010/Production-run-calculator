@@ -523,6 +523,11 @@ async function signInToManagerSandbox(page: Page): Promise<void> {
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  const manager = await page.evaluate(async () => {
+    const response = await fetch("/api/me", { cache: "no-store" });
+    return response.ok ? (await response.json()) as { role?: string } : null;
+  });
+  expect(manager?.role, "browser session role").toBe("manager");
 }
 
 async function promoteToManager(username: string): Promise<void> {
@@ -532,12 +537,12 @@ async function promoteToManager(username: string): Promise<void> {
     const user = await db.query("SELECT id FROM users WHERE username = $1", [username]);
     expect(user.rows).toHaveLength(1);
     await db.query(
-      `INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager')
-       ON CONFLICT (user_id) DO UPDATE SET role = 'manager'`,
+      `INSERT INTO user_roles (user_id, role, updated_at) VALUES ($1, 'manager', NOW())
+       ON CONFLICT (user_id) DO UPDATE SET role = 'manager', updated_at = NOW()`,
       [user.rows[0].id],
     );
     await db.query(
-      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+      "UPDATE roles SET capabilities = $1::jsonb, updated_at = NOW() WHERE name = 'manager'",
       [JSON.stringify([
         "manage-staff",
         "manage-inventory",
@@ -1047,6 +1052,101 @@ test.describe("phone layout smoke", () => {
     });
     await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
   });
+
+  for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
+    test(`standalone setup editor actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToManagerSandbox(page);
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      const manageDialog = page.getByRole("dialog", {
+        name: "Manage Lists & Settings",
+      });
+      await expect(manageDialog).toBeVisible();
+      await manageDialog.getByRole("button", { name: "Tools", exact: true }).click();
+      await page.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+
+      const openEditor = manageDialog.getByRole("button", {
+        name: "Open Setup Profiles Editor",
+        exact: true,
+      });
+      await expect(openEditor).toBeVisible();
+      await openEditor.click();
+      await expect(manageDialog).toBeHidden();
+
+      const setupDialog = page.getByRole("dialog", { name: "Setup Profiles" });
+      await expect(setupDialog).toBeVisible();
+      await assertPhoneLayout(page, "standalone setup profiles editor", {
+        skipModalOverlayCoverage: true,
+      });
+      await assertOverlayActionHitTargets(
+        setupDialog,
+        `standalone setup profiles editor at ${viewport.width}x${viewport.height}`,
+      );
+
+      // Use a browser-only identity so the real save button is enabled, while
+      // intercepting the profile write so this journey cannot change saved
+      // production setup.
+      await page.route("**/api/brand-profiles", async route => {
+        if (route.request().method() === "POST") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ items: [] }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+      const disposableBrand = `Phone Layout ${viewport.width}`;
+      const disposableFlavor = "Disposable";
+      await setupDialog
+        .getByRole("button", { name: /Pick or add a brand/ })
+        .click();
+      const brandSearch = page.getByPlaceholder(/Search or add/);
+      await brandSearch.fill(disposableBrand);
+      await page
+        .getByRole("button", { name: `Add "${disposableBrand}"`, exact: true })
+        .click();
+      await setupDialog
+        .getByRole("button", { name: /Pick or add a flavor/ })
+        .click();
+      const flavorSearch = page.getByPlaceholder(/Search or add/);
+      await flavorSearch.fill(disposableFlavor);
+      await page
+        .getByRole("button", { name: `Add "${disposableFlavor}"`, exact: true })
+        .click();
+
+      const saveSetup = setupDialog.getByRole("button", {
+        name: "Save Setup",
+        exact: true,
+      });
+      await expect(saveSetup).toBeEnabled();
+      await assertReachableDialogAction(
+        saveSetup,
+        `standalone setup Save Setup at ${viewport.width}x${viewport.height}`,
+      );
+      await saveSetup.click();
+
+      const closeSetup = setupDialog.getByRole("button", {
+        name: "Close",
+        exact: true,
+      });
+      await assertReachableDialogAction(
+        closeSetup,
+        `standalone setup Close at ${viewport.width}x${viewport.height}`,
+      );
+      await closeSetup.click();
+      await expect(setupDialog).toBeHidden();
+    });
+  }
 
   for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
     test(`operational dialog actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
