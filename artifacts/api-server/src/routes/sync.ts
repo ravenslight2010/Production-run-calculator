@@ -50,7 +50,7 @@ import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
-import { requireCapability } from "../middlewares/requireCapability";
+import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
 import {
@@ -80,6 +80,7 @@ import {
 } from "@workspace/live-calc";
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
 import { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
+import { buildSyncHealthReport } from "../lib/syncHealth";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
@@ -1729,6 +1730,55 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
     })
   );
 });
+
+router.get(
+  "/sync/health",
+  requireLiveScope,
+  requireCapability("manage-staff"),
+  async (req: Request, res: Response): Promise<void> => {
+    const date = typeof req.query.date === "string"
+      ? req.query.date
+      : clientToday(req);
+    if (!isValidDate(date)) {
+      res.status(400).json({ error: "Invalid date format" });
+      return;
+    }
+    const startedAt = Date.now();
+    const correlationId = String(
+      (req as Request & { correlationId?: string }).correlationId ?? req.id ?? "sync-health",
+    );
+    try {
+      const report = await buildSyncHealthReport(db, currentScope(), date);
+      logger.info({
+        event: "sync_health_check",
+        correlationId,
+        scope: currentScope(),
+        date,
+        outcome: report.status,
+        checkStatuses: Object.fromEntries(report.checks.map((check) => [check.name, check.status])),
+        durationMs: Date.now() - startedAt,
+      }, "sync health check completed");
+      res.setHeader("X-Correlation-ID", correlationId);
+      res.json({ ...report, correlationId });
+    } catch (error) {
+      logger.warn({
+        event: "sync_health_check",
+        correlationId,
+        scope: currentScope(),
+        date,
+        outcome: "unavailable",
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.name : "unknown",
+      }, "sync health check unavailable");
+      res.status(503).json({
+        error: "Sync health check unavailable",
+        correlationId,
+        status: "warning",
+        nextAction: "Retry the check; no data was changed.",
+      });
+    }
+  },
+);
 
 router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;

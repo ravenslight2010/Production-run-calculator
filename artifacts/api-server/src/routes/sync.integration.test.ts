@@ -531,6 +531,134 @@ describe("GET /sync/operational-intents/cursor", () => {
   });
 });
 
+describe("GET /sync/health — read-only scoped sentinel", () => {
+  const DATE = "2030-03-10";
+
+  async function getHealth(headers: Record<string, string> = managerAuthHeaders()) {
+    return fetch(`${baseUrl}/api/sync/health?date=${DATE}`, { headers });
+  }
+
+  async function seedHealthyDocument() {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          currentIndex: 0,
+          runs: [{ id: "health-run", startedAt: 100, metaUpdatedAt: 100 }],
+        },
+        runValues: { "health-run": { casesNeeded: 10, freezerTime: 5 } },
+      },
+      canonicalRevision: 7,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  }
+
+  it("reports a healthy bounded contract without exposing canonical payloads", async () => {
+    await seedHealthyDocument();
+    const response = await getHealth();
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body).toMatchObject({
+      contractVersion: 1,
+      scope: "live",
+      date: DATE,
+      status: "healthy",
+      evidence: {
+        dailyRowPresent: true,
+        canonicalRevision: 7,
+        ledgerRowsScanned: 0,
+        historyRowsScanned: 0,
+      },
+    });
+    expect(body.checks.map((check: any) => check.name)).toEqual([
+      "canonical-document",
+      "snapshot-revision",
+      "operational-projection",
+      "command-history",
+    ]);
+    expect(body).not.toHaveProperty("data");
+    expect(body).not.toHaveProperty("payload");
+    expect(JSON.stringify(body)).not.toContain("health-run");
+  });
+
+  it("reports a representative canonical mismatch as failing and never repairs it", async () => {
+    await seedHealthyDocument();
+    const before = (await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"),
+      eq(dailySyncTable.date, DATE),
+    )))[0];
+    await db.update(dailySyncTable).set({
+      data: { dayState: { date: DATE, runs: [{ id: "health-run" }] } },
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+
+    const response = await getHealth();
+    const body = await response.json() as any;
+    expect(body.status).toBe("failing");
+    expect(body.checks.find((check: any) => check.name === "operational-projection")).toMatchObject({
+      status: "failing",
+    });
+    expect(body.nextAction).toContain("did not repair");
+
+    const after = (await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"),
+      eq(dailySyncTable.date, DATE),
+    )))[0];
+    expect(after.data).toEqual({ dayState: { date: DATE, runs: [{ id: "health-run" }] } });
+    expect(after.canonicalRevision).toBe(before.canonicalRevision);
+  });
+
+  it("marks accepted receipts without snapshots as failing", async () => {
+    await seedHealthyDocument();
+    await db.insert(operationalIntentLedgerTable).values({
+      scope: "live",
+      date: DATE,
+      intentId: "health-invalid-receipt",
+      outcome: "accepted",
+      snapshot: null,
+    });
+    const body = await (await getHealth()).json() as any;
+    expect(body.status).toBe("failing");
+    expect(body.checks.find((check: any) => check.name === "command-history").status).toBe("failing");
+  });
+
+  it("reports unavailable canonical evidence as a warning without treating it as repaired", async () => {
+    const response = await fetch(`${baseUrl}/api/sync/health?date=2030-04-01`, {
+      headers: managerAuthHeaders(),
+    });
+    const body = await response.json() as any;
+    expect(body.status).toBe("warning");
+    expect(body.evidence).toMatchObject({
+      dailyRowPresent: false,
+      snapshotId: null,
+      canonicalRevision: null,
+    });
+    expect(body.nextAction).toContain("rerun");
+  });
+
+  it("bounds ledger evidence and keeps output free of receipt payloads", async () => {
+    await seedHealthyDocument();
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 105 }, (_, index) => ({
+      scope: "live",
+      date: DATE,
+      intentId: `health-bounded-${index}`,
+      outcome: "review-required",
+      snapshot: { privatePayload: `secret-${index}` },
+    })));
+    const body = await (await getHealth()).json() as any;
+    expect(body.evidence.ledgerRowsScanned).toBe(100);
+    expect(body.evidence.ledgerRowsTruncated).toBe(true);
+    expect(body.checks.find((check: any) => check.name === "command-history")).toMatchObject({
+      status: "warning",
+    });
+    expect(JSON.stringify(body)).not.toContain("privatePayload");
+    expect(JSON.stringify(body)).not.toContain("secret-");
+  });
+
+  it("denies non-managers and sandbox sessions before inspecting data", async () => {
+    expect((await getHealth(authHeaders())).status).toBe(403);
+    expect((await getHealth(sandboxAuthHeaders())).status).toBe(403);
+  });
+});
+
 describe("POST /sync/operational-intents — canonical transitions", () => {
   const DATE = "2030-03-10";
   const RUN = "transition-run";
