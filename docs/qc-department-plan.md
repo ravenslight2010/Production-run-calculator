@@ -2,6 +2,28 @@
 
 ## Critical Requirements
 
+### Daily Reset: Archive Yesterday, Show Only Today
+The daily reset (midnight day-state clear) is the natural cutoff point. QC data behavior:
+
+- **Active QC Dashboard** — always shows ONLY today's checks (current run, today's weight checks, today's lot entries, today's component checks)
+- **Yesterday's data is saved** — QC records from previous days remain in the database, untouched by the daily reset
+- **History view** — one tap away from the active dashboard; browse any previous day, filter by date/ingredient/lot/station, export for audits
+- **No clutter** — operators see only what matters RIGHT NOW on the active screen; historical data never pollutes the current view
+- **The reset doesn't delete QC data** — it only clears day-state (runs, active operational data). QC tables are server-persisted and accumulate indefinitely
+
+**UI pattern**:
+```
+QC Dashboard
+├── Today (active)     ← default view, shows current run checks only
+├── History            ← calendar/date picker, browse past days
+│   ├── Sep 7 (yesterday) — 12 checks, 2 failures
+│   ├── Sep 6 — 18 checks, 0 failures
+│   └── ...
+└── Audit Export       ← CSV/PDF for compliance
+```
+
+The daily reset is invisible to QC — the dashboard just naturally shows today because that's the default filter. Yesterday becomes "history" automatically at midnight.
+
 ### QC Data Survives All Wipes
 The factory reset (`POST /sync/purge-all`) currently wipes ALL scoped tables including `qualityChecksTable`. QC data must survive both:
 - **Daily reset** (day-state clear at midnight) — already safe since QC tables are server-side, not in day-state
