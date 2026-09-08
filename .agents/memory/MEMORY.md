@@ -156,3 +156,4 @@
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
+- [Browser peer startup ordering](browser-peer-startup-ordering.md) — assert snapshot no-ops before opening a peer; hydration may issue a legitimate background merge and change the canonical hash.
