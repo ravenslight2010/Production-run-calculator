@@ -66,6 +66,21 @@
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
 
+## Task generation and automation policy
+
+Generate one end-to-end task per user-visible outcome. Include investigation, implementation, integration and persistence impacts, regression coverage, and verification.
+
+Do not stop at diagnosis or create a follow-up task for an in-scope defect. Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
+
+Automatically approve and start ordinary, bounded UI, test, and bug-fix tasks.
+
+Keep manual approval and final merge review for:
+- database schema changes and data heals;
+- authentication, authorization, sync, or security changes;
+- production, release, or destructive operations;
+- external integrations, secrets, or irreversible data changes.
+
+When a task is approved, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence.
 
 # [Project name]
 
