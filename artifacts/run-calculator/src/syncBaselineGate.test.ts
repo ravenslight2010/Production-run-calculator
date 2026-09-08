@@ -138,7 +138,7 @@ describe("SSE sync baseline gate", () => {
     );
   });
 
-  it("claims a seed after a genuine form edit, while programmatic resets stay local-only", () => {
+  it("claims a seed after a genuine form edit without replacing newer day state", () => {
     const source = readFileSync(
       resolve(process.cwd(), "src/hooks/useHomeFormLifecycle.ts"),
       "utf8",
@@ -147,9 +147,11 @@ describe("SSE sync baseline gate", () => {
       source.indexOf("if (!shouldAutosaveHomeForm("),
       source.indexOf("flashSaved();"),
     );
-    expect(autosave).toContain("if (run.seeded)");
-    expect(autosave).toContain("seeded: false");
-    expect(autosave).toContain("saveDayState(dayState);");
+    expect(autosave).toContain("clearSeededFlagForAutosave(");
+    expect(autosave).toContain("dayStateRef.current,");
+    expect(autosave).toContain("saveDayState(seededPatch.dayState);");
+    expect(autosave).toContain('schedulePush(dayStateRef.current, undefined, "edit");');
+    expect(autosave).not.toContain("capturedDayState");
   });
 
   it("coalesces ordinary edits quickly while keeping recovery pushes immediate", () => {

@@ -1,6 +1,7 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { useEvent } from "../hooks/useEvent";
 import {
+  flushPendingHomeFormWrites,
   useHomeFormIdentityFences,
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
@@ -9954,6 +9955,7 @@ export default function Home() {
   // Home remains the sole owner of the canonical day, form, and providers.
   useHomeFormLifecycle({
     currentRunId,
+    persistenceScope: me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "signed-out",
     dayStateRef,
     form,
     values: v,
@@ -10535,6 +10537,7 @@ export default function Home() {
 
   function switchToRun(newIndex: number) {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
+    flushPendingHomeFormWrites();
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
@@ -10630,6 +10633,7 @@ export default function Home() {
 
   function addRun() {
     if (dayState.runs.length >= MAX_RUNS) return;
+    flushPendingHomeFormWrites();
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
@@ -10660,6 +10664,7 @@ export default function Home() {
     const idx = dayState.currentIndex;
     const run = dayState.runs[idx];
     if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
+    flushPendingHomeFormWrites();
     const newRuns = dayState.runs.filter((_, i) => i !== idx);
     if (newRuns.length === 0) return; // always keep at least one run
     // Tombstone the removed run id so live-sync's additive run-union can't
@@ -10721,6 +10726,7 @@ export default function Home() {
   function removeRunById(id: string) {
     const result = removeRunByIdFromDayState(dayState, id);
     if (!result) return;
+    flushPendingHomeFormWrites();
     tombstoneDeleted("runs", result.removedRun.id);
     const { dayState: newDs, removedCurrent } = result;
     setDayState(newDs);
@@ -10744,6 +10750,7 @@ export default function Home() {
   // without touching anything.
   function addRunWithIdentity(brand: string, flavor: string): boolean {
     if (dayState.runs.length >= MAX_RUNS) return false;
+    flushPendingHomeFormWrites();
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
@@ -10780,6 +10787,7 @@ export default function Home() {
   }
 
   function setRunBrandFlavor(brand: string, flavor: string) {
+    flushPendingHomeFormWrites();
     // Save current values to old profile
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
@@ -11422,6 +11430,7 @@ export default function Home() {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
+    flushPendingHomeFormWrites();
     const activeRunId = activeRun.id;
     const now = Date.now();
     queueOperationalIntent({ runId: activeRunId, observedGeneration: `${activeRunId}:${activeRun.metaUpdatedAt ?? activeRun.startedAt ?? 0}`, effectiveAt: now, action: "lifecycle", lifecycle: "start" });
@@ -11535,6 +11544,7 @@ export default function Home() {
     // A double click or a stale compact strip must never create concurrent pause
     // records for one lifecycle.
     if (!run?.startedAt || run.pausedAt || run.endedAt) return;
+    flushPendingHomeFormWrites();
     const now = Date.now();
     queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "pause" });
     void flushOperationalIntentOutbox();
@@ -11609,6 +11619,7 @@ export default function Home() {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (!run) return;
+    flushPendingHomeFormWrites();
     const now = Date.now();
     queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "resume" });
     void flushOperationalIntentOutbox();
@@ -11822,6 +11833,7 @@ export default function Home() {
       return;
     }
     const activeRunId = activeRun.id;
+    flushPendingHomeFormWrites();
     const cur = form.getValues();
     saveRunValues(activeRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
