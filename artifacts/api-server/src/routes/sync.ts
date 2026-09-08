@@ -46,7 +46,7 @@ import {
   completedRunHistoryTable,
 } from "@workspace/db";
 import { and, eq, gt, gte, lte, asc, sql, inArray } from "drizzle-orm";
-import { currentScope, type Scope } from "../lib/requestScope";
+import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
@@ -76,12 +76,15 @@ import {
   type AutoTrackScheduleInput,
   type ServerCalcResult,
 } from "@workspace/live-calc";
+import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
+import { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
+export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
 
 const router: IRouter = Router();
 
-type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string };
+type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string; resetEpoch: number };
 const clients = new Set<SseClient>();
 function requestedSnapshot(req: Request): string | undefined {
   const value = req.query.snapshot;
@@ -122,6 +125,8 @@ function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+const SERVER_DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"] as const;
 
 function isValidDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -281,6 +286,211 @@ function broadcastReset(scope: Scope, resetEpoch: number): void {
   }
 }
 
+function broadcastRollover(scope: Scope, resetEpoch: number): void {
+  for (const client of clients) {
+    if (client.scope !== scope) continue;
+    try {
+      client.res.write(`data: ${JSON.stringify({ rollover: true, resetEpoch })}\n\n`);
+      client.resetEpoch = resetEpoch;
+    } catch {
+      clients.delete(client);
+    }
+  }
+}
+
+function canonicalSnapshot(value: unknown): Record<string, unknown> {
+  const stable = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(stable);
+    if (input && typeof input === "object") {
+      return Object.fromEntries(Object.entries(input as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, child]) => [key, stable(child)]));
+    }
+    return input;
+  };
+  return stable(JSON.parse(JSON.stringify(value))) as Record<string, unknown>;
+}
+
+export type DailyRolloverResult = {
+  scope: Scope;
+  fromDate: string | null;
+  toDate: string;
+  epoch: number;
+  finalizedRuns: number;
+  rolled: boolean;
+};
+
+/**
+ * Advances one scope to its facility-local production day. The reset row is
+ * locked before any daily document, matching every sync writer and making this
+ * operation exactly-once across concurrent processes and startup catch-up.
+ */
+export async function runDailyRollover(
+  scope: Scope,
+  opts: { nowMs?: number; timeZone?: string } = {},
+): Promise<DailyRolloverResult> {
+  // Background jobs have no request AsyncLocalStorage by default. Bind the
+  // requested scope here as a final safety net so inventory helpers cannot
+  // silently fall back to live while rolling the sandbox.
+  if (currentScope() !== scope) {
+    return runWithScope(scope, () => runDailyRollover(scope, opts));
+  }
+  const nowMs = opts.nowMs ?? Date.now();
+  const timeZone = opts.timeZone ?? facilityTimeZone();
+  const toDate = dateInTimeZone(nowMs, timeZone);
+  const result = await db.transaction(async (tx) => {
+    const insertedReset = await tx.insert(dataResetTable).values({
+      scope,
+      epoch: 0,
+      resetAt: new Date(0),
+    }).onConflictDoNothing().returning({ scope: dataResetTable.scope });
+    const [reset] = await tx.select().from(dataResetTable)
+      .where(eq(dataResetTable.scope, scope)).for("update");
+    const lastBoundaryDate = dateInTimeZone(reset?.resetAt.getTime() ?? 0, timeZone);
+
+    const priorRows = await tx.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), sql`${dailySyncTable.date} < ${toDate}`))
+      .orderBy(sql`${dailySyncTable.date} asc`)
+      .for("update");
+    const prior = priorRows.at(-1);
+    const [scheduled] = await tx.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, toDate)))
+      .for("update");
+    if (lastBoundaryDate >= toDate) {
+      return {
+        scope,
+        fromDate: prior?.date ?? null,
+        toDate,
+        epoch: reset?.epoch ?? 0,
+        finalizedRuns: 0,
+        rolled: false,
+      };
+    }
+    // A brand-new, empty scope has no production day to close. Anchor its
+    // boundary without manufacturing a reset event. Existing scopes still
+    // advance after a quiet day, and a pre-scheduled current row is activated.
+    if (insertedReset.length > 0 && !prior && !scheduled) {
+      await tx.update(dataResetTable).set({ resetAt: new Date(nowMs) })
+        .where(eq(dataResetTable.scope, scope));
+      return {
+        scope,
+        fromDate: null,
+        toDate,
+        epoch: 0,
+        finalizedRuns: 0,
+        rolled: false,
+      };
+    }
+
+    let finalizedRuns = 0;
+    // Startup catch-up must close runs in every missed production day. Looking
+    // only at the latest row is unsafe because that row can be a quiet scheduled
+    // day while an older production row still contains an active run.
+    for (const priorRow of priorRows) {
+      const priorData = (priorRow.data ?? emptySyncData(priorRow.date)) as Record<string, any>;
+      const runs = Array.isArray(priorData.dayState?.runs) ? priorData.dayState.runs : [];
+      const activeRunIds = new Set<string>(
+        runs.filter((run: any) => run?.id && run.startedAt && !run.endedAt)
+          .map((run: any) => String(run.id)),
+      );
+      if (activeRunIds.size === 0) continue;
+      const finalizedData = {
+        ...priorData,
+        dayState: {
+          ...priorData.dayState,
+          runs: runs.map((run: any) => activeRunIds.has(String(run.id))
+            ? { ...run, endedAt: nowMs, pausedAt: undefined, metaUpdatedAt: nowMs }
+            : run),
+        },
+      };
+      for (const runId of activeRunIds) {
+        const snapshot = canonicalSnapshot(finalizedData);
+        const snapshotHash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+        await tx.insert(completedRunHistoryTable).values({
+          id: randomUUID(),
+          scope,
+          operationId: `rollover:${priorRow.date}:${runId}`,
+          runId,
+          date: priorRow.date,
+          completedAt: new Date(nowMs),
+          snapshot,
+          snapshotHash,
+          actorId: "server:daily-rollover",
+        }).onConflictDoNothing();
+        const values = priorData.runValues?.[runId];
+        const substitutions = Array.isArray(priorData.dayState?.substitutions)
+          ? priorData.dayState.substitutions
+          : [];
+        const effectiveValues = values && typeof values === "object"
+          ? applySubstitutions(values, substitutions)
+          : values;
+        const pepTypes = Array.isArray(priorData.pepTypes)
+          ? priorData.pepTypes.filter((value: unknown): value is string => typeof value === "string")
+          : SERVER_DEFAULT_PEP_TYPES;
+        await consumeRunInTransaction(
+          tx,
+          runId,
+          effectiveValues && typeof effectiveValues === "object" && Object.keys(effectiveValues).length > 0
+            ? computeRunConsumptionLines(effectiveValues as any, pepTypes)
+            : [],
+        );
+      }
+      finalizedRuns += activeRunIds.size;
+      await tx.update(dailySyncTable).set({ data: finalizedData as any, updatedAt: new Date(nowMs) })
+        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, priorRow.date)));
+    }
+
+    const nextEpoch = (reset?.epoch ?? 0) + 1;
+    const todayData = (scheduled?.data ?? emptySyncData(toDate)) as Record<string, any>;
+    const activated = {
+      ...todayData,
+      dayState: {
+        ...(todayData.dayState ?? {}),
+        date: toDate,
+        resetAt: nowMs,
+        resetBoundaryAt: nowMs,
+        rolloverEpoch: nextEpoch,
+      },
+    };
+    if (scheduled) {
+      await tx.update(dailySyncTable).set({ data: activated as any, updatedAt: new Date(nowMs) })
+        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, toDate)));
+    } else {
+      await tx.insert(dailySyncTable).values({
+        scope,
+        date: toDate,
+        data: activated as any,
+        updatedAt: new Date(nowMs),
+      });
+    }
+    const [nextReset] = await tx.update(dataResetTable)
+      .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date(nowMs) })
+      .where(eq(dataResetTable.scope, scope))
+      .returning();
+    return {
+      scope,
+      fromDate: prior?.date ?? null,
+      toDate,
+      epoch: nextReset?.epoch ?? 0,
+      finalizedRuns,
+      rolled: true,
+    };
+  });
+  if (result.rolled) {
+    broadcastRollover(scope, result.epoch);
+    logger.info({
+      event: "daily_rollover",
+      scope,
+      outcome: "success",
+      safeCounts: { finalizedRuns: result.finalizedRuns },
+      fromDate: result.fromDate,
+      toDate: result.toDate,
+      epoch: result.epoch,
+    }, "Facility-local daily rollover completed");
+  }
+  return result;
+}
+
 // Current reset generation for a scope (0 when never reset). Clients compare this
 // against the epoch they last honored to decide whether to perform a local wipe.
 async function getResetEpoch(scope: Scope): Promise<number> {
@@ -289,6 +499,22 @@ async function getResetEpoch(scope: Scope): Promise<number> {
     .from(dataResetTable)
     .where(eq(dataResetTable.scope, scope));
   return row?.epoch ?? 0;
+}
+
+async function getResetState(scope: Scope): Promise<{ epoch: number; rollover: boolean }> {
+  const [reset] = await db.select().from(dataResetTable).where(eq(dataResetTable.scope, scope));
+  const epoch = reset?.epoch ?? 0;
+  if (!reset || epoch === 0) return { epoch, rollover: false };
+  const boundaryDate = dateInTimeZone(reset.resetAt.getTime(), facilityTimeZone());
+  const [day] = await db.select().from(dailySyncTable)
+    .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, boundaryDate)));
+  const data = day?.data as { dayState?: { rolloverEpoch?: unknown } } | null | undefined;
+  return { epoch, rollover: epoch > 0 && data?.dayState?.rolloverEpoch === epoch };
+}
+
+async function staleEpochResponse(scope: Scope, epoch: number) {
+  const state = await getResetState(scope);
+  return { ok: true, stale: true, epoch, rollover: state.epoch === epoch && state.rollover };
 }
 
 // Postgres unique-violation is SQLSTATE 23505. Drizzle wraps driver errors, so
@@ -368,6 +594,17 @@ function applyResetBoundary(
       ?.dayState?.resetBoundaryAt;
     if (typeof prev === "number" && prev > 0) day.resetBoundaryAt = prev;
     else delete day.resetBoundaryAt;
+  }
+  // The rollover discriminator is server-owned and must survive normal same-day
+  // sync writes. If a client could erase or forge it, a later reconnect could
+  // mistake a daily rollover for an administrative purge (or vice versa).
+  const previousRolloverEpoch = (
+    existingData as { dayState?: { rolloverEpoch?: unknown } } | null | undefined
+  )?.dayState?.rolloverEpoch;
+  if (typeof previousRolloverEpoch === "number" && previousRolloverEpoch > 0) {
+    day.rolloverEpoch = previousRolloverEpoch;
+  } else {
+    delete day.rolloverEpoch;
   }
 }
 
@@ -656,7 +893,7 @@ async function isStaleResetPush(req: Request, scope: Scope): Promise<number | nu
 }
 
 router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<void> => {
-  res.json({ epoch: await getResetEpoch(currentScope()) });
+  res.json(await getResetState(currentScope()));
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
@@ -675,12 +912,12 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
   const result = await upsertProtected(today, scope, sanitized, today, expectedEpoch, req.ip);
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
-    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    res.json(await staleEpochResponse(scope, result.staleEpoch));
     return;
   }
   const merged = result.data;
@@ -919,7 +1156,7 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) {
     res.setHeader("X-Sync-Response", "stale");
-    res.json({ ok: true, stale: true, epoch: staleEpoch });
+    res.json(await staleEpochResponse(scope, staleEpoch));
     return;
   }
 
@@ -1021,10 +1258,11 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
-  const [row] = await db
-    .select()
-    .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
+  const [[row], initialResetState] = await Promise.all([
+    db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope))),
+    getResetState(scope),
+  ]);
   if (closed) return;
   // Always send a first frame, including when no row exists. The web client uses
   // this acknowledgement as its sync baseline and must not upload local state
@@ -1042,12 +1280,15 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       : { data, snapshotId }),
     senderId: null,
     initial: true,
+    ...(initialResetState.epoch > 0
+      ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }
+      : {}),
     ...liveState,
   })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  client = { res, clientId, scope, watchDate };
+  client = { res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch };
   clients.add(client);
 
   // Refresh schedule leases on the established heartbeat. A schedule never
@@ -1056,8 +1297,19 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   heartbeat = setInterval(() => {
     void (async () => {
       try {
-        const [fresh] = await db.select().from(dailySyncTable)
-          .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
+        const [[fresh], resetState] = await Promise.all([
+          db.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope))),
+          getResetState(scope),
+        ]);
+        if (client && resetState.epoch > client.resetEpoch) {
+          client.resetEpoch = resetState.epoch;
+          res.write(`data: ${JSON.stringify({
+            [resetState.rollover ? "rollover" : "reset"]: true,
+            resetEpoch: resetState.epoch,
+          })}\n\n`);
+          return;
+        }
         const live = fresh?.data ? computeServerLiveState(fresh.data) : null;
         if (live?.autoTrackSchedule) {
           res.write(`data: ${JSON.stringify({ autoTrackSchedule: live.autoTrackSchedule, heartbeat: true })}\n\n`);
@@ -1147,12 +1399,12 @@ router.put(
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
   const result = await upsertProtected(date, scope, sanitized, clientToday(req), expectedEpoch, req.ip);
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
-    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    res.json(await staleEpochResponse(scope, result.staleEpoch));
     return;
   }
   const merged = result.data;
@@ -1445,6 +1697,34 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
   }, intervalMs);
   timer.unref();
   return timer;
+}
+
+const DAILY_ROLLOVER_CHECK_MS = 15_000;
+
+export function startDailyRolloverScheduler(
+  scopes: Scope[] = ["live"],
+): { stop: () => void } {
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      for (const scope of scopes) {
+        await runWithScope(scope, () => runDailyRollover(scope));
+      }
+    } catch (err) {
+      logger.error({ err, event: "daily_rollover", outcome: "degraded" }, "Daily rollover pass failed");
+    } finally {
+      running = false;
+    }
+  };
+  void run();
+  const timer = setInterval(() => { void run(); }, Math.max(
+    5_000,
+    Number(process.env.DAILY_ROLLOVER_CHECK_MS) || DAILY_ROLLOVER_CHECK_MS,
+  ));
+  timer.unref();
+  return { stop: () => clearInterval(timer) };
 }
 
 export default router;

@@ -33,3 +33,21 @@ export function applyResetWipe(serverEpoch: number): boolean {
     return false;
   }
 }
+
+/**
+ * Adopt a server daily-rollover epoch without performing the administrative
+ * reset's broad cache purge. Reloading after this write reconstructs today's
+ * day state and hydrates the canonical server row while preserving profiles,
+ * master data, completed history, and durable outboxes.
+ */
+export function applyRolloverEpoch(serverEpoch: number): boolean {
+  if (!Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
+  try {
+    browserRecordStore.record(RESET_EPOCH_KEY, () => 0, {
+      decode: (value) => typeof value === "number" ? value : null,
+    }).write(serverEpoch);
+    return true;
+  } catch {
+    return false;
+  }
+}

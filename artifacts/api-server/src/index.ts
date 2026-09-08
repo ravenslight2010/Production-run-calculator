@@ -6,7 +6,7 @@ import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
-import { startAutoTrackServerTicks } from "./routes/sync";
+import { startAutoTrackServerTicks, startDailyRolloverScheduler } from "./routes/sync";
 import { startWebPushAlertScheduler } from "./lib/webPush";
 import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { db } from "@workspace/db";
@@ -32,6 +32,7 @@ if (!rawPort) {
 const port = Number(rawPort);
 let stopServerJobWorker: (() => void) | undefined;
 let stopWebPushAlertScheduler: (() => void) | undefined;
+let stopDailyRolloverScheduler: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -72,6 +73,8 @@ async function startServer(): Promise<void> {
     stopServerJobWorker = undefined;
     stopWebPushAlertScheduler?.();
     stopWebPushAlertScheduler = undefined;
+    stopDailyRolloverScheduler?.();
+    stopDailyRolloverScheduler = undefined;
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -172,6 +175,9 @@ async function initializeStartup(startedAt: number): Promise<void> {
   // Best-effort, bounded ownership for live automatic production tracking.
   // The runner shares the claim transaction path with connected clients.
   startAutoTrackServerTicks();
+  stopDailyRolloverScheduler = startDailyRolloverScheduler(
+    sandboxAllowed() ? ["live", "sandbox"] : ["live"],
+  ).stop;
   stopWebPushAlertScheduler = startWebPushAlertScheduler().stop;
   stopServerJobWorker = startServerJobWorkerLoop({
     onError(error, operation) {

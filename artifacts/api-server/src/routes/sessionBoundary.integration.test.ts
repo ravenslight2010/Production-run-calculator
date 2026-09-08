@@ -47,6 +47,7 @@ let clearSessionBoundaryCache: () => void;
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
+let originalFacilityTimeZone: string | undefined;
 let server: Server;
 let baseUrl: string;
 
@@ -73,6 +74,8 @@ function yesterdayStr(): string {
 }
 
 beforeAll(async () => {
+  originalFacilityTimeZone = process.env.FACILITY_TIME_ZONE;
+  process.env.FACILITY_TIME_ZONE = "UTC";
   originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
 
@@ -138,6 +141,8 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
+  if (originalFacilityTimeZone === undefined) delete process.env.FACILITY_TIME_ZONE;
+  else process.env.FACILITY_TIME_ZONE = originalFacilityTimeZone;
 }, 60_000);
 
 beforeEach(async () => {
