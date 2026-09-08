@@ -4451,6 +4451,8 @@ paths:
                   snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
                   stale: { type: boolean }
                   epoch: { type: integer }
+                  canonicalRevision: { type: integer, minimum: 0 }
+                  serverTime: { type: integer, minimum: 0 }
 
   /sync/auto-track/claim:
     post:
@@ -4480,6 +4482,63 @@ paths:
           description: Invalid or out-of-bounds event
         "500":
           description: Safe automatic tracking failure
+
+  /sync/operational-intents:
+    post:
+      operationId: submitOperationalIntent
+      tags: [sync]
+      summary: Apply one server-authoritative production command
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: epoch
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationalIntentRequest"
+      responses:
+        "200":
+          description: Durable command receipt and canonical materialized result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationalIntentResponse"
+        "400":
+          description: Invalid, stale, or oversized command
+        "500":
+          description: Command could not be committed
+
+  /sync/operational-intents/cursor:
+    get:
+      operationId: listOperationalIntentReceipts
+      tags: [sync]
+      summary: Read durable command receipts after a scoped cursor
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Ordered command receipt page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cursor, hasMore, mutations]
+                properties:
+                  cursor: { type: integer, minimum: 0 }
+                  hasMore: { type: boolean }
+                  mutations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OperationalIntentReceipt"
+        "400":
+          description: Invalid cursor
 
 components:
   parameters:
@@ -4603,7 +4662,7 @@ components:
         updatedAt: { type: number }
     AutoTrackClaimResponse:
       type: object
-      required: [ok, outcome, state, values, data, snapshotId]
+      required: [ok, outcome, state, values, data, snapshotId, canonicalRevision, serverTime]
       properties:
         ok: { type: boolean }
         outcome:
@@ -4615,6 +4674,82 @@ components:
           additionalProperties: true
         data: { $ref: "#/components/schemas/SyncPayload" }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        duplicate: { type: boolean }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+
+    OperationalIntent:
+      type: object
+      required: [version, id, date, runId, observedGeneration, resetEpoch, effectiveAt, action]
+      properties:
+        version: { type: integer, enum: [1] }
+        id: { type: string, minLength: 1, maxLength: 160 }
+        date: { type: string, format: date }
+        runId: { type: string, minLength: 1, maxLength: 160 }
+        observedGeneration: { type: string, minLength: 1, maxLength: 160 }
+        resetEpoch: { type: integer, minimum: 0 }
+        effectiveAt: { type: number }
+        baseRevision: { type: integer, minimum: 0 }
+        action:
+          type: string
+          enum: [pause, resume, lifecycle, correction]
+        lifecycle:
+          type: string
+          enum: [start, end]
+        values:
+          type: object
+          additionalProperties: { type: number, minimum: 0, maximum: 1000000 }
+        inventoryLines:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [itemKey, qty]
+            properties:
+              itemKey: { type: string, minLength: 1, maxLength: 300 }
+              qty: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+    OperationalIntentRequest:
+      type: object
+      required: [intent]
+      properties:
+        senderId: { type: string, maxLength: 160 }
+        deviceId: { type: string, maxLength: 160 }
+        baseRevision: { type: integer, minimum: 0 }
+        intent: { $ref: "#/components/schemas/OperationalIntent" }
+    OperationalIntentResponse:
+      type: object
+      required: [ok, outcome, duplicate, cursor, canonicalRevision, serverTime, data, snapshotId]
+      properties:
+        ok: { type: boolean }
+        outcome:
+          type: string
+          enum: [accepted, superseded, rebased, conflicted, review-required]
+        duplicate: { type: boolean }
+        cursor: { type: integer, minimum: 1 }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+    OperationalIntentReceipt:
+      type: object
+      required: [cursor, date, outcome, createdAt]
+      properties:
+        cursor: { type: integer, minimum: 1 }
+        date: { type: string, format: date }
+        outcome:
+          type: string
+          enum: [accepted, superseded, rebased, conflicted, review-required, stale, duplicate]
+        canonicalRevision: { type: integer, minimum: 0 }
+        baseRevision: { type: integer, minimum: 0 }
+        commandType: { type: string }
+        actorId: { type: string }
+        deviceId: { type: string }
+        serverReceivedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        snapshot:
+          oneOf:
+            - $ref: "#/components/schemas/SyncPayload"
+            - type: "null"
 
     HealthStatus:
       type: object

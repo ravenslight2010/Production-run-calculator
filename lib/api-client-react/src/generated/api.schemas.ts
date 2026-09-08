@@ -207,6 +207,147 @@ export interface AutoTrackClaimResponse {
   data: SyncPayload;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId: string;
+  duplicate?: boolean;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
+}
+
+export type OperationalIntentVersion = typeof OperationalIntentVersion[keyof typeof OperationalIntentVersion];
+
+
+export const OperationalIntentVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OperationalIntentAction = typeof OperationalIntentAction[keyof typeof OperationalIntentAction];
+
+
+export const OperationalIntentAction = {
+  pause: 'pause',
+  resume: 'resume',
+  lifecycle: 'lifecycle',
+  correction: 'correction',
+} as const;
+
+export type OperationalIntentLifecycle = typeof OperationalIntentLifecycle[keyof typeof OperationalIntentLifecycle];
+
+
+export const OperationalIntentLifecycle = {
+  start: 'start',
+  end: 'end',
+} as const;
+
+export type OperationalIntentValues = {[key: string]: number};
+
+export type OperationalIntentInventoryLinesItem = {
+  /**
+     * @minLength 1
+     * @maxLength 300
+     */
+  itemKey: string;
+  /**
+     * @maximum 1000000
+     * @exclusiveMinimum 0
+     */
+  qty: number;
+};
+
+export interface OperationalIntent {
+  version: OperationalIntentVersion;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  id: string;
+  date: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  resetEpoch: number;
+  effectiveAt: number;
+  /** @minimum 0 */
+  baseRevision?: number;
+  action: OperationalIntentAction;
+  lifecycle?: OperationalIntentLifecycle;
+  values?: OperationalIntentValues;
+  /** @maxItems 200 */
+  inventoryLines?: OperationalIntentInventoryLinesItem[];
+}
+
+export interface OperationalIntentRequest {
+  /** @maxLength 160 */
+  senderId?: string;
+  /** @maxLength 160 */
+  deviceId?: string;
+  /** @minimum 0 */
+  baseRevision?: number;
+  intent: OperationalIntent;
+}
+
+export type OperationalIntentResponseOutcome = typeof OperationalIntentResponseOutcome[keyof typeof OperationalIntentResponseOutcome];
+
+
+export const OperationalIntentResponseOutcome = {
+  accepted: 'accepted',
+  superseded: 'superseded',
+  rebased: 'rebased',
+  conflicted: 'conflicted',
+  'review-required': 'review-required',
+} as const;
+
+export interface OperationalIntentResponse {
+  ok: boolean;
+  outcome: OperationalIntentResponseOutcome;
+  duplicate: boolean;
+  /** @minimum 1 */
+  cursor: number;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
+  data: SyncPayload;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+}
+
+export type OperationalIntentReceiptOutcome = typeof OperationalIntentReceiptOutcome[keyof typeof OperationalIntentReceiptOutcome];
+
+
+export const OperationalIntentReceiptOutcome = {
+  accepted: 'accepted',
+  superseded: 'superseded',
+  rebased: 'rebased',
+  conflicted: 'conflicted',
+  'review-required': 'review-required',
+  stale: 'stale',
+  duplicate: 'duplicate',
+} as const;
+
+export interface OperationalIntentReceipt {
+  /** @minimum 1 */
+  cursor: number;
+  date: string;
+  outcome: OperationalIntentReceiptOutcome;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  baseRevision?: number;
+  commandType?: string;
+  actorId?: string;
+  deviceId?: string;
+  serverReceivedAt?: string;
+  createdAt: string;
+  snapshot?: SyncPayload | null;
 }
 
 export interface HealthStatus {
@@ -5019,6 +5160,10 @@ export type PutSyncToday200 = {
   snapshotId?: string;
   stale?: boolean;
   epoch?: number;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
 };
 
 export type ClaimAutoTrackEventParams = {
@@ -5027,4 +5172,26 @@ today?: ClientTodayParameter;
  * @minimum 0
  */
 epoch?: number;
+};
+
+export type SubmitOperationalIntentParams = {
+today?: ClientTodayParameter;
+/**
+ * @minimum 0
+ */
+epoch?: number;
+};
+
+export type ListOperationalIntentReceiptsParams = {
+/**
+ * @minimum 0
+ */
+after?: number;
+};
+
+export type ListOperationalIntentReceipts200 = {
+  /** @minimum 0 */
+  cursor: number;
+  hasMore: boolean;
+  mutations: OperationalIntentReceipt[];
 };

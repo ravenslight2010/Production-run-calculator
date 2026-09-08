@@ -15,4 +15,8 @@ export type PutSyncToday200 = {
   snapshotId?: string;
   stale?: boolean;
   epoch?: number;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
 };

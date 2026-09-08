@@ -17,7 +17,7 @@ const correctionFields = new Set([
 
 export type OperationalIntent = {
   version: 1; id: string; date: string; runId: string; observedGeneration: string;
-  resetEpoch: number; effectiveAt: number;
+  resetEpoch: number; effectiveAt: number; baseRevision?: number;
   action: "pause" | "resume" | "lifecycle" | "correction";
   lifecycle?: "start" | "end";
   values?: Record<string, number>;
@@ -41,6 +41,8 @@ export function parseOperationalIntent(input: unknown, now = Date.now()): Operat
     || typeof x.effectiveAt !== "number" || !Number.isFinite(x.effectiveAt)
     || Math.abs(now - (x.effectiveAt as number)) > 36 * 60 * 60_000
     || !["pause", "resume", "lifecycle", "correction"].includes(String(x.action))) return null;
+  if (x.baseRevision !== undefined
+    && (!Number.isSafeInteger(x.baseRevision) || (x.baseRevision as number) < 0)) return null;
   if (x.action === "lifecycle" && x.lifecycle !== "start" && x.lifecycle !== "end") return null;
   if (x.action === "lifecycle" && x.lifecycle === "end") {
     if (!Array.isArray(x.inventoryLines) || x.inventoryLines.length > 200) return null;

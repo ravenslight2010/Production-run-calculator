@@ -261,6 +261,8 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
     expect(firstBody.cursor).toBeTypeOf("number");
+    expect(firstBody.canonicalRevision).toBe(1);
+    expect(firstBody.serverTime).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
     // Completed history is the retained daily document flow: the canonical ended
@@ -277,6 +279,15 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
       date: DATE,
       actorId: USER,
     });
+    const [receipt] = await db.select().from(operationalIntentLedgerTable);
+    expect(receipt).toMatchObject({
+      commandType: "operational-intent",
+      actorId: USER,
+      deviceId: "end-client",
+      baseRevision: 0,
+      canonicalRevision: 1,
+    });
+    expect(receipt.serverReceivedAt.getTime()).toBe(firstBody.serverTime);
     expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
       .toBe(completion.completedAt.getTime());
 
@@ -288,7 +299,13 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
     const replay = await postFinalization(finalization("offline:final-one"));
     const replayBody = await replay.json() as any;
-    expect(replayBody).toMatchObject({ outcome: "accepted", duplicate: true, cursor: firstBody.cursor });
+    expect(replayBody).toMatchObject({
+      outcome: "accepted",
+      duplicate: true,
+      cursor: firstBody.cursor,
+      canonicalRevision: firstBody.canonicalRevision,
+      serverTime: firstBody.serverTime,
+    });
     expect(replayBody.data.dayState.runs.find((run: any) => run.id === RUN)?.endedAt)
       .toBe(firstBody.data.dayState.runs.find((run: any) => run.id === RUN).endedAt);
     expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(false);
@@ -589,6 +606,7 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
 
     const stale = await post(intent("ordered:stale-pause", startGeneration, "pause"));
     expect(stale.outcome).toBe("conflicted");
+    expect(stale.canonicalRevision).toBe(5);
     expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
   });
 });
@@ -643,9 +661,18 @@ describe("POST /sync/auto-track/claim", () => {
     const bodies = await Promise.all([a.json(), b.json()]) as Array<{
       outcome: string;
       values: { traysOnLine: number };
+      canonicalRevision: number;
+      serverTime: number;
     }>;
     expect(bodies.map((body) => body.outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every((body) => body.values.traysOnLine === 9)).toBe(true);
+    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([1, 2]));
+    expect(bodies.every((body) => typeof body.serverTime === "number")).toBe(true);
+    const receipts = await db.select().from(operationalIntentLedgerTable);
+    expect(receipts).toHaveLength(2);
+    expect(receipts.every((receipt) => receipt.commandType === "auto-track")).toBe(true);
+    expect(receipts.every((receipt) => receipt.actorId === USER)).toBe(true);
+    expect(new Set(receipts.map((receipt) => receipt.deviceId))).toEqual(new Set(["tab-a", "tab-b"]));
   });
 
   it("returns duplicate for an accepted retry and rejects a stale-base event after manual correction", async () => {
