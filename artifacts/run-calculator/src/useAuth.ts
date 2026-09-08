@@ -13,6 +13,8 @@ export type AuthContextValue = {
   me: StaffMember | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  startupError: string | null;
+  retryStartup: () => void;
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (
     username: string,

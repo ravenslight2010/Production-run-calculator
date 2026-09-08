@@ -177,6 +177,17 @@ describe("AuthProvider session transition", () => {
     expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a transient startup probe and reaches the authenticated shell", async () => {
+    mocks.fetchMe
+      .mockRejectedValueOnce(new Error("temporary proxy failure"))
+      .mockResolvedValueOnce(manager);
+
+    renderAuth();
+
+    await screen.findByText("manager-1");
+    expect(mocks.fetchMe).toHaveBeenCalledTimes(2);
+  });
+
   it("marks a successful sign-in as fresh exactly once", async () => {
     mocks.fetchMe.mockResolvedValue(null);
     mocks.signInRequest.mockResolvedValue({ token: "ignored", user: manager });

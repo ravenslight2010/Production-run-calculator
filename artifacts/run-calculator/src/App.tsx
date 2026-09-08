@@ -62,7 +62,13 @@ const LazyHome = lazy(() => {
     });
 });
 
-function AppLoadingSurface() {
+function AppLoadingSurface({
+  error,
+  onRetry,
+}: {
+  error?: string;
+  onRetry?: () => void;
+}) {
   return (
     <main
       className="dark flex min-h-[100dvh] items-center justify-center bg-background px-6 py-12 text-foreground"
@@ -79,10 +85,22 @@ function AppLoadingSurface() {
           className="mb-5 h-16 w-16 rounded-2xl shadow-lg"
         />
         <Loader2 className="mb-4 h-7 w-7 animate-spin text-amber-400" aria-hidden="true" />
-        <h1 className="text-xl font-semibold">Opening Run Calculator</h1>
+        <h1 className="text-xl font-semibold">
+          {error ? "Unable to open Run Calculator" : "Opening Run Calculator"}
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Confirming your staff session…
+          {error ?? "Confirming your staff session…"}
         </p>
+        {error && onRetry ? (
+          <button
+            type="button"
+            className="mt-5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            data-testid="auth-startup-retry"
+            onClick={onRetry}
+          >
+            Try again
+          </button>
+        ) : null}
       </div>
     </main>
   );
@@ -91,8 +109,16 @@ function AppLoadingSurface() {
 // "/" renders the calculator for signed-in staff, and a branded welcome with a
 // sign-in CTA for everyone else (no auto-redirect into the sign-in form).
 function HomeGate() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading,
+    startupError,
+    retryStartup,
+  } = useAuth();
   if (isLoading) return <AppLoadingSurface />;
+  if (startupError) {
+    return <AppLoadingSurface error={startupError} onRetry={retryStartup} />;
+  }
   return isAuthenticated ? (
     <MasterDataPolling>
       <Suspense fallback={<AppLoadingSurface />}>
