@@ -39,3 +39,20 @@ run's own anchors.
 **Why:** The form and channel-pending registry are shared across selected runs,
 so guarding only the successful value write does not protect retry and cleanup
 paths from cross-run contamination.
+
+Fresh server not-due schedules are short, generation-bound leases for every
+automatic channel, not just net-second counters. Suppressed wall-clock ticks
+advance due-time and elapsed baselines, but must not consume one-shot seeds,
+fractional remainders, or manual-correction state. Lifecycle rearming clears the
+lease, and missing, stale, reordered, or implausibly future schedule frames
+leave local fallback active.
+
+**Why:** Filtering only the emitted claim after local tick calculation silently
+marks an unclaimed seed as consumed and can leave an offline client unable to
+recover. Accepting reordered or future schedule times can also extend
+suppression beyond the bounded online handoff.
+
+**How to apply:** Evaluate server ownership independently for case, hopper,
+tray production/consumption, and batch production/consumption before mutating
+claim-only bookkeeping. Continue advancing cadence anchors while suppressed so
+lease expiry resumes from a normal interval rather than replaying a backlog.
