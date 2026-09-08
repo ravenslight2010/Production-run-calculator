@@ -27,10 +27,57 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
 import { sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
+
+const provider = vi.hoisted(() => ({
+  calls: 0,
+  wait: false,
+  started: undefined as (() => void) | undefined,
+  release: undefined as (() => void) | undefined,
+}));
+
+vi.mock("@workspace/integrations-openai-ai-server", () => {
+  const AI_MODELS = { full: "gpt-5.4", cheap: "gpt-5-mini" } as const;
+  return {
+    openai: {
+      chat: {
+        completions: {
+          create: async (args: { messages?: Array<{ content?: unknown }> }) => {
+            const system = String(args.messages?.[0]?.content ?? "");
+            if (system.includes("careful reviewer")) {
+              return { choices: [{ message: { content: "{}" } }] };
+            }
+            provider.calls += 1;
+            provider.started?.();
+            if (provider.wait) {
+              await new Promise<void>((resolve) => {
+                provider.release = resolve;
+              });
+            }
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    brandMatches: [],
+                    flavorMatches: [],
+                    ingredientMatches: [],
+                    appTypeMatches: [],
+                    pepTypeMatches: [],
+                  }),
+                },
+              }],
+            };
+          },
+        },
+      },
+    },
+    AI_MODELS,
+    pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
+  };
+});
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -38,6 +85,7 @@ let pool: DbModule["pool"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
+let aiResultCacheTable: DbModule["aiResultCacheTable"];
 let seedRoles: () => Promise<void>;
 let newUserId: () => string;
 
@@ -79,6 +127,7 @@ beforeAll(async () => {
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
+  aiResultCacheTable = dbMod.aiResultCacheTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   newUserId = (await import("../lib/auth")).newUserId;
   pool.on("error", () => {});
@@ -121,9 +170,13 @@ beforeEach(async () => {
   // NODE_ENV), keyed by userId, so each test's freshly-minted users start with
   // a clean budget — no cross-test leakage.
   await db.execute(
-    sql`TRUNCATE ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${aiResultCacheTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
+  provider.calls = 0;
+  provider.wait = false;
+  provider.started = undefined;
+  provider.release = undefined;
 });
 
 // A distinct user per call site, so two callers in one test never share a
@@ -138,6 +191,11 @@ async function insertUser(userId: string): Promise<void> {
     username: `costuser${userSeq}`,
     passwordHash: "x",
   });
+}
+
+async function insertManager(userId: string): Promise<void> {
+  await insertUser(userId);
+  await db.insert(userRolesTable).values({ userId, role: "manager" });
 }
 
 function auth(userId: string): Record<string, string> {
@@ -168,6 +226,30 @@ async function exhaustBudget(): Promise<{ blocked: Response; userId: string }> {
 }
 
 describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
+  it("requires authentication and capability before retained provider routes run", async () => {
+    const unauthenticated = await fetch(`${baseUrl}/api/ai/parse-spec-sheet`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workbookText: "Brand\tFlavor\nAcme\tCheese" }),
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const operator = freshUser();
+    await insertUser(operator);
+    const denied = await fetch(`${baseUrl}/api/ai/match-import`, {
+      method: "POST",
+      headers: { ...auth(operator), "content-type": "application/json" },
+      body: JSON.stringify({
+        brands: ["Acme"],
+        brandFlavors: { Acme: [] },
+        unmatchedBrands: ["Unknown"],
+        unmatchedFlavors: [],
+      }),
+    });
+    expect(denied.status).toBe(403);
+    expect(provider.calls).toBe(0);
+  });
+
   it(
     "429s on the request that pushes aggregate AI spend past budget (cost, not request count)",
     async () => {
@@ -207,4 +289,91 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
     const res = await aiCall(other, "/ai/fill-missing");
     expect(res.status).toBe(403);
   });
+
+  it("does not charge deterministic mix reconciliation or recap aliases", async () => {
+    const { blocked, userId } = await exhaustBudget();
+    expect(blocked.status).toBe(429);
+
+    const mix = await fetch(`${baseUrl}/api/ai/mix-reconcile`, {
+      method: "POST",
+      headers: { ...auth(userId), "content-type": "application/json" },
+      body: JSON.stringify({ discrepancies: [] }),
+    });
+    expect(mix.status).toBe(200);
+    expect(mix.headers.get("X-Cost-Limit")).toBeNull();
+    await expect(mix.json()).resolves.toMatchObject({
+      discrepancies: [],
+      aiGenerated: false,
+      aiStatus: "deterministic",
+    });
+
+    const recap = await fetch(`${baseUrl}/api/ai/summary`, {
+      method: "POST",
+      headers: { ...auth(userId), "content-type": "application/json" },
+      body: JSON.stringify({
+        scope: "day",
+        date: "2026-09-08",
+        nowMs: Date.UTC(2026, 8, 8, 12),
+        runs: [],
+      }),
+    });
+    expect(recap.status).toBe(200);
+    expect(recap.headers.get("X-Cost-Limit")).toBeNull();
+    await expect(recap.json()).resolves.toMatchObject({
+      aiGenerated: false,
+      aiStatus: "deterministic",
+    });
+    expect(provider.calls).toBe(0);
+  }, 30_000);
+
+  it("charges one cache-miss owner, not its concurrent waiter or later cache hit", async () => {
+    const manager = freshUser();
+    await insertManager(manager);
+
+    // Leave exactly one unit of provider budget. Invalid non-cacheable requests
+    // are still charged by the historical global middleware ordering.
+    for (let i = 0; i < 299; i += 1) {
+      await aiCall(manager, "/ai/fill-missing");
+    }
+
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    provider.wait = true;
+    provider.started = signalStarted;
+    const requestBody = {
+      brands: ["Acme"],
+      brandFlavors: { Acme: [] },
+      unmatchedBrands: ["Unknown"],
+      unmatchedFlavors: [],
+    };
+    const callMatch = () => fetch(`${baseUrl}/api/ai/match-import`, {
+      method: "POST",
+      headers: { ...auth(manager), "content-type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+
+    const owner = callMatch();
+    await started;
+    const waiter = callMatch();
+    provider.release?.();
+    const [ownerResponse, waiterResponse] = await Promise.all([owner, waiter]);
+    expect(ownerResponse.status).toBe(200);
+    expect(waiterResponse.status).toBe(200);
+    expect(provider.calls).toBe(1);
+
+    provider.wait = false;
+    const hit = await callMatch();
+    expect(hit.status).toBe(200);
+    expect(provider.calls).toBe(1);
+
+    const distinctMiss = await fetch(`${baseUrl}/api/ai/match-import`, {
+      method: "POST",
+      headers: { ...auth(manager), "content-type": "application/json" },
+      body: JSON.stringify({ ...requestBody, unmatchedBrands: ["Another Unknown"] }),
+    });
+    expect(distinctMiss.status).toBe(429);
+    expect(provider.calls).toBe(1);
+  }, 30_000);
 });
