@@ -71,7 +71,8 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 ### What's Missing
 - Real-time overproduction detection
 - Ingredient-level overages (dough, sauce, cheese)
-- Disposition decision flow
+- **Inventory auto-adjustment on overproduction** (critical: consumption is currently based on planned `casesNeeded`, not actual `casesCompleted` — overproduced ingredients are unaccounted for)
+- Disposition flow (store-in-freezer | use-on-next-run only)
 - Surplus dashboard + history
 - Trend analysis + recurring-overproduction alerts
 
