@@ -20,7 +20,7 @@ Excel/photo → SheetGrid[] text
 ```
 
 **AI is used for**: first-pass parse (spec/premix/cheese/shipping), brand/flavor match suggestions, merge suggestions, second-pass review.
-**Deterministic today**: sanitization, alias application, chunk merging, ingredient link passes, discrepancy computation, corpus harness (deterministic layers only), spec-export round-trip.
+**Deterministic today**: sanitization, **learned merge/rename alias application (specImportAliases, mergeAliases, mergedAway)**, chunk merging, ingredient link passes, discrepancy computation, corpus harness (deterministic layers only), spec-export round-trip.
 
 **The key architectural problem**: free-form spreadsheets have NO deterministic fallback — the comment says so explicitly: "there is no usable fallback for a free-form spreadsheet." The whole pipeline depends on AI for the first pass, so AI cost, rate limits, and hallucination risk are baked in.
 
@@ -75,15 +75,24 @@ Not every file matches a template, but most customer sheets have recognizable st
 
 ### 4. Auto-Match + Auto-Verify (Layer 3 — the automation win)
 
-**Idea**: Exception-based review instead of reviewing everything.
+**Idea**: Exception-based review instead of reviewing everything. The learned merge/rename aliases are the FOUNDATION of this layer.
 
 **How**:
-- **Auto-apply tier**: items that match exactly (aliases, exact known-name matches, deterministic parse with 100% confidence) → auto-verified, no review click
+- **Auto-apply tier (top priority — zero AI)**: items resolved by **learned merges/renames** + exact known-name matches + deterministic parse at 100% confidence → auto-verified, no review click. This is exactly what `learnSpecImportAliasesForNameChange` already does — when a brand/flavor was merged or renamed, the alias is fetched at import start and applied BEFORE AI/fuzzy. The redesign keeps and extends this as the highest-confidence tier.
 - **Review tier**: items with ambiguity (near-dup names, first-time names, missing links) → human review
 - **Auto-verify checks**: deterministic cross-field rules — "sauce lbs ≈ sauce oz/pizza × pizzas ÷ 16", "batch count = ceil(pounds / batch size)", "allergen ∈ known list"
 - **Auto-apply "apply all verified"**: one click applies every auto-verified item; only flagged items remain for manual decisions
 
-**Benefit**: A clean spec-sheet import goes from 15+ review clicks to 1 click ("Apply all verified") — or zero if everything passes.
+**Learned aliases in the redesign (explicit)**:
+| Concern | Answer |
+|---------|--------|
+| Are learned merges/renames still applied? | **Yes — they are Tier 1 of auto-match, highest priority** |
+| Do they still run before AI? | Yes — already true today (importers canonicalize through the alias store before AI/fuzzy) |
+| Do they get verified? | Yes — the verification report records "N names resolved via learned aliases: X→Y" |
+| Do merge UI renames still feed them? | Yes — `maybeLearnBrandRename` / `maybeLearnPoolRename` / `maybeLearnRowBrandChange` keep writing merge/rename aliases |
+| Future: merge detection in parse | A parsed row matching a merged-away name auto-re-points to the canonical target (reuses the mergedAway/mergeAlias stores) |
+
+**Benefit**: A clean spec-sheet import goes from 15+ review clicks to 1 click ("Apply all verified") — or zero if everything passes. Learned renames/merges become part of the deterministic evidence trail, not a separate helper.
 
 ### 5. Verification Report (Layer 5 — the audit win)
 
