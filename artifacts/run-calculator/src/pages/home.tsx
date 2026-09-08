@@ -1,5 +1,6 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { useEvent } from "../hooks/useEvent";
+import { createFrameRepeater } from "../frameRepeater";
 import {
   flushPendingHomeFormWrites,
   useHomeFormIdentityFences,
@@ -2423,14 +2424,25 @@ function StepperField({
   onSuggest?: () => void;
   onManualChange?: (nextValue: number) => void;
 }) {
-  const repeatRef = useRef<{ t?: ReturnType<typeof setTimeout>; i?: ReturnType<typeof setInterval> }>({});
+  const repeatRef = useRef<ReturnType<typeof createFrameRepeater> | null>(null);
   const fieldRef = useRef<any>(null);
-  useEffect(() => () => { clearTimeout(repeatRef.current.t); clearInterval(repeatRef.current.i); }, []);
+  if (!repeatRef.current) repeatRef.current = createFrameRepeater();
+  const stopRepeat = useCallback(() => repeatRef.current?.stop(), []);
+  useEffect(() => {
+    const stopWhenHidden = () => {
+      if (document.hidden) stopRepeat();
+    };
+    window.addEventListener("blur", stopRepeat);
+    document.addEventListener("visibilitychange", stopWhenHidden);
+    return () => {
+      stopRepeat();
+      window.removeEventListener("blur", stopRepeat);
+      document.removeEventListener("visibilitychange", stopWhenHidden);
+    };
+  }, [stopRepeat]);
   const startRepeat = (fn: () => void) => {
-    fn();
-    repeatRef.current.t = setTimeout(() => { repeatRef.current.i = setInterval(fn, 80); }, 400);
+    repeatRef.current?.start(fn);
   };
-  const stopRepeat = () => { clearTimeout(repeatRef.current.t); clearInterval(repeatRef.current.i); };
   return (
     <FormField
       control={control}
@@ -2477,6 +2489,9 @@ function StepperField({
                   onPointerDown={() => startRepeat(decrement)}
                   onPointerUp={stopRepeat}
                   onPointerLeave={stopRepeat}
+                   onPointerCancel={stopRepeat}
+                   onLostPointerCapture={stopRepeat}
+                   onBlur={stopRepeat}
                   className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none"
                   data-testid={`btn-dec-${name}`}
                   disabled={disabled}
@@ -2503,6 +2518,9 @@ function StepperField({
                   onPointerDown={() => startRepeat(increment)}
                   onPointerUp={stopRepeat}
                   onPointerLeave={stopRepeat}
+                   onPointerCancel={stopRepeat}
+                   onLostPointerCapture={stopRepeat}
+                   onBlur={stopRepeat}
                   className={`h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none${atMax ? " opacity-30 cursor-not-allowed" : ""}`}
                   data-testid={`btn-inc-${name}`}
                   disabled={disabled || atMax}
