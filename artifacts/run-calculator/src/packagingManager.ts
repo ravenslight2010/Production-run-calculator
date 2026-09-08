@@ -6,10 +6,90 @@ import { computeEffectiveLineSpeed } from "./lineSpeed";
 
 export type PackagingProgressSource = "manual" | "auto";
 
+export type PackagingControlAdapter = {
+  apply(
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+    options?: { vibrationMs?: number; reportCorrection?: boolean },
+  ): void;
+  setTotal(totalCases: number): void;
+  decrementSkids(): void;
+  incrementSkids(maxSkids?: number): void;
+  decrementCases(): void;
+  incrementCases(): void;
+  completeSkid(): void;
+};
+
 export type DrainingPackagingRun = {
   run: RunMeta;
   values: FormValues;
 };
+
+type PackagingControlAdapterDependencies = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+  casesPerSkid: number;
+  applyProgress(skidsCompleted: number, casesOnCurrentSkid: number): void;
+  reportCorrection(deltaCases: number): void;
+  vibrate?(durationMs: number): void;
+};
+
+/**
+ * Shared action adapter for the full Packaging panel and its station quick
+ * checks. UI surfaces own rendering and persistence, while this boundary keeps
+ * correction evidence, bounds, and skid/case transitions identical.
+ */
+export function createPackagingControlAdapter(
+  deps: PackagingControlAdapterDependencies,
+): PackagingControlAdapter {
+  let currentSkids = Math.max(0, Number(deps.skidsCompleted) || 0);
+  let currentCases = Math.max(0, Number(deps.casesOnCurrentSkid) || 0);
+  const casesPerSkid = Math.max(0, Number(deps.casesPerSkid) || 0);
+  const totalCases = (skidsCompleted: number, casesOnCurrentSkid: number) =>
+    casesPerSkid > 0
+      ? skidsCompleted * casesPerSkid + casesOnCurrentSkid
+      : skidsCompleted;
+
+  const apply: PackagingControlAdapter["apply"] = (
+    skidsCompleted,
+    casesOnCurrentSkid,
+    options = {},
+  ) => {
+    options.vibrationMs && deps.vibrate?.(options.vibrationMs);
+    deps.applyProgress(skidsCompleted, casesOnCurrentSkid);
+    if (options.reportCorrection !== false) {
+      deps.reportCorrection(
+        totalCases(skidsCompleted, casesOnCurrentSkid) -
+          totalCases(currentSkids, currentCases),
+      );
+    }
+    currentSkids = skidsCompleted;
+    currentCases = casesOnCurrentSkid;
+  };
+
+  return {
+    apply,
+    setTotal: (totalCasesToSet) => {
+      const total = Math.max(0, totalCasesToSet);
+      if (casesPerSkid <= 0) return;
+      apply(
+        Math.floor(total / casesPerSkid),
+        Math.round(total % casesPerSkid),
+      );
+    },
+    decrementSkids: () => apply(Math.max(0, currentSkids - 1), currentCases, { vibrationMs: 8 }),
+    incrementSkids: (maxSkids) => {
+      if (maxSkids !== undefined && currentSkids >= maxSkids) return;
+      apply(currentSkids + 1, currentCases, { vibrationMs: 8 });
+    },
+    decrementCases: () => apply(currentSkids, Math.max(0, currentCases - 1), { vibrationMs: 8 }),
+    incrementCases: () => {
+      if (casesPerSkid > 0 && currentCases >= casesPerSkid) return;
+      apply(currentSkids, currentCases + 1, { vibrationMs: 8 });
+    },
+    completeSkid: () => apply(currentSkids + 1, 0, { vibrationMs: 15 }),
+  };
+}
 
 export interface PackagingManager {
   persistManualProgress(

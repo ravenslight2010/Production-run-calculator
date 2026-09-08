@@ -539,7 +539,7 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
-import { createPackagingManager } from "../packagingManager";
+import { createPackagingControlAdapter, createPackagingManager } from "../packagingManager";
 import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -20351,6 +20351,18 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               manualOverrideUntil,
                             );
                           };
+                          const packagingControls = createPackagingControlAdapter({
+                            skidsCompleted: skids,
+                            casesOnCurrentSkid: casesOnSkid,
+                            casesPerSkid,
+                            applyProgress: (nextSkids, nextCases) => {
+                              onManual(nextSkids, nextCases);
+                              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                            },
+                            reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+                            vibrate: (durationMs) => navigator.vibrate?.(durationMs),
+                          });
                           const skidNearlyFull =
                             casesPerSkid > 0 && casesOnSkid > 0 &&
                             casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
@@ -20392,7 +20404,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={packagingControls.decrementSkids}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -20406,7 +20418,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={() => packagingControls.incrementSkids(maxSkids)}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -20427,7 +20439,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={packagingControls.decrementCases}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -20446,7 +20458,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={packagingControls.incrementCases}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -20495,16 +20507,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               {(runStatus === "running" || runStatus === "paused") && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    navigator.vibrate?.(15);
-                                    const ns = skids + 1;
-                                    onManual(ns, 0);
-                                    form.setValue("skidsCompleted", ns, { shouldDirty: true });
-                                    form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
-                                    const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids;
-                                    const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid : ns;
-                                    detectPackagingSpeedDrift(nextTotal - currentTotal);
-                                  }}
+                                  onClick={packagingControls.completeSkid}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"
                                 >
@@ -21094,31 +21097,25 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
         const packOnPace = packGapCases <= 2;
         const packBehindSec = packGapCases * casePeriodSec;
-        const recordQuickCheckCorrection = (nextSkids: number, nextCases: number) => {
-          const currentTotal = hasCps ? packedTotal : packedSkids;
-          const nextTotal = hasCps ? nextSkids * cps + nextCases : nextSkids;
-          detectPackagingSpeedDrift(nextTotal - currentTotal);
-        };
-        const setPackedTotal = (t: number) => {
-          const total = Math.max(0, t);
-          const nextSkids = Math.floor(total / cps);
-          const nextCases = Math.round(total % cps);
-          persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
-          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-          form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-          recordQuickCheckCorrection(nextSkids, nextCases);
-        };
+        const packagingControls = createPackagingControlAdapter({
+          skidsCompleted: packedSkids,
+          casesOnCurrentSkid: packedCasesOnSkid,
+          casesPerSkid: cps,
+          applyProgress: (nextSkids, nextCases) => {
+            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+          },
+          reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+        });
+        const setPackedTotal = (total: number) => packagingControls.setTotal(total);
         const bumpSkids = (d: number) => {
-          const nextSkids = Math.max(0, packedSkids + d);
-          persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
-          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-          recordQuickCheckCorrection(nextSkids, packedCasesOnSkid);
+          if (d < 0) packagingControls.decrementSkids();
+          else if (d > 0) packagingControls.incrementSkids();
         };
         const bumpCases = (d: number) => {
-          const nextCases = Math.max(0, packedCasesOnSkid + d);
-          persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
-          form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-          recordQuickCheckCorrection(packedSkids, nextCases);
+          if (d < 0) packagingControls.decrementCases();
+          else if (d > 0) packagingControls.incrementCases();
         };
         const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
         return (
@@ -21866,37 +21863,31 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
                           const packOnPace = packGapCases <= 2;
                           const packBehindSec = packGapCases * casePeriodSec;
-                          const recordQuickCheckCorrection = (nextSkids: number, nextCases: number) => {
-                            const currentTotal = hasCps ? packedTotal : packedSkids;
-                            const nextTotal = hasCps ? nextSkids * cps + nextCases : nextSkids;
-                            detectPackagingSpeedDrift(nextTotal - currentTotal);
-                          };
-                          const setPackedTotal = (t: number) => {
-                            // No upper cap: manual counts can exceed the planned
-                            // need (run may over-produce). Auto-track still stops
-                            // at casesNeeded on its own.
-                            const total = Math.max(0, t);
-                            const nextSkids = Math.floor(total / cps);
-                            const nextCases = Math.round(total % cps);
-                            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
-                            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                            recordQuickCheckCorrection(nextSkids, nextCases);
-                          };
+                          const packagingControls = createPackagingControlAdapter({
+                            skidsCompleted: packedSkids,
+                            casesOnCurrentSkid: packedCasesOnSkid,
+                            casesPerSkid: cps,
+                            applyProgress: (nextSkids, nextCases) => {
+                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+                              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                            },
+                            reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+                          });
+                          // No upper cap: manual counts can exceed the planned
+                          // need (run may over-produce). Auto-track still stops
+                          // at casesNeeded on its own.
+                          const setPackedTotal = (total: number) => packagingControls.setTotal(total);
                           // Without a cases-per-skid setting the two counters
                           // can't be combined into one total — bump each field
                           // directly instead (same as the old plain steppers).
                           const bumpSkids = (d: number) => {
-                            const nextSkids = Math.max(0, packedSkids + d);
-                            persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
-                            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                            recordQuickCheckCorrection(nextSkids, packedCasesOnSkid);
+                            if (d < 0) packagingControls.decrementSkids();
+                            else if (d > 0) packagingControls.incrementSkids();
                           };
                           const bumpCases = (d: number) => {
-                            const nextCases = Math.max(0, packedCasesOnSkid + d);
-                            persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
-                            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                            recordQuickCheckCorrection(packedSkids, nextCases);
+                            if (d < 0) packagingControls.decrementCases();
+                            else if (d > 0) packagingControls.incrementCases();
                           };
                           const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
                           return (
