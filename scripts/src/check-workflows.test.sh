@@ -1036,9 +1036,21 @@ test_department_navigation_readiness_contract() {
   assert_contains "$workflow_content" \
     'PORT=5000 pnpm --filter @workspace/api-server run start'
   assert_contains "$workflow_content" \
-    "curl --fail --silent http://127.0.0.1:5000/api/healthz"
+    "http://127.0.0.1:5000/api/readyz"
+  assert_contains "$workflow_content" \
+    "/tmp/department-readiness.log"
+  assert_contains "$workflow_content" \
+    "grep -q '\"phase\":\"failed\"'"
   assert_contains "$workflow_content" \
     'pnpm --filter @workspace/run-calculator run dev'
+  assert_contains "$workflow_content" \
+    "name: Verify browser API proxy"
+  assert_contains "$workflow_content" \
+    "http://127.0.0.1:5000/api/livez"
+  assert_contains "$workflow_content" \
+    "http://127.0.0.1:5173/api/livez"
+  assert_contains "$workflow_content" \
+    "/tmp/department-proxy.log"
   assert_contains "$workflow_content" \
     "name: Upload browser server logs on failure"
   assert_contains "$workflow_content" "path: /tmp/department-*.log"

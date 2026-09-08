@@ -152,3 +152,4 @@
 - [Capability-gated controlled dialogs](capability-gated-controlled-dialogs.md) — revoke access with an immediate effective close plus one controlled-state close request; never unmount an open portal abruptly.
 - [Operational dialog viewport safety](operational-dialog-viewport-safety.md) — short landscape overlays need dynamic viewport height and scroll-aware hit tests; inset-0 can stop above fixed navigation.
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
+- [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
