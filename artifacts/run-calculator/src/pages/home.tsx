@@ -21,6 +21,7 @@ import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
@@ -2994,6 +2995,11 @@ const HOME_DIALOG_CARD_SCROLL_CLASS =
   `${HOME_DIALOG_CARD_CLASS} overflow-y-auto`;
 
 export default function Home() {
+  const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
+  useEffect(() => {
+    visibleTabScheduler.start();
+    return () => visibleTabScheduler.stop();
+  }, [visibleTabScheduler]);
   useAccessibleDialogStack();
   const {
     signOut,
@@ -4123,10 +4129,14 @@ export default function Home() {
   // transitions remain in Home's day-state coordinator.
   const { activeTab, setActiveTab, goBack } = useHomeNavigation();
   useEffect(() => {
-    recordMemorySample("home:mount");
-    const interval = window.setInterval(() => recordMemorySample("home:interval"), 60_000);
-    return () => window.clearInterval(interval);
-  }, []);
+    return visibleTabScheduler.register({
+      id: "memory-sample",
+      cadenceMs: 60_000,
+      runOnStart: true,
+      order: 10,
+      run: () => recordMemorySample("home:interval"),
+    });
+  }, [visibleTabScheduler]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetSummary = usePendingResetSummary();
   const pendingResetCount = pendingResetSummary.count;
@@ -5515,8 +5525,8 @@ export default function Home() {
   useEffect(() => {
     if (!canManageInventory) return;
     let active = true;
-    const refresh = () => {
-      void fetchPendingDuplicateReviews()
+    const refresh = async () => {
+      await fetchPendingDuplicateReviews()
         .then((result) => {
           if (active) persistPendingDuplicateReview(result.count);
         })
@@ -5524,15 +5534,18 @@ export default function Home() {
           // Preserve the last known reminder when the server is unavailable.
         });
     };
-    refresh();
-    const interval = window.setInterval(refresh, 30_000);
-    window.addEventListener("focus", refresh);
+    const unregister = visibleTabScheduler.register({
+      id: "duplicate-review",
+      cadenceMs: 30_000,
+      runOnStart: true,
+      order: 20,
+      run: refresh,
+    });
     return () => {
       active = false;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refresh);
+      unregister();
     };
-  }, [canManageInventory, persistPendingDuplicateReview]);
+  }, [canManageInventory, persistPendingDuplicateReview, visibleTabScheduler]);
 
   const openPendingDuplicateReview = useCallback(() => {
     setMergeFromImport(true);
@@ -8806,10 +8819,15 @@ export default function Home() {
         applyProfileReconcileRef.current(result);
       } catch {}
     };
-    void pass();
-    const t = setInterval(() => { void pass(); }, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, []);
+    const unregister = visibleTabScheduler.register({
+      id: "profile-reconcile",
+      cadenceMs: 60_000,
+      runOnStart: true,
+      order: 30,
+      run: pass,
+    });
+    return () => { cancelled = true; unregister(); };
+  }, [visibleTabScheduler]);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
@@ -9195,25 +9213,22 @@ export default function Home() {
     });
     foregroundRecoveryRetryRef.current = reconcileForeground;
 
-    function onVisibility() {
-      if (document.visibilityState === "visible") void reconcileForeground();
-    }
-    function onFocus() {
-      void reconcileForeground();
-    }
     function onOnline() {
-      void reconcileForeground();
+      if (!document.hidden) void reconcileForeground();
     }
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
     window.addEventListener("online", onOnline);
+    const unregisterWake = visibleTabScheduler.register({
+      id: "foreground-reconcile",
+      runOnForeground: true,
+      order: 0,
+      run: reconcileForeground,
+    });
     return () => {
       cancelled = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
       window.removeEventListener("online", onOnline);
+      unregisterWake();
     };
-  }, []);
+  }, [visibleTabScheduler]);
 
   // ── Durable merged-away tombstone (once on mount) ──
   // The per-day sync blob can't carry a merge across a day boundary: a new day's
@@ -9260,9 +9275,13 @@ export default function Home() {
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
   useEffect(() => {
-    const id = setInterval(() => { schedulePush(dayStateRef.current, 0, "periodic"); }, 30_000);
-    return () => clearInterval(id);
-  }, []);
+    return visibleTabScheduler.register({
+      id: "periodic-sync-push",
+      cadenceMs: 30_000,
+      order: 40,
+      run: () => schedulePush(dayStateRef.current, 0, "periodic"),
+    });
+  }, [visibleTabScheduler]);
 
   // Auto-save dough recipe preset whenever name + rows are set. The typed
   // Target Doughball Weight rides along (falling back to any weight the preset
@@ -9491,29 +9510,15 @@ export default function Home() {
     // time another device's pushed resetAt may have already 401-bounced us to
     // login, so the user sees the logout but never the reset. Mobile already
     // rolls over on its mount effect; this brings web to parity.
-    void checkDateRollover();
-    const interval = setInterval(checkDateRollover, 60_000);
-    document.addEventListener("visibilitychange", checkDateRollover);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", checkDateRollover);
-    };
-  }, []);
-
-  // Re-push on tab-foreground restore so a run-start (or any action) that
-  // fired while the tab was backgrounded or the screen was off doesn't stay
-  // unsynced. The browser can cancel an in-flight fetch when a tab is hidden,
-  // and setTimeout-based retries are throttled to ≥1 min on mobile — so the
-  // tab returning to the foreground is the reliable recovery point.
-  useEffect(() => {
-    function onVisibility() {
-      if (document.visibilityState === "visible") {
-        schedulePush(dayStateRef.current, 300);
-      }
-    }
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+    return visibleTabScheduler.register({
+      id: "date-rollover",
+      cadenceMs: 60_000,
+      runOnStart: true,
+      runOnForeground: true,
+      order: 50,
+      run: checkDateRollover,
+    });
+  }, [visibleTabScheduler]);
 
   // The server's PUT epoch guard fails CLOSED once the scope has ever been
   // reset: any sync write that doesn't carry a current `?epoch=` is answered
@@ -9852,6 +9857,13 @@ export default function Home() {
     delay = SYNC_EDIT_DEBOUNCE_MS,
     trigger: SyncMeasurementTrigger = "edit",
   ) {
+    // Keep every timer-driven/debounced write asleep with the document. The
+    // foreground reconciliation barrier pulls canonical state first, then
+    // replays this pending local delta after adoption.
+    if (document.hidden) {
+      foregroundPushPendingRef.current = true;
+      return;
+    }
     if (foregroundSyncBarrierRef.current) {
       foregroundPushPendingRef.current = true;
       return;
@@ -9877,6 +9889,11 @@ export default function Home() {
     setSyncPendingCount(1);
     recordSyncEvent("local", "Local change is queued for server sync");
     pushTimerRef.current = setTimeout(() => {
+      if (document.hidden) {
+        foregroundPushPendingRef.current = true;
+        syncPushTimingRef.current = null;
+        return;
+      }
       // Never push a stale-dated day into today's sync row. A tab left open
       // across midnight still holds yesterday's runs until the rollover fires;
       // pushing them to /api/sync/today (the server resolves "today" by its own

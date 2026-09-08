@@ -157,7 +157,11 @@ describe("SSE sync baseline gate", () => {
     expect(source).toContain("const SYNC_EDIT_DEBOUNCE_MS = 120;");
     expect(source).toContain("function schedulePush(");
     expect(source).toContain("delay = SYNC_EDIT_DEBOUNCE_MS");
-    expect(source).toContain("setInterval(() => { schedulePush(dayStateRef.current, 0, \"periodic\"); }, 30_000)");
+    expect(source).toContain('id: "periodic-sync-push"');
+    expect(source).toContain('run: () => schedulePush(dayStateRef.current, 0, "periodic")');
+    expect(source).toMatch(
+      /pushTimerRef\.current = setTimeout\(\(\) => \{\s*if \(document\.hidden\) \{\s*foregroundPushPendingRef\.current = true;/,
+    );
     expect(source).toContain("syncMeta: { queuedAt: timing.queuedAtEpoch }");
     expect(source).toContain("X-Sync-Response-Bytes");
   });

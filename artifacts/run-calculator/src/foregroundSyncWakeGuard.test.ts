@@ -14,8 +14,10 @@ import { createForegroundSyncWakeGuard } from "./foregroundSyncWakeGuard";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
 const HOOK_FILE = path.join(__dirname, "hooks", "useAutoTrack.ts");
+const SCHEDULER_FILE = path.join(__dirname, "visibleTabScheduler.ts");
 const homeSource = fs.readFileSync(HOME_FILE, "utf8");
 const hookSource = fs.readFileSync(HOOK_FILE, "utf8");
+const schedulerSource = fs.readFileSync(SCHEDULER_FILE, "utf8");
 
 describe("foreground wake sync barrier", () => {
   it("pulls the date-scoped row through the established inbound merge before releasing auto-track", () => {
@@ -25,8 +27,9 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain('cache: "no-store"');
     expect(homeSource).toContain("applySyncCallbackRef.current(payload)");
     expect(homeSource).toContain("setAutoTrackBlocked(false)");
-    expect(homeSource).toContain('document.addEventListener("visibilitychange", onVisibility)');
-    expect(homeSource).toContain('window.addEventListener("focus", onFocus)');
+    expect(homeSource).toContain('id: "foreground-reconcile"');
+    expect(schedulerSource).toContain('document.addEventListener("visibilitychange", this.onVisibility)');
+    expect(schedulerSource).toContain('window.addEventListener("focus", this.onFocus)');
     expect(homeSource).toContain('window.addEventListener("online", onOnline)');
   });
 
