@@ -15,6 +15,7 @@ export interface CalcStoppage {
 }
 export interface CalcRunMeta {
   id?: string;
+  metaUpdatedAt?: number;
   startedAt?: number;
   endedAt?: number;
   pausedAt?: number;
@@ -341,3 +342,4 @@ export * from "./autoTrackSchedule";
 export * from "./wallClockEngine";
 export * from "./linePhases";
 export * from "./operationalRunView";
+export * from "./operationalProjection";

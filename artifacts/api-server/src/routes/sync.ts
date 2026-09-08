@@ -70,10 +70,12 @@ import {
 } from "../lib/syncContract";
 import {
   computeAutoTrackSchedule,
+  buildOperationalProjection,
   computeServerCalc,
   applyTemporaryOverrides,
   type AutoTrackSchedule,
   type AutoTrackScheduleInput,
+  type OperationalProjection,
   type ServerCalcResult,
 } from "@workspace/live-calc";
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
@@ -221,18 +223,51 @@ export function buildAutoTrackSchedule(
   });
 }
 
-function computeServerLiveState(data: unknown, nowMs = Date.now()): {
+function computeServerLiveState(
+  data: unknown,
+  nowMs = Date.now(),
+  calculationRevision = 0,
+): {
   serverCalc: ServerCalcResult | null;
   autoTrackSchedule: AutoTrackSchedule | null;
+  operationalProjection: OperationalProjection | null;
+  serverTime: number;
+  calculationRevision: number;
+  snapshotId?: string;
 } {
+  const snapshotId = data == null ? undefined : syncSnapshotId(data);
   try {
     const payload = data as BroadcastPayload | null;
     const serverCalc = payload?.dayState
       ? computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs)
       : null;
-    return { serverCalc, autoTrackSchedule: buildAutoTrackSchedule(payload, serverCalc, nowMs) };
+    const autoTrackSchedule = buildAutoTrackSchedule(payload, serverCalc, nowMs);
+    const operationalProjection = payload && serverCalc && autoTrackSchedule
+      ? buildOperationalProjection({
+          payload: payload as Parameters<typeof buildOperationalProjection>[0]["payload"],
+          serverCalc,
+          schedule: autoTrackSchedule,
+          nowMs,
+          calculationRevision,
+        })
+      : null;
+    return {
+      serverCalc,
+      autoTrackSchedule,
+      operationalProjection,
+      serverTime: nowMs,
+      calculationRevision,
+      ...(snapshotId ? { snapshotId } : {}),
+    };
   } catch {
-    return { serverCalc: null, autoTrackSchedule: null };
+    return {
+      serverCalc: null,
+      autoTrackSchedule: null,
+      operationalProjection: null,
+      serverTime: nowMs,
+      calculationRevision,
+      ...(snapshotId ? { snapshotId } : {}),
+    };
   }
 }
 
@@ -243,12 +278,15 @@ function broadcast(
   date: string,
   meta: { canonicalRevision?: number; serverTime?: number } = {},
 ): void {
-  const liveState = computeServerLiveState(data);
+  const liveState = computeServerLiveState(
+    data,
+    meta.serverTime ?? Date.now(),
+    meta.canonicalRevision ?? 0,
+  );
   const msg = `data: ${JSON.stringify({
     data,
     senderId,
-    canonicalRevision: meta.canonicalRevision ?? 0,
-    serverTime: meta.serverTime ?? Date.now(),
+    canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
     ...liveState,
   })}\n\n`;
   for (const client of clients) {
@@ -945,7 +983,19 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   res.setHeader("X-Sync-Server-Time", String(serverTime));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
-  res.json(data);
+  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
+  if (!liveState.operationalProjection) {
+    // Preserve the empty-baseline response shape for clients that have no
+    // selected run yet. The server-time headers still provide the anchor.
+    res.json(data);
+    return;
+  }
+  res.json({
+    ...(data as Record<string, unknown>),
+    operationalProjection: liveState.operationalProjection,
+    serverTime,
+    canonicalRevision,
+  });
 });
 
 // A client pushes the reset epoch it last honored as `?epoch=`. If a data reset
@@ -1017,7 +1067,15 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     serverTime: result.serverTime,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
-  res.json(responseBody);
+  const liveState = merged
+    ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
+    : null;
+  res.json({
+    ...responseBody,
+    operationalProjection: liveState?.operationalProjection ?? null,
+    serverTime: result.serverTime,
+    canonicalRevision: result.canonicalRevision,
+  });
 });
 
 // Offline operational commands are not snapshots. Their stable ID is retained
@@ -1496,7 +1554,11 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
     if (result.outcome === "accepted") {
       broadcast(result.data, senderId, scope, date, result);
     }
-    const liveState = computeServerLiveState(result.data);
+    const liveState = computeServerLiveState(
+      result.data,
+      result.serverTime,
+      result.canonicalRevision,
+    );
     req.log.info({
       event: "auto_track_claim",
       outcome: result.outcome,
@@ -1514,7 +1576,6 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       values: result.values,
       data: result.data,
       canonicalRevision: result.canonicalRevision,
-      serverTime: result.serverTime,
       ...liveState,
       snapshotId: syncSnapshotId(result.data),
     });
@@ -1563,11 +1624,16 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const data = row?.data ?? null;
   const snapshotId = data ? syncSnapshotId(data) : undefined;
   const requested = requestedSnapshot(req);
-  const liveState = data ? computeServerLiveState(data) : {
-    serverCalc: null,
-    autoTrackSchedule: null,
-  };
   const initialServerTime = Date.now();
+  const liveState = data
+    ? computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0)
+    : {
+        serverCalc: null,
+        autoTrackSchedule: null,
+        operationalProjection: null,
+        serverTime: initialServerTime,
+        calculationRevision: row?.canonicalRevision ?? 0,
+      };
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
@@ -1575,7 +1641,6 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
     senderId: null,
     initial: true,
     canonicalRevision: row?.canonicalRevision ?? 0,
-    serverTime: initialServerTime,
     ...(initialResetState.epoch > 0
       ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }
       : {}),
@@ -1606,9 +1671,16 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
           })}\n\n`);
           return;
         }
-        const live = fresh?.data ? computeServerLiveState(fresh.data) : null;
-        if (live?.autoTrackSchedule) {
-          res.write(`data: ${JSON.stringify({ autoTrackSchedule: live.autoTrackSchedule, heartbeat: true })}\n\n`);
+        const heartbeatServerTime = Date.now();
+        const live = fresh?.data
+          ? computeServerLiveState(fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0)
+          : null;
+        if (live) {
+          res.write(`data: ${JSON.stringify({
+            ...live,
+            canonicalRevision: fresh?.canonicalRevision ?? 0,
+            heartbeat: true,
+          })}\n\n`);
         } else {
           res.write(": heartbeat\n\n");
         }

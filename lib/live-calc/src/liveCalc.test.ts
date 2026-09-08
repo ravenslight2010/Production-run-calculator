@@ -5,6 +5,7 @@ import {
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
   computeServerCalc,
+  buildOperationalProjection,
   deriveOperationalRunView,
   OperationalRunViewError,
   getAutoTrackTiming,
@@ -217,5 +218,80 @@ describe("shared live calculation boundary", () => {
       ...request,
       snapshot: { ...base, dayState: { ...base.dayState, runs: [{ id: "run-1" }, { id: "run-1" }] } } as never,
     })).toThrow(OperationalRunViewError);
+  });
+
+  it("builds a deterministic server projection with pause and end anchors", () => {
+    const base = {
+      dayState: {
+        currentIndex: 0,
+        runs: [{
+          id: "run-projection",
+          metaUpdatedAt: 11,
+          startedAt: 1_000,
+          stoppages: [{ type: "stop", startedAt: 3_000, endedAt: 4_000 }],
+        }],
+      },
+      runValues: {
+        "run-projection": {
+          pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
+          crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
+          freezerTime: 10, traysOnLine: 4, batchesReady: 2,
+          sauceBarrelsMade: 1, app1BatchesMade: 2,
+        },
+      },
+    } as never;
+    const serverCalc = computeServerCalc(base, [], 10_000)!;
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-projection",
+      startedAt: 1_000,
+      metaUpdatedAt: 11,
+      nowMs: 10_000,
+      v: base.runValues["run-projection"] as never,
+      calc: serverCalc.calc,
+    });
+    const args = {
+      payload: base,
+      serverCalc,
+      schedule,
+      nowMs: 10_000,
+      calculationRevision: 8,
+    };
+    const first = buildOperationalProjection(args);
+    const second = buildOperationalProjection(args);
+    expect(second).toEqual(first);
+    expect(first).toMatchObject({
+      version: 1,
+      runId: "run-projection",
+      lifecycleGeneration: "run-projection:11",
+      serverTimeMs: 10_000,
+      capturedAtServerMs: 10_000,
+      calculationRevision: 8,
+      effectiveElapsedSec: 8,
+      counters: { traysOnLine: 4, batchesReady: 2, sauceBarrelsMade: 1, app1BatchesMade: 2 },
+    });
+
+    const paused = {
+      ...base,
+      dayState: {
+        ...base.dayState,
+        runs: [{ ...base.dayState.runs[0], pausedAt: 7_000 }],
+      },
+    } as never;
+    const pausedCalc = computeServerCalc(paused, [], 10_000)!;
+    const pausedSchedule = computeAutoTrackSchedule({
+      runId: "run-projection",
+      startedAt: 1_000,
+      pausedAt: 7_000,
+      metaUpdatedAt: 11,
+      nowMs: 10_000,
+      v: paused.runValues["run-projection"] as never,
+      calc: pausedCalc.calc,
+    });
+    expect(buildOperationalProjection({
+      payload: paused,
+      serverCalc: pausedCalc,
+      schedule: pausedSchedule,
+      nowMs: 10_000,
+    }).effectiveElapsedSec).toBe(5);
   });
 });

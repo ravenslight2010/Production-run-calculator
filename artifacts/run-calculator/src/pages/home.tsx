@@ -12,7 +12,12 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
-import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
+import {
+  applyTemporaryOverrides,
+  type AutoTrackSchedule,
+  type Calc,
+  type OperationalProjection,
+} from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/WarehouseTabCtx";
@@ -7665,18 +7670,49 @@ export default function Home() {
   // adopt these refs without changing today's client-owned ticking semantics.
   const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
   const [serverCalc, setServerCalc] = useState<Calc | null>(null);
+  const serverProjectionRef = useRef<OperationalProjection | null>(null);
+  const [serverProjection, setServerProjection] = useState<OperationalProjection | null>(null);
+  const serverClockOffsetMsRef = useRef(0);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
   const [serverCalcReceipt, setServerCalcReceipt] =
     useState<OperationalSnapshotReceipt | null>(null);
+  function adoptOperationalProjection(
+    projection: OperationalProjection | null | undefined,
+    snapshotId: string | undefined,
+  ) {
+    if (!projection || !snapshotId || !Number.isFinite(projection.serverTimeMs)) return;
+    const offset = projection.serverTimeMs - Date.now();
+    serverClockOffsetMsRef.current = offset;
+    setServerClockOffsetMs(offset);
+    serverProjectionRef.current = projection;
+    setServerProjection(projection);
+    serverCalcRef.current = { runId: projection.runId, calc: projection.calc };
+    setServerCalc(projection.calc);
+    const receipt: OperationalSnapshotReceipt = {
+      runId: projection.runId,
+      snapshotId,
+      capturedAt: projection.capturedAtServerMs,
+    };
+    const previous = serverCalcReceiptRef.current;
+    if (
+      previous?.runId === receipt.runId
+      && previous.snapshotId === receipt.snapshotId
+      && previous.capturedAt === receipt.capturedAt
+    ) return;
+    serverCalcReceiptRef.current = receipt;
+    setServerCalcReceipt(receipt);
+  }
   function adoptServerCalcReceipt(
     serverCalc: { runId: string; calc: Calc } | null | undefined,
     snapshotId: string | undefined,
+    capturedAt = Date.now(),
   ) {
     if (!serverCalc || !snapshotId) return;
     const receipt: OperationalSnapshotReceipt = {
       runId: serverCalc.runId,
       snapshotId,
-      capturedAt: Date.now(),
+      capturedAt,
     };
     const previous = serverCalcReceiptRef.current;
     if (
@@ -8939,19 +8975,31 @@ export default function Home() {
           resetEpoch?: number;
           initial?: boolean;
           serverCalc?: { runId: string; calc: Calc } | null;
+          operationalProjection?: OperationalProjection | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
+          serverTime?: number;
+          canonicalRevision?: number;
           masterDataChanged?: boolean;
           configurationInvalidated?: boolean;
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
-        if (msg.serverCalc) {
+        if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
+          const offset = msg.serverTime - Date.now();
+          serverClockOffsetMsRef.current = offset;
+          setServerClockOffsetMs(offset);
+        }
+        if (msg.operationalProjection) {
+          adoptOperationalProjection(msg.operationalProjection, msg.snapshotId);
+        } else if (msg.serverCalc) {
           serverCalcRef.current = msg.serverCalc;
           setServerCalc(msg.serverCalc.calc);
-          adoptServerCalcReceipt(msg.serverCalc, msg.snapshotId);
+          adoptServerCalcReceipt(msg.serverCalc, msg.snapshotId, msg.serverTime);
         } else if (msg.initial && msg.snapshotId) {
           serverCalcRef.current = null;
           setServerCalc(null);
+          serverProjectionRef.current = null;
+          setServerProjection(null);
           serverCalcReceiptRef.current = null;
           setServerCalcReceipt(null);
         }
@@ -8995,6 +9043,9 @@ export default function Home() {
           }
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
+          if (msg.data.operationalProjection) {
+            adoptOperationalProjection(msg.data.operationalProjection, msg.snapshotId);
+          }
           if (msg.data.doughTimerControls) {
             localStorage.setItem(
               "run-calculator:dough-timer-controls",
@@ -9141,6 +9192,12 @@ export default function Home() {
            if (responseSnapshot) syncSnapshotIdRef.current = responseSnapshot;
            if (payload) {
              canonicalRunValuesUpdatedAtRef.current = { ...(payload.runValuesUpdatedAt ?? {}) };
+             if (payload.operationalProjection) {
+               adoptOperationalProjection(
+                 payload.operationalProjection,
+                 responseSnapshot ?? syncSnapshotIdRef.current,
+               );
+             }
            }
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
@@ -9506,6 +9563,14 @@ export default function Home() {
     if (result.body?.data && typeof result.body.data === "object") {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
+    }
+    if (result.body?.operationalProjection) {
+      adoptOperationalProjection(
+        result.body.operationalProjection as OperationalProjection,
+        typeof result.body.snapshotId === "string"
+          ? result.body.snapshotId
+          : syncSnapshotIdRef.current,
+      );
     }
     return result;
   }
@@ -17882,6 +17947,8 @@ export default function Home() {
         }}
         operationalSnapshotReceipt={serverCalcReceipt}
         operationalServerCalc={serverCalc}
+        operationalProjection={serverProjection}
+        serverClockOffsetMs={serverClockOffsetMs}
         operationalOnline={isOnline}
         operationalSyncConnected={syncConnected}
       >

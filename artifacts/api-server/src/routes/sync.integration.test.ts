@@ -2347,7 +2347,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
       body: JSON.stringify({
         senderId: "schedule-writer",
         payload: {
-          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep" }], resetAt: 1000 },
+          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }], resetAt: 1000 },
           runValues: { "scheduled-run": { casesNeeded: 240 } },
           runValuesUpdatedAt: { "scheduled-run": 1 },
         },
@@ -2373,12 +2373,28 @@ describe("/sync/events — date-scoped broadcasts", () => {
       data?: { dayState?: { runs?: Array<{ id: string }> } };
       serverCalc?: { runId: string } | null;
       autoTrackSchedule?: { runId: string; entries: unknown[] } | null;
+      operationalProjection?: {
+        version: number;
+        runId: string;
+        serverTimeMs: number;
+        calculationRevision: number;
+        effectiveElapsedSec: number;
+        facts: { runStatus: string; pressDone: boolean };
+      } | null;
+      serverTime?: number;
     };
     expect(initial.initial).toBe(true);
     expect(initial.senderId).toBeNull();
     expect(initial.data?.dayState?.runs?.map((run) => run.id)).toContain("scheduled-run");
     expect(initial.serverCalc?.runId).toBe("scheduled-run");
     expect(initial.autoTrackSchedule).toMatchObject({ runId: "scheduled-run", entries: [] });
+    expect(initial.operationalProjection).toMatchObject({
+      version: 1,
+      runId: "scheduled-run",
+      calculationRevision: 0,
+      facts: { runStatus: "running", pressDone: false },
+    });
+    expect(initial.operationalProjection?.serverTimeMs).toBe(initial.serverTime);
   });
 
   it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {
