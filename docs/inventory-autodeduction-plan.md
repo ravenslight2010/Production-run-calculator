@@ -68,51 +68,57 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 
 ## E. Non-Ingredient / Packaging Inventory Gaps
 
-### Gap E1: Labeled Runs Don't Consume Packaging
-**Problem**: `computeRunLines` only deducts circles, shippers, and cartons for `cartoned` runs. `labeled` runs are excluded — but they still physically use circles and shippers. The warehouse needs roll-up (`aggregatePackagingNeeds`) shows labels for labeled runs but inventory never deducts them.
+### Gap E1-E3: Packaging Consumption Per Mode
+**Problem**: Only `cartoned` runs consume circles/shippers/cartons. `labeled` runs consume nothing. Grip sheets, slip sheets, and skid stacking are never tracked.
 
-**Fix**: Extend `computeRunLines` to handle all three packaging modes:
+**Fix**: Extend `computeRunLines` to handle all packaging modes:
 
-| Mode | Circles | Shippers | Cartons | Labels |
-|------|---------|----------|---------|--------|
-| `cartoned` | ✓ deduct | ✓ deduct | ✓ deduct | ✗ (none needed) |
-| `labeled` | ✓ deduct | ✓ deduct | ✗ | ✓ deduct (rolls) |
-| `n-a` | ✗ | ✗ | ✗ | ✗ |
+| Mode | Circles | Shippers | Cartons | Top/Bottom Labels | Shipper Labels | Slip/Grip Sheets | Pallets | Tape/Glue/Ink |
+|------|---------|----------|---------|-------------------|---------------|-----------------|---------|--------------|
+| `cartoned` | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| `labeled` | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `n-a` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ |
+
+**Key insight**: Circles, shippers, grip/slip sheets, pallets, and tape/glue apply to BOTH cartoned and labeled runs — only cartons and labels are mode-specific. `n-a` still uses pallets and grip/slip sheets (physical stacking needs them).
 
 **Implementation**:
-- Move circles/shippers deduction OUTSIDE the `cartoned` gate — they apply to both `cartoned` and `labeled` runs
-- Add label roll deduction for `labeled` runs: `packaging:labels:rolls` or `packaging:labels:top` / `packaging:labels:bottom`
-- Keep `n-a` as zero-consumption
+- Move circles/shippers OUTSIDE the `cartoned` gate
+- Add label roll deduction for `labeled` runs
+- Add grip sheets, slip sheets, pallets, tape, glue, ink as universal packaging lines
 
-### Gap E2: Grip Sheets Not Tracked
-**Problem**: `gripSheets` is a per-run packaging option ("none", "every other layer", "3rd and 5th") but never appears in consumption lines or inventory.
+### Gap E4: Full Packaging Inventory List
+**Problem**: The system only tracks 3 packaging items (circles, shippers, cartons). The real factory uses 13+ packaging items, most lot-tracked by QC.
 
-**Fix**: Add grip sheet consumption to `computeRunLines`:
-- If `gripSheets !== "none"` → compute number of grip sheets needed based on skid layers
-- Key: `packaging:gripSheets:{type}`, unit: `sheets`
-- Requires: `casesPerSkid`, `casesPerLayer` to compute layer count
+**Complete packaging list** (what the factory actually uses):
 
-### Gap E3: Skid Stacking Materials Not Tracked
-**Problem**: `skidStacking` ("lucia", "hannaford", "column") is a packaging option but never tracked.
+| Item | Unit | How Computed | Currently Tracked |
+|------|------|-------------|-------------------|
+| **Circles** | circles | totalPizzas × circle size | ✓ cartoned only |
+| **Shippers** | shippers | totalCases × shipper type | ✓ cartoned only |
+| **Cartons** | cases | totalPizzas / cartonsPerCase | ✓ cartoned only |
+| **Slip sheets** | sheets | per skid layer | ✗ |
+| **Grip sheets** | sheets | per skid layer (based on gripSheets setting) | ✗ |
+| **Top labels** | rolls | totalPizzas / labelsPerRoll (top position) | ✗ |
+| **Bottom labels** | rolls | totalPizzas / labelsPerRoll (bottom position) | ✗ |
+| **Shipper labels** | rolls | totalCases / labelsPerShipper | ✗ |
+| **Pallets** | pallets | Math.ceil(casesNeeded / casesPerSkid) | ✗ |
+| **Tape** | rolls | per N skids or per run | ✗ |
+| **Glue** | lbs/oz | per run (labeling) | ✗ |
+| **Glue sticks** | sticks | per run (labeling) | ✗ |
+| **Ink** | cartridges | per run (labeling) | ✗ |
 
-**Fix**: If skid stacking requires specific materials (bands, stretch wrap), add as consumption line:
-- Key: `packaging:skidStacking:{type}`, unit: `skids`
-- Computed from: `skidsCompleted` or `Math.ceil(casesNeeded / casesPerSkid)`
+**Fix**: Add all 13 items to `computeRunLines` with proper computation logic. Each gets a consumption key, category "packaging", and deducts from inventory at run-end.
 
-### Gap E4: Film / Wrap / Tape (Common Supplies)
-**Problem**: Stretch wrap, tape, and film are commonly used in packaging but don't exist in the system at all — no form field, no consumption line.
-
-**Fix**: These are typically "supplies" rather than per-run items. Options:
-- **Simple**: Add a general "packaging supplies" consumption line per run (e.g., 1 roll of stretch wrap per N skids)
-- **Better**: Add `film`, `tape`, `stretchWrap` as configurable packaging options in Setup → Packaging Settings, with per-skid or per-run quantities
+**QC lot tracking tie-in**: Most of these packaging items get lot-tracked by QC. The lot tracking system (from QC department plan) connects here — when packaging is consumed from inventory, the lot number should be recorded. This creates the full chain: **QC lot entry → inventory deduction → run consumption → audit trail**.
 
 ### Gap E5: Pallets / Skids
 **Problem**: `casesPerSkid` and `skidsCompleted` are tracked but pallets themselves are never consumed from inventory.
 
-**Fix**: If pallets are tracked as inventory items:
+**Fix**: 
 - Key: `packaging:pallets:count`
 - Computed from: `Math.ceil(casesNeeded / casesPerSkid)` (or `skidsCompleted` for actual)
 - Deduct from inventory like other packaging
+- Lot-tracked by QC when pallets are staged
 
 ---
 
@@ -153,13 +159,16 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 | `lib/freezer-pull/src/surplus.ts` | Surplus math (extend) |
 | `artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx` | Surplus UI (add inventory deduction) |
 | `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx` | Already-made input (add inventory deduction) |
-| `artifacts/run-calculator/src/types.ts` | Form values (add grip sheets, film, etc.) |
+| `artifacts/run-calculator/src/types.ts` | Form values (add slip sheets, tape, glue, ink, shipper labels) |
+| `artifacts/run-calculator/src/pages/home.tsx:1055` | `aggregatePackagingNeeds` — extend for full packaging list |
+| `artifacts/run-calculator/src/departments/QcDepartment.tsx` | QC lot tracking ties to packaging consumption |
 
 ## New Database Tables
 None — all changes extend existing tables and consumption logic.
 
 ## API Changes
-- `POST /inventory/consume` — extend to accept actual cases
+- `POST /inventory/consume` — extend to accept actual cases + full packaging list
 - `POST /api/freezer-surplus/allocate` — add inventory deduction side-effect
 - New: `POST /inventory/consume-mix` — deduct mix ingredients
 - New: `POST /inventory/consume-overproduction` — deduct overproduction ingredients
+- Lot tracking integration: packaging deductions carry lot numbers from QC entries
