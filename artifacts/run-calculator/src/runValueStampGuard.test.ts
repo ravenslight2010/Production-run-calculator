@@ -231,15 +231,18 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
         if (/\.test\.(ts|tsx)$/.test(entry.name)) continue;
         const rel = path.relative(srcDir, full);
-        // The form lifecycle controller owns Home's extracted autosave write and
-        // is analyzed above by the same stamp guard. LiveRunContext pre-seeds
+        // Extracted Home managers remain guarded orchestration boundaries:
+        // useHomeFormLifecycle owns autosave, while useRunLifecycleManager owns
+        // run-switch and transition durability. Their focused tests verify
+        // attribution and the required value stamps. LiveRunContext pre-seeds
         // next-run dough counters and stamps immediately afterward.
         if (
           rel === path.join("pages", "home.tsx") ||
           rel === "storage.ts" ||
           rel === path.join("adapters", "browserRunPersistence.ts") ||
           rel === path.join("contexts", "LiveRunContext.tsx") ||
-          rel === path.join("hooks", "useHomeFormLifecycle.ts")
+          rel === path.join("hooks", "useHomeFormLifecycle.ts") ||
+          rel === path.join("hooks", "useRunLifecycleManager.ts")
         ) continue;
         const text = fs.readFileSync(full, "utf8");
         if (/\bsaveRunValues\b/.test(text)) offenders.push(rel);

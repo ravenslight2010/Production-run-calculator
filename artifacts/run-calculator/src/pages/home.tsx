@@ -6,6 +6,7 @@ import {
   useHomeFormIdentityFences,
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
+import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
 import {
   initialResetRequiresReload,
   useHomeSyncCoordination,
@@ -5211,11 +5212,6 @@ export default function Home() {
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
   const [confirmRemoveBlanks, setConfirmRemoveBlanks] = useState(false);
-  // The safe policy is persisted by pauseRun before this local prompt opens.
-  // This state only controls the short-lived operator decision UI; it is never
-  // required to keep a paused run safe across a reload, sync, or hidden screen.
-  const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
-  const pauseDecisionPauseIdRef = useRef<string | null>(null);
   const savedFlashRef = useRef<HTMLSpanElement>(null);
   const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeState = useRef<SwipeGestureState | null>(null);
@@ -10496,32 +10492,39 @@ export default function Home() {
     form.setValue(key as keyof FormValues, value as never, { shouldDirty: true });
   });
 
-  function switchToRun(newIndex: number) {
-    if (newIndex < 0 || newIndex >= dayState.runs.length) return;
-    flushPendingHomeFormWrites();
-    const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
-    // Profile writes are manager-only: run values still save for everyone,
-    // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
-      }
-    }
-    const newId = dayState.runs[newIndex].id;
-    const newDs = { ...dayState, currentIndex: newIndex };
-    setDayState(newDs);
-    saveDayState(newDs);
-    const newVals = loadRunValues(newId);
-    lastFormRunIdRef.current = newId;
-    form.reset(newVals);
-    resetFieldArrays(newVals);
-    setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
-    // Restore open stoppage for the new run (or clear if none)
-    const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt);
-    setActiveStopId(openStop?.id ?? null);
-    setConfirmDeleteStopId(null);
-  }
+  const {
+    switchToRun,
+    startRun,
+    pauseRun,
+    setPauseTunnelPolicy,
+    resumeRun,
+    endRun,
+    pauseDecisionRunId,
+    dismissPauseDecision: setPauseDecisionRunId,
+  } = useRunLifecycleManager({
+    dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
+    flushFormWrites: flushPendingHomeFormWrites,
+    loadRunValues, saveRunValues, markRunValuesUpdated,
+    canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
+    setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
+    foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
+    showForegroundRecoveryNotice, recordSyncEvent,
+    queueOperationalIntent, flushOperationalIntentOutbox, browserIsOnline,
+    capturePreEndLifecycle, computeRunConsumptionLines, effectiveValuesForRun,
+    overlayRunMetaStamps, isolatePendingRunPackagingProgress,
+    recordManualPackagingProgress, persistManualPackagingProgress,
+    calcTotalTimeSec: () => calcRef.current?.totalTimeSec ?? 0,
+    initialFinishTimestampRef,
+    summarizeCarriedInCases: (run, originalTarget) => summarizeSurplusForRun({
+      runId: run.id, brand: run.brand, flavor: run.flavor, originalTarget,
+      lots: freezerSurplus.lots, allocations: freezerSurplus.allocations,
+    }).carriedInCases,
+    startRunAndQueueCompetingCompletions, todayStr,
+    reportRunInsightsAfterFinalize,
+    getRunInsightsSignal: () => runInsightsAbortControllerRef.current.signal,
+    genId, applyResumeToRun, canChoosePauseTunnelPolicy,
+    pauseDecisionRemainingMs, shouldClosePauseDecision, schedulePush,
+  });
 
   // ── Temporary ingredient substitutions (day-state overlay) ─────────────────
   // Floor staff overlay today's recipes when an ingredient is low/out. These
@@ -11382,259 +11385,6 @@ export default function Home() {
     }
   }
 
-  function startRun() {
-    // A visible tab can be tapped before its foreground GET returns. Do not
-    // turn that stale UI into a lifecycle write; the reconciled state will
-    // render before the controls become actionable again.
-    if (foregroundSyncBarrierRef.current) return;
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const activeRun = base.runs[index];
-    if (!activeRun) return;
-    flushPendingHomeFormWrites();
-    const activeRunId = activeRun.id;
-    const now = Date.now();
-    queueOperationalIntent({ runId: activeRunId, observedGeneration: `${activeRunId}:${activeRun.metaUpdatedAt ?? activeRun.startedAt ?? 0}`, effectiveAt: now, action: "lifecycle", lifecycle: "start" });
-    void flushOperationalIntentOutbox();
-    // A pending run owns no Packaging completion. If a run-switch handoff ever
-    // leaked the prior run's counters into this form/storage, clear them before
-    // the lifecycle starts so the new run cannot begin already "complete".
-    const rawOpeningValues = form.getValues();
-    const isolatedOpeningValues = isolatePendingRunPackagingProgress(
-      activeRun,
-      rawOpeningValues,
-    );
-    if (isolatedOpeningValues !== rawOpeningValues) {
-      form.setValue("skidsCompleted", 0, { shouldDirty: true });
-      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
-      recordManualPackagingProgress({
-        runId: activeRunId,
-        skidsCompleted: 0,
-        casesOnCurrentSkid: 0,
-        manualOverrideUntil: now,
-        now,
-      });
-      saveRunValues(activeRunId, form.getValues());
-      markRunValuesUpdated(activeRunId, now);
-    }
-    initialFinishTimestampRef.current =
-      now + (calcRef.current?.totalTimeSec ?? 0) * 1000;
-    // Starting a run stops any other run that is currently running. Finalize each
-    // through the same durable intent as an explicit End.
-    for (const r of base.runs) {
-      if (r.id !== activeRunId && r.startedAt && !r.endedAt) {
-        const runValues = loadRunValues(r.id);
-        queueOperationalIntent({
-          runId: r.id,
-          observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
-          effectiveAt: now,
-          action: "lifecycle",
-          lifecycle: "end",
-          preEndLifecycle: capturePreEndLifecycle(r),
-          inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, runValues)),
-        });
-      }
-    }
-    if (browserIsOnline()) void flushOperationalIntentOutbox();
-    // An explicit Warehouse allocation is carried into the live packaging
-    // register once, so the operator sees the confirmed opening count while
-    // the original casesNeeded target remains intact in the run form.
-    const carried = summarizeSurplusForRun({
-      runId: activeRunId,
-      brand: activeRun.brand,
-      flavor: activeRun.flavor,
-      originalTarget: Number(form.getValues("casesNeeded")) || 0,
-      lots: freezerSurplus.lots,
-      allocations: freezerSurplus.allocations,
-    }).carriedInCases;
-    const openingValues = form.getValues();
-    const openingCases =
-      (Number(openingValues.skidsCompleted) || 0) * (Number(openingValues.casesPerSkid) || 0) +
-      (Number(openingValues.casesOnCurrentSkid) || 0);
-    if (carried > 0 && openingCases === 0) {
-      const casesPerSkid = Number(openingValues.casesPerSkid) || 0;
-      const seededSkids = casesPerSkid > 0 ? Math.floor(carried / casesPerSkid) : 0;
-      const seededCases = casesPerSkid > 0 ? carried % casesPerSkid : carried;
-      form.setValue("skidsCompleted", seededSkids, { shouldDirty: true });
-      form.setValue("casesOnCurrentSkid", seededCases, { shouldDirty: true });
-      persistManualPackagingProgress(activeRunId, seededSkids, seededCases);
-      saveRunValues(activeRunId, form.getValues());
-    }
-    // Carry over prep batches into the starting run (once, guarded by prepCarriedOver).
-    // Adds dough prep batches to the run form's batchesReady field so the live
-    // calculation begins with the correct head start.
-    const prep = base.prepPhase;
-    let nextPrepPhase = prep;
-    if (prep && !prep.prepCarriedOver && prep.prepBatchesDough > 0) {
-      const curBatches = Number(form.getValues("batchesReady")) || 0;
-      form.setValue("batchesReady", curBatches + prep.prepBatchesDough, { shouldDirty: true });
-      markRunValuesUpdated(activeRunId, now);
-      nextPrepPhase = { ...prep, prepCarriedOver: true };
-    } else if (prep && !prep.prepCarriedOver) {
-      // Mark carried even if no dough batches — prevents re-check on next startRun.
-      nextPrepPhase = { ...prep, prepCarriedOver: true };
-    }
-    const { runs: newRuns, autoEnded } = startRunAndQueueCompetingCompletions({
-      date: base.date || todayStr(),
-      runs: base.runs,
-      currentIndex: index,
-      now,
-      loadValues: loadRunValues,
-    });
-    const newDs = { ...base, runs: newRuns, prepPhase: nextPrepPhase };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-    // Run Insights: runs auto-finalized by starting this one get the same
-    // post-run evaluation as an explicit Stop Run (best-effort).
-    if (autoEnded.length > 0) {
-      void reportRunInsightsAfterFinalize(
-        autoEnded,
-        newRuns,
-        runInsightsAbortControllerRef.current.signal,
-      );
-    }
-  }
-
-  function pauseRun() {
-    if (foregroundSyncBarrierRef.current) return;
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const run = base.runs[index];
-    // A double click or a stale compact strip must never create concurrent pause
-    // records for one lifecycle.
-    if (!run?.startedAt || run.pausedAt || run.endedAt) return;
-    flushPendingHomeFormWrites();
-    const now = Date.now();
-    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "pause" });
-    void flushOperationalIntentOutbox();
-    // Persist the conservative default before displaying the question. This is
-    // intentionally not deferred to the ten-second timer: a reload, a lost
-    // foreground event, or another tablet must all see the same safe choice.
-    const pauseStop: Stoppage = {
-      id: genId(), reason: "", type: "pause", startedAt: now, stopTunnel: true,
-    };
-    const newRuns = base.runs.map((r, i) =>
-      i === index
-        ? {
-          ...r,
-          pausedAt: now,
-          pausedStoppageId: pauseStop.id,
-          stoppages: [...(r.stoppages ?? []), pauseStop],
-        }
-        : r
-    );
-    const newDs = { ...base, runs: newRuns };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-    setActiveTab("run");
-    pauseDecisionPauseIdRef.current = pauseStop.id;
-    setPauseDecisionRunId(run.id);
-  }
-
-  function setPauseTunnelPolicy(stopTunnel: boolean) {
-    const runId = pauseDecisionRunId ?? currentRunId;
-    const pauseId = pauseDecisionPauseIdRef.current;
-    const base = dayStateRef.current;
-    const run = base.runs.find((candidate) => candidate.id === runId);
-    if (
-      !pauseId ||
-      !run?.pausedAt ||
-      run.pausedStoppageId !== pauseId ||
-      !canChoosePauseTunnelPolicy(run.pausedAt, Date.now())
-    ) {
-      setPauseDecisionRunId(null);
-      return;
-    }
-    let changed = false;
-    const stoppages = (run.stoppages ?? []).map((stoppage) => {
-      if (
-        stoppage.id === pauseId && stoppage.type === "pause" && !stoppage.endedAt
-      ) {
-        changed = true;
-        return { ...stoppage, stopTunnel };
-      }
-      return stoppage;
-    });
-    if (changed) {
-      const newDs = {
-        ...base,
-        runs: base.runs.map((candidate) =>
-          candidate.id === runId ? { ...candidate, stoppages } : candidate,
-        ),
-      };
-      dayStateRef.current = newDs;
-      setDayState(newDs);
-      saveDayState(newDs);
-      schedulePush(newDs, 0);
-    }
-    setPauseDecisionRunId(null);
-  }
-
-  function resumeRun() {
-    if (foregroundSyncBarrierRef.current) return;
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const run = base.runs[index];
-    if (!run) return;
-    flushPendingHomeFormWrites();
-    const now = Date.now();
-    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "resume" });
-    void flushOperationalIntentOutbox();
-    const resumed = applyResumeToRun(run, now);
-    if (!resumed) return;
-    const newRuns = base.runs.map((r, i) =>
-      i === index ? resumed : r
-    );
-    const newDs = { ...base, runs: newRuns };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-    setPauseDecisionRunId(null);
-  }
-
-  useEffect(() => {
-    if (!pauseDecisionRunId) return;
-    // Closing the prompt is deliberately harmless: the pause record already
-    // contains stopTunnel:true unless the operator explicitly chose No.
-    const pauseId = pauseDecisionPauseIdRef.current;
-    const pausedAt = currentRun?.id === pauseDecisionRunId ? currentRun.pausedAt : undefined;
-    if (!pausedAt || currentRun?.pausedStoppageId !== pauseId) {
-      setPauseDecisionRunId(null);
-      return;
-    }
-    const close = () => setPauseDecisionRunId(null);
-    const timer = window.setTimeout(
-      close,
-      pauseDecisionRemainingMs(pausedAt, Date.now()),
-    );
-    const closeWhenHidden = () => {
-      if (
-        shouldClosePauseDecision(pausedAt, Date.now(), document.visibilityState === "visible")
-      ) {
-        close();
-      }
-    };
-    document.addEventListener("visibilitychange", closeWhenHidden);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("visibilitychange", closeWhenHidden);
-    };
-  }, [currentRun, pauseDecisionRunId]);
-
-  useEffect(() => {
-    if (
-      pauseDecisionRunId &&
-      (!currentRun || currentRun.id !== pauseDecisionRunId || !currentRun.pausedAt)
-    ) {
-      setPauseDecisionRunId(null);
-    }
-  }, [currentRun, pauseDecisionRunId]);
-
   // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
   // never called automatically. Returns a confirmation line for the card.
   const applyRunSuggestion = useEvent(async (s: RunSuggestion): Promise<string> => {
@@ -11761,93 +11511,6 @@ export default function Home() {
     }
     return null;
   });
-
-  function endRun(expectedRunId?: string, fromForegroundRecovery = false) {
-    // Guard: a run that was never started cannot be ended. Every UI call-site
-    // is already gated (STOP RUN only shows when runStatus==="running"), but
-    // this makes the function itself safe against future or unexpected paths.
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const activeRun = base.runs[index];
-    if (foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
-      if (
-        activeRun?.startedAt &&
-        !activeRun.endedAt &&
-        (!foregroundStopIntentRef.current || foregroundStopIntentRef.current.runId === activeRun.id)
-      ) {
-        foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
-        setPendingForegroundStopRunId(activeRun.id);
-        showForegroundRecoveryNotice(
-          "recovering",
-          "Stop requested. Checking the current run state before applying it…",
-        );
-        recordSyncEvent("local", "Stop request queued behind foreground recovery", undefined, activeRun.id);
-      }
-      return;
-    }
-    if (!activeRun?.startedAt || activeRun.endedAt) return;
-    if (expectedRunId && activeRun.id !== expectedRunId) {
-      showForegroundRecoveryNotice(
-        "outcome",
-        "Stop was not applied because the displayed run changed elsewhere. No other run was stopped.",
-      );
-      return;
-    }
-    const activeRunId = activeRun.id;
-    flushPendingHomeFormWrites();
-    const cur = form.getValues();
-    saveRunValues(activeRunId, cur);
-    // Profile writes are manager-only: run values still save for everyone,
-    // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (activeRun.brand || activeRun.flavor)) {
-      if (saveProfile(activeRun.brand, activeRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
-      }
-    }
-    const endedAt = Date.now();
-    // Online and offline completion use the same durable command. The bounded
-    // canonical lines are captured now (not recomputed after recipes change).
-    // Until this commits, buildSyncPayload removes the optimistic endedAt.
-    const observedRun = overlayRunMetaStamps([activeRun])[0];
-    queueOperationalIntent({
-      runId: activeRunId,
-      observedGeneration: `${activeRunId}:${observedRun.metaUpdatedAt ?? observedRun.startedAt ?? 0}`,
-      effectiveAt: endedAt,
-      action: "lifecycle",
-      lifecycle: "end",
-      preEndLifecycle: capturePreEndLifecycle(observedRun),
-      inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur)),
-    });
-    if (browserIsOnline()) void flushOperationalIntentOutbox();
-    const newRuns = base.runs.map((r, i) =>
-      i === index ? { ...r, pausedAt: undefined, endedAt } : r
-    );
-    const nextIndex = index + 1 < base.runs.length ? index + 1 : index;
-    const newDs = { ...base, runs: newRuns, currentIndex: nextIndex };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    // Run Insights: evaluate the just-finished run against its configured
-    // settings (best-effort, fire-and-forget — never disturbs the run flow).
-    void reportRunInsightsAfterFinalize(
-      newRuns.filter((r) => r.id === activeRunId),
-      newRuns,
-      runInsightsAbortControllerRef.current.signal,
-    );
-    if (nextIndex !== index) {
-      const nextId = base.runs[nextIndex].id;
-      const nextVals = loadRunValues(nextId);
-      lastFormRunIdRef.current = nextId;
-      form.reset(nextVals);
-      resetFieldArrays(nextVals);
-      const openStop = newRuns[nextIndex].stoppages?.find(s => !s.endedAt);
-      setActiveStopId(openStop?.id ?? null);
-    } else {
-      setActiveStopId(null);
-    }
-    setConfirmDeleteStopId(null);
-    schedulePush(newDs, 0);
-  }
 
   function moveRun(fromIdx: number, toIdx: number) {
     if (toIdx < 0 || toIdx >= dayState.runs.length) return;

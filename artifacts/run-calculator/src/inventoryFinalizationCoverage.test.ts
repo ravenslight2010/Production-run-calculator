@@ -12,14 +12,18 @@ const homeSource = readFileSync(
   resolve(fileURLToPath(import.meta.url), "../pages/home.tsx"),
   "utf8",
 );
+const lifecycleManagerSource = readFileSync(
+  resolve(fileURLToPath(import.meta.url), "../hooks/useRunLifecycleManager.ts"),
+  "utf8",
+);
 
 describe("inventory finalization wiring", () => {
   it("routes every run-closing path through the atomic finalization intent", () => {
-    const inventoryIntentLines = [...homeSource.matchAll(
-      /inventoryLines:\s*computeRunConsumptionLines\(/g,
+    const inventoryIntentLines = [...lifecycleManagerSource.matchAll(
+      /inventoryLines:\s*deps\.computeRunConsumptionLines\(/g,
     )];
     expect(inventoryIntentLines.length).toBeGreaterThanOrEqual(2);
-    expect(homeSource).toContain('lifecycle: "end"');
+    expect(lifecycleManagerSource).toContain('lifecycle: "end"');
     expect(homeSource).toContain("fencePendingEndSnapshots(");
     expect(homeSource).not.toMatch(/consumeRun\(\s*activeRunId\s*,/);
   });

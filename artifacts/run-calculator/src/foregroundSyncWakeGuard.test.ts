@@ -13,10 +13,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createForegroundSyncWakeGuard } from "./foregroundSyncWakeGuard";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
+const LIFECYCLE_MANAGER_FILE = path.join(__dirname, "hooks", "useRunLifecycleManager.ts");
 const SYNC_MANAGER_FILE = path.join(__dirname, "hooks", "useHomeSyncCoordination.ts");
 const HOOK_FILE = path.join(__dirname, "hooks", "useAutoTrack.ts");
 const SCHEDULER_FILE = path.join(__dirname, "visibleTabScheduler.ts");
 const homeSource = fs.readFileSync(HOME_FILE, "utf8");
+const lifecycleManagerSource = fs.readFileSync(LIFECYCLE_MANAGER_FILE, "utf8");
 const syncManagerSource = fs.readFileSync(SYNC_MANAGER_FILE, "utf8");
 const hookSource = fs.readFileSync(HOOK_FILE, "utf8");
 const schedulerSource = fs.readFileSync(SCHEDULER_FILE, "utf8");
@@ -110,13 +112,13 @@ describe("foreground wake sync barrier", () => {
 
   it("fences stale lifecycle taps until foreground adoption completes", () => {
     for (const name of ["startRun", "pauseRun", "resumeRun", "endRun"]) {
-      const start = homeSource.indexOf(`function ${name}(`);
+      const start = lifecycleManagerSource.indexOf(`const ${name} = useEvent(`);
       expect(start, `${name} exists`).toBeGreaterThan(-1);
-      expect(homeSource.slice(start, start + 700)).toContain("foregroundSyncBarrierRef.current");
+      expect(lifecycleManagerSource.slice(start, start + 900)).toContain("foregroundSyncBarrierRef.current");
     }
-    expect(homeSource).toContain("foregroundStopIntentRef.current = { action: \"stop\", runId: activeRun.id }");
+    expect(lifecycleManagerSource).toContain("foregroundStopIntentRef.current = { action: \"stop\", runId: activeRun.id }");
     expect(homeSource).toContain("resolveForegroundStopIntent(");
-    expect(homeSource).toContain("No other run was stopped.");
+    expect(lifecycleManagerSource).toContain("No other run was stopped.");
   });
 
   it("holds queued pushes and keeps recovery fenced after a failed pull", () => {
