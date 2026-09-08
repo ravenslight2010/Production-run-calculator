@@ -9,12 +9,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { StaffMember } from "./inventoryShared";
+import {
+  readCachedProfileBlobs,
+  resetProfileCacheForTests,
+  subscribeProfileCache,
+  writeCachedProfileBlobs,
+} from "./profileCache";
 
 const mocks = vi.hoisted(() => ({
   fetchMe: vi.fn(),
   signInRequest: vi.fn(),
+  signOutRequest: vi.fn(),
   setUnauthorizedHandler: vi.fn(),
   setAuthRequestEpoch: vi.fn(),
   resetMasterDataTransportCache: vi.fn(),
@@ -26,6 +33,7 @@ vi.mock("./inventoryShared", async (importOriginal) => {
     ...actual,
     fetchMe: mocks.fetchMe,
     signInRequest: mocks.signInRequest,
+    signOutRequest: mocks.signOutRequest,
     setUnauthorizedHandler: mocks.setUnauthorizedHandler,
     setAuthRequestEpoch: mocks.setAuthRequestEpoch,
   };
@@ -58,6 +66,14 @@ const manager: StaffMember = {
   sandboxStale: false,
 };
 
+const secondManager: StaffMember = {
+  ...manager,
+  userId: "manager-2",
+  name: "Second Manager",
+};
+
+const PROFILE_KEY = "acme__pepperoni";
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -88,6 +104,27 @@ function IdentityProbe() {
   );
 }
 
+function OpenProfileProbe() {
+  const { me, signIn, signOut } = useAuth();
+  const cacheVersion = useSyncExternalStore(
+    subscribeProfileCache,
+    () => readCachedProfileBlobs(PROFILE_KEY).dough,
+    () => null,
+  );
+  return (
+    <>
+      <output data-testid="profile-owner">{me?.userId ?? "signed-out"}</output>
+      <output data-testid="profile-value">{cacheVersion ?? "empty"}</output>
+      <button type="button" onClick={() => void signIn("manager", "password")}>
+        Sign in
+      </button>
+      <button type="button" onClick={() => void signOut()}>
+        Sign out
+      </button>
+    </>
+  );
+}
+
 function renderAuth() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -106,9 +143,11 @@ afterEach(() => {
   cleanup();
   mocks.fetchMe.mockReset();
   mocks.signInRequest.mockReset();
+  mocks.signOutRequest.mockReset();
   mocks.setUnauthorizedHandler.mockReset();
   mocks.setAuthRequestEpoch.mockReset();
   mocks.resetMasterDataTransportCache.mockReset();
+  resetProfileCacheForTests();
 });
 
 describe("AuthProvider session transition", () => {
@@ -163,5 +202,46 @@ describe("AuthProvider session transition", () => {
     );
 
     expect(screen.getByTestId("fresh-session").textContent).toBe("false");
+  });
+
+  it("clears an open profile consumer on logout and does not expose it after re-login", async () => {
+    mocks.fetchMe.mockResolvedValue(null);
+    mocks.signInRequest
+      .mockResolvedValueOnce({ token: "ignored", user: manager })
+      .mockResolvedValueOnce({ token: "ignored", user: secondManager });
+    mocks.signOutRequest.mockResolvedValue({});
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <OpenProfileProbe />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-owner").textContent).toBe("manager-1"),
+    );
+
+    writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":10}' });
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-value").textContent).toBe('{"lineSpeed":10}'),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-owner").textContent).toBe("signed-out"),
+    );
+    expect(screen.getByTestId("profile-value").textContent).toBe("empty");
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-owner").textContent).toBe("manager-2"),
+    );
+    expect(screen.getByTestId("profile-value").textContent).toBe("empty");
   });
 });
