@@ -450,3 +450,15 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 7. Ran `pnpm --filter @workspace/api-spec run codegen` to regenerate `OperationalRunView` types matching merged spec
 
 **Context**: This is the major Replit sync merge. Replit's branch is now the authoritative feature codebase; main's Step 7a/7b work is included via Replit's pre-squash merge of the feature branch. PR: https://github.com/ravenslight2010/Production-run-calculator/pull/39
+
+## LineMapDashboard Integration (2026-09-08)
+
+- **Files changed**: `artifacts/run-calculator/src/components/LineMapDashboard.tsx` (new), `artifacts/run-calculator/src/pages/home.tsx` (3 changes)
+- **What was wrong**: `LineMapDashboard` component was created in prior session but never integrated into the app. It also had 7 TypeScript errors: `linePhases` not on `LiveRunContextValue`, `fmtCountdownParts` called with 1 arg instead of 2, `"upstream"` status not in return type, and `ve.preTunnelMin`/`ve.postTunnelMin` don't exist on `CalcFormValues`.
+- **What the fix was**:
+  1. Added import + `MapPin` icon + `showLineMap` state toggle + conditional render in `LiveRunTabContent`
+  2. Removed `linePhases` dependency — derived press/tunnel/pack status from `calc` fields instead
+  3. Fixed all `fmtCountdownParts(sec)` → `fmtCountdownParts(Math.floor(sec/60), Math.round(sec%60))`
+  4. Fixed `ve.preTunnelMin`/`ve.postTunnelMin` → `v.preTunnelMin`/`v.postTunnelMin`
+  5. Removed dead `phaseStatus` function and unused `PhaseInfo`/`lineHasProduct`/`pickMostActivePhase` imports
+- **Why it was needed**: Component was orphaned — created but never wired in. Type errors would have prevented build.

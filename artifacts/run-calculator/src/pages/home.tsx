@@ -652,6 +652,7 @@ import {
   Users,
   Truck,
   RefreshCw,
+  MapPin,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
@@ -712,6 +713,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
+import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -18989,6 +18991,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
     operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
+  const [showLineMap, setShowLineMap] = useState(false);
   useAutomaticUpdateReloadBlocker(
     "live-run-operational-alert",
     Boolean(stallPrompt || showPaceAlert || showBatchDue),
@@ -19030,6 +19033,22 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   displayState={operationalDisplayState}
                   receipt={operationalSnapshotReceipt}
                 />
+                {/* ─── Line Map toggle ─── */}
+                <div className="flex justify-end mb-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowLineMap(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
+                      showLineMap
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/60"
+                    }`}
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Line Map</span>
+                  </button>
+                </div>
+                {showLineMap && <LineMapDashboard />}
                 {/* Blank-run sweep confirmation dialog */}
                 {confirmRemoveBlanks && (
                   <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
