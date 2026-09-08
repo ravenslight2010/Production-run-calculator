@@ -20213,7 +20213,18 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                             />
                             <button
                               type="button"
-                              onClick={() => { navigator.vibrate?.(15); updateDrainingRunValues(id, { skidsCompleted: skids + 1, casesOnCurrentSkid: 0 }); }}
+                              onClick={() => {
+                                navigator.vibrate?.(15);
+                                // A prior-run drain can already have moved cases
+                                // onto the next skid. Completing the skid adds
+                                // one full skid to the total; it must not erase
+                                // those newly arrived cases by resetting the
+                                // next skid's counter.
+                                updateDrainingRunValues(id, {
+                                  skidsCompleted: skids + 1,
+                                  casesOnCurrentSkid: casesOnSkid,
+                                });
+                              }}
                               className="w-12 h-10 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 rounded-lg flex items-center justify-center active:scale-95 transition-all shrink-0"
                               title="Skid done — log & reset"
                               data-testid="btn-draining-skid-done"
