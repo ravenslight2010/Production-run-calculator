@@ -570,4 +570,3 @@ Improve cross-device synchronization reliability and reduce conflicts.
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
 - `artifacts/run-calculator/src/contexts/SyncContext.tsx` — sync context
 - `.agents/memory/sync-convergence-soak.md` — sync stability notes
-
