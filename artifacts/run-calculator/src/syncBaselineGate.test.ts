@@ -119,8 +119,12 @@ describe("SSE sync baseline gate", () => {
     expect(lifecycleSource).toContain("formHandoffRef: useRef(false)");
     expect(source).toContain("useHomeSyncCoordination()");
     expect(coordinationSource).toContain("createSyncBaselineGate(synchronizationStateMachineRef.current)");
-    const errorHandler = source.match(/es\.onerror = \(\) => \{([\s\S]*?)\n    \};/);
-    expect(errorHandler?.[1]).toContain("syncBaselineGateRef.current.beginConnection()");
+    // Stream lifecycle moved into the manager; Home remains responsible for
+    // authoritative merge callbacks only.
+    expect(source).toContain("const disconnectSse = connectSse({");
+    expect(source).toContain("onInitialBaseline: (shouldPush) => {");
+    expect(coordinationSource).toContain("syncBaselineGateRef.current.beginConnection()");
+    expect(coordinationSource).toContain("syncBaselineGateRef.current.completeInitialSnapshot()");
   });
 
   it("routes bounded configuration invalidations through canonical sources and recovers all families at a baseline", () => {

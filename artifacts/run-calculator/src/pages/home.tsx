@@ -6,7 +6,10 @@ import {
   useHomeFormIdentityFences,
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
-import { useHomeSyncCoordination } from "../hooks/useHomeSyncCoordination";
+import {
+  initialResetRequiresReload,
+  useHomeSyncCoordination,
+} from "../hooks/useHomeSyncCoordination";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
@@ -22,7 +25,6 @@ import MixesTabContent from "../components/MixesTabContent";
 import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
-import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
@@ -36,7 +38,6 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
-import { SingleFlightSyncQueue } from "../syncPushQueue";
 import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
@@ -252,7 +253,6 @@ import {
 import {
   acceptRemoteRunValueOnSync,
   adoptStrictlyNewerRemoteLifecycles,
-  createSyncBaselineGate,
   deepEqual,
   freshDayState,
   isBlankRemovableRun,
@@ -7623,10 +7623,12 @@ export default function Home() {
   // offline edits remain available before a connection establishes a baseline.
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
-    syncBaselineGateRef, synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
+    synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
     foregroundSyncBarrierRef, foregroundPushPendingRef, foregroundStopIntentRef,
     foregroundRecoveryRetryRef, foregroundRecoveryNoticeTimerRef,
     foregroundRecoveryOwnerRef, syncPushGenerationRef, syncPushAbortControllersRef,
+    syncRetryTimerRef, syncPushQueueRef, connectSse, writeToday, requestBaselinePush,
+    registerForegroundRecovery,
     autoTrackBlocked, setAutoTrackBlocked,
     autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock,
     pendingForegroundStopRunId, setPendingForegroundStopRunId,
@@ -7650,16 +7652,6 @@ export default function Home() {
   // durable last line of defense if an already-received request completes, but
   // stale responses/retries may no longer update this client's sync signature
   // or re-publish a captured running snapshot after a remote Stop is adopted.
-  const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncPushQueueRef = useRef(
-    new SingleFlightSyncQueue<{
-      payload: SyncPayload;
-      sig?: string;
-      queuedAtPerf?: number;
-      queuedAtEpoch?: number;
-      trigger?: SyncMeasurementTrigger;
-    }>(synchronizationStateMachineRef.current),
-  );
   const syncPushTimingRef = useRef<{ queuedAtPerf: number; queuedAtEpoch: number } | null>(null);
   const syncPushTriggerRef = useRef<SyncMeasurementTrigger>("edit");
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
@@ -8949,21 +8941,18 @@ export default function Home() {
       "master-data", "profiles", "factory-data", "die-types", "supervisor-pin", "name-links", "merged-away",
     ]);
     const reconcileConfigurationBaseline = () => void reconcileConfiguration(allConfigurationFamilies());
-    syncBaselineGateRef.current.beginConnection();
-    const snapshot = syncSnapshotIdRef.current;
-    const esUrl = snapshot
-      ? `/api/sync/events?clientId=${clientId.current}&today=${todayStr()}&snapshot=${snapshot}`
-      : `/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`;
-    const es = new EventSource(esUrl);
-    es.onopen = () => {
+    const disconnectSse = connectSse({
+      clientId: clientId.current,
+      getSnapshot: () => syncSnapshotIdRef.current,
+      onOpen: () => {
       setSyncConnected(true);
       recordSyncEvent("connected", "Live sync connection opened");
       // Queue the reconnect recovery push. It is released only after the stream's
       // first frame has established a baseline, so a new/stale device cannot
       // upload its local day before applying today's shared row.
       schedulePush(dayStateRef.current, 1000, "recovery");
-    };
-    es.onmessage = (e: MessageEvent) => {
+    },
+    onMessage: (e: MessageEvent) => {
       try {
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
@@ -8993,7 +8982,7 @@ export default function Home() {
         if (msg.initial) {
           // An initial frame is also the reconnect baseline: refresh every
           // independent configuration family in case its nudge was missed while
-          // this EventSource was disconnected.
+          // this live stream was disconnected.
           reconcileConfigurationBaseline();
         } else if (
           (msg.configurationInvalidated || msg.masterDataChanged) &&
@@ -9011,15 +9000,18 @@ export default function Home() {
         // slate. applyResetWipe records the new epoch so this fires exactly once.
         if ((msg.reset || msg.rollover) && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
-          if (msg.resetEpoch > getStoredResetEpoch()) {
+          if (initialResetRequiresReload(msg.resetEpoch, getStoredResetEpoch())) {
             const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
             const adopted = msg.rollover
               ? applyRolloverEpoch(msg.resetEpoch)
               : applyResetWipe(msg.resetEpoch);
             if (adopted) window.location.reload();
             else synchronizationStateMachineRef.current.completeReset(generation);
+            return false;
           }
-          return;
+          // The server repeats its current reset marker on reconnect. Once this
+          // device has durably adopted that epoch, the same frame remains the
+          // only initial baseline and must continue through normal data handling.
         }
         if (msg.unchanged) {
           if (typeof msg.snapshotId === "string") {
@@ -9061,29 +9053,28 @@ export default function Home() {
           lastFormRunIdRef.current = seedId;
           formHandoffRef.current = false;
         }
-        if (msg.initial) {
-          // applySyncCallbackRef clears its sync-apply suppression in a
-          // requestAnimationFrame. Queue behind that same frame so the recovery
-          // push builds from the adopted snapshot and is not discarded by the
-          // suppression guard.
-          const shouldPush = syncBaselineGateRef.current.completeInitialSnapshot();
-          if (shouldPush) {
-            requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
-          }
-        }
-      } catch {}
-    };
-    es.onerror = () => {
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    onError: () => {
       recordSyncEvent("failure", isOnline ? "Live sync connection delayed; local changes are retained" : "Offline; local changes are retained");
-      // EventSource reconnects itself after an error without recreating this
+      // The browser stream reconnects itself after an error without recreating this
       // effect. Fence automatic pushes until that reconnect delivers its own
       // initial snapshot.
-      syncBaselineGateRef.current.beginConnection();
       setSyncConnected(false);
-      // EventSource can't read the HTTP status, so a drop may be the daily reset
+      // The browser stream can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me; if the session is gone we land on login.
       revalidate();
-    };
+    },
+    onInitialBaseline: (shouldPush) => {
+      // applySyncCallbackRef clears its sync-apply suppression in a frame.
+      // The manager opens this gate only after Home has merged the baseline.
+      if (shouldPush) requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
+    },
+    onClose: () => {},
+    });
     return () => {
       cancelled = true;
       configurationGeneration += 1;
@@ -9094,7 +9085,7 @@ export default function Home() {
       }
       syncPushTimingRef.current = null;
       syncPushQueueRef.current.reset();
-      es.close();
+      disconnectSse();
     };
   }, []);
 
@@ -9104,7 +9095,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async (): Promise<boolean> => {
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       foregroundSyncBarrierRef.current = true;
@@ -9339,22 +9330,10 @@ export default function Home() {
         }
       })();
     });
-    foregroundRecoveryRetryRef.current = reconcileForeground;
-
-    function onOnline() {
-      if (!document.hidden) void reconcileForeground();
-    }
-    window.addEventListener("online", onOnline);
-    const unregisterWake = visibleTabScheduler.register({
-      id: "foreground-reconcile",
-      runOnForeground: true,
-      order: 0,
-      run: reconcileForeground,
-    });
+    foregroundRecoveryRetryRef.current = foregroundRegistration.reconcile;
     return () => {
       cancelled = true;
-      window.removeEventListener("online", onOnline);
-      unregisterWake();
+      foregroundRegistration.dispose();
     };
   }, [visibleTabScheduler]);
 
@@ -9556,14 +9535,12 @@ export default function Home() {
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
-    const res = await fetch(
-      `/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: clientId.current, payload, snapshotId: syncSnapshotIdRef.current || undefined }),
-      },
-    );
+    const res = await writeToday({
+      payload,
+      clientId: clientId.current,
+      snapshotId: syncSnapshotIdRef.current,
+      epoch: getStoredResetEpoch(),
+    });
     await consumeCanonicalSyncWriteResponse(res, true);
     return res;
   }
@@ -9624,11 +9601,13 @@ export default function Home() {
       ...(timing?.queuedAtEpoch ? { syncMeta: { queuedAt: timing.queuedAtEpoch } } : {}),
     });
     const requestBytes = new Blob([requestBody]).size;
-    fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: requestBody,
+    writeToday({
+      payload,
+      clientId: clientId.current,
+      snapshotId: syncSnapshotIdRef.current,
+      epoch: getStoredResetEpoch(),
       signal: controller.signal,
+      queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
       if (generation !== syncPushGenerationRef.current) return;
       // Authentication failures are permanent for this request. Retrying them
@@ -9863,7 +9842,7 @@ export default function Home() {
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
-    if (!syncBaselineGateRef.current.requestPush()) return;
+    if (!requestBaselinePush()) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     if (!syncPushTimingRef.current) {
       syncPushTimingRef.current = {
