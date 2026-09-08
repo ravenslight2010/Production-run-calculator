@@ -446,3 +446,30 @@ Full details in `docs/idea-backlog.md` (10 sections, 60+ items). Summary:
 
 Working agreement unchanged: formula once in `lib/live-calc`, feature branch
 + PR, update memory, run skills before claiming done.
+
+## Section 9 — Production Line Layout Analysis (2026-09-08)
+
+Codex analyzed the physical production line layout photo (`docs/production-line/production-line.png`) against the app's current station model. Key findings:
+
+### Physical line flow
+Dough → Sauce → Press/Oven → Frontline (apps 1-4, pep 1-2) → Freeze Tunnel → Wrapper/Packaging → Warehouse (with cooler/freezer)
+
+### Gaps identified
+1. **Press/Oven** — only timing modeled (`preTunnelMin`), no dedicated monitoring station
+2. **Freeze Tunnel** — only timing modeled (`freezerTime` in line phases), no visual
+3. **Production Cooler** — not tracked at all
+4. **Physical line map** — no visual representation of the facility layout in the app
+
+### Recommended improvements (added to idea backlog Section 17)
+- SVG/canvas line map dashboard with real-time zone status
+- Freeze tunnel fill-level visualization
+- Press/Oven monitoring section
+- Production cooler tracking
+- Station-to-tab quick navigation from map
+- Upstream/downstream dependency alerts
+
+### Code references for Replit
+- `lib/live-calc/src/linePhases.ts` — 3-phase line model
+- `artifacts/run-calculator/src/frontlineRows.ts` — frontline station definitions
+- `artifacts/run-calculator/src/components/HomeStationTabs.tsx` — tab rendering
+- `artifacts/run-calculator/src/hooks/useHomeNavigation.ts` — HOME_TABS ordering

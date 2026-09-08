@@ -346,3 +346,45 @@ field checks, duplicate reviews, AI corrections, AI reviewer.
 - **Customer complaint linkage** — link external complaints to production runs;
   trace quality history → root cause. Closes the loop: complaint → run trace
   → quality data.
+
+---
+
+## 17. Production Line Layout & Station Mapping
+
+_Author: Codex — derived from physical line layout image analysis (2026-09-08)_
+
+### Physical line flow (from facility photo)
+Dough (white) → Sauce (red) → Press/Oven (gray) → Frontline apps 1-4, pep 1-2 (yellow) → Freeze tunnel (blue) → Wrapper/Packaging (green) → Warehouse (large white with cooler/freezer zones in blue). Production cooler (blue) sits between frontline and warehouse.
+
+### Current app coverage
+| Physical Station | App Tab | Line Phase Model | Status |
+|---|---|---|---|
+| Dough | ✅ Full tab | — | Complete |
+| Sauce | ✅ Full tab | — | Complete |
+| Press/Oven | ❌ No dedicated tab | Stage 1 (preTunnelMin) | Partial — timing only |
+| Frontline (apps 1-4, pep 1-2) | ✅ Full tab | Stage 1 (preTunnelMin) | Complete |
+| Freeze Tunnel | ❌ No dedicated visual | Stage 2 (freezerTime) | Partial — timing only |
+| Wrapper/Packaging | ✅ Full tab | Stage 3 (postTunnelMin) | Complete |
+| Production Cooler | ❌ Not tracked | — | Missing |
+| Warehouse Cooler/Freezer | ✅ Tab + inventory | — | Complete |
+
+### Improvement ideas
+
+- **Physical line map dashboard** — SVG/canvas rendering of the actual facility layout (matching the photo). Color-coded zones: dough (white), sauce (red), press/oven (gray), frontline (yellow), freeze tunnel (blue), packaging (green), warehouse (white). Real-time status overlay: green = running, yellow = idle, red = stopped. Show product flow direction with animated arrows. Tap a zone to jump to its tab.
+- **Freeze tunnel visual** — dedicated mini-visualization showing tunnel fill level as a percentage bar or fill animation. Show cases inside tunnel, transit time remaining, tunnel speed vs line speed. Currently modeled in `linePhases.ts` Stage 2 but has no dedicated UI.
+- **Press/Oven monitoring station** — dedicated section showing: press cases completed, oven temperature (if available), cases pressed vs target, press speed (cases/min). Currently only the timing phase is modeled (`preTunnelMin` default 2.5 min) but no operational monitoring.
+- **Production cooler tracking** — track product staging in the production cooler between frontline and warehouse. Temperature logging, cases staged, dwell time. Could integrate with QC temperature logging.
+- **Upstream/downstream dependency alerts** — when dough is falling behind sauce's readiness, or sauce behind frontline's needs, show a visual warning on the line map. The app already computes dough staging suggestions (`suggestedDoughStaging`) and frontline need rows (`deriveFrontlineNeedRows`) — surface these as alerts on the map.
+- **Station-to-tab quick nav** — tapping any zone on the line map navigates directly to the relevant tab (dough → Dough tab, press/oven → Run tab, frontline → Frontline tab, etc.).
+- **Line occupancy heatmap** — historical view of which stations are bottlenecks (most idle time, most stoppages). Pulls from existing stoppage/downtime data.
+- **Multi-line support** — future: if the facility expands to multiple lines, the map could show parallel lines. For now, single-line view is sufficient.
+
+### Key code references
+- `lib/live-calc/src/linePhases.ts` — 3-phase line model (Stage 1: Press·Oven·Frontline, Stage 2: Freeze Tunnel, Stage 3: Wrapper·Packaging)
+- `lib/live-calc/src/autoTrackEngine.ts` — auto-track timing (caseMs, trayMs, batchMs, hopperMs)
+- `lib/inventory-math/src/index.ts` — freezer WIP model (`computeCasesInFreezer`, `FreezerWipInput`)
+- `artifacts/run-calculator/src/frontlineRows.ts` — frontline station definitions (sauce, app1-4, pep1-2)
+- `artifacts/run-calculator/src/components/HomeStationTabs.tsx` — tab rendering
+- `artifacts/run-calculator/src/departments/DepartmentBoundary.tsx` — department groupings
+- `artifacts/run-calculator/src/hooks/useHomeNavigation.ts` — tab ordering (HOME_TABS)
+- `docs/production-line/production-line.png` — physical line layout photo
