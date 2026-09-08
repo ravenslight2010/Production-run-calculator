@@ -771,7 +771,7 @@ export default function SetupProfileEditor({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60 p-4"
       onClick={onClose}
     >
       <div
@@ -779,7 +779,7 @@ export default function SetupProfileEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-profile-dialog-title"
-        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
+        className="my-auto min-h-0 max-h-[calc(100dvh-2rem)] bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -792,7 +792,7 @@ export default function SetupProfileEditor({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         <Form {...form}>
         {!isSupervisor ? (
           <p className="text-sm text-muted-foreground py-6 text-center">

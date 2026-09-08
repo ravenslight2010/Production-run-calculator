@@ -2987,9 +2987,11 @@ async function encodeSpecPhoto(file: File): Promise<{ imageBase64: string; mimeT
 }
 
 const HOME_DIALOG_OVERLAY_CLASS =
-  "fixed inset-x-0 top-0 z-[70] flex h-[100dvh] items-center justify-center overflow-y-auto bg-black/60 p-4";
+  "fixed inset-x-0 top-0 z-[70] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60 p-4";
+const HOME_DIALOG_CARD_CLASS =
+  "my-auto max-h-[calc(100dvh-2rem)] min-h-0";
 const HOME_DIALOG_CARD_SCROLL_CLASS =
-  "my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto";
+  `${HOME_DIALOG_CARD_CLASS} overflow-y-auto`;
 
 export default function Home() {
   useAccessibleDialogStack();
@@ -15048,8 +15050,8 @@ export default function Home() {
           },
         ];
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScreensDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h3 id="cast-screens-dialog-title" className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
                 <button type="button" aria-label="Close cast to screens" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -15145,14 +15147,14 @@ export default function Home() {
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
       {showReorderDialog && (
         <div
-          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-4"
+          className={HOME_DIALOG_OVERLAY_CLASS}
           onClick={() => setShowReorderDialog(false)}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="reorder-runs-dialog-title"
-            className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]"
+            className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col`}
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -15164,7 +15166,7 @@ export default function Home() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="overflow-y-auto overscroll-contain flex-1 p-3 space-y-2">
+            <div className="min-h-0 overflow-y-auto overscroll-contain flex-1 p-3 space-y-2">
               {dayState.runs.map((run, idx) => {
                 const isCur = idx === dayState.currentIndex;
                 const statusDot = run.endedAt ? "bg-emerald-400" : run.startedAt ? "bg-primary animate-pulse" : "bg-muted-foreground/40";
@@ -15408,14 +15410,14 @@ export default function Home() {
 
         return (
           <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+            className={HOME_DIALOG_OVERLAY_CLASS}
             onClick={() => setShowManageDialog(false)}
           >
             <div
               role="dialog"
               aria-modal="true"
               aria-labelledby="manage-lists-dialog-title"
-              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
+              className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col`}
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
@@ -15458,7 +15460,7 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <div className="space-y-4">
@@ -16412,14 +16414,14 @@ export default function Home() {
       {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
       {showPinDialog && (
           <div
-           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+           className={HOME_DIALOG_OVERLAY_CLASS}
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="supervisor-access-dialog-title"
-            className="bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4 shadow-2xl"
+            className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4 shadow-2xl`}
             onClick={e => e.stopPropagation()}
           >
             <div className="text-center">
@@ -16973,8 +16975,8 @@ export default function Home() {
 
         {/* ── Re-import case-count offer: per-run Accept / Keep ────────────── */}
         {caseUpdatePrompt && caseUpdatePrompt.length > 0 && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className={HOME_DIALOG_OVERLAY_CLASS}>
+            <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4`}>
               <div className="flex items-center gap-2">
                 <h2 id="case-counts-dialog-title" className="text-base font-bold">Case counts changed</h2>
                 <button type="button" aria-label="Close case counts dialog" onClick={() => setCaseUpdatePrompt(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>

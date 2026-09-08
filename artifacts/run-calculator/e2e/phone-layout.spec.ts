@@ -637,6 +637,44 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
   return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
 }
+
+test.describe("phone layout smoke", () => {
+  test.describe.configure({ mode: "serial" });
+
+  for (const viewport of PHONE_VIEWPORTS) {
+    test(`sign-in is usable without overflow at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+      await page
+        .locator("#username")
+        .waitFor({ state: "visible", timeout: 20_000 });
+
+      await assertPhoneLayout(page, "sign-in");
+      await expect(
+        page.getByRole("heading", { name: /sign in to run calculator/i }),
+      ).toBeVisible();
+      await expect(page.locator("#username")).toBeEditable();
+      await expect(page.locator("#password")).toBeEditable();
+      await expect(
+        page.getByRole("button", { name: /^sign in$/i }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: /log in as test user/i }),
+      ).toBeVisible();
+    });
+  }
+
+  for (const viewport of PHONE_VIEWPORTS) {
+    test(`authenticated calculator stays usable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToSandbox(page);
+
+      await assertPhoneLayout(page, "main calculator");
+      for (const tab of PRIMARY_TABS) {
         const tabLocator = page.locator(`[data-testid="${tab}"]`);
         await expect(
           tabLocator,
@@ -890,46 +928,45 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
 
     const syncStatus = page.locator('button[title^="Sync"]');
     await expect(syncStatus).toBeVisible();
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
     await syncStatus.click();
+
     const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
     await expect(popover).toBeVisible();
-
-    await expect.poll(() => failedWrites, { timeout: 20_000 }).toBeGreaterThan(0);
-    await expect(popover.getByText("Sync failed", { exact: true })).toBeVisible({
-      timeout: 20_000,
-    });
-    await expect(
-      popover.getByText(
-        "Your local change is retained on this device. It is not shared until the server acknowledges it.",
-        { exact: true },
-      ),
-    ).toBeVisible();
     await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+    await expect(
+      popover.getByText("Last acknowledgment", { exact: true }),
+    ).toBeVisible();
     const retry = popover.getByRole("button", {
       name: /retry latest retained change/i,
     });
-      if (await retry.count()) await expect(retry).toBeVisible();
+    if (await retry.count()) await expect(retry).toBeVisible();
 
-      const geometry = await page.evaluate(() => {
-        const panel = document.querySelector("div.absolute.top-9");
-        if (!panel) return null;
-        const rect = panel.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          viewportWidth: window.innerWidth,
-          documentScrollWidth: document.documentElement.scrollWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        };
-      });
-      expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
-      expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
-      expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
-      expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
-      expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+    const geometry = await page.evaluate(() => {
+      const panel = document.querySelector("div.absolute.top-9");
+      if (!panel) return null;
+      const rect = panel.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+      };
+    });
+    expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
+    expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
+    expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
 
-      await syncStatus.click();
-    }
+    await syncStatus.click();
+  }
   });
 
   test("failed sync keeps the retained-change retry action visible on phone", async ({
@@ -998,11 +1035,14 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
     await expect(
       page.getByRole("heading", { name: "Manage Lists & Settings" }),
     ).toBeVisible();
+    await assertOverlayActionHitTargets(
+      page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+      "narrow landscape manager settings",
+    );
     await assertPhoneLayout(page, "narrow landscape manager settings", {
-      // The compact manager modal intentionally uses a clipped-height fixed
-      // backdrop while its scroll container owns the controls. Overflow and
-      // focus are still checked below; backdrop hit-testing is covered by the
-      // portrait dialog checks above.
+      // The dedicated dialog hit-test above probes the modal's actual controls.
+      // Exclude the backdrop from the page-wide fixed-layer scan so it is not
+      // mistaken for a separate obstruction over its own dialog contents.
       skipModalOverlayCoverage: true,
     });
     await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
@@ -1019,10 +1059,43 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
           "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
       });
 
+      const screensButton = page.getByTitle("Cast to other screens");
+      await expect(screensButton).toBeVisible();
+      await screensButton.click();
+      const screensDialog = page.getByRole("dialog", { name: "Cast to Screens" });
+      await expect(screensDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        screensDialog,
+        `Cast to Screens at ${viewport.width}x${viewport.height}`,
+      );
+      await screensDialog.getByRole("button", { name: "Close cast to screens" }).click();
+      await expect(screensDialog).toBeHidden();
+
+      // Add a second disposable run so the run-list reorder workflow is
+      // exercised from the same compact header action operators use.
+      await page.getByTestId("tab-run").click();
+      const newRun = page.locator("button").filter({ hasText: "New Run" }).first();
+      await expect(newRun).toBeVisible();
+      const reorderButton = page.getByTitle("Reorder runs");
+      for (let attempt = 0; attempt < 3 && !(await reorderButton.count()); attempt += 1) {
+        await newRun.click();
+        await page.waitForTimeout(350);
+      }
+      await expect(reorderButton).toBeVisible();
+      await reorderButton.click();
+      const reorderDialog = page.getByRole("dialog", { name: "Reorder Runs" });
+      await expect(reorderDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        reorderDialog,
+        `Reorder Runs at ${viewport.width}x${viewport.height}`,
+      );
+      await reorderDialog.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(reorderDialog).toBeHidden();
+
       // Start a disposable run through the real Run workflow so Log Line Stop
       // opens from the same action an operator uses on the station screen.
       await page.getByTestId("tab-run").click();
-        const casesNeeded = page.getByTestId("input-casesNeeded");
+      const casesNeeded = page.getByTestId("input-casesNeeded");
       await expect(casesNeeded).toBeVisible();
       await casesNeeded.fill("1");
       await page.getByTestId("button-start-run").click();
@@ -1459,8 +1532,6 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
   });
 });
 
-      const productionWrites: string[] = [];
-
 async function prepareGuideReviewForCommit(
   dialog: Locator,
   brandSelectTestId: string,
@@ -1474,8 +1545,6 @@ async function prepareGuideReviewForCommit(
     await acknowledgement.check();
   }
 }
-
-      const shipping = page.getByTestId("dialog-shipping-import");
 
 function crc32(bytes: Buffer): number {
   let crc = 0xffffffff;
@@ -1561,10 +1630,6 @@ function sauceGuideFixture(): Buffer {
   return singleFileZip("word/document.xml", xml);
 }
 
-      const sauce = page.getByTestId("dialog-sauce-guide-import");
-
-      const excel = page.getByRole("dialog", { name: "Import Excel" });
-
 function singleFileZip(fileName: string, contents: string): Buffer {
   // A minimal uncompressed ZIP is enough for the importer's DOCX reader and
   // keeps this disposable fixture independent of another archive package.
@@ -1602,8 +1667,6 @@ function singleFileZip(fileName: string, contents: string): Buffer {
   end.writeUInt32LE(local.length + data.length, 16);
   return Buffer.concat([local, data, central, end]);
 }
-
-      const dough = page.getByTestId("dialog-dough-guide-import");
 
 function scheduleFixture(): Buffer {
   return workbookFixture("Production Runs", [
