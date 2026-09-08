@@ -53,6 +53,46 @@ QC audit records must be:
 - API routes for audit export: `GET /api/qc/audit?from=&to=&type=&ingredient=`
 
 ## Current State
+### Move All Existing QC Features into the QC Department
+
+Currently QC features are scattered across the app. Everything below moves into the new QC department section:
+
+| Current Location | Feature | Move To |
+|-----------------|---------|---------|
+| Bottom bar `quality` tab | `QcQualitySurface` (photo quality checks) | QC Department → Quality Checks |
+| Bottom bar `incidents` tab | `QcIncidentsSurface` (incident log) | QC Department → Incidents |
+| Bottom bar `downtime` tab | `QcDowntimeSurface` (downtime trends) | QC Department → Downtime |
+| Inventory tab | AI quality/defect photo check (`inventoryShared.ts` → `QualityCheckRecord`) | QC Department → Quality Checks |
+| Inventory tab | Lot number field on inventory batches | QC Department → Lot Tracking (plus keep read-only summary in inventory) |
+| Manager menu | Import dialogs (spec, premix, cheese, shipping, guides) | **Shared** — see below |
+
+**Tab placement**: The bottom nav bar gains a `qc` tab (replacing or joining `quality`/`incidents`/`downtime` which currently exist as secondary tabs). The QC tab becomes one of the 6 bottom-bar slots (Run, Dough, Sauce, Frontline, QC, Warehouse) — or the existing quality/incidents/downtime tabs consolidate into a single QC section with internal sub-tabs (QA Checks, Incidents, Downtime, Lot Tracking, Weight Checks). The second option is recommended to avoid nav overcrowding.
+
+### Shared Importers: QC + Everyone Else
+
+The importers stay available to both QC and management, but with roles:
+
+- **Who can import**: Managers, supervisors, and QC staff (existing capability gates stay)
+- **Who must verify/approve**: QC staff — every import lands in a **pending review** state
+- **Import flow**:
+  1. Anyone with import capability uploads a file (spec sheet, shipping guide, premix, cheese, etc.)
+  2. The parsed data lands in the normal pipeline BUT with `qc_review_status = "pending"`
+  3. Database changes are applied but flagged as **unverified** (visible to all, marked "awaiting QC verification")
+  4. QC staff see pending imports in their QC queue → review → **approve** (verified) or **reject** (rollback pending)
+  5. On approval, the import becomes fully verified; on rejection, a rollback plan is offered
+- **Where it shows**:
+  - **QC Department** → "Import Review" queue (pending/approved/rejected, with diff preview)
+  - **Company-wide** → imported data still shows everywhere (profiles, recipes, mixes) but with a small "unverified" badge until QC approves
+- **Why shared works**: QC is the *primary* source but not the *only* source — managers can import in an emergency, but QC verification is the enforced quality gate
+
+**Implementation notes**:
+- Extend import metadata with `qc_review_status` enum: `pending | verified | rejected`
+- Add `qc_reviewed_by`, `qc_reviewed_at`, `qc_review_notes` to import records
+- API: `GET /api/qc/import-reviews` (queue), `POST /api/qc/import-reviews/:id/approve`, `POST /api/qc/import-reviews/:id/reject`
+- Existing import capability gates (`canImportSpec`, `canImportProfileGuide`, etc.) remain unchanged for who can *trigger* an import
+- Import commit / rollback needs to stay reversible until QC approves (see existing import lifecycle audit in docs/)
+
+
 - **Existing tabs**: Quality (photo checks), Incidents, Downtime Trends
 - **Inventory lot tracking**: Basic — lot number field on inventory items, no workflow enforcement
 - **No**: weight checks, component checks, shipper label verification, date verification, lot traceability per station, QC-specific dashboards
