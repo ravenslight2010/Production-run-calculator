@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { normalizeSchemaSnapshot } from "./schema-snapshot-normalization.mts";
 
 const rootDir = new URL("../../", import.meta.url).pathname;
 let timeoutMs = 180_000;
@@ -18,6 +19,8 @@ const network = `${resourcePrefix}-net`;
 const volume = `${resourcePrefix}-pgdata`;
 const database = `${resourcePrefix}-db`;
 const runtime = `${resourcePrefix}-runtime`;
+const migration = `${resourcePrefix}-migration`;
+const readinessProbe = `${resourcePrefix}-pg-ready`;
 const parentContext = mkdtempSync(join(tmpdir(), `${resourcePrefix}-parent-`));
 const currentContext = mkdtempSync(join(tmpdir(), `${resourcePrefix}-current-`));
 const schemaContext = mkdtempSync(join(tmpdir(), `${resourcePrefix}-schema-`));
@@ -38,6 +41,8 @@ let beforeSchema = "not captured";
 let currentSchema = "not captured";
 let afterSchema = "not captured";
 let schemaDifference = "";
+let schemaClassification = "not classified";
+let cleanupChecks = "not run";
 let failure = "";
 let cleaned = false;
 let parentWorktreeAdded = false;
@@ -51,8 +56,18 @@ function duration(value: string): number {
   return parsed;
 }
 
-function command(commandName: string, args: string[], stdio: "inherit" | "pipe" | "ignore" = "pipe"): string {
-  const value = execFileSync(commandName, args, { cwd: rootDir, encoding: "utf8", stdio });
+function command(
+  commandName: string,
+  args: string[],
+  stdio: "inherit" | "pipe" | "ignore" = "pipe",
+  commandTimeoutMs = timeoutMs,
+): string {
+  const value = execFileSync(commandName, args, {
+    cwd: rootDir,
+    encoding: "utf8",
+    stdio,
+    timeout: commandTimeoutMs,
+  });
   return typeof value === "string" ? value.trim() : "";
 }
 function docker(args: string[], stdio: "inherit" | "pipe" | "ignore" = "pipe"): string {
@@ -71,6 +86,11 @@ function cleanup(): string[] {
   if (cleaned) return [];
   cleaned = true;
   ignore(() => docker(["rm", "--force", runtime], "ignore"));
+  ignore(() => docker(["rm", "--force", migration], "ignore"));
+  ignore(() => docker(["rm", "--force", readinessProbe], "ignore"));
+  for (const name of ["schema-after-migration", "schema-after-current-runtime", "schema-after-parent-runtime"]) {
+    ignore(() => docker(["rm", "--force", `${resourcePrefix}-${name}`], "ignore"));
+  }
   ignore(() => docker(["rm", "--force", database], "ignore"));
   ignore(() => docker(["network", "rm", network], "ignore"));
   ignore(() => docker(["volume", "rm", "--force", volume], "ignore"));
@@ -90,6 +110,9 @@ function cleanup(): string[] {
     docker(["info"], "ignore");
     if (docker(["ps", "--all", "--filter", `name=^/${runtime}$`, "--format", "{{.Names}}"])) remaining.push(`container ${runtime}`);
     if (docker(["ps", "--all", "--filter", `name=^/${database}$`, "--format", "{{.Names}}"])) remaining.push(`container ${database}`);
+    if (docker(["ps", "--all", "--filter", `name=^/${migration}$`, "--format", "{{.Names}}"])) remaining.push(`container ${migration}`);
+    const prefixedContainers = docker(["ps", "--all", "--filter", `name=${resourcePrefix}`, "--format", "{{.Names}}"]);
+    for (const name of prefixedContainers.split("\n").filter(Boolean)) remaining.push(`container ${name}`);
     for (const [kind, name, inspectArgs] of [
       ["network", network, ["network", "inspect", network]],
       ["volume", volume, ["volume", "inspect", volume]],
@@ -128,6 +151,8 @@ function report(): void {
 - Public schema hash after migration: ${beforeSchema}
 - Public schema hash after current runtime: ${currentSchema}
 - Public schema hash after rollback: ${afterSchema}
+- Schema drift classification: ${schemaClassification}
+- Cleanup verification: ${cleanupChecks}
 - Forward-only schema statement: The schema was applied once by the current matching migration image and was not rolled back; replacing the runtime never runs a parent migration.
 ${schemaDifference ? `\n## Public Schema Difference\n\n\`\`\`diff\n${schemaDifference}\n\`\`\`\n` : ""}${failure ? `\n## Failure\n\n\`\`\`\n${failure}\n\`\`\`\n` : ""}`;
   writeFileSync(reportPath, markdown);
@@ -157,31 +182,43 @@ async function waitFor(label: string, test: () => boolean | Promise<boolean>): P
   throw new Error(`${label} did not become ready within ${timeoutMs}ms: ${last}`);
 }
 function pgReady(): boolean {
+  ignore(() => docker(["rm", "--force", readinessProbe], "ignore"));
   try {
     docker([
-      "run", "--rm", "--network", network,
+      "create", "--name", readinessProbe, "--network", network,
       "--env", `PGPASSWORD=${dbPassword}`,
       "postgres:16-alpine",
       "pg_isready", "-h", database, "-U", dbUser, "-d", dbName,
-    ], "ignore");
-    return true;
+    ]);
+    command("docker", ["start", "--attach", readinessProbe], "ignore", 10_000);
+    return docker(["inspect", "--format", "{{.State.ExitCode}}", readinessProbe]) === "0";
   } catch {
     return false;
+  } finally {
+    ignore(() => docker(["rm", "--force", readinessProbe], "ignore"));
   }
 }
 function schemaSnapshot(name: string): string {
-  // Use a one-shot client container instead of docker exec. Some nested Docker
-  // environments can start sibling containers but cannot setns into one that is
-  // already running.
-  const snapshot = docker([
-    "run", "--rm", "--network", network,
+  // Explicit create/start/remove avoids nested-Docker hangs observed while the
+  // daemon auto-removes an attached `docker run --rm` client.
+  const container = `${resourcePrefix}-schema-${name}`;
+  docker([
+    "create", "--name", container, "--network", network,
     "--env", `PGPASSWORD=${dbPassword}`,
     "postgres:16-alpine",
-    "sh", "-c",
-    `set -eu; set -o pipefail; pg_dump --schema-only --schema=public -h ${database} -U ${dbUser} ${dbName} | sed '/^\\\\restrict /d;/^\\\\unrestrict /d'`,
+    "pg_dump", "--schema-only", "--schema=public", "-h", database, "-U", dbUser, dbName,
   ]);
-  writeFileSync(join(schemaContext, `${name}.sql`), `${snapshot}\n`);
-  return snapshot;
+  try {
+    const rawSnapshot = docker(["start", "--attach", container]);
+    const exitCode = docker(["inspect", "--format", "{{.State.ExitCode}}", container]);
+    if (exitCode !== "0") throw new Error(`schema snapshot ${name} exited ${exitCode}`);
+    const normalizedSnapshot = normalizeSchemaSnapshot(rawSnapshot);
+    writeFileSync(join(schemaContext, `${name}.raw.sql`), `${rawSnapshot}\n`);
+    writeFileSync(join(schemaContext, `${name}.sql`), normalizedSnapshot);
+    return normalizedSnapshot;
+  } finally {
+    ignore(() => docker(["rm", "--force", container], "ignore"));
+  }
 }
 function schemaFingerprint(snapshot: string): string {
   return execFileSync("sha256sum", [], {
@@ -255,9 +292,13 @@ async function main(): Promise<void> {
     "postgres:16-alpine"], "inherit");
   await waitFor("Postgres", pgReady);
   try {
-    docker(["run", "--rm", "--network", network, "--env", `DATABASE_URL=postgres://${dbUser}:${dbPassword}@${database}:5432/${dbName}`, migrationTag], "inherit");
+    docker(["create", "--name", migration, "--network", network, "--env", `DATABASE_URL=postgres://${dbUser}:${dbPassword}@${database}:5432/${dbName}`, migrationTag]);
+    docker(["start", "--attach", migration], "inherit");
+    const migrationExitCode = docker(["inspect", "--format", "{{.State.ExitCode}}", migration]);
+    if (migrationExitCode !== "0") throw new Error(`migration container exited ${migrationExitCode}`);
     migrationResult = "exit 0";
   } catch (error) { migrationResult = "non-zero exit"; throw error; }
+  finally { ignore(() => docker(["rm", "--force", migration], "ignore")); }
   const migrationSnapshot = schemaSnapshot("after-migration");
   beforeSchema = schemaFingerprint(migrationSnapshot);
   await verifyRuntime(currentTag);
@@ -265,6 +306,7 @@ async function main(): Promise<void> {
   const currentSnapshot = schemaSnapshot("after-current-runtime");
   currentSchema = schemaFingerprint(currentSnapshot);
   if (beforeSchema !== currentSchema) {
+    schemaClassification = "runtime DDL (current runtime changed the forward schema)";
     schemaDifference = captureSchemaDifference("after-migration", "after-current-runtime");
     throw new Error(`public schema changed while starting the current runtime (${beforeSchema} -> ${currentSchema})`);
   }
@@ -274,15 +316,18 @@ async function main(): Promise<void> {
   const parentSnapshot = schemaSnapshot("after-parent-runtime");
   afterSchema = schemaFingerprint(parentSnapshot);
   if (currentSchema !== afterSchema) {
+    schemaClassification = "parent-runtime schema mutation";
     schemaDifference = captureSchemaDifference("after-current-runtime", "after-parent-runtime");
     throw new Error(`public schema changed during runtime replacement (${currentSchema} -> ${afterSchema})`);
   }
+  schemaClassification = "nondeterministic pg_dump boilerplate normalized; no semantic schema drift";
 }
 
 for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
   process.once(signal, () => {
     failure = `Interrupted by ${signal}`;
     const remaining = cleanup();
+    cleanupChecks = remaining.length ? `FAILED (${remaining.length} resource(s) remained)` : "PASS (no disposable resources remained)";
     if (remaining.length) failure += `\nCleanup failed verification or left disposable resources:\n- ${remaining.join("\n- ")}`;
     try { report(); } catch (error) { console.error(`Could not write evidence: ${String(error)}`); }
     process.exit(remaining.length ? 1 : code);
@@ -294,6 +339,7 @@ try { await main(); } catch (error) {
   process.exitCode = 1;
 } finally {
   const remaining = cleanup();
+  cleanupChecks = remaining.length ? `FAILED (${remaining.length} resource(s) remained)` : "PASS (no disposable resources remained)";
   if (remaining.length) {
     failure += `${failure ? "\n" : ""}Cleanup failed verification or left disposable resources:\n- ${remaining.join("\n- ")}`;
     console.error(`FAIL schema-safe rollback rehearsal cleanup:\n- ${remaining.join("\n- ")}`);
