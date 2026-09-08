@@ -38,7 +38,13 @@ export function useRunLifecycleManager(deps: {
   setPendingForegroundStopRunId: Dispatch<SetStateAction<string | null>>;
   showForegroundRecoveryNotice: (kind: "recovering" | "outcome", message: string) => void;
   recordSyncEvent: (kind: string, message: string, response?: string, runId?: string) => void;
-  queueOperationalIntent: (input: Omit<OperationalIntent, "version" | "id" | "date" | "resetEpoch" | "state"> & { date?: string }) => OperationalIntent;
+  queueOperationalIntent: (input: Omit<OperationalIntent, "version" | "id" | "date" | "resetEpoch" | "state" | "commandCategory" | "deviceId" | "baseRevision" | "occurredAt"> & {
+    date?: string;
+    commandCategory?: OperationalIntent["commandCategory"];
+    deviceId?: string;
+    baseRevision?: number;
+    occurredAt?: number;
+  }) => OperationalIntent;
   flushOperationalIntentOutbox: () => Promise<void>;
   browserIsOnline: () => boolean;
   capturePreEndLifecycle: (run: RunMeta) => PreEndLifecycle;
@@ -67,9 +73,16 @@ export function useRunLifecycleManager(deps: {
   pauseDecisionRemainingMs: (pausedAt: number, now: number) => number;
   shouldClosePauseDecision: (pausedAt: number, now: number, visible: boolean) => boolean;
   schedulePush: (state: DayState, delay?: number) => void;
+  operationalAdoptionInFlightRef?: MutableRefObject<number>;
+  operationalCanonicalRevisionRef?: MutableRefObject<number>;
+  operationalIntentBlocksLifecycle?: (runId: string) => boolean;
 }) {
   const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
   const pauseDecisionPauseIdRef = useRef<string | null>(null);
+  const lifecycleBlocked = (runId: string) =>
+    (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0 ||
+    (deps.operationalIntentBlocksLifecycle?.(runId) ?? false);
+  const canonicalRevision = () => deps.operationalCanonicalRevisionRef?.current ?? 0;
 
   const switchToRun = useEvent((newIndex: number) => {
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
@@ -106,12 +119,21 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
+    if (lifecycleBlocked(activeRun.id)) return;
     deps.flushFormWrites();
     const now = Date.now();
     const activeRunId = activeRun.id;
     const observedRuns = deps.overlayRunMetaStamps(base.runs);
     const observedActiveRun = observedRuns[index] ?? activeRun;
-    deps.queueOperationalIntent({ runId: activeRunId, observedGeneration: `${activeRunId}:${observedActiveRun.metaUpdatedAt ?? observedActiveRun.startedAt ?? 0}`, effectiveAt: now, action: "lifecycle", lifecycle: "start" });
+    deps.queueOperationalIntent({
+      runId: activeRunId,
+      observedGeneration: `${activeRunId}:${observedActiveRun.metaUpdatedAt ?? observedActiveRun.startedAt ?? 0}`,
+      effectiveAt: now,
+      action: "lifecycle",
+      lifecycle: "start",
+      baseRevision: canonicalRevision(),
+      preLifecycle: deps.capturePreEndLifecycle(observedActiveRun),
+    });
     void deps.flushOperationalIntentOutbox();
     const opening = deps.form.getValues();
     const isolated = deps.isolatePendingRunPackagingProgress(activeRun, opening);
@@ -128,6 +150,8 @@ export function useRunLifecycleManager(deps: {
       deps.queueOperationalIntent({
         runId: run.id, observedGeneration: `${run.id}:${observedRun.metaUpdatedAt ?? observedRun.startedAt ?? 0}`,
         effectiveAt: now, action: "lifecycle", lifecycle: "end",
+        baseRevision: canonicalRevision(),
+        preLifecycle: deps.capturePreEndLifecycle(observedRun),
         preEndLifecycle: deps.capturePreEndLifecycle(observedRun),
         inventoryLines: deps.computeRunConsumptionLines(deps.effectiveValuesForRun(run, deps.loadRunValues(run.id))),
       });
@@ -167,10 +191,18 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (!run?.startedAt || run.pausedAt || run.endedAt) return;
+    if (lifecycleBlocked(run.id)) return;
     deps.flushFormWrites();
     const now = Date.now();
     const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
-    deps.queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`, effectiveAt: now, action: "pause" });
+    deps.queueOperationalIntent({
+      runId: run.id,
+      observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,
+      effectiveAt: now,
+      action: "pause",
+      baseRevision: canonicalRevision(),
+      preLifecycle: deps.capturePreEndLifecycle(observed),
+    });
     void deps.flushOperationalIntentOutbox();
     const stop: Stoppage = { id: deps.genId(), reason: "", type: "pause", startedAt: now, stopTunnel: true };
     const next = { ...base, runs: base.runs.map((candidate, i) => i === index ? { ...candidate, pausedAt: now, pausedStoppageId: stop.id, stoppages: [...(candidate.stoppages ?? []), stop] } : candidate) };
@@ -216,10 +248,18 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (!run) return;
+    if (lifecycleBlocked(run.id)) return;
     deps.flushFormWrites();
     const now = Date.now();
     const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
-    deps.queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`, effectiveAt: now, action: "resume" });
+    deps.queueOperationalIntent({
+      runId: run.id,
+      observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,
+      effectiveAt: now,
+      action: "resume",
+      baseRevision: canonicalRevision(),
+      preLifecycle: deps.capturePreEndLifecycle(observed),
+    });
     void deps.flushOperationalIntentOutbox();
     const resumed = deps.applyResumeToRun(run, now);
     if (!resumed) return;
@@ -236,6 +276,7 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (deps.formHandoffRef.current) return;
+    if (activeRun && lifecycleBlocked(activeRun.id)) return;
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
       if (activeRun?.startedAt && !activeRun.endedAt && (!deps.foregroundStopIntentRef.current || deps.foregroundStopIntentRef.current.runId === activeRun.id)) {
         deps.foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
@@ -256,7 +297,17 @@ export function useRunLifecycleManager(deps: {
     if (deps.canManageProfiles && (activeRun.brand || activeRun.flavor) && deps.saveProfile(activeRun.brand, activeRun.flavor, values)) void deps.propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
     const endedAt = Date.now();
     const observed = deps.overlayRunMetaStamps([activeRun])[0];
-    deps.queueOperationalIntent({ runId: activeRun.id, observedGeneration: `${activeRun.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`, effectiveAt: endedAt, action: "lifecycle", lifecycle: "end", preEndLifecycle: deps.capturePreEndLifecycle(observed), inventoryLines: deps.computeRunConsumptionLines(deps.effectiveValuesForRun(activeRun, values)) });
+    deps.queueOperationalIntent({
+      runId: activeRun.id,
+      observedGeneration: `${activeRun.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,
+      effectiveAt: endedAt,
+      action: "lifecycle",
+      lifecycle: "end",
+      baseRevision: canonicalRevision(),
+      preLifecycle: deps.capturePreEndLifecycle(observed),
+      preEndLifecycle: deps.capturePreEndLifecycle(observed),
+      inventoryLines: deps.computeRunConsumptionLines(deps.effectiveValuesForRun(activeRun, values)),
+    });
     if (deps.browserIsOnline()) void deps.flushOperationalIntentOutbox();
     const runs = base.runs.map((run, i) => i === index ? { ...run, pausedAt: undefined, endedAt } : run);
     const nextIndex = index + 1 < base.runs.length ? index + 1 : index;

@@ -531,7 +531,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
@@ -7677,6 +7677,20 @@ export default function Home() {
   const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
   const [serverCalcReceipt, setServerCalcReceipt] =
     useState<OperationalSnapshotReceipt | null>(null);
+  // Operational commands have their own canonical adoption fence. A command
+  // response is not terminal until this callback has installed its snapshot
+  // and receipt, so ordinary snapshot writes and auto-track cannot race it.
+  const operationalCanonicalRevisionRef = useRef(0);
+  const operationalServerTimeOffsetRef = useRef(0);
+  const operationalAdoptionInFlightRef = useRef(0);
+  const operationalAdoptionGenerationRef = useRef(0);
+  function adoptOperationalRevision(revision: unknown): void {
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) return;
+    operationalCanonicalRevisionRef.current = Math.max(
+      operationalCanonicalRevisionRef.current,
+      revision,
+    );
+  }
   function adoptOperationalProjection(
     projection: OperationalProjection | null | undefined,
     snapshotId: string | undefined,
@@ -7775,12 +7789,43 @@ export default function Home() {
   // The normal snapshot sync remains a recovery path; this separate queue keeps
   // operator occurrence times and can be retried after a tab/browser restart.
   useEffect(() => {
-    setOperationalIntentCanonicalAdopter((data, intent, outcome) => {
+    setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
+      const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
+      operationalAdoptionInFlightRef.current += 1;
+      setAutoTrackBlocked(true);
+      setAutoTrackRebaseAfterBlock(false);
+      adoptOperationalRevision(intent.canonicalRevision);
+      if (intent.serverTime !== undefined) {
+        operationalServerTimeOffsetRef.current = intent.serverTime - Date.now();
+        serverClockOffsetMsRef.current = operationalServerTimeOffsetRef.current;
+        setServerClockOffsetMs(operationalServerTimeOffsetRef.current);
+      }
+      let adoptionSucceeded = false;
+      const adoptReceipt = () => {
+        if (!intent.snapshotId || !intent.canonicalAdoptedAt) return;
+        const receipt: OperationalSnapshotReceipt = {
+          runId: intent.runId,
+          snapshotId: intent.snapshotId,
+          capturedAt: intent.canonicalAdoptedAt,
+          ...(intent.canonicalRevision !== undefined ? { canonicalRevision: intent.canonicalRevision } : {}),
+          ...(intent.serverTime !== undefined ? { serverTime: intent.serverTime } : {}),
+        };
+        const previous = serverCalcReceiptRef.current;
+        if (previous?.runId === receipt.runId && previous.capturedAt > receipt.capturedAt) return;
+        serverCalcReceiptRef.current = receipt;
+        setServerCalcReceipt(receipt);
+      };
+      try {
+      if (!data || typeof data !== "object") {
+        throw new Error("Operational command response did not include a canonical snapshot");
+      }
       const payload = data as SyncPayload;
       const acceptedFinalization =
         outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
       if (outcome === "accepted" && !acceptedFinalization) {
         applySyncCallbackRef.current(payload);
+        adoptReceipt();
+        adoptionSucceeded = true;
         return;
       }
       if (
@@ -7791,6 +7836,8 @@ export default function Home() {
         && outcome !== "review-required"
       ) {
         applySyncCallbackRef.current(payload);
+        adoptReceipt();
+        adoptionSucceeded = true;
         return;
       }
       // A finalization/review/rebase response is authoritative for the command it resolves,
@@ -7861,6 +7908,21 @@ export default function Home() {
         };
       }
       applySyncCallbackRef.current(inbound);
+      await Promise.resolve();
+      adoptReceipt();
+      adoptionSucceeded = true;
+      } finally {
+        operationalAdoptionInFlightRef.current = Math.max(0, operationalAdoptionInFlightRef.current - 1);
+        if (
+          operationalAdoptionInFlightRef.current === 0
+          && adoptionGeneration === operationalAdoptionGenerationRef.current
+          && !foregroundSyncBarrierRef.current
+          && adoptionSucceeded
+        ) {
+          setAutoTrackRebaseAfterBlock(true);
+          setAutoTrackBlocked(false);
+        }
+      }
     });
     const flush = () => { void flushOperationalIntentOutbox(); };
     flush();
@@ -8984,6 +9046,7 @@ export default function Home() {
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
+        adoptOperationalRevision(msg.canonicalRevision);
         if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
           const offset = msg.serverTime - Date.now();
           serverClockOffsetMsRef.current = offset;
@@ -9180,7 +9243,8 @@ export default function Home() {
            const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
            const res = await fetch(snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string } | null;
+           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string; canonicalRevision?: number } | null;
+           adoptOperationalRevision(body && "canonicalRevision" in body ? body.canonicalRevision : undefined);
            if (body && "unchanged" in body && body.unchanged === true) {
              if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
              pushAcknowledgedRef.current = true;
@@ -9553,6 +9617,9 @@ export default function Home() {
         : undefined,
     });
     const snapshot = result.body?.snapshotId;
+    adoptOperationalRevision(
+      (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
+    );
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
     if (result.body?.partialFallback && result.body.data === null) {
       // A partial write against a missing row has no valid snapshot identity.
@@ -9564,10 +9631,13 @@ export default function Home() {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
     }
-    if (result.body?.operationalProjection) {
+    const operationalProjection = (
+      result.body as (typeof result.body & { operationalProjection?: unknown }) | null | undefined
+    )?.operationalProjection;
+    if (operationalProjection) {
       adoptOperationalProjection(
-        result.body.operationalProjection as OperationalProjection,
-        typeof result.body.snapshotId === "string"
+        operationalProjection as OperationalProjection,
+        typeof result.body?.snapshotId === "string"
           ? result.body.snapshotId
           : syncSnapshotIdRef.current,
       );
@@ -9842,7 +9912,7 @@ export default function Home() {
       completeness: canSendPartial ? "partial" : "complete",
       ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
       dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
-      runValues,
+      runValues: fencePendingOperationalValues(runValues),
       runValuesUpdatedAt,
       ...(() => {
         try {
@@ -9872,6 +9942,10 @@ export default function Home() {
       return;
     }
     if (foregroundSyncBarrierRef.current) {
+      foregroundPushPendingRef.current = true;
+      return;
+    }
+    if (operationalAdoptionInFlightRef.current > 0) {
       foregroundPushPendingRef.current = true;
       return;
     }
@@ -10553,6 +10627,8 @@ export default function Home() {
     canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
     setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
     foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
+    operationalAdoptionInFlightRef, operationalCanonicalRevisionRef,
+    operationalIntentBlocksLifecycle,
     showForegroundRecoveryNotice, recordSyncEvent,
     queueOperationalIntent, flushOperationalIntentOutbox, browserIsOnline,
     capturePreEndLifecycle, computeRunConsumptionLines, effectiveValuesForRun,

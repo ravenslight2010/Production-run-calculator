@@ -17,7 +17,7 @@ const LOCK_RENEW_MS = 10_000;
 let activeFlush: Promise<void> | undefined;
 let retryTimer: number | undefined;
 let activeOwner: string | undefined;
-let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void) | undefined;
+let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void | Promise<void>) | undefined;
 type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
 const storageHealth = {
   corruptRecords: 0,
@@ -27,6 +27,13 @@ const storageHealth = {
 
 export type OperationalIntentState = "pending" | "sending" | "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected";
 export type OperationalIntentFailure = "network" | "rate-limited" | "server" | "authentication" | "permission" | "validation" | "quota";
+export type OperationalIntentCanonicalReceipt = {
+  cursor?: number;
+  canonicalRevision?: number;
+  serverTime?: number;
+  snapshotId?: string;
+  adoptedAt: number;
+};
 export type PreEndLifecycle = {
   startedAt?: number; pausedAt?: number; pausedStoppageId?: string; endedAt?: number;
   stoppages?: unknown[]; metaUpdatedAt?: number;
@@ -34,8 +41,14 @@ export type PreEndLifecycle = {
 export type OperationalIntent = {
   version: 1; id: string; date: string; runId: string; observedGeneration: string;
   resetEpoch: number; effectiveAt: number; action: "pause" | "resume" | "lifecycle" | "correction";
+  commandCategory: "lifecycle" | "correction";
+  deviceId: string;
+  baseRevision: number;
+  occurredAt: number;
+  serverTimeOffsetMs?: number;
   lifecycle?: "start" | "end"; values?: Record<string, number>;
   inventoryLines?: Array<{ itemKey: string; qty: number }>;
+  preLifecycle?: PreEndLifecycle;
   preEndLifecycle?: PreEndLifecycle;
   deferredOffline?: boolean;
   state: OperationalIntentState;
@@ -43,6 +56,8 @@ export type OperationalIntent = {
   deliveryToken?: string;
   attempts?: number; nextRetryAt?: number; lastAttemptAt?: number;
   failure?: OperationalIntentFailure; guidance?: string; resolvedAt?: number;
+  canonicalCursor?: number; canonicalRevision?: number; serverTime?: number; snapshotId?: string;
+  canonicalAdoptedAt?: number;
 };
 
 export type OperationalIntentStorageHealth = {
@@ -77,8 +92,22 @@ export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbo
 }
 
 /** Registered by Home; avoids coupling this storage module to React/sync. */
-export function setOperationalIntentCanonicalAdopter(callback: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void) | undefined): void {
+export function setOperationalIntentCanonicalAdopter(callback: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void | Promise<void>) | undefined): void {
   adoptCanonical = callback;
+}
+const DEVICE_KEY = "run-calculator:operational-device-id";
+export function getOperationalDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_KEY);
+    if (existing && existing.length <= 160) return existing;
+    const created = `device:${crypto.randomUUID()}`;
+    localStorage.setItem(DEVICE_KEY, created);
+    return created;
+  } catch {
+    // The command itself remains durable when localStorage is available. This
+    // fallback is only for an unavailable browser storage implementation.
+    return `device:${crypto.randomUUID()}`;
+  }
 }
 function validPreEndLifecycle(value: unknown): value is PreEndLifecycle {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -108,6 +137,7 @@ function valid(item: unknown): item is OperationalIntent {
     && typeof x.observedGeneration === "string" && Number.isFinite(x.resetEpoch) && Number.isFinite(x.effectiveAt)
     && ["pause", "resume", "lifecycle", "correction"].includes(String(x.action))
     && (x.lifecycle !== "end" || (Array.isArray(x.inventoryLines) && x.inventoryLines.length <= 200))
+    && (x.preLifecycle === undefined || validPreEndLifecycle(x.preLifecycle))
     && (x.lifecycle !== "end" || x.preEndLifecycle === undefined || validPreEndLifecycle(x.preEndLifecycle))
     && ["pending", "sending", "accepted", "superseded", "rebased", "conflicted", "review-required", "blocked", "permanently-rejected"].includes(String(x.state));
 }
@@ -267,13 +297,33 @@ export function operationalIntentRecoveryTelemetry(): OperationalIntentRecoveryT
     corruptRecords: storageHealth.corruptRecords,
   };
 }
-export function queueOperationalIntent(input: Omit<OperationalIntent, "version" | "id" | "date" | "resetEpoch" | "state"> & { date?: string }): OperationalIntent {
+export function queueOperationalIntent(input: Omit<OperationalIntent, "version" | "id" | "date" | "resetEpoch" | "state" | "commandCategory" | "deviceId" | "baseRevision" | "occurredAt"> & {
+  date?: string;
+  commandCategory?: OperationalIntent["commandCategory"];
+  deviceId?: string;
+  baseRevision?: number;
+  occurredAt?: number;
+}): OperationalIntent {
   const inventoryLines = input.action === "lifecycle" && input.lifecycle === "end" ? canonicalInventoryLines(input.inventoryLines) : input.inventoryLines;
   if (input.action === "lifecycle" && input.lifecycle === "end" && !validPreEndLifecycle(input.preEndLifecycle)) throw new Error("Run completion lifecycle snapshot is invalid");
   if (!activeOwner) throw new Error("Offline action could not be saved before sign-in completed");
+  const requestedBaseRevision = input.baseRevision;
+  const baseRevision = typeof requestedBaseRevision === "number"
+    && Number.isSafeInteger(requestedBaseRevision)
+    && requestedBaseRevision >= 0
+    ? requestedBaseRevision
+    : 0;
+  const requestedOccurredAt = input.occurredAt;
+  const occurredAt = typeof requestedOccurredAt === "number" && Number.isFinite(requestedOccurredAt)
+    ? requestedOccurredAt
+    : input.effectiveAt;
   const intent: OperationalIntent = {
     ...input,
     inventoryLines,
+    commandCategory: input.action === "correction" ? "correction" : "lifecycle",
+    deviceId: input.deviceId ?? getOperationalDeviceId(),
+    baseRevision,
+    occurredAt,
     version: 1,
     id: `offline:${crypto.randomUUID()}`,
     date: input.date ?? todayStr(),
@@ -306,18 +356,53 @@ export function discardOperationalIntent(id: string): boolean {
     localStorage.removeItem(`${PENDING_PREFIX}${id}`); localStorage.removeItem(`${TERMINAL_PREFIX}${id}`); notify(); return true;
   } catch { return false; }
 }
-export function fencePendingEndSnapshots<T extends { id: string; startedAt?: number; pausedAt?: number; pausedStoppageId?: string; endedAt?: number; stoppages?: unknown[]; metaUpdatedAt?: number }>(runs: T[], intents = readOperationalIntentOutbox()): T[] {
-  // Blocked and permanently rejected Ends remain unresolved until the operator
-  // explicitly retries or discards them. Keep their optimistic endedAt out of
-  // ordinary snapshot sync so it cannot bypass atomic finalization.
-  const pending = new Map(intents.filter((x) => ["pending", "sending", "blocked", "permanently-rejected"].includes(x.state) && x.action === "lifecycle" && x.lifecycle === "end").map((x) => [x.runId, x]));
+export function operationalIntentBlocksLifecycle(runId: string, intents = readOperationalIntentOutbox()): boolean {
+  return intents.some((intent) =>
+    intent.runId === runId
+    && ["pending", "sending", "blocked", "permanently-rejected", "conflicted", "review-required"].includes(intent.state)
+    && ["pause", "resume", "lifecycle"].includes(intent.action),
+  );
+}
+export function fencePendingOperationalValues<T extends object>(
+  runValues: T,
+  intents = readOperationalIntentOutbox(),
+): T {
+  const output = { ...runValues } as T;
+  for (const intent of intents) {
+    if (
+      intent.action !== "correction"
+      || !["pending", "sending", "blocked", "permanently-rejected", "conflicted", "review-required"].includes(intent.state)
+      || !intent.values
+    ) continue;
+    const current = (output as Record<string, Record<string, unknown>>)[intent.runId];
+    if (!current) continue;
+    const next = { ...current };
+    for (const field of Object.keys(intent.values)) delete next[field];
+    if (Object.keys(next).length === 0) delete (output as Record<string, unknown>)[intent.runId];
+    else (output as Record<string, Record<string, unknown>>)[intent.runId] = next;
+  }
+  return output;
+}
+export function fencePendingOperationalSnapshots<T extends { id: string; startedAt?: number; pausedAt?: number; pausedStoppageId?: string; endedAt?: number; stoppages?: unknown[]; metaUpdatedAt?: number }>(runs: T[], intents = readOperationalIntentOutbox()): T[] {
+  // Lifecycle commands remain authoritative until their receipt is adopted.
+  // Strip optimistic lifecycle fields from the ordinary snapshot path so a
+  // stale/offline projection cannot bypass the command reducer.
+  const pending = new Map(intents.filter((x) =>
+    ["pending", "sending", "blocked", "permanently-rejected", "conflicted", "review-required"].includes(x.state)
+    && (x.action === "lifecycle" || x.action === "pause" || x.action === "resume")
+  ).map((x) => [x.runId, x]));
   return runs.map((run) => {
     const intent = pending.get(run.id); if (!intent) return run;
     const { startedAt: _a, pausedAt: _b, pausedStoppageId: _c, endedAt: _d, stoppages: _e, metaUpdatedAt: _f, ...nonLifecycle } = run;
+    if (intent.preLifecycle) return { ...nonLifecycle, ...intent.preLifecycle } as T;
     if (intent.preEndLifecycle) return { ...nonLifecycle, ...intent.preEndLifecycle } as T;
     const stamp = Number(intent.observedGeneration.slice(intent.observedGeneration.lastIndexOf(":") + 1));
     return { ...run, endedAt: undefined, ...(Number.isFinite(stamp) ? { metaUpdatedAt: stamp } : {}) };
   });
+}
+/** Backwards-compatible name used by existing callers and tests. */
+export function fencePendingEndSnapshots<T extends { id: string; startedAt?: number; pausedAt?: number; pausedStoppageId?: string; endedAt?: number; stoppages?: unknown[]; metaUpdatedAt?: number }>(runs: T[], intents = readOperationalIntentOutbox()): T[] {
+  return fencePendingOperationalSnapshots(runs, intents);
 }
 function jitter(id: string): number { let hash = 0; for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0; return hash % 1000; }
 function retryAfter(res: Response): number | undefined {
@@ -417,18 +502,47 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
         deliveryController = new AbortController();
         const deliveryTimeout = window.setTimeout(() => deliveryController?.abort(), DELIVERY_TIMEOUT_MS);
         try {
-          const res = await fetch(`/api/sync/operational-intents?today=${encodeURIComponent(item.date)}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: deliveryController.signal, body: JSON.stringify({ senderId, intent: (({ state: _state, owner: _owner, deliveryToken: _token, preEndLifecycle: _local, attempts: _a, nextRetryAt: _n, lastAttemptAt: _l, failure: _f, guidance: _g, resolvedAt: _r, deferredOffline: _offline, ...wire }) => wire)(item) }) });
-          let body: { outcome?: string; data?: unknown } = {}; try { body = await res.json(); } catch { /* status classification still applies */ }
+           const res = await fetch(`/api/sync/operational-intents?today=${encodeURIComponent(item.date)}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: deliveryController.signal, body: JSON.stringify({
+             senderId,
+             deviceId: item.deviceId || senderId || getOperationalDeviceId(),
+             baseRevision: item.baseRevision ?? 0,
+             intent: (({ state: _state, owner: _owner, deliveryToken: _token, deviceId: _deviceId, preLifecycle: _preLifecycle, preEndLifecycle: _local, attempts: _a, nextRetryAt: _n, lastAttemptAt: _l, failure: _f, guidance: _g, resolvedAt: _r, deferredOffline: _offline, canonicalCursor: _cursor, canonicalRevision: _revision, serverTime: _serverTime, snapshotId: _snapshotId, canonicalAdoptedAt: _adoptedAt, serverTimeOffsetMs: _offset, ...wire }) => wire)(item),
+           }) });
+           let body: { outcome?: string; data?: unknown; cursor?: number; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {}; try { body = await res.json(); } catch { /* status classification still applies */ }
           if (activeOwner !== ownerAtStart || !currentDeliveryMatches(item)) continue;
           if (res.ok && ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(body.outcome ?? "")) {
             const outcome = body.outcome as "accepted" | "superseded" | "rebased" | "conflicted" | "review-required";
-            if (body.data) adoptCanonical?.(body.data, item, outcome);
+             const receipt: OperationalIntentCanonicalReceipt = {
+               ...(Number.isSafeInteger(body.cursor) ? { cursor: body.cursor } : {}),
+               ...(Number.isSafeInteger(body.canonicalRevision) ? { canonicalRevision: body.canonicalRevision } : {}),
+               ...(Number.isFinite(body.serverTime) ? { serverTime: body.serverTime } : {}),
+               ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
+               adoptedAt: Date.now(),
+             };
+             const receiptIntent: OperationalIntent = {
+               ...item,
+               ...(receipt.cursor !== undefined ? { canonicalCursor: receipt.cursor } : {}),
+               ...(receipt.canonicalRevision !== undefined ? { canonicalRevision: receipt.canonicalRevision } : {}),
+               ...(receipt.serverTime !== undefined ? { serverTime: receipt.serverTime, serverTimeOffsetMs: receipt.serverTime - Date.now() } : {}),
+               ...(receipt.snapshotId !== undefined ? { snapshotId: receipt.snapshotId } : {}),
+               canonicalAdoptedAt: receipt.adoptedAt,
+             };
+             // Older server responses may omit data for a duplicate outcome.
+             // There is nothing to install in that case; retain the receipt and
+             // let the idempotent command terminalize normally.
+             if (adoptCanonical && body.data) await adoptCanonical(body.data, receiptIntent, outcome);
             if (item.deferredOffline) {
               window.dispatchEvent(new CustomEvent("calculator-field-check-signal", {
                 detail: { checkName: "offline-queue-replay", outcome: "success" },
               }));
             }
-            terminalize(item, outcome); continue;
+             terminalize(item, outcome, {
+               ...(receipt.cursor !== undefined ? { canonicalCursor: receipt.cursor } : {}),
+               ...(receipt.canonicalRevision !== undefined ? { canonicalRevision: receipt.canonicalRevision } : {}),
+               ...(receipt.serverTime !== undefined ? { serverTime: receipt.serverTime, serverTimeOffsetMs: receipt.serverTime - Date.now() } : {}),
+               ...(receipt.snapshotId !== undefined ? { snapshotId: receipt.snapshotId } : {}),
+               canonicalAdoptedAt: receipt.adoptedAt,
+             }); continue;
           }
           if (res.status === 401) terminalize(item, "blocked", { failure: "authentication", guidance: "Sign in again, then choose Retry." });
           else if (res.status === 403) terminalize(item, "blocked", { failure: "permission", guidance: "You do not have permission. Ask a manager, then Retry if access changes." });
@@ -449,7 +563,7 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
       scheduleNextFlush();
     }
 }
-export async function flushOperationalIntentOutbox(senderId = ""): Promise<void> {
+export async function flushOperationalIntentOutbox(senderId = getOperationalDeviceId()): Promise<void> {
   if (activeFlush) return activeFlush;
   activeFlush = (async () => {
     const locks = typeof navigator !== "undefined"

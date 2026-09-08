@@ -54,6 +54,9 @@ export default function SyncStatusPopover(props: Props) {
   const Icon = failed ? AlertTriangle : !props.connected ? WifiOff : props.status === "syncing" || props.status === "retrying" ? Loader2 : props.status === "synchronized" ? CheckCircle2 : delayed ? Clock3 : Wifi;
   const color = failed ? "text-red-400" : delayed || props.status === "retrying" ? "text-amber-400" : props.status === "synchronized" ? "text-emerald-400" : "text-muted-foreground";
   const attentionState: AttentionState = failed ? "blocker" : delayed || props.status === "retrying" || props.pendingCount > 0 ? "review" : "info";
+  const latestCanonicalReceipt = intents
+    .filter((intent) => intent.canonicalAdoptedAt)
+    .sort((a, b) => (b.canonicalAdoptedAt ?? 0) - (a.canonicalAdoptedAt ?? 0))[0];
 
   useLayoutEffect(() => {
     if (!open) {
@@ -152,6 +155,13 @@ export default function SyncStatusPopover(props: Props) {
                  ? ` · ${intentSummary.blocked + intentSummary["permanently-rejected"]} need action`
                  : ""}
              </strong>
+             <span>Operational baseline</span><strong className="text-right">
+               {latestCanonicalReceipt
+                 ? `Confirmed${latestCanonicalReceipt.canonicalRevision !== undefined ? ` · rev ${latestCanonicalReceipt.canonicalRevision}` : ""}`
+                 : intentSummary.pending + intentSummary.sending > 0
+                   ? "Provisional / pending"
+                   : "No command receipt"}
+             </strong>
           </div>
            {(intentSummary.accepted + intentSummary.superseded + intentSummary.rebased + intentSummary.conflicted + intentSummary["review-required"]) > 0 && (
              <p className="mt-2 text-muted-foreground">
@@ -182,6 +192,13 @@ export default function SyncStatusPopover(props: Props) {
                            ? "A manager must review this action. It is retained and cannot be discarded."
                            : `Attempt ${intent.attempts ?? 0}`)}
                        </p>
+                       {intent.canonicalAdoptedAt && (
+                         <p className="mt-1 text-emerald-500">
+                           Canonical result adopted
+                           {intent.canonicalRevision !== undefined ? ` · revision ${intent.canonicalRevision}` : ""}
+                           {intent.snapshotId ? ` · snapshot ${intent.snapshotId.slice(0, 10)}` : ""}
+                         </p>
+                       )}
                        {intent.state === "review-required" || intent.state === "conflicted" ? (
                          <p className="mt-1 font-medium text-amber-500">Open the manager conflict monitor for review guidance.</p>
                         ) : !["accepted", "superseded", "rebased", "sending"].includes(intent.state) && (

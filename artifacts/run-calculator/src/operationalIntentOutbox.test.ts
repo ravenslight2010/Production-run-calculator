@@ -10,12 +10,17 @@ import {
   readOperationalIntentOutbox,
   retryOperationalIntent,
   discardOperationalIntent,
+  setOperationalIntentCanonicalAdopter,
+  fencePendingOperationalValues,
+  getOperationalDeviceId,
+  operationalIntentBlocksLifecycle,
   setOperationalIntentIdentity,
 } from "./operationalIntentOutbox";
 
 describe("operational intent outbox", () => {
   beforeEach(() => setOperationalIntentIdentity({ scope: "live", userId: "operator-1" }));
   afterEach(() => {
+    setOperationalIntentCanonicalAdopter(undefined);
     setOperationalIntentIdentity(null);
     localStorage.clear();
     vi.unstubAllGlobals();
@@ -43,6 +48,105 @@ describe("operational intent outbox", () => {
     expect(operationalIntentSummary().accepted).toBe(1);
     expect(fetch.mock.calls[0][1].body).toContain('"traysOnLine":5');
     expect(replaySignal).not.toHaveBeenCalled();
+  });
+  it("captures device identity and base revision in the authenticated command envelope", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        outcome: "accepted",
+        cursor: 18,
+        canonicalRevision: 42,
+        serverTime: 1_700_000_000_000,
+        snapshotId: "snapshot-42",
+      }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    const deviceId = getOperationalDeviceId();
+    const intent = queueOperationalIntent({
+      runId: "run-1",
+      observedGeneration: "run-1:7",
+      effectiveAt: 123,
+      action: "pause",
+      baseRevision: 41,
+    });
+    await flushOperationalIntentOutbox("sender-tab");
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body).toMatchObject({ senderId: "sender-tab", deviceId, baseRevision: 41 });
+    expect(body.intent).toMatchObject({ baseRevision: 41 });
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id,
+      state: "accepted",
+      canonicalCursor: 18,
+      canonicalRevision: 42,
+      serverTime: 1_700_000_000_000,
+      snapshotId: "snapshot-42",
+      canonicalAdoptedAt: expect.any(Number),
+    })]);
+  });
+  it("waits for canonical adoption before terminalizing and keeps a failed adoption replayable", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ outcome: "accepted", data: { canonical: true } }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    let release: (() => void) | undefined;
+    const adopt = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({
+      runId: "run-1",
+      observedGeneration: "run-1:7",
+      effectiveAt: 123,
+      action: "resume",
+    });
+    const delivery = flushOperationalIntentOutbox();
+    await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "sending" })]);
+    release?.();
+    await delivery;
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "accepted" })]);
+
+    const failed = queueOperationalIntent({
+      runId: "run-2",
+      observedGeneration: "run-2:7",
+      effectiveAt: 124,
+      action: "pause",
+    });
+    adopt.mockRejectedValueOnce(new Error("canonical persistence failed"));
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual(expect.arrayContaining([expect.objectContaining({
+      id: failed.id,
+      state: "pending",
+      failure: "network",
+    })]));
+  });
+  it("fences pending correction fields and lifecycle actions from snapshot writes", () => {
+    const correction = queueOperationalIntent({
+      runId: "run-1",
+      observedGeneration: "run-1:7",
+      effectiveAt: 123,
+      action: "correction",
+      values: { casesOnCurrentSkid: 12, sauceBarrelsMade: 3 },
+    });
+    const lifecycle = queueOperationalIntent({
+      runId: "run-2",
+      observedGeneration: "run-2:7",
+      effectiveAt: 124,
+      action: "pause",
+    });
+    expect(operationalIntentBlocksLifecycle("run-2")).toBe(true);
+    expect(operationalIntentBlocksLifecycle("run-1")).toBe(false);
+    expect(fencePendingOperationalValues({
+      "run-1": { casesOnCurrentSkid: 12, sauceBarrelsMade: 3, unrelated: 9 },
+    }, [correction])).toEqual({
+      "run-1": { unrelated: 9 },
+    });
+    expect(lifecycle.state).toBe("pending");
   });
   it("reports an offline queue replay only after an offline-deferred intent is acknowledged", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false });

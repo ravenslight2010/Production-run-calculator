@@ -140,8 +140,19 @@ function paths(a: unknown, b: unknown, prefix = "$"): string[] {
   }
   if (a && b && typeof a === "object" && typeof b === "object") {
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    // These values are anchored to the response that delivered the
+    // projection, not to the shared day-state. Comparing them across clients
+    // makes a successful convergence pull look divergent by design.
+    const responseLocalTimingFields = new Set([
+      "serverTime",
+      "serverTimeMs",
+      "capturedAtServerMs",
+      "atMs",
+    ]);
     return [...keys].flatMap((key) =>
-      paths((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], `${prefix}.${key}`),
+      responseLocalTimingFields.has(key)
+        ? []
+        : paths((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], `${prefix}.${key}`),
     );
   }
   return [prefix];
