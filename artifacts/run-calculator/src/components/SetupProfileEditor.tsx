@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle } from "lucide-react";
 import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
+import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -308,6 +309,11 @@ export default function SetupProfileEditor({
   onRemoveFrontlineRecipeName,
   ingredientUniverse,
 }: SetupProfileEditorProps) {
+  const profileCacheVersion = useSyncExternalStore(
+    subscribeProfileCache,
+    getProfileCacheVersion,
+    getProfileCacheVersion,
+  );
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [brand, setBrand] = useState(initialBrand ?? "");
   const [flavor, setFlavor] = useState(initialFlavor ?? "");
@@ -510,7 +516,7 @@ export default function SetupProfileEditor({
     setAutofill(null);
     setAutofillError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, brand, flavor]);
+  }, [open, brand, flavor, profileCacheVersion]);
 
   useEffect(() => {
     if (open) {

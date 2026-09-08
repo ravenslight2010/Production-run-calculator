@@ -17,6 +17,7 @@ import {
 } from "./inventoryShared";
 import { AuthContext } from "./useAuth";
 import { resetMasterDataTransportCache } from "./masterData";
+import { setProfileCacheIdentity } from "./profileCache";
 
 // NOTE: the raw context object and `useAuth` live in ./useAuth.ts so this file
 // exports ONLY a component. Mixing them here broke React Fast Refresh's
@@ -53,6 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (requestEpoch !== authEpochRef.current) {
           return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
         }
+        setProfileCacheIdentity({
+          userId: user.userId,
+          scope: user.sandbox ? "sandbox" : "live",
+        });
         return user;
       } catch (err) {
         if (requestEpoch !== authEpochRef.current) {
@@ -67,6 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const me = data ?? null;
+
+  useEffect(() => {
+    setProfileCacheIdentity(me ? {
+      userId: me.userId,
+      scope: me.sandbox ? "sandbox" : "live",
+    } : null);
+  }, [me?.sandbox, me?.userId]);
 
   // On every identity change we (a) write the new identity straight into ["me"]
   // from the auth response (mirroring mobile's setMe), and (b) drop every OTHER
@@ -83,6 +95,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // honor AbortSignal.
       await qc.cancelQueries({ queryKey: ["me"], exact: true });
       resetMasterDataTransportCache();
+      setProfileCacheIdentity(identity ? {
+        userId: identity.userId,
+        scope: identity.sandbox ? "sandbox" : "live",
+      } : null);
       qc.setQueryData(["me"], identity);
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
@@ -139,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     advanceAuthEpoch();
     freshSessionRef.current = false;
     resetMasterDataTransportCache();
+    setProfileCacheIdentity(null);
     qc.setQueryData(["me"], null);
   }, [advanceAuthEpoch, qc]);
 

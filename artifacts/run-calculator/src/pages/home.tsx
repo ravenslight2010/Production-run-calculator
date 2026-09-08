@@ -409,6 +409,7 @@ import {
 import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "../cycleCount";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cachedProfileKeys } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
@@ -4691,22 +4692,10 @@ export default function Home() {
             // Network unavailable — fall back to whatever localStorage already holds.
           }
 
-          // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
-          // then union with the server pairs so profiles seeded above are included.
-          const seenSuffixes = new Set<string>();
-          const profileSuffixes: string[] = [];
-          const PREFIX = "run-calc-profile-";
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (!k) continue;
-            if (!k.startsWith(PREFIX)) continue;
-            const suffix = k.slice(PREFIX.length);
-            // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
-            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-              seenSuffixes.add(suffix);
-              profileSuffixes.push(suffix);
-            }
-          }
+          // Enumerate the active authenticated cache, then union with server
+          // pairs so profiles seeded above are included.
+          const profileSuffixes = cachedProfileKeys();
+          const seenSuffixes = new Set(profileSuffixes);
           // Add any server profiles that seedProfilesFromServer reported but
           // couldn't write to localStorage (quota issues) — we still want to
           // attempt to load them if they're already there under a different casing.
@@ -4813,18 +4802,8 @@ export default function Home() {
             // Network unavailable — fall back to whatever localStorage already holds.
           }
 
-          const seenSuffixes = new Set<string>();
-          const profileSuffixes: string[] = [];
-          const PREFIX = "run-calc-profile-";
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (!k?.startsWith(PREFIX)) continue;
-            const suffix = k.slice(PREFIX.length);
-            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-              seenSuffixes.add(suffix);
-              profileSuffixes.push(suffix);
-            }
-          }
+          const profileSuffixes = cachedProfileKeys();
+          const seenSuffixes = new Set(profileSuffixes);
           for (const { brand, flavor } of serverPairs) {
             const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
             if (!seenSuffixes.has(suffix)) {
@@ -6099,15 +6078,11 @@ export default function Home() {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
       settingsObjects.push(vals as unknown as Record<string, unknown>);
     }
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")) {
-        try {
-          const obj = JSON.parse(localStorage.getItem(key) ?? "null");
-          if (obj && typeof obj === "object") settingsObjects.push(obj as Record<string, unknown>);
-        } catch {}
-      }
+    for (const key of cachedProfileKeys()) {
+      const sep = key.indexOf("__");
+      if (sep < 0) continue;
+      const profile = loadRawProfile(key.slice(0, sep), key.slice(sep + 2));
+      if (profile) settingsObjects.push(profile);
     }
     for (const day of loadHistory()) {
       for (const vals of Object.values(day.runValues ?? {})) {
@@ -10456,14 +10431,10 @@ export default function Home() {
     if (!alreadyHealed && canManageProfiles) {
       localStorage.setItem(MARKER, "1");
 
-    const PREFIX = "run-calc-profile-";
     const toHeal: { brand: string; flavor: string }[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k?.startsWith(PREFIX)) continue;
-      const suffix = k.slice(PREFIX.length);
-      if (!suffix.includes("__")) continue;
+    for (const suffix of cachedProfileKeys()) {
       const dIdx = suffix.indexOf("__");
+      if (dIdx < 0) continue;
       const brand  = suffix.slice(0, dIdx);
       const flavor = suffix.slice(dIdx + 2);
       const p = loadProfile(brand, flavor);
