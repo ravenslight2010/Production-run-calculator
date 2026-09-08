@@ -12,6 +12,8 @@ import {
   type DataHealthWorkspace as DataHealthWorkspaceData,
 } from "@/profileDataHealth";
 import { MASTER_DATA_QUERY_KEY } from "@/masterData";
+import { todayStr } from "@/utils";
+import { fetchSyncHealth, type SyncHealthReport } from "../syncDiagnostics";
 
 type Props = { onNavigate?: (section: string) => void };
 
@@ -37,6 +39,12 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
   const [result, setResult] = useState<{ applied: number; skipped: number; failed: number; repairedRuns: number } | null>(null);
   const [latestBatch, setLatestBatch] = useState<DataHealthWorkspaceData["repairBatches"][number] | null>(null);
   const [undoingBatch, setUndoingBatch] = useState<string | null>(null);
+  const syncHealthQuery = useQuery<SyncHealthReport>({
+    queryKey: ["sync-health", todayStr()],
+    queryFn: () => fetchSyncHealth(todayStr()),
+    enabled: false,
+    staleTime: 0,
+  });
   const query = useQuery({
     queryKey: ["data-health-workspace"],
     queryFn: fetchDataHealthWorkspace,
@@ -169,6 +177,80 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
+        <div data-testid="sync-health-sentinel" className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-medium">Canonical sync self-check</p>
+              <p className="text-muted-foreground">
+                Read-only production checks for the daily snapshot, operational state, and command history.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-[10px]"
+              disabled={syncHealthQuery.isFetching}
+              onClick={() => void syncHealthQuery.refetch()}
+            >
+              {syncHealthQuery.isFetching ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              Run self-check
+            </Button>
+          </div>
+          {syncHealthQuery.isError && (
+            <p role="alert" className="mt-2 text-destructive">
+              The sync self-check is unavailable. Nothing was changed; retry when the API is reachable.
+            </p>
+          )}
+          {!syncHealthQuery.data && !syncHealthQuery.isFetching && !syncHealthQuery.isError && (
+            <p className="mt-2 text-muted-foreground">Run the self-check to review the current production sync evidence.</p>
+          )}
+          {syncHealthQuery.data && (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  data-testid="sync-health-status"
+                  className={`rounded px-2 py-0.5 font-semibold uppercase ${
+                    syncHealthQuery.data.status === "healthy"
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : syncHealthQuery.data.status === "warning"
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                        : "bg-destructive/15 text-destructive"
+                  }`}
+                >
+                  {syncHealthQuery.data.status}
+                </span>
+                <span className="text-muted-foreground">
+                  Checked {new Date(syncHealthQuery.data.checkedAt).toLocaleString()}
+                </span>
+              </div>
+              <p className="text-muted-foreground">{syncHealthQuery.data.nextAction}</p>
+              <div className="space-y-1">
+                {syncHealthQuery.data.checks.map((check) => (
+                  <div key={check.name} className="rounded border border-border bg-background/60 px-2 py-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">{check.name.replaceAll("-", " ")}</span>
+                      <span className={`font-semibold uppercase ${
+                        check.status === "healthy"
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : check.status === "warning" || check.status === "unknown"
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-destructive"
+                      }`}>
+                        {check.status}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-muted-foreground">{check.summary}</p>
+                    {check.status !== "healthy" && <p className="mt-0.5">Next: {check.nextAction}</p>}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Evidence is bounded and redacted. A warning or failure is a review signal, not a repair.
+              </p>
+            </div>
+          )}
+        </div>
         {query.isError && <p className="text-xs text-destructive">The health check could not be completed. Nothing was changed.</p>}
         {!workspace && !query.isFetching && !query.isError && (
           <p className="text-xs text-muted-foreground">Run a check to review production master-data findings.</p>

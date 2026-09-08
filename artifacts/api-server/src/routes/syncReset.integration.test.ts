@@ -21,10 +21,13 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let dataResetTable: DbModule["dataResetTable"];
+let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
+let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
+let runDailyRollover: typeof import("./sync")["runDailyRollover"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -65,10 +68,13 @@ beforeAll(async () => {
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
   dataResetTable = dbMod.dataResetTable;
+  completedRunHistoryTable = dbMod.completedRunHistoryTable;
+  inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
+  runDailyRollover = (await import("./sync")).runDailyRollover;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -111,7 +117,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   await db.execute(
-    sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${completedRunHistoryTable}, ${inventoryConsumedRunsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([
@@ -137,7 +143,96 @@ describe("GET /sync/reset-epoch", () => {
   it("starts at 0 before any reset", async () => {
     const res = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
     expect(res.status).toBe(200);
-    expect((await res.json()) as { epoch: number }).toEqual({ epoch: 0 });
+    expect((await res.json()) as { epoch: number }).toEqual({ epoch: 0, rollover: false });
+  });
+});
+
+describe("facility-local daily rollover", () => {
+  it("preserves the archive and scheduled day, advances once, and fences stale writes", async () => {
+    const nowMs = Date.parse("2030-03-12T06:00:00.000Z");
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: "2030-03-11",
+          runs: [{ id: "active-at-midnight", brand: "Acme", flavor: "Pep", startedAt: nowMs - 3_600_000 }],
+        },
+        runValues: { "active-at-midnight": {} },
+      },
+    }).where(sql`${dailySyncTable.date} = '2030-03-11' AND ${dailySyncTable.scope} = 'live'`);
+    const first = await runDailyRollover("live", { nowMs, timeZone: "America/Chicago" });
+    expect(first).toMatchObject({
+      fromDate: "2030-03-11",
+      toDate: "2030-03-12",
+      epoch: 1,
+      finalizedRuns: 1,
+      rolled: true,
+    });
+
+    const rows = await db.select().from(dailySyncTable);
+    expect(rows.map((row) => row.date).sort()).toEqual(["2030-03-10", "2030-03-11", "2030-03-12"]);
+    const scheduled = rows.find((row) => row.date === "2030-03-12")?.data as any;
+    expect(scheduled.dayState.runs).toEqual([
+      { id: "run-2030-03-12", brand: "Acme", flavor: "Pep" },
+    ]);
+    expect(scheduled.dayState).toMatchObject({
+      date: "2030-03-12",
+      resetAt: nowMs,
+      resetBoundaryAt: nowMs,
+    });
+    const archived = rows.find((row) => row.date === "2030-03-11")?.data as any;
+    expect(archived.dayState.runs[0]).toMatchObject({
+      id: "active-at-midnight",
+      endedAt: nowMs,
+      metaUpdatedAt: nowMs,
+    });
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
+
+    const duplicate = await runDailyRollover("live", {
+      nowMs: nowMs + 60_000,
+      timeZone: "America/Chicago",
+    });
+    expect(duplicate).toMatchObject({ epoch: 1, rolled: false });
+
+    const stale = await fetch(`${baseUrl}/api/sync/today?today=2030-03-12&epoch=0`, {
+      method: "PUT",
+      headers: { ...authHeaders(OPERATOR), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "stale-device", payload: dayRow("2030-03-11").data }),
+    });
+    expect(await stale.json()).toMatchObject({ ok: true, stale: true, epoch: 1 });
+    const currentWrite = await fetch(`${baseUrl}/api/sync/today?today=2030-03-12&epoch=1`, {
+      method: "PUT",
+      headers: { ...authHeaders(OPERATOR), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "current-device", payload: dayRow("2030-03-12").data }),
+    });
+    expect(currentWrite.status).toBe(200);
+    const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
+    expect(await epochRes.json()).toEqual({ epoch: 1, rollover: true });
+  });
+
+  it("finalizes active runs across every missed day, even behind a quiet scheduled row", async () => {
+    const nowMs = Date.parse("2030-03-12T06:00:00.000Z");
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: "2030-03-10",
+          runs: [{ id: "older-active", brand: "Acme", flavor: "Pep", startedAt: nowMs - 172_800_000 }],
+        },
+        runValues: { "older-active": {} },
+      },
+    }).where(sql`${dailySyncTable.date} = '2030-03-10' AND ${dailySyncTable.scope} = 'live'`);
+    // March 11 remains the default scheduled/quiet row and must not hide the
+    // older active production run during startup catch-up.
+    const result = await runDailyRollover("live", { nowMs, timeZone: "America/Chicago" });
+    expect(result).toMatchObject({ rolled: true, finalizedRuns: 1, epoch: 1 });
+
+    const [older] = await db.select().from(dailySyncTable)
+      .where(sql`${dailySyncTable.date} = '2030-03-10' AND ${dailySyncTable.scope} = 'live'`);
+    expect((older.data as any).dayState.runs[0]).toMatchObject({
+      id: "older-active",
+      endedAt: nowMs,
+      metaUpdatedAt: nowMs,
+    });
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
   });
 });
 
@@ -165,7 +260,7 @@ describe("POST /sync/reset", () => {
     expect(rows).toHaveLength(0);
 
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
-    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1 });
+    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1, rollover: false });
   });
 
   it("increments the epoch on each reset", async () => {
@@ -235,7 +330,7 @@ describe("POST /sync/purge-all — full factory purge", () => {
 
     // Manager can still hit a protected endpoint afterwards (auth intact).
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(MANAGER) });
-    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 5 });
+    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 5, rollover: false });
   });
 
   it("stale pre-purge pushes are rejected by the epoch guard", async () => {

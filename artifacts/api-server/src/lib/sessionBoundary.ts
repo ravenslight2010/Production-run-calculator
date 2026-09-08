@@ -1,5 +1,6 @@
 import { db, dailySyncTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
+import { facilityDate } from "./facilityTime";
 
 // The daily reset doubles as a session boundary: when a client performs the
 // midnight rollover it records the reset on today's `daily_sync` row (via the
@@ -21,11 +22,6 @@ import { and, eq } from "drizzle-orm";
 // requireAuth, which runs on every request including SSE, never pays for a DB
 // round-trip per request.
 
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 const CACHE_TTL_MS = 15_000;
 let cachedBoundaryMs = 0;
 let cachedAt = 0;
@@ -42,7 +38,7 @@ export async function getSessionBoundaryMs(): Promise<number> {
     const [row] = await db
       .select()
       .from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, "live")));
+      .where(and(eq(dailySyncTable.date, facilityDate(now)), eq(dailySyncTable.scope, "live")));
     const data = row?.data as
       | { dayState?: { resetBoundaryAt?: unknown } }
       | null

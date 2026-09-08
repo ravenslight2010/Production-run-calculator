@@ -322,8 +322,9 @@ describe("freeze tunnel and warehouse freezer domain isolation", () => {
 
   it("keeps Home drain and freezer action handlers on opposite state boundaries", () => {
     const homeSource = readSource("pages/home.tsx");
+    const packagingManagerSource = readSource("packagingManager.ts");
     const drainEffect = findEffectSource(homeSource, "priorDrainFreezerRef");
-    const updateDrainingRun = findFunctionSource(homeSource, "updateDrainingRunValues");
+    const updateDrainingRun = findFunctionSource(packagingManagerSource, "updateDrainingRun");
     const confirmSurplus = findFunctionSource(homeSource, "confirmRunSurplus");
     const replaceSurplus = findFunctionSource(homeSource, "replaceRunSurplus");
 
@@ -338,7 +339,7 @@ describe("freeze tunnel and warehouse freezer domain isolation", () => {
       "setDayState",
       "saveDayState",
       "saveRunValues",
-      "updateDrainingRunValues",
+      "updateDrainingRun",
       "recordAutomaticPackagingProgress",
       "recordManualPackagingProgress",
       "persistManualPackagingProgress",

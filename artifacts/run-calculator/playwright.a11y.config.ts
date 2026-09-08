@@ -36,5 +36,9 @@ export default defineConfig({
       name: "a11y-tablet",
       use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
     },
+    {
+      name: "a11y-tablet-landscape",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 768 } },
+    },
   ],
 });

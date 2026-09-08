@@ -4,6 +4,7 @@ import { db, supervisorPinSettingsTable } from "@workspace/db";
 import { UpdateSupervisorPinBody } from "@workspace/api-zod";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -71,6 +72,7 @@ router.put(
           set: { pin, updatedAt: new Date() },
         })
         .returning();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "supervisor-pin");
       res.json({ pin: row?.pin ?? pin });
     } catch (err) {
       req.log.error({ err }, "failed to update supervisor pin");

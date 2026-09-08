@@ -199,6 +199,7 @@ export type TrayTickResult = {
 export function computeTrayTick(input: {
   nowMs: number; prodDueMs: number; consDueMs: number; lastMs: number; periodMs: number;
   suppressed: boolean; feedComplete: boolean; deficitOpen: boolean; seeded: boolean;
+  productionSuppressed?: boolean; consumptionSuppressed?: boolean;
   current: number; seed: number | null; ppm: number; perTray: number; remainder: number;
 }): TrayTickResult {
   let prodDueMsNew = input.prodDueMs;
@@ -212,7 +213,7 @@ export function computeTrayTick(input: {
     prodDueMsNew = input.nowMs + input.periodMs / 2;
   } else if (input.nowMs >= prodDueMsNew) {
     prodDueMsNew = input.nowMs + input.periodMs;
-    if (!input.suppressed && !input.feedComplete && input.deficitOpen) delta += 1;
+    if (!input.suppressed && !input.productionSuppressed && !input.feedComplete && input.deficitOpen) delta += 1;
   }
   if (input.nowMs >= consDueMsNew) {
     const durationMin = lastMsNew > 0
@@ -220,7 +221,7 @@ export function computeTrayTick(input: {
       : input.periodMs / 60000;
     consDueMsNew = input.nowMs + input.periodMs;
     lastMsNew = input.nowMs;
-    if (!input.suppressed && !input.feedComplete) {
+    if (!input.suppressed && !input.consumptionSuppressed && !input.feedComplete) {
       if (!seededNew) {
         seededNew = true;
         if (input.current === 0 && input.seed !== null) seed = { from: input.current, to: input.seed };
@@ -243,6 +244,7 @@ export type BatchTickResult = {
 export function computeBatchTick(input: {
   nowMs: number; prodDueMs: number; consDueMs: number; lastMs: number; periodMs: number;
   fullBatchMs: number; effDrainMs: number; suppressed: boolean; feedComplete: boolean;
+  productionSuppressed?: boolean; consumptionSuppressed?: boolean;
   deficitOpen: boolean; seeded: boolean; current: number; traysSeededAmount: number;
   traysNeeded: number; batchesNeeded: number;
 }): BatchTickResult {
@@ -256,7 +258,7 @@ export function computeBatchTick(input: {
     prodDueMsNew = input.nowMs + input.fullBatchMs;
   } else if (input.nowMs >= prodDueMsNew) {
     prodDueMsNew = input.nowMs + input.fullBatchMs;
-    if (!input.suppressed && !input.feedComplete && input.deficitOpen) delta += 1;
+    if (!input.suppressed && !input.productionSuppressed && !input.feedComplete && input.deficitOpen) delta += 1;
   }
   if (input.nowMs >= consDueMsNew) {
     const durationMin = lastMsNew > 0
@@ -264,7 +266,7 @@ export function computeBatchTick(input: {
       : input.periodMs / 60000;
     consDueMsNew = input.nowMs + input.periodMs;
     lastMsNew = input.nowMs;
-    if (!input.suppressed && !input.feedComplete) {
+    if (!input.suppressed && !input.consumptionSuppressed && !input.feedComplete) {
       if (!seededNew) {
         seededNew = true;
         const remainingBatchesNeeded = input.traysSeededAmount > 0 && input.traysNeeded > 0

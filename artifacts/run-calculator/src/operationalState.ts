@@ -2,6 +2,8 @@ export type OperationalSnapshotReceipt = {
   runId: string;
   snapshotId: string;
   capturedAt: number;
+  canonicalRevision?: number;
+  serverTime?: number;
 };
 
 export type OperationalDisplayState = "confirmed" | "provisional" | "offline";

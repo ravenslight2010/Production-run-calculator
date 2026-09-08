@@ -771,6 +771,25 @@ test(
     const firstSnapshot = first.body.snapshotId;
     expect(typeof firstSnapshot).toBe("string");
 
+    // Assert the no-op before opening the second context. A newly booted peer
+    // can still finish its initial hydration and issue a legitimate background
+    // merge; allowing that startup write to race this assertion makes the
+    // snapshot comparison depend on viewport/project timing rather than the
+    // unchanged-write contract.
+    const unchanged = await page.evaluate(async ({ date, payload, snapshotId }) => {
+      const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+      const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
+      const response = await fetch(`/api/sync/today?today=${date}&epoch=${epoch}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ senderId: "unchanged-wake", payload, snapshotId }),
+      });
+      return { status: response.status, body: await response.json() as Record<string, unknown> };
+    }, { date: today(), payload: seeded, snapshotId: firstSnapshot });
+    expect(unchanged.status).toBe(200);
+    expect(unchanged.body).toMatchObject({ unchanged: true, snapshotId: firstSnapshot });
+    expect(unchanged.body.data).toBeUndefined();
+
     const peerContext = await browser.newContext({
       storageState: await page.context().storageState(),
     });
@@ -779,20 +798,6 @@ test(
       await peer.goto("/", { waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       await peerContext.setOffline(true);
-
-      const unchanged = await page.evaluate(async ({ date, payload, snapshotId }) => {
-        const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
-        const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
-        const response = await fetch(`/api/sync/today?today=${date}&epoch=${epoch}`, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ senderId: "unchanged-wake", payload, snapshotId }),
-        });
-        return { status: response.status, body: await response.json() as Record<string, unknown> };
-      }, { date: today(), payload: seeded, snapshotId: firstSnapshot });
-      expect(unchanged.status).toBe(200);
-      expect(unchanged.body).toMatchObject({ unchanged: true, snapshotId: firstSnapshot });
-      expect(unchanged.body.data).toBeUndefined();
 
       // Use the context request client so the reset broadcast can navigate the
       // page without destroying an in-flight page.evaluate execution context.

@@ -9,6 +9,15 @@ import {
   shouldResetFormOnRunSwitch,
 } from "../domain/runSyncPolicy";
 import { loadRunValues, markRunValuesUpdated, saveRunValues } from "../adapters/browserRunPersistence";
+import { KeyedDurableWriter } from "../keyedDurableWriter";
+
+const AUTOSAVE_DURABLE_DELAY_MS = 120;
+const homeFormDurableWriter = new KeyedDurableWriter(AUTOSAVE_DURABLE_DELAY_MS);
+
+/** Flush pending attributed form writes before an imperative durability boundary. */
+export function flushPendingHomeFormWrites(): void {
+  homeFormDurableWriter.flushAll();
+}
 
 export interface HomeFormIdentityFences {
   /** The run for which the visible form has been explicitly settled. */
@@ -31,6 +40,27 @@ export function shouldAutosaveHomeForm(
     && !isEmptyOverPopulated(incoming, stored);
 }
 
+export function clearSeededFlagForAutosave(
+  current: DayState,
+  runId: string,
+  capturedRunWasSeeded: boolean,
+): { dayState: DayState; changed: boolean } {
+  if (!capturedRunWasSeeded) return { dayState: current, changed: false };
+  const selected = current.runs[current.currentIndex];
+  if (selected?.id !== runId || !selected.seeded) {
+    return { dayState: current, changed: false };
+  }
+  return {
+    dayState: {
+      ...current,
+      runs: current.runs.map((candidate) =>
+        candidate.id === runId ? { ...candidate, seeded: false } : candidate,
+      ),
+    },
+    changed: true,
+  };
+}
+
 /**
  * Owns the two synchronous form identity fences. Home deliberately retains
  * canonical day state and chooses every imperative reset target.
@@ -44,6 +74,7 @@ export function useHomeFormIdentityFences(): HomeFormIdentityFences {
 
 interface HomeFormLifecycleOptions {
   currentRunId: string;
+  persistenceScope: string;
   dayStateRef: MutableRefObject<DayState>;
   form: UseFormReturn<FormValues>;
   values: FormValues;
@@ -67,6 +98,7 @@ interface HomeFormLifecycleOptions {
  */
 export function useHomeFormLifecycle({
   currentRunId,
+  persistenceScope,
   dayStateRef,
   form,
   values,
@@ -83,6 +115,9 @@ export function useHomeFormLifecycle({
   flashSaved,
 }: HomeFormLifecycleOptions) {
   useEffect(() => {
+    // The previous run/scope's delayed callback captured its immutable identity.
+    // Persist it before settling the visible form for a different identity.
+    flushPendingHomeFormWrites();
     if (!currentRunId) return;
     const stored = loadRunValues(currentRunId);
     if (
@@ -113,7 +148,23 @@ export function useHomeFormLifecycle({
     }
     // A run identity transition, not changing helper identities, owns this heal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRunId]);
+  }, [currentRunId, persistenceScope]);
+
+  useEffect(() => {
+    const flush = () => flushPendingHomeFormWrites();
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, []);
 
   useEffect(() => {
     let dayState = dayStateRef.current;
@@ -129,29 +180,34 @@ export function useHomeFormLifecycle({
       fences.formHandoffRef.current,
     )) return;
 
-    const now = Date.now();
-    if (run.seeded) {
-      dayState = {
-        ...dayState,
-        runs: dayState.runs.map((candidate) =>
-          candidate.id === runId ? { ...candidate, seeded: false } : candidate,
-        ),
-      };
-      dayStateRef.current = dayState;
-      // Home owns canonical day persistence; this is the intentional edit-side
-      // mutation before its canonical sync payload is built.
-      saveDayState(dayState);
-      setDayState(dayState);
-    }
-    saveRunValues(runId, values);
-    markRunValuesUpdated(runId, now);
-    if (canManageProfiles && (run.brand || run.flavor)) {
-      if (saveProfileForRun(run.brand, run.flavor, values)) {
-        void propagateProfileToPendingRuns(run.brand, run.flavor);
+    const capturedRun = { ...run };
+    const capturedValues = structuredClone(values);
+    const writeKey = `${persistenceScope}:${runId}`;
+    homeFormDurableWriter.schedule(writeKey, () => {
+      const now = Date.now();
+      const seededPatch = clearSeededFlagForAutosave(
+        dayStateRef.current,
+        runId,
+        capturedRun.seeded === true,
+      );
+      if (seededPatch.changed) {
+        dayStateRef.current = seededPatch.dayState;
+        saveDayState(seededPatch.dayState);
+        setDayState(seededPatch.dayState);
       }
-    }
-    lastLocalEditRef.current = now;
-    schedulePush(dayState, undefined, "edit");
-    flashSaved();
-  }, [values]);
+      saveRunValues(runId, capturedValues);
+      markRunValuesUpdated(runId, now);
+      if (canManageProfiles && (capturedRun.brand || capturedRun.flavor)) {
+        if (saveProfileForRun(capturedRun.brand, capturedRun.flavor, capturedValues)) {
+          void propagateProfileToPendingRuns(capturedRun.brand, capturedRun.flavor);
+        }
+      }
+      lastLocalEditRef.current = now;
+      // Build the server push from the latest canonical day. A sync adoption or
+      // lifecycle edit during the debounce window must never be replaced by the
+      // older render that originally scheduled this run-value write.
+      schedulePush(dayStateRef.current, undefined, "edit");
+      flashSaved();
+    });
+  }, [values, persistenceScope]);
 }

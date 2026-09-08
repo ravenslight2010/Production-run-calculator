@@ -4,6 +4,7 @@ import { db, dieTypesTable, type DieTypeRow } from "@workspace/db";
 import { SaveDieTypesBody, DeleteDieTypesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -60,15 +61,17 @@ router.post("/die-types", requireCapability("manage-inventory"), async (req: Req
   const byId = new Map<string, string>();
   for (const name of cleanNames(parsed.data.names)) byId.set(dieTypeId(name), name);
   try {
+    const scope = currentScope();
     for (const [id, name] of byId) {
       await db
         .insert(dieTypesTable)
-        .values({ id, scope: currentScope(), name, updatedAt: new Date() })
+        .values({ id, scope, name, updatedAt: new Date() })
         .onConflictDoUpdate({
           target: [dieTypesTable.id, dieTypesTable.scope],
           set: { name, updatedAt: new Date() },
         });
     }
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "die-types");
     res.json({ names: await listAll() });
   } catch (err) {
     req.log.error({ err }, "failed to save die types");
@@ -84,11 +87,13 @@ router.post("/die-types/delete", requireCapability("manage-inventory"), async (r
   }
   const ids = [...new Set(cleanNames(parsed.data.names).map(dieTypeId))];
   try {
+    const scope = currentScope();
     if (ids.length > 0) {
       await db
         .delete(dieTypesTable)
-        .where(and(inArray(dieTypesTable.id, ids), eq(dieTypesTable.scope, currentScope())));
+        .where(and(inArray(dieTypesTable.id, ids), eq(dieTypesTable.scope, scope)));
     }
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "die-types");
     res.json({ names: await listAll() });
   } catch (err) {
     req.log.error({ err }, "failed to delete die types");

@@ -474,6 +474,7 @@ assert_stopped_summary_workflow_contract() {
   summary_block=$(workflow_step_block "$summary_step")
   assert_contains "$summary_block" "if: always()"
   assert_contains "$summary_block" "CHECKPOINT_DIR: ${checkpoint_dir}"
+  assert_contains "$summary_block" "CHECKPOINT_ARTIFACT_NAME: release-evidence-${mode}-\${{ github.run_id }}"
   assert_contains "$summary_block" \
     "CHECKPOINT_ARTIFACT_URL: \${{ steps.${artifact_step_id}.outputs.artifact-url }}"
   assert_contains "$summary_block" \
@@ -489,6 +490,12 @@ assert_stopped_summary_workflow_contract() {
 }
 
 test_release_workflow_preserves_stopped_summary_contract() {
+  local workflow_content
+  workflow_content=$(<"$RELEASE_WORKFLOW")
+  assert_contains "$workflow_content" \
+    'RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"'
+  assert_contains "$workflow_content" \
+    "A fresh service database cannot prove the retained production repair"
   assert_stopped_summary_workflow_contract \
     standard \
     "Upload standard release evidence" \
@@ -1036,9 +1043,21 @@ test_department_navigation_readiness_contract() {
   assert_contains "$workflow_content" \
     'PORT=5000 pnpm --filter @workspace/api-server run start'
   assert_contains "$workflow_content" \
-    "curl --fail --silent http://127.0.0.1:5000/api/healthz"
+    "http://127.0.0.1:5000/api/readyz"
+  assert_contains "$workflow_content" \
+    "/tmp/department-readiness.log"
+  assert_contains "$workflow_content" \
+    "grep -q '\"phase\":\"failed\"'"
   assert_contains "$workflow_content" \
     'pnpm --filter @workspace/run-calculator run dev'
+  assert_contains "$workflow_content" \
+    "name: Verify browser API proxy"
+  assert_contains "$workflow_content" \
+    "http://127.0.0.1:5000/api/livez"
+  assert_contains "$workflow_content" \
+    "http://127.0.0.1:5173/api/livez"
+  assert_contains "$workflow_content" \
+    "/tmp/department-proxy.log"
   assert_contains "$workflow_content" \
     "name: Upload browser server logs on failure"
   assert_contains "$workflow_content" "path: /tmp/department-*.log"

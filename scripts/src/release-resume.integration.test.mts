@@ -152,9 +152,7 @@ for argument in "$@"; do
   fi
   previous="$argument"
 done
-if [[ "\${*: -1}" == */actions/artifacts/* ]]; then
-  printf '{"name":"%s"}\\n' "$EXPECTED_ARTIFACT_NAME" > "$output_path"
-fi
+printf '{"name":"%s","expired":false}\\n' "$EXPECTED_ARTIFACT_NAME" > "$output_path"
 `,
         { encoding: "utf8", mode: 0o755 },
       );
@@ -202,8 +200,8 @@ fi
               /https:\/\/github\.com\/example\/factory\/actions\/runs\/123456789\/artifacts\/987654321/g,
             ) ?? []
           ).length,
-          1,
-          `${mode}/${scenario.name} uploaded artifact link should be probed exactly once`,
+          0,
+          `${mode}/${scenario.name} browser artifact URL should not be treated as an API probe`,
         );
         assert.match(
           curlCalls,
@@ -266,7 +264,7 @@ exit 22
       assert.equal(result.code, 1, result.output);
       assert.match(
         result.output,
-        /forked pull request: the artifact link did not resolve\. The read-only workflow token could not verify the uploaded artifact\./,
+        /forked pull request: artifact metadata was unavailable; the artifact may be missing, expired, or inaccessible to this workflow token\. The base repository's read-only workflow token could not verify the uploaded artifact\./,
         `${mode} fork access failure must explain the safe recovery path`,
       );
       assert.doesNotMatch(
@@ -299,15 +297,15 @@ exit 22
           CHECKPOINT_ARTIFACT_NAME: `release-evidence-${mode}-123456789`,
           RELEASE_BASE_REPOSITORY: "example/factory",
           RELEASE_EVENT_NAME: "pull_request",
-          RELEASE_HEAD_REPOSITORY: "contributor/factory",
+          RELEASE_HEAD_REPOSITORY: "example/factory",
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1",
         },
       );
       assert.equal(result.code, 1, result.output);
       assert.match(
         result.output,
-        /forked pull request: no artifact link was provided by the upload step\./,
-        `${mode} fork upload without a URL must fail with recovery guidance`,
+        /no artifact link was provided by the upload step\./,
+        `${mode} same-repository upload without a URL must fail with recovery guidance`,
       );
       assert.doesNotMatch(
         result.output,
@@ -319,8 +317,84 @@ exit 22
     }
   }
 
+  for (const artifactScenario of [
+    {
+      name: "expired",
+      metadata: '{"name":"release-evidence-standard-123456789","expired":true}',
+      expected: /the uploaded artifact has expired\./,
+    },
+    {
+      name: "malformed",
+      metadata: '{"name":42,"expired":false}',
+      expected: /artifact metadata was malformed\./,
+    },
+    {
+      name: "wrong-name",
+      metadata: '{"name":"another-artifact","expired":false}',
+      expected: /the uploaded artifact name did not match\./,
+    },
+  ] as const) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${artifactScenario.name}-`),
+    );
+    const fakeBinDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${artifactScenario.name}-bin-`),
+    );
+    await writeFile(
+      join(fakeBinDir, "curl"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+output_path=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "--output" ]]; then output_path="$argument"; fi
+  previous="$argument"
+done
+printf '%s\\n' "$ARTIFACT_METADATA" > "$output_path"
+`,
+      { encoding: "utf8", mode: 0o755 },
+    );
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        join(evidenceDir, "step-summary.md"),
+        "standard",
+        artifactUrl,
+        {
+          ARTIFACT_METADATA: artifactScenario.metadata,
+          CHECKPOINT_ARTIFACT_NAME: "release-evidence-standard-123456789",
+          GITHUB_API_URL: "https://api.example.test",
+          GITHUB_REPOSITORY: "example/factory",
+          GITHUB_TOKEN: "test-token",
+          PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+          VERIFY_CHECKPOINT_ARTIFACT_LINK: "1",
+        },
+      );
+      assert.equal(result.code, 1, result.output);
+      assert.match(result.output, artifactScenario.expected);
+      const summary = await readFile(
+        join(evidenceDir, "step-summary.md"),
+        "utf8",
+      );
+      assert.match(summary, artifactScenario.expected);
+      assert.doesNotMatch(
+        summary,
+        /Download the stopped-check checkpoint artifact|https?:\/\//,
+        `${artifactScenario.name} metadata must not produce a download link`,
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+      await rm(fakeBinDir, { recursive: true, force: true });
+    }
+  }
+
   console.log(
-    "Stopped release artifact link verification passed (same-repository and forked pull requests; read-only success and denied access).",
+    "Stopped release artifact verification passed (same-repository and forked pull requests; success, inaccessible, missing, expired, malformed, and mismatched metadata).",
   );
 }
 
@@ -451,7 +525,7 @@ async function runParallelStageScenario(): Promise<void> {
     {
       label: "parallel slow gate",
       command: process.execPath,
-      args: ["-e", delayedGate],
+      args: ["-e", delayedGate, "parallel-slow"],
       env: {
         RELEASE_PARALLEL_MARKER: firstMarker,
         RELEASE_PARALLEL_DELAY: "1000",
@@ -461,7 +535,7 @@ async function runParallelStageScenario(): Promise<void> {
     {
       label: "parallel fast gate",
       command: process.execPath,
-      args: ["-e", delayedGate],
+      args: ["-e", delayedGate, "parallel-fast"],
       env: {
         RELEASE_PARALLEL_MARKER: secondMarker,
         RELEASE_PARALLEL_DELAY: "40",
@@ -995,7 +1069,7 @@ async function runApiShardConcurrencyScenario(): Promise<void> {
   const steps: FixtureStep[] = Array.from({ length: 4 }, (_, index) => ({
     label: `API fixture shard ${index + 1}`,
     command: process.execPath,
-    args: ["-e", gateScript],
+    args: ["-e", gateScript, `api-fixture-${index + 1}`],
     env: {
       RELEASE_API_EVENTS: eventsPath,
       RELEASE_API_DELAY: "500",

@@ -15,6 +15,7 @@ import {
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
   assertUniqueReleaseSteps,
   PRODUCTION_AUDIT_TIMEOUT_MS,
@@ -124,6 +125,11 @@ async function run(): Promise<void> {
     rootPackage.scripts?.["audit:prod:ci"],
     "pnpm audit --prod --audit-level high --ignore-registry-errors",
     "informational CI security must report high-severity advisories and tolerate registry failures",
+  );
+  assert.deepEqual(
+    SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.args,
+    ["--filter", "@workspace/scripts", "run", "test:source-heal-verify"],
+    "disposable CI must run focused reconciliation fixtures instead of querying an empty database for production history",
   );
   assert.equal(
     rootPackage.scripts?.["audit:prod:release"],

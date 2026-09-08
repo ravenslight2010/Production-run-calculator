@@ -9,6 +9,7 @@ import {
   matchesSpecImportAliasDeletion,
   type SpecImportAliasDeletionEntry,
 } from "../lib/specImportAliasDeletion";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -105,11 +106,12 @@ router.post("/spec-import-aliases", requireCapability("manage-profiles"), async 
   }
 
   try {
+    const scope = currentScope();
     if (incoming.length > 0) {
       const existing = await db
         .select()
         .from(specImportAliasesTable)
-        .where(eq(specImportAliasesTable.scope, currentScope()));
+        .where(eq(specImportAliasesTable.scope, scope));
       const byKey = new Map<string, SpecImportAliasRow>();
       for (const row of existing) {
         byKey.set(specAliasKey(row.kind, row.externalName, row.context ?? null), row);
@@ -137,11 +139,12 @@ router.post("/spec-import-aliases", requireCapability("manage-profiles"), async 
       if (inserts.length > 0) {
         await db
           .insert(specImportAliasesTable)
-          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
+          .values(inserts.map((a) => ({ ...a, scope })));
       }
     }
 
     const aliases = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
     req.log.error({ err }, "failed to save spec-import aliases");
@@ -177,11 +180,12 @@ router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"),
   }
 
   try {
+    const scope = currentScope();
     if (entries.length > 0) {
       const existing = await db
         .select()
         .from(specImportAliasesTable)
-        .where(eq(specImportAliasesTable.scope, currentScope()));
+        .where(eq(specImportAliasesTable.scope, scope));
       const idsToDelete = existing
         .filter((row) =>
           entries.some((entry) =>
@@ -204,6 +208,7 @@ router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"),
     }
 
     const aliases = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
     req.log.error({ err }, "failed to delete spec-import aliases");

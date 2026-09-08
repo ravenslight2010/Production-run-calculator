@@ -261,6 +261,8 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
     expect(firstBody.cursor).toBeTypeOf("number");
+    expect(firstBody.canonicalRevision).toBe(1);
+    expect(firstBody.serverTime).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
     // Completed history is the retained daily document flow: the canonical ended
@@ -277,6 +279,15 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
       date: DATE,
       actorId: USER,
     });
+    const [receipt] = await db.select().from(operationalIntentLedgerTable);
+    expect(receipt).toMatchObject({
+      commandType: "operational-intent",
+      actorId: USER,
+      deviceId: "end-client",
+      baseRevision: 0,
+      canonicalRevision: 1,
+    });
+    expect(receipt.serverReceivedAt.getTime()).toBe(firstBody.serverTime);
     expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
       .toBe(completion.completedAt.getTime());
 
@@ -288,7 +299,13 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
     const replay = await postFinalization(finalization("offline:final-one"));
     const replayBody = await replay.json() as any;
-    expect(replayBody).toMatchObject({ outcome: "accepted", duplicate: true, cursor: firstBody.cursor });
+    expect(replayBody).toMatchObject({
+      outcome: "accepted",
+      duplicate: true,
+      cursor: firstBody.cursor,
+      canonicalRevision: firstBody.canonicalRevision,
+      serverTime: firstBody.serverTime,
+    });
     expect(replayBody.data.dayState.runs.find((run: any) => run.id === RUN)?.endedAt)
       .toBe(firstBody.data.dayState.runs.find((run: any) => run.id === RUN).endedAt);
     expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(false);
@@ -514,6 +531,134 @@ describe("GET /sync/operational-intents/cursor", () => {
   });
 });
 
+describe("GET /sync/health — read-only scoped sentinel", () => {
+  const DATE = "2030-03-10";
+
+  async function getHealth(headers: Record<string, string> = managerAuthHeaders()) {
+    return fetch(`${baseUrl}/api/sync/health?date=${DATE}`, { headers });
+  }
+
+  async function seedHealthyDocument() {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          currentIndex: 0,
+          runs: [{ id: "health-run", startedAt: 100, metaUpdatedAt: 100 }],
+        },
+        runValues: { "health-run": { casesNeeded: 10, freezerTime: 5 } },
+      },
+      canonicalRevision: 7,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  }
+
+  it("reports a healthy bounded contract without exposing canonical payloads", async () => {
+    await seedHealthyDocument();
+    const response = await getHealth();
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body).toMatchObject({
+      contractVersion: 1,
+      scope: "live",
+      date: DATE,
+      status: "healthy",
+      evidence: {
+        dailyRowPresent: true,
+        canonicalRevision: 7,
+        ledgerRowsScanned: 0,
+        historyRowsScanned: 0,
+      },
+    });
+    expect(body.checks.map((check: any) => check.name)).toEqual([
+      "canonical-document",
+      "snapshot-revision",
+      "operational-projection",
+      "command-history",
+    ]);
+    expect(body).not.toHaveProperty("data");
+    expect(body).not.toHaveProperty("payload");
+    expect(JSON.stringify(body)).not.toContain("health-run");
+  });
+
+  it("reports a representative canonical mismatch as failing and never repairs it", async () => {
+    await seedHealthyDocument();
+    const before = (await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"),
+      eq(dailySyncTable.date, DATE),
+    )))[0];
+    await db.update(dailySyncTable).set({
+      data: { dayState: { date: DATE, runs: [{ id: "health-run" }] } },
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+
+    const response = await getHealth();
+    const body = await response.json() as any;
+    expect(body.status).toBe("failing");
+    expect(body.checks.find((check: any) => check.name === "operational-projection")).toMatchObject({
+      status: "failing",
+    });
+    expect(body.nextAction).toContain("did not repair");
+
+    const after = (await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"),
+      eq(dailySyncTable.date, DATE),
+    )))[0];
+    expect(after.data).toEqual({ dayState: { date: DATE, runs: [{ id: "health-run" }] } });
+    expect(after.canonicalRevision).toBe(before.canonicalRevision);
+  });
+
+  it("marks accepted receipts without snapshots as failing", async () => {
+    await seedHealthyDocument();
+    await db.insert(operationalIntentLedgerTable).values({
+      scope: "live",
+      date: DATE,
+      intentId: "health-invalid-receipt",
+      outcome: "accepted",
+      snapshot: null,
+    });
+    const body = await (await getHealth()).json() as any;
+    expect(body.status).toBe("failing");
+    expect(body.checks.find((check: any) => check.name === "command-history").status).toBe("failing");
+  });
+
+  it("reports unavailable canonical evidence as a warning without treating it as repaired", async () => {
+    const response = await fetch(`${baseUrl}/api/sync/health?date=2030-04-01`, {
+      headers: managerAuthHeaders(),
+    });
+    const body = await response.json() as any;
+    expect(body.status).toBe("warning");
+    expect(body.evidence).toMatchObject({
+      dailyRowPresent: false,
+      snapshotId: null,
+      canonicalRevision: null,
+    });
+    expect(body.nextAction).toContain("rerun");
+  });
+
+  it("bounds ledger evidence and keeps output free of receipt payloads", async () => {
+    await seedHealthyDocument();
+    await db.insert(operationalIntentLedgerTable).values(Array.from({ length: 105 }, (_, index) => ({
+      scope: "live",
+      date: DATE,
+      intentId: `health-bounded-${index}`,
+      outcome: "review-required",
+      snapshot: { privatePayload: `secret-${index}` },
+    })));
+    const body = await (await getHealth()).json() as any;
+    expect(body.evidence.ledgerRowsScanned).toBe(100);
+    expect(body.evidence.ledgerRowsTruncated).toBe(true);
+    expect(body.checks.find((check: any) => check.name === "command-history")).toMatchObject({
+      status: "warning",
+    });
+    expect(JSON.stringify(body)).not.toContain("privatePayload");
+    expect(JSON.stringify(body)).not.toContain("secret-");
+  });
+
+  it("denies non-managers and sandbox sessions before inspecting data", async () => {
+    expect((await getHealth(authHeaders())).status).toBe(403);
+    expect((await getHealth(sandboxAuthHeaders())).status).toBe(403);
+  });
+});
+
 describe("POST /sync/operational-intents — canonical transitions", () => {
   const DATE = "2030-03-10";
   const RUN = "transition-run";
@@ -589,6 +734,7 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
 
     const stale = await post(intent("ordered:stale-pause", startGeneration, "pause"));
     expect(stale.outcome).toBe("conflicted");
+    expect(stale.canonicalRevision).toBe(5);
     expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
   });
 });
@@ -643,9 +789,18 @@ describe("POST /sync/auto-track/claim", () => {
     const bodies = await Promise.all([a.json(), b.json()]) as Array<{
       outcome: string;
       values: { traysOnLine: number };
+      canonicalRevision: number;
+      serverTime: number;
     }>;
     expect(bodies.map((body) => body.outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every((body) => body.values.traysOnLine === 9)).toBe(true);
+    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([1, 2]));
+    expect(bodies.every((body) => typeof body.serverTime === "number")).toBe(true);
+    const receipts = await db.select().from(operationalIntentLedgerTable);
+    expect(receipts).toHaveLength(2);
+    expect(receipts.every((receipt) => receipt.commandType === "auto-track")).toBe(true);
+    expect(receipts.every((receipt) => receipt.actorId === USER)).toBe(true);
+    expect(new Set(receipts.map((receipt) => receipt.deviceId))).toEqual(new Set(["tab-a", "tab-b"]));
   });
 
   it("returns duplicate for an accepted retry and rejects a stale-base event after manual correction", async () => {
@@ -2320,7 +2475,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
       body: JSON.stringify({
         senderId: "schedule-writer",
         payload: {
-          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep" }], resetAt: 1000 },
+          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }], resetAt: 1000 },
           runValues: { "scheduled-run": { casesNeeded: 240 } },
           runValuesUpdatedAt: { "scheduled-run": 1 },
         },
@@ -2346,12 +2501,28 @@ describe("/sync/events — date-scoped broadcasts", () => {
       data?: { dayState?: { runs?: Array<{ id: string }> } };
       serverCalc?: { runId: string } | null;
       autoTrackSchedule?: { runId: string; entries: unknown[] } | null;
+      operationalProjection?: {
+        version: number;
+        runId: string;
+        serverTimeMs: number;
+        calculationRevision: number;
+        effectiveElapsedSec: number;
+        facts: { runStatus: string; pressDone: boolean };
+      } | null;
+      serverTime?: number;
     };
     expect(initial.initial).toBe(true);
     expect(initial.senderId).toBeNull();
     expect(initial.data?.dayState?.runs?.map((run) => run.id)).toContain("scheduled-run");
     expect(initial.serverCalc?.runId).toBe("scheduled-run");
     expect(initial.autoTrackSchedule).toMatchObject({ runId: "scheduled-run", entries: [] });
+    expect(initial.operationalProjection).toMatchObject({
+      version: 1,
+      runId: "scheduled-run",
+      calculationRevision: 0,
+      facts: { runStatus: "running", pressDone: false },
+    });
+    expect(initial.operationalProjection?.serverTimeMs).toBe(initial.serverTime);
   });
 
   it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {

@@ -111,6 +111,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/profile-data/health-check", "/profile-data/health-workspace",
     "/ai-memory/health-check",
   ]),
+  ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
     "/inventory/count-observations/:id", "/inventory/count-observations",

@@ -139,6 +139,27 @@ describe("auto-track coordination", () => {
     expect(retry.values.traysOnLine).toBe(9);
   });
 
+  it("rejects a valid claim when the canonical run is in manual mode", () => {
+    const stored = {
+      dayState: {
+        runs: [{
+          id: "run-1",
+          startedAt: 1,
+          metaUpdatedAt: 2,
+          autoTrackDisabled: true,
+        }],
+      },
+      runValues: { "run-1": { traysOnLine: 10 } },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+
+    const result = applyAutoTrackClaim(stored, claim(), NOW);
+
+    expect(result.outcome).toBe("stale");
+    expect(result.values.traysOnLine).toBe(10);
+    expect(result.data).toEqual(stored);
+  });
+
   it("rejects competing and skipped claims without changing the register", () => {
     const stored = {
       dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },

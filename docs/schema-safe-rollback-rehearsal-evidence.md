@@ -22,6 +22,27 @@ disposable Docker resources with this repository revision and its parent:
 - Cleanup check: no rehearsal containers, networks, volumes, image tags, or
   temporary worktrees remained.
 
+The September 8, 2026 CI repair classified the reported drift as
+**nondeterministic `pg_dump` output**, not runtime DDL, a migration mismatch, or
+parent-runtime incompatibility. PostgreSQL emits random `\restrict` and
+`\unrestrict` session guards in plain-text dumps. The rehearsal now retains raw
+and normalized transient snapshots while it runs, excludes only those proven
+non-schema guard lines from fingerprints, and continues diffing every
+meaningful schema statement. Both adjacent application revisions use the same
+forward schema and contain no runtime migration path.
+
+The repaired rehearsal completed against current revision
+`634e49c0e6d3d6208a6b36cd1b2cec63b62e8790` and parent revision
+`f25abe58b4777c170868f79cd941b41ab77747f9`:
+
+- Current migration result: exit 0
+- Current runtime checks (`/`, `/api/healthz`): PASS
+- Parent runtime checks against the forward schema (`/`, `/api/healthz`): PASS
+- Normalized fingerprint after migration, current runtime, and parent runtime:
+  `6f977ba0b7a2f02b29711ade202297b257d759a0a493e6ae425c2c4bece2ec0f`
+- Cleanup verification: PASS; no disposable containers, network, volume, image
+  tags, or temporary worktrees remained
+
 The schema was applied exactly once by the migration image matching the
 introduced release. The rehearsal then replaced only the application runtime
 with the parent revision's immutable image while preserving the database

@@ -5920,6 +5920,12 @@ export const PutSyncTodayBody = zod.object({
 })
 
 export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayResponseCanonicalRevisionMin = 0;
+
+export const putSyncTodayResponseServerTimeMin = 0;
+
+export const putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin = 0;
+
 
 
 export const PutSyncTodayResponse = zod.object({
@@ -5931,7 +5937,58 @@ export const PutSyncTodayResponse = zod.object({
   "unchanged": zod.boolean().optional(),
   "snapshotId": zod.string().regex(putSyncTodayResponseSnapshotIdRegExp).optional(),
   "stale": zod.boolean().optional(),
-  "epoch": zod.number().int().optional()
+  "epoch": zod.number().int().optional(),
+  "canonicalRevision": zod.number().int().min(putSyncTodayResponseCanonicalRevisionMin).optional(),
+  "serverTime": zod.number().int().min(putSyncTodayResponseServerTimeMin).optional(),
+  "operationalProjection": zod.union([zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string(),
+  "lifecycleGeneration": zod.string(),
+  "serverTimeMs": zod.number(),
+  "capturedAtServerMs": zod.number(),
+  "calculationRevision": zod.number().int().min(putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin),
+  "effectiveElapsedSec": zod.number(),
+  "timers": zod.object({
+  "nextBatchInSec": zod.number(),
+  "pressRemainingSec": zod.number(),
+  "freezerElapsedSec": zod.number(),
+  "freezerRemainingSec": zod.number()
+}),
+  "counters": zod.object({
+  "casesCompleted": zod.number(),
+  "casesInFreezer": zod.number(),
+  "casesOnLine": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressCasesLeft": zod.number(),
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number(),
+  "sauceBarrelsMade": zod.number(),
+  "app1BatchesMade": zod.number(),
+  "app2BatchesMade": zod.number(),
+  "app3BatchesMade": zod.number(),
+  "app4BatchesMade": zod.number()
+}),
+  "facts": zod.object({
+  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
+  "pressDone": zod.boolean(),
+  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
+  "paceDelta": zod.number()
+}),
+  "calc": zod.record(zod.string(), zod.unknown()),
+  "due": zod.object({
+  "runId": zod.string(),
+  "generation": zod.string(),
+  "atMs": zod.number(),
+  "entries": zod.array(zod.object({
+  "channel": zod.string(),
+  "dueAt": zod.number(),
+  "dueNow": zod.boolean(),
+  "nextDueAt": zod.number(),
+  "canonical": zod.boolean(),
+  "sequence": zod.number().optional()
+}))
+})
+}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()]).optional()
 })
 
 
@@ -5995,6 +6052,10 @@ export const ClaimAutoTrackEventBody = zod.object({
 export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
 
 export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const claimAutoTrackEventResponseCanonicalRevisionMin = 0;
+
+export const claimAutoTrackEventResponseServerTimeMin = 0;
+
 
 
 export const ClaimAutoTrackEventResponse = zod.object({
@@ -6013,5 +6074,136 @@ export const ClaimAutoTrackEventResponse = zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
-  "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp)
+  "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp),
+  "duplicate": zod.boolean().optional(),
+  "canonicalRevision": zod.number().int().min(claimAutoTrackEventResponseCanonicalRevisionMin),
+  "serverTime": zod.number().int().min(claimAutoTrackEventResponseServerTimeMin)
+})
+
+
+/**
+ * @summary Apply one server-authoritative production command
+ */
+export const submitOperationalIntentQueryEpochMin = 0;
+
+
+
+export const SubmitOperationalIntentQueryParams = zod.object({
+  "today": zod.date().optional(),
+  "epoch": zod.coerce.number().int().min(submitOperationalIntentQueryEpochMin).optional()
+})
+
+export const submitOperationalIntentBodySenderIdMax = 160;
+
+export const submitOperationalIntentBodyDeviceIdMax = 160;
+
+export const submitOperationalIntentBodyBaseRevisionMin = 0;
+
+export const submitOperationalIntentBodyIntentIdMax = 160;
+
+export const submitOperationalIntentBodyIntentRunIdMax = 160;
+
+export const submitOperationalIntentBodyIntentObservedGenerationMax = 160;
+
+export const submitOperationalIntentBodyIntentResetEpochMin = 0;
+
+export const submitOperationalIntentBodyIntentBaseRevisionMin = 0;
+
+export const submitOperationalIntentBodyIntentValuesMinOne = 0;
+export const submitOperationalIntentBodyIntentValuesMaxOne = 1000000;
+
+export const submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax = 300;
+
+export const submitOperationalIntentBodyIntentInventoryLinesItemQtyExclusiveMin = 0;
+export const submitOperationalIntentBodyIntentInventoryLinesItemQtyMax = 1000000;
+
+export const submitOperationalIntentBodyIntentInventoryLinesMax = 200;
+
+
+
+export const SubmitOperationalIntentBody = zod.object({
+  "senderId": zod.string().max(submitOperationalIntentBodySenderIdMax).optional(),
+  "deviceId": zod.string().max(submitOperationalIntentBodyDeviceIdMax).optional(),
+  "baseRevision": zod.number().int().min(submitOperationalIntentBodyBaseRevisionMin).optional(),
+  "intent": zod.object({
+  "version": zod.literal(1),
+  "id": zod.string().min(1).max(submitOperationalIntentBodyIntentIdMax),
+  "date": zod.coerce.date(),
+  "runId": zod.string().min(1).max(submitOperationalIntentBodyIntentRunIdMax),
+  "observedGeneration": zod.string().min(1).max(submitOperationalIntentBodyIntentObservedGenerationMax),
+  "resetEpoch": zod.number().int().min(submitOperationalIntentBodyIntentResetEpochMin),
+  "effectiveAt": zod.number(),
+  "baseRevision": zod.number().int().min(submitOperationalIntentBodyIntentBaseRevisionMin).optional(),
+  "action": zod.enum(['pause', 'resume', 'lifecycle', 'correction']),
+  "lifecycle": zod.enum(['start', 'end']).optional(),
+  "values": zod.record(zod.string(), zod.number().min(submitOperationalIntentBodyIntentValuesMinOne).max(submitOperationalIntentBodyIntentValuesMaxOne)).optional(),
+  "inventoryLines": zod.array(zod.object({
+  "itemKey": zod.string().min(1).max(submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax),
+  "qty": zod.number().gt(submitOperationalIntentBodyIntentInventoryLinesItemQtyExclusiveMin).max(submitOperationalIntentBodyIntentInventoryLinesItemQtyMax)
+})).max(submitOperationalIntentBodyIntentInventoryLinesMax).optional()
+})
+})
+
+
+export const submitOperationalIntentResponseCanonicalRevisionMin = 0;
+
+export const submitOperationalIntentResponseServerTimeMin = 0;
+
+export const submitOperationalIntentResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const SubmitOperationalIntentResponse = zod.object({
+  "ok": zod.boolean(),
+  "outcome": zod.enum(['accepted', 'superseded', 'rebased', 'conflicted', 'review-required']),
+  "duplicate": zod.boolean(),
+  "cursor": zod.number().int().min(1),
+  "canonicalRevision": zod.number().int().min(submitOperationalIntentResponseCanonicalRevisionMin),
+  "serverTime": zod.number().int().min(submitOperationalIntentResponseServerTimeMin),
+  "data": zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
+  "snapshotId": zod.string().regex(submitOperationalIntentResponseSnapshotIdRegExp)
+})
+
+
+/**
+ * @summary Read durable command receipts after a scoped cursor
+ */
+export const listOperationalIntentReceiptsQueryAfterMin = 0;
+
+
+
+export const ListOperationalIntentReceiptsQueryParams = zod.object({
+  "after": zod.coerce.number().int().min(listOperationalIntentReceiptsQueryAfterMin).optional()
+})
+
+export const listOperationalIntentReceiptsResponseCursorMin = 0;
+
+
+export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
+
+export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+
+
+
+export const ListOperationalIntentReceiptsResponse = zod.object({
+  "cursor": zod.number().int().min(listOperationalIntentReceiptsResponseCursorMin),
+  "hasMore": zod.boolean(),
+  "mutations": zod.array(zod.object({
+  "cursor": zod.number().int().min(1),
+  "date": zod.coerce.date(),
+  "outcome": zod.enum(['accepted', 'superseded', 'rebased', 'conflicted', 'review-required', 'stale', 'duplicate']),
+  "canonicalRevision": zod.number().int().min(listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin).optional(),
+  "baseRevision": zod.number().int().min(listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin).optional(),
+  "commandType": zod.string().optional(),
+  "actorId": zod.string().optional(),
+  "deviceId": zod.string().optional(),
+  "serverReceivedAt": zod.coerce.date().optional(),
+  "createdAt": zod.coerce.date(),
+  "snapshot": zod.union([zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional()
+}))
 })

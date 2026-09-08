@@ -9,8 +9,8 @@ function NeedsList({ rows }: { rows: NeedRow[] }) {
   return (
     <div className="space-y-1.5">
       {rows.map((row, i) => (
-        <div key={i} className="flex items-baseline justify-between gap-2 text-sm">
-          <span className="text-muted-foreground truncate">{row.label}</span>
+        <div key={i} className="responsive-row flex items-baseline justify-between gap-2 text-sm">
+          <span className="responsive-label flex-1 text-muted-foreground">{row.label}</span>
           <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
             {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
           </span>

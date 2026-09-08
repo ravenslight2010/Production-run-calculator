@@ -6,9 +6,10 @@
 // their own server pool (like Cheese / Dough / Sauce recipes) with a
 // per-profile last-write-wins stamp enforced SERVER-side.
 //
-// localStorage stays the read cache — loadProfile/saveProfile keep reading
-// and writing the same `run-calc-profile-*` / `run-calc-crust-profile-*`
-// blobs synchronously. This module adds:
+// An authenticated, scope-bound in-memory repository is the read cache.
+// localStorage keeps scoped offline snapshots and the legacy
+// `run-calc-profile-*` / `run-calc-crust-profile-*` blobs only for bounded
+// migration compatibility. This module adds:
 //
 //   • a per-profile local edit-stamp map (ms epoch) bumped on every real edit
 //   • a persisted push queue + serialized flush, so edits survive offline
@@ -27,6 +28,17 @@
 // the run form even fully offline.
 
 import { inventoryClientId } from "./inventoryShared";
+import {
+  activeProfileCacheOwnsLegacyData,
+  cachedProfileKeys,
+  getProfileCacheGeneration,
+  profileCacheGenerationIsCurrent,
+  profileCacheIsActive,
+  readCachedProfileBlobs,
+  replaceCachedProfiles,
+  scopeProfileCacheStorageKey,
+  writeCachedProfileBlobs,
+} from "./profileCache";
 
 const DOUGH_PREFIX = "run-calc-profile-";
 const CRUST_PREFIX = "run-calc-crust-profile-";
@@ -78,20 +90,32 @@ function nextGen(): number {
 // stale persisted copy). The immediate flush kick pushes queued edits straight
 // from memory; the fallback is cleared the moment a persist succeeds again.
 // Ops held only in memory do not survive a reload — hence flushing right away.
-let memoryQueue: QueueOp[] | null = null;
+const memoryQueues = new Map<string, QueueOp[]>();
 const memoryMaps = new Map<string, StampMap>();
 
 /** Test-only: clear the in-memory storage fallbacks between test cases. */
 export function resetProfileSyncMemoryFallbackForTests(): void {
-  memoryQueue = null;
+  memoryQueues.clear();
   memoryMaps.clear();
 }
 
+function readProfileBlobs(key: string): { dough: string | null; crust: string | null } {
+  if (profileCacheIsActive()) return readCachedProfileBlobs(key);
+  return {
+    dough: localStorage.getItem(doughStorageKey(key)),
+    crust: localStorage.getItem(crustStorageKey(key)),
+  };
+}
+
 function readMap(storageKey: string): StampMap {
-  const mem = memoryMaps.get(storageKey);
+  const scopedKey = scopeProfileCacheStorageKey(storageKey);
+  const mem = memoryMaps.get(scopedKey);
   if (mem) return { ...mem };
   try {
-    const raw = localStorage.getItem(storageKey);
+    const raw = localStorage.getItem(scopedKey)
+      ?? (scopedKey !== storageKey && activeProfileCacheOwnsLegacyData()
+        ? localStorage.getItem(storageKey)
+        : null);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -102,20 +126,26 @@ function readMap(storageKey: string): StampMap {
 }
 
 function writeMap(storageKey: string, map: StampMap): void {
+  const scopedKey = scopeProfileCacheStorageKey(storageKey);
   try {
-    localStorage.setItem(storageKey, JSON.stringify(map));
-    memoryMaps.delete(storageKey);
+    localStorage.setItem(scopedKey, JSON.stringify(map));
+    memoryMaps.delete(scopedKey);
   } catch {
     // Quota exceeded (or storage unavailable) — keep the latest value in
     // memory so the pending edit's stamp is not silently lost.
-    memoryMaps.set(storageKey, { ...map });
+    memoryMaps.set(scopedKey, { ...map });
   }
 }
 
 function readQueue(): QueueOp[] {
-  if (memoryQueue !== null) return [...memoryQueue];
+  const scopedKey = scopeProfileCacheStorageKey(QUEUE_KEY);
+  const memoryQueue = memoryQueues.get(scopedKey);
+  if (memoryQueue) return [...memoryQueue];
   try {
-    const raw = localStorage.getItem(QUEUE_KEY);
+    const raw = localStorage.getItem(scopedKey)
+      ?? (scopedKey !== QUEUE_KEY && activeProfileCacheOwnsLegacyData()
+        ? localStorage.getItem(QUEUE_KEY)
+        : null);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -133,13 +163,14 @@ function readQueue(): QueueOp[] {
 }
 
 function writeQueue(ops: QueueOp[]): void {
+  const scopedKey = scopeProfileCacheStorageKey(QUEUE_KEY);
   try {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(ops));
-    memoryQueue = null;
+    localStorage.setItem(scopedKey, JSON.stringify(ops));
+    memoryQueues.delete(scopedKey);
   } catch {
     // Quota exceeded — the queue lives in memory until storage recovers; the
     // caller's flush kick still pushes these ops to the server right away.
-    memoryQueue = [...ops];
+    memoryQueues.set(scopedKey, [...ops]);
   }
 }
 
@@ -241,13 +272,25 @@ function splitKey(key: string): { brand: string; flavor: string } {
 }
 
 async function apiList(): Promise<ApiProfile[]> {
-  const res = await fetch("/api/brand-profiles", {
-    headers: { "x-client-id": inventoryClientId() },
-  });
-  if (!res.ok) throw new Error(`List brand profiles failed (${res.status})`);
-  const data = (await res.json()) as { items: ApiProfile[] };
-  return Array.isArray(data.items) ? data.items : [];
+  const cacheGeneration = getProfileCacheGeneration();
+  if (apiListInFlight?.generation === cacheGeneration) return apiListInFlight.promise;
+  const promise = (async () => {
+    const res = await fetch("/api/brand-profiles", {
+      headers: { "x-client-id": inventoryClientId() },
+    });
+    if (!res.ok) throw new Error(`List brand profiles failed (${res.status})`);
+    const data = (await res.json()) as { items: ApiProfile[] };
+    return Array.isArray(data.items) ? data.items : [];
+  })();
+  apiListInFlight = { generation: cacheGeneration, promise };
+  try {
+    return await promise;
+  } finally {
+    if (apiListInFlight?.promise === promise) apiListInFlight = null;
+  }
 }
+
+let apiListInFlight: { generation: number; promise: Promise<ApiProfile[]> } | null = null;
 
 // The server processes at most this many items per request (its MAX_BATCH) —
 // anything beyond is silently truncated, so every save/delete call is chunked
@@ -383,8 +426,10 @@ export async function flushProfileQueueStrict(): Promise<void> {
 }
 
 async function flushOnce(): Promise<void> {
+  const cacheGeneration = getProfileCacheGeneration();
   const ops = readQueue();
   if (ops.length === 0) return;
+  if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return;
 
   const upserts: ApiProfile[] = [];
   const upsertKeys: string[] = [];
@@ -397,8 +442,7 @@ async function flushOnce(): Promise<void> {
       deleteKeys.push(op.key);
       continue;
     }
-    const dough = localStorage.getItem(doughStorageKey(op.key));
-    const crust = localStorage.getItem(crustStorageKey(op.key));
+    const { dough, crust } = readProfileBlobs(op.key);
     if (dough === null && crust === null) {
       // Blobs vanished since the edit (deleted meanwhile) — drop the stale op;
       // the deletion path enqueued its own delete op.
@@ -424,6 +468,7 @@ async function flushOnce(): Promise<void> {
     let serverStamps: Map<string, number> | null = null;
     try {
       serverStamps = await apiSave(upserts);
+      if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return;
     } catch (err) {
       // Includes 403: keeping the operation is the only safe outcome. A
       // background retry is harmless, while dropping it makes an authoritative
@@ -476,6 +521,7 @@ async function flushOnce(): Promise<void> {
     let deleted = true;
     try {
       await apiDelete(deleteKeys);
+      if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return;
     } catch (err) {
       throw err;
     }
@@ -504,6 +550,7 @@ async function flushOnce(): Promise<void> {
 
 /** Every canonical profile key that exists in the local cache (dough or crust blob). */
 function localProfileKeys(): string[] {
+  if (profileCacheIsActive()) return cachedProfileKeys();
   const keys = new Set<string>();
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -564,6 +611,7 @@ export type ProfileReconcileResult = {
  * boolean wrapper below is intentionally kept for existing boot/poll callers.
  */
 export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReconcileResult> {
+  const cacheGeneration = getProfileCacheGeneration();
   migrateLocalProfilesToServerIfNeeded();
 
   let serverItems: ApiProfile[];
@@ -572,6 +620,9 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   } catch {
     // Offline / signed-out — retry queued pushes anyway and bail quietly.
     void flushProfileQueue();
+    return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
+  }
+  if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) {
     return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
   }
 
@@ -583,17 +634,29 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   const synced = readMap(SYNCED_KEY);
   const serverByKey = new Map(serverItems.map((it) => [it.key, it]));
   const pending = new Set(readQueue().map((op) => op.key));
+  const nextCache = new Map(
+    localProfileKeys().map((key) => [key, readProfileBlobs(key)] as const),
+  );
 
   for (const item of serverItems) {
     if (!item.key || item.key === "__") continue;
-    const localStamp = stamps[item.key] ?? 0;
+    // A scoped cache with no value must always adopt the authenticated server
+    // row. Legacy/global stamps are bookkeeping only and must never make an
+    // empty new identity look newer than its canonical facility data.
+    const localStamp = nextCache.has(item.key) ? (stamps[item.key] ?? 0) : 0;
     if (item.updatedAt > localStamp) {
       try {
-        localStorage.setItem(doughStorageKey(item.key), JSON.stringify(item.values ?? {}));
-        localStorage.setItem(
-          crustStorageKey(item.key),
-          JSON.stringify(item.crustValues ?? {}),
-        );
+        if (!profileCacheIsActive()) {
+          localStorage.setItem(doughStorageKey(item.key), JSON.stringify(item.values ?? {}));
+          localStorage.setItem(
+            crustStorageKey(item.key),
+            JSON.stringify(item.crustValues ?? {}),
+          );
+        }
+        nextCache.set(item.key, {
+          dough: JSON.stringify(item.values ?? {}),
+          crust: JSON.stringify(item.crustValues ?? {}),
+        });
         stamps[item.key] = item.updatedAt;
         synced[item.key] = item.updatedAt;
         changed = true;
@@ -603,7 +666,7 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
         // full profile blob on every call. This is the mechanism that propagates
         // a manager's Dough/Crust toggle to all other tablets.
         const subTab = (item.values as Record<string, unknown> | undefined)?._subTab;
-        if (subTab === "dough" || subTab === "crusts") {
+        if (!profileCacheIsActive() && (subTab === "dough" || subTab === "crusts")) {
           try { localStorage.setItem(item.key + ":subtab", subTab); } catch {}
         }
       } catch {}
@@ -620,14 +683,16 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
     if (synced[key] !== undefined) {
       // Was on the server before and is gone now — deleted remotely.
       try {
-        const dough = localStorage.getItem(doughStorageKey(key));
-        const crust = localStorage.getItem(crustStorageKey(key));
+        const { dough, crust } = readProfileBlobs(key);
         if (dough !== null || crust !== null) {
           deletedSnapshots[key] = { dough: dough ?? "{}", crust: crust ?? "{}" };
         }
-        localStorage.removeItem(doughStorageKey(key));
-        localStorage.removeItem(crustStorageKey(key));
-        localStorage.removeItem(key + ":subtab");
+        if (!profileCacheIsActive()) {
+          localStorage.removeItem(doughStorageKey(key));
+          localStorage.removeItem(crustStorageKey(key));
+          localStorage.removeItem(key + ":subtab");
+        }
+        nextCache.delete(key);
         delete stamps[key];
         delete synced[key];
         changed = true;
@@ -642,12 +707,15 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
 
   writeMap(STAMPS_KEY, stamps);
   writeMap(SYNCED_KEY, synced);
+  if (profileCacheIsActive() && !replaceCachedProfiles(nextCache, cacheGeneration)) {
+    return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
+  }
 
   // One-time: inject legacy :subtab preferences into dough profile blobs so
   // the server pool carries them to fresh tablets. Runs here — after server
   // items are already merged into localStorage — so the check never races
   // against a newer server _subTab value.
-  injectSubTabIntoProfileBlobsIfNeeded(stamps);
+  if (!profileCacheIsActive()) injectSubTabIntoProfileBlobsIfNeeded(stamps);
 
   void flushProfileQueue();
   return { changed, adoptedKeys, deletedKeys, deletedSnapshots };
@@ -723,19 +791,26 @@ function injectSubTabIntoProfileBlobsIfNeeded(stamps: Record<string, number>): v
  * boot reconciliation having finished first.
  */
 export async function seedProfilesFromServer(): Promise<{ brand: string; flavor: string }[]> {
+  const cacheGeneration = getProfileCacheGeneration();
   const items = await apiList();
+  if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return [];
   for (const item of items) {
     const doughKey = doughStorageKey(item.key);
     const crustKey = crustStorageKey(item.key);
     // Only write if no local blob exists — do not clobber a local edit that
     // hasn't been pushed yet (the upload queue will reconcile it shortly).
     try {
-      if (!localStorage.getItem(doughKey)) {
+      if (!profileCacheIsActive() && !localStorage.getItem(doughKey)) {
         localStorage.setItem(doughKey, JSON.stringify(item.values ?? {}));
       }
-      if (!localStorage.getItem(crustKey)) {
+      if (!profileCacheIsActive() && !localStorage.getItem(crustKey)) {
         localStorage.setItem(crustKey, JSON.stringify(item.crustValues ?? {}));
       }
+      const cached = readCachedProfileBlobs(item.key);
+      writeCachedProfileBlobs(item.key, {
+        dough: cached.dough ?? JSON.stringify(item.values ?? {}),
+        crust: cached.crust ?? JSON.stringify(item.crustValues ?? {}),
+      });
     } catch {
       // Quota exceeded or storage unavailable — skip this profile; the caller
       // will still process whatever it already has in localStorage.

@@ -17,6 +17,39 @@ import {
 } from "./inventoryShared";
 import { AuthContext } from "./useAuth";
 import { resetMasterDataTransportCache } from "./masterData";
+import { setProfileCacheIdentity } from "./profileCache";
+
+const AUTH_SESSION_PROBE_TIMEOUT_MS = 8_000;
+const AUTH_SESSION_PROBE_MAX_ATTEMPTS = 2;
+const AUTH_SESSION_PROBE_RETRY_DELAY_MS = 250;
+const AUTH_SESSION_PROBE_TIMEOUT_MESSAGE =
+  "The staff session check timed out before the server responded.";
+
+async function fetchSessionWithDeadline(signal: AbortSignal): Promise<StaffMember> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromQuery = () => controller.abort(signal.reason);
+  if (signal.aborted) abortFromQuery();
+  else signal.addEventListener("abort", abortFromQuery, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, AUTH_SESSION_PROBE_TIMEOUT_MS);
+
+  try {
+    return await fetchMe(controller.signal);
+  } catch (error) {
+    if (timedOut && !signal.aborted) {
+      const timeoutError = new Error(AUTH_SESSION_PROBE_TIMEOUT_MESSAGE);
+      timeoutError.name = "AuthSessionProbeTimeoutError";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abortFromQuery);
+  }
+}
 
 // NOTE: the raw context object and `useAuth` live in ./useAuth.ts so this file
 // exports ONLY a component. Mixing them here broke React Fast Refresh's
@@ -41,18 +74,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return next;
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const {
+    data,
+    isPending,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["me"],
     queryFn: async ({ signal }): Promise<StaffMember | null> => {
       const requestEpoch = authEpochRef.current;
       try {
-        const user = await fetchMe(signal);
+        const user = await fetchSessionWithDeadline(signal);
         // A request that began under a previous session transition is no
         // longer allowed to become the identity source. The current cache is
         // authoritative (and may already contain the sign-in response).
         if (requestEpoch !== authEpochRef.current) {
           return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
         }
+        setProfileCacheIdentity({
+          userId: user.userId,
+          scope: user.sandbox ? "sandbox" : "live",
+        });
         return user;
       } catch (err) {
         if (requestEpoch !== authEpochRef.current) {
@@ -62,11 +105,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    retry: false,
+    retry: (failureCount, retryError) => {
+      const shouldRetry =
+        !(retryError instanceof InventoryApiError && retryError.status === 401)
+        && failureCount + 1 < AUTH_SESSION_PROBE_MAX_ATTEMPTS;
+      const message = retryError instanceof Error
+        ? retryError.message
+        : "Unknown session probe failure";
+      const log = shouldRetry ? console.warn : console.error;
+      log("[auth-startup] staff session probe", {
+        attempt: failureCount + 1,
+        maxAttempts: AUTH_SESSION_PROBE_MAX_ATTEMPTS,
+        outcome: shouldRetry ? "retrying" : "failed",
+        message,
+      });
+      return shouldRetry;
+    },
+    retryDelay: AUTH_SESSION_PROBE_RETRY_DELAY_MS,
     staleTime: 60_000,
   });
 
   const me = data ?? null;
+  const startupError = error && data == null
+    ? "We couldn't confirm your staff session. Check the connection and try again."
+    : null;
+  const isLoading = isPending || (Boolean(error && data == null) && isFetching);
+  const retryStartup = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    setProfileCacheIdentity(me ? {
+      userId: me.userId,
+      scope: me.sandbox ? "sandbox" : "live",
+    } : null);
+  }, [me?.sandbox, me?.userId]);
 
   // On every identity change we (a) write the new identity straight into ["me"]
   // from the auth response (mirroring mobile's setMe), and (b) drop every OTHER
@@ -83,6 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // honor AbortSignal.
       await qc.cancelQueries({ queryKey: ["me"], exact: true });
       resetMasterDataTransportCache();
+      setProfileCacheIdentity(identity ? {
+        userId: identity.userId,
+        scope: identity.sandbox ? "sandbox" : "live",
+      } : null);
       qc.setQueryData(["me"], identity);
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
@@ -139,6 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     advanceAuthEpoch();
     freshSessionRef.current = false;
     resetMasterDataTransportCache();
+    setProfileCacheIdentity(null);
     qc.setQueryData(["me"], null);
   }, [advanceAuthEpoch, qc]);
 
@@ -249,6 +327,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         me,
         isAuthenticated: me !== null,
         isLoading,
+        startupError,
+        retryStartup,
         signIn,
         signUp,
         signInAsTest,

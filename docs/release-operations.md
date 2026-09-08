@@ -125,15 +125,23 @@ clean-start evidence, and startup logs. The roots and artifact names are
 deliberately distinct so a full run cannot overwrite or be mistaken for
 standard evidence.
 
+Both jobs use fresh Postgres services. They run the reconciliation verifier's
+focused fixture suite, but do not query that empty database as if it contained
+the retained production repair history. Their reports therefore remain NO-GO
+and explicitly require authoritative production reconciliation evidence. The
+normal release command remains fail-closed: outside the narrowly identified
+disposable CI test database, the production reconciliation verifier and its
+retained evidence are mandatory.
+
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume
 command, and the matching fresh-run command. The stopped-summary probe uses the
-base repository's read-only workflow token and the artifact ID, including for a
-`pull_request` from a fork. If GitHub does not provide an artifact URL, the
-summary says `The checkpoint artifact was not uploaded successfully.` instead
-of showing a broken link; forked pull requests also fail the probe with a
-non-sensitive recovery message because a missing or inaccessible artifact cannot
-support a download. GitHub may not expose that Markdown for cancelled jobs
+base repository's read-only workflow token and artifact ID to validate the
+artifact metadata and exact expected name, including for a `pull_request` from
+a fork. Missing URLs, expired artifacts, malformed metadata, name mismatches,
+and inaccessible metadata fail with an accurate non-sensitive diagnostic. The
+summary never claims the upload succeeded when no usable artifact URL was
+returned. GitHub may not expose that Markdown for cancelled jobs
 through an unauthenticated page or check-run API. The summary contract can
 therefore be checked without GitHub access:
 

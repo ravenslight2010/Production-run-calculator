@@ -4,6 +4,7 @@ import { db, photoAliasesTable, type PhotoAlias } from "@workspace/db";
 import { SavePhotoAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -65,11 +66,12 @@ router.post("/photo-aliases", requireCapability("manage-inventory"), async (req:
   }
 
   try {
+    const scope = currentScope();
     if (incoming.length > 0) {
       const existing = await db
         .select()
         .from(photoAliasesTable)
-        .where(eq(photoAliasesTable.scope, currentScope()));
+        .where(eq(photoAliasesTable.scope, scope));
       const byKey = new Map<string, PhotoAlias>();
       for (const row of existing) {
         byKey.set(aliasKey(row.guessName), row);
@@ -96,11 +98,12 @@ router.post("/photo-aliases", requireCapability("manage-inventory"), async (req:
       if (inserts.length > 0) {
         await db
           .insert(photoAliasesTable)
-          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
+          .values(inserts.map((a) => ({ ...a, scope })));
       }
     }
 
     const aliases = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
     req.log.error({ err }, "failed to save photo aliases");

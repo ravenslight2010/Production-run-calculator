@@ -5,7 +5,7 @@ import { getStartupHealth } from "./startupHealth";
 // held until required boot work has completed, so a process that is listening
 // but still initializing cannot accept writes against a partially healed DB.
 export function startupGate(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction,
 ): void {
@@ -18,6 +18,13 @@ export function startupGate(
   res.status(503).json({
     error: "Service is not ready",
     status: startup.phase,
+    stage: startup.stage,
+    durationMs: startup.durationMs,
     ...(startup.failure ? { errorCode: startup.failure.errorCode } : {}),
+    correlationId: String(
+      (req as Request & { correlationId?: string }).correlationId ??
+        req.id ??
+        "startup-gate",
+    ),
   });
 }

@@ -5,6 +5,7 @@ import { SaveMergeAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { mergeAliasKey, type MergeSuggestCategory } from "@workspace/merge-suggest";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -117,13 +118,14 @@ router.post("/merge-aliases", requireCapability("manage-profiles"), async (req: 
   }
 
   try {
+    const scope = currentScope();
     if (incoming.length > 0) {
       const existing = await db
         .select()
         .from(mergeAliasesTable)
         .where(
           and(
-            eq(mergeAliasesTable.scope, currentScope()),
+            eq(mergeAliasesTable.scope, scope),
             eq(mergeAliasesTable.category, category),
             brand ? eq(mergeAliasesTable.brand, brand) : isNull(mergeAliasesTable.brand),
           ),
@@ -155,11 +157,12 @@ router.post("/merge-aliases", requireCapability("manage-profiles"), async (req: 
       if (inserts.length > 0) {
         await db
           .insert(mergeAliasesTable)
-          .values(inserts.map((a) => ({ ...a, scope: currentScope(), category, brand })));
+          .values(inserts.map((a) => ({ ...a, scope, category, brand })));
       }
     }
 
     const aliases = await listAll(category, brand);
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
     req.log.error({ err }, "failed to save merge aliases");

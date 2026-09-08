@@ -39,3 +39,17 @@ Two related trust boundaries in `artifacts/api-server/src/routes/sync.ts` must s
    lifecycle fixtures, and give any intentional rollover test its own isolated
    boundary setup.
 
+6. **An SSE reconnect baseline is acknowledged only after canonical adoption.**
+The initial frame can also carry a reset/rollover marker. A genuinely newer
+epoch must interrupt adoption and reload, but an equal or older marker is only
+the server repeating the epoch this client already honored; continue processing
+that same frame because the server sends no second initial baseline.
+
+**Why:** opening the push gate before Home adopts the frame can republish stale
+local state, while rejecting every reset-marked frame leaves post-reset clients
+permanently unable to push after reload.
+
+**How to apply:** make the canonical frame handler explicitly acknowledge
+successful adoption. Never infer success from parseable `initial:true`, and
+test newer, equal, and older reset epochs.
+

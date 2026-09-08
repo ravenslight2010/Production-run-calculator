@@ -8,7 +8,7 @@ import {
   saveRunValues,
   subscribeRunValuesWrites,
 } from "./browserRunPersistence";
-import { applyResetWipe, getStoredResetEpoch } from "./browserResetPersistence";
+import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "./browserResetPersistence";
 import { browserRecordStore } from "./browserRecordStore";
 
 afterEach(() => localStorage.clear());
@@ -53,6 +53,18 @@ describe("browser run persistence", () => {
 });
 
 describe("browser reset persistence", () => {
+  it("adopts a daily rollover without purging profiles or master-data caches", () => {
+    localStorage.setItem("run-calc-day", "prior-day");
+    localStorage.setItem("run-calc-profile-a", "profile");
+    localStorage.setItem("run-calc-cheese-recipes", "master-data");
+    expect(applyRolloverEpoch(4)).toBe(true);
+    expect(getStoredResetEpoch()).toBe(4);
+    expect(localStorage.getItem("run-calc-day")).toBe("prior-day");
+    expect(localStorage.getItem("run-calc-profile-a")).toBe("profile");
+    expect(localStorage.getItem("run-calc-cheese-recipes")).toBe("master-data");
+    expect(applyRolloverEpoch(4)).toBe(false);
+  });
+
   it("wipes run-calculator cache keys once and retains the honored epoch", () => {
     localStorage.setItem("run-calc-day", "old");
     localStorage.setItem("run-calc-profile-a", "old");

@@ -1,12 +1,23 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { useEvent } from "../hooks/useEvent";
+import { createFrameRepeater } from "../frameRepeater";
 import {
+  flushPendingHomeFormWrites,
   useHomeFormIdentityFences,
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
-import { useHomeSyncCoordination } from "../hooks/useHomeSyncCoordination";
+import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
+import {
+  initialResetRequiresReload,
+  useHomeSyncCoordination,
+} from "../hooks/useHomeSyncCoordination";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
-import { applyTemporaryOverrides, type AutoTrackSchedule, type Calc } from "@workspace/live-calc";
+import {
+  applyTemporaryOverrides,
+  type AutoTrackSchedule,
+  type Calc,
+  type OperationalProjection,
+} from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/WarehouseTabCtx";
@@ -20,7 +31,7 @@ import MixesTabContent from "../components/MixesTabContent";
 import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
-import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
@@ -33,7 +44,6 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
-import { SingleFlightSyncQueue } from "../syncPushQueue";
 import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
@@ -126,8 +136,6 @@ import {
   genId,
   todayStr,
   writeDayResetAt,
-  shouldSignOutAfterRollover,
-  shouldPublishFreshRolloverState,
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
@@ -155,7 +163,6 @@ import {
   saveDayState,
   loadHistory,
   filterMeaningfulHistory,
-  archiveDayToHistory,
   overlayRunMetaStamps,
   removeRunByIdFromDayState,
   dropTombstonedPresetKeys,
@@ -240,7 +247,7 @@ import {
   type SpecImportDisplayKind,
 } from "../storage";
 import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCompletedHistory, loadCompletedHistoryForActiveScope, pendingCompletedHistoryCount, queueCompletedRun, setCompletedHistoryScope, startRunAndQueueCompetingCompletions } from "../completedHistorySync";
-import { applyResetWipe, getStoredResetEpoch } from "../adapters/browserResetPersistence";
+import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "../adapters/browserResetPersistence";
 import {
   loadRunValues,
   loadRunValuesUpdated,
@@ -252,7 +259,6 @@ import {
 import {
   acceptRemoteRunValueOnSync,
   adoptStrictlyNewerRemoteLifecycles,
-  createSyncBaselineGate,
   deepEqual,
   freshDayState,
   isBlankRemovableRun,
@@ -409,6 +415,7 @@ import {
 import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "../cycleCount";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cachedProfileKeys } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
@@ -524,7 +531,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fencePendingEndSnapshots, flushOperationalIntentOutbox, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
@@ -532,6 +539,7 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
+import { createPackagingControlAdapter, createPackagingManager } from "../packagingManager";
 import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -695,7 +703,8 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
+import { fetchSpecImportAliases, saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
+import { refreshPhotoAliasesCache } from "@/photoAliasesStore";
 
 import {
   Form,
@@ -2372,7 +2381,7 @@ function SecondsField({
       name={name}
       render={({ field }) => (
         <FormItem className="min-w-0 space-y-0">
-          <FormLabel className="text-[9px] text-muted-foreground block truncate font-normal">{label}</FormLabel>
+          <FormLabel className="text-[10px] text-muted-foreground block truncate font-normal">{label}</FormLabel>
           <FormControl>
             <div className="flex items-center gap-1 mt-0.5">
               <input
@@ -2389,7 +2398,7 @@ function SecondsField({
                 className="h-7 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 data-testid={`input-${name}`}
               />
-              <span className="text-[9px] text-muted-foreground shrink-0 font-mono">= {fmtMS(Number(field.value) || 0)}</span>
+              <span className="text-[10px] text-muted-foreground shrink-0 font-mono">= {fmtMS(Number(field.value) || 0)}</span>
             </div>
           </FormControl>
         </FormItem>
@@ -2421,14 +2430,25 @@ function StepperField({
   onSuggest?: () => void;
   onManualChange?: (nextValue: number) => void;
 }) {
-  const repeatRef = useRef<{ t?: ReturnType<typeof setTimeout>; i?: ReturnType<typeof setInterval> }>({});
+  const repeatRef = useRef<ReturnType<typeof createFrameRepeater> | null>(null);
   const fieldRef = useRef<any>(null);
-  useEffect(() => () => { clearTimeout(repeatRef.current.t); clearInterval(repeatRef.current.i); }, []);
+  if (!repeatRef.current) repeatRef.current = createFrameRepeater();
+  const stopRepeat = useCallback(() => repeatRef.current?.stop(), []);
+  useEffect(() => {
+    const stopWhenHidden = () => {
+      if (document.hidden) stopRepeat();
+    };
+    window.addEventListener("blur", stopRepeat);
+    document.addEventListener("visibilitychange", stopWhenHidden);
+    return () => {
+      stopRepeat();
+      window.removeEventListener("blur", stopRepeat);
+      document.removeEventListener("visibilitychange", stopWhenHidden);
+    };
+  }, [stopRepeat]);
   const startRepeat = (fn: () => void) => {
-    fn();
-    repeatRef.current.t = setTimeout(() => { repeatRef.current.i = setInterval(fn, 80); }, 400);
+    repeatRef.current?.start(fn);
   };
-  const stopRepeat = () => { clearTimeout(repeatRef.current.t); clearInterval(repeatRef.current.i); };
   return (
     <FormField
       control={control}
@@ -2475,6 +2495,9 @@ function StepperField({
                   onPointerDown={() => startRepeat(decrement)}
                   onPointerUp={stopRepeat}
                   onPointerLeave={stopRepeat}
+                   onPointerCancel={stopRepeat}
+                   onLostPointerCapture={stopRepeat}
+                   onBlur={stopRepeat}
                   className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none"
                   data-testid={`btn-dec-${name}`}
                   disabled={disabled}
@@ -2501,6 +2524,9 @@ function StepperField({
                   onPointerDown={() => startRepeat(increment)}
                   onPointerUp={stopRepeat}
                   onPointerLeave={stopRepeat}
+                   onPointerCancel={stopRepeat}
+                   onLostPointerCapture={stopRepeat}
+                   onBlur={stopRepeat}
                   className={`h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none${atMax ? " opacity-30 cursor-not-allowed" : ""}`}
                   data-testid={`btn-inc-${name}`}
                   disabled={disabled || atMax}
@@ -2987,11 +3013,18 @@ async function encodeSpecPhoto(file: File): Promise<{ imageBase64: string; mimeT
 }
 
 const HOME_DIALOG_OVERLAY_CLASS =
-  "fixed inset-x-0 top-0 z-[70] flex h-[100dvh] items-center justify-center overflow-y-auto bg-black/60 p-4";
+  "responsive-dialog-overlay fixed inset-x-0 top-0 z-[70] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60";
+const HOME_DIALOG_CARD_CLASS =
+  "responsive-dialog-card my-auto";
 const HOME_DIALOG_CARD_SCROLL_CLASS =
-  "my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto";
+  `${HOME_DIALOG_CARD_CLASS} overflow-y-auto`;
 
 export default function Home() {
+  const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
+  useEffect(() => {
+    visibleTabScheduler.start();
+    return () => visibleTabScheduler.stop();
+  }, [visibleTabScheduler]);
   useAccessibleDialogStack();
   const {
     signOut,
@@ -3108,43 +3141,22 @@ export default function Home() {
     });
     void flushOperationalIntentOutbox();
   }, []);
-  const persistManualPackagingProgress = useCallback((
-    runId: string,
-    skidsCompleted: number,
-    casesOnCurrentSkid: number,
-    manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
-  ) => {
-    const now = Date.now();
-    recordManualPackagingProgress({
-      runId,
-      skidsCompleted,
-      casesOnCurrentSkid,
-      manualOverrideUntil,
-      now,
-    });
-    markRunValuesUpdated(runId, now);
-    lastLocalEditRef.current = now;
-    queueManualCorrection(runId, {
-      skidsCompleted: Math.max(0, skidsCompleted),
-      casesOnCurrentSkid: Math.max(0, casesOnCurrentSkid),
-    });
-    if (runId === currentRunIdRef.current) {
-      autoSuppressUntilRef.current = Math.max(
-        autoSuppressUntilRef.current,
-        manualOverrideUntil,
-      );
-    }
-  }, [queueManualCorrection]);
-  const persistAutomaticPackagingProgress = useCallback((
-    skidsCompleted: number,
-    casesOnCurrentSkid: number,
-  ): boolean => (
-    recordAutomaticPackagingProgress({
-      runId: currentRunIdRef.current,
-      skidsCompleted,
-      casesOnCurrentSkid,
-    }) !== null
-  ), []);
+  const packagingManager = useMemo(() => createPackagingManager({
+    currentRunIdRef,
+    autoSuppressUntilRef,
+    dayStateRef,
+    autoSuppressMs: AUTO_SUPPRESS_MS,
+    loadRunValues,
+    saveRunValues,
+    markRunValuesUpdated,
+    markLocalEdit: (now) => { lastLocalEditRef.current = now; },
+    schedulePush,
+    queueManualCorrection,
+    recordManualProgress: recordManualPackagingProgress,
+    recordAutomaticProgress: recordAutomaticPackagingProgress,
+  }), [queueManualCorrection]);
+  const persistManualPackagingProgress = packagingManager.persistManualProgress;
+  const persistAutomaticPackagingProgress = packagingManager.persistAutomaticProgress;
   useEffect(() => {
     // A correction may arrive while this device is viewing another run. Adopt
     // that run's shared deadline when the operator later switches to it, rather
@@ -3462,6 +3474,24 @@ export default function Home() {
 
   const [dieTypes, setDieTypes] = useState<string[]>(() => healDieTypesFromProfiles());
 
+  const reconcileServerDieTypes = useCallback(async (): Promise<void> => {
+    const serverNames = await fetchServerDieTypes();
+    const migrated = localStorage.getItem(DIE_TYPES_SERVER_MIGRATED_KEY) === "1";
+    const localNames = migrated ? scanProfileDieTypes() : healDieTypesFromProfiles();
+    const deletedMap = loadDeletedItems();
+    const { effective, toPush } = reconcileDieTypes(
+      serverNames,
+      localNames,
+      n => dropDeleted([n], deletedMap, "dieTypes").length === 0,
+    );
+    setDieTypes(effective);
+    if (!deepEqual(loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES), effective)) {
+      saveList(DIE_TYPES_KEY, effective);
+    }
+    const ok = toPush.length > 0 ? await pushDieTypesToServer(toPush) : true;
+    if (ok && !migrated) localStorage.setItem(DIE_TYPES_SERVER_MIGRATED_KEY, "1");
+  }, []);
+
   // Die types are a factory-wide SERVER pool (NOT in the day-state sync blob),
   // so they survive a factory data reset, a cleared browser, and a fresh device.
   // On load: fetch the server list, reconcile it with the local cache/profile
@@ -3474,20 +3504,8 @@ export default function Home() {
     let cancelled = false;
     (async () => {
       try {
-        const serverNames = await fetchServerDieTypes();
+        await reconcileServerDieTypes();
         if (cancelled) return;
-        const migrated = localStorage.getItem(DIE_TYPES_SERVER_MIGRATED_KEY) === "1";
-        const localNames = migrated ? scanProfileDieTypes() : healDieTypesFromProfiles();
-        const deletedMap = loadDeletedItems();
-        const { effective, toPush } = reconcileDieTypes(
-          serverNames,
-          localNames,
-          n => dropDeleted([n], deletedMap, "dieTypes").length === 0,
-        );
-        setDieTypes(effective);
-        saveList(DIE_TYPES_KEY, effective);
-        const ok = toPush.length > 0 ? await pushDieTypesToServer(toPush) : true;
-        if (ok && !migrated) localStorage.setItem(DIE_TYPES_SERVER_MIGRATED_KEY, "1");
       } catch {
         // Offline / server unreachable — the local cached list keeps working.
       }
@@ -3495,7 +3513,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reconcileServerDieTypes]);
 
   function addDieType(name: string) {
     const trimmed = name.trim();
@@ -4121,10 +4139,14 @@ export default function Home() {
   // transitions remain in Home's day-state coordinator.
   const { activeTab, setActiveTab, goBack } = useHomeNavigation();
   useEffect(() => {
-    recordMemorySample("home:mount");
-    const interval = window.setInterval(() => recordMemorySample("home:interval"), 60_000);
-    return () => window.clearInterval(interval);
-  }, []);
+    return visibleTabScheduler.register({
+      id: "memory-sample",
+      cadenceMs: 60_000,
+      runOnStart: true,
+      order: 10,
+      run: () => recordMemorySample("home:interval"),
+    });
+  }, [visibleTabScheduler]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetSummary = usePendingResetSummary();
   const pendingResetCount = pendingResetSummary.count;
@@ -4656,22 +4678,10 @@ export default function Home() {
             // Network unavailable — fall back to whatever localStorage already holds.
           }
 
-          // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
-          // then union with the server pairs so profiles seeded above are included.
-          const seenSuffixes = new Set<string>();
-          const profileSuffixes: string[] = [];
-          const PREFIX = "run-calc-profile-";
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (!k) continue;
-            if (!k.startsWith(PREFIX)) continue;
-            const suffix = k.slice(PREFIX.length);
-            // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
-            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-              seenSuffixes.add(suffix);
-              profileSuffixes.push(suffix);
-            }
-          }
+          // Enumerate the active authenticated cache, then union with server
+          // pairs so profiles seeded above are included.
+          const profileSuffixes = cachedProfileKeys();
+          const seenSuffixes = new Set(profileSuffixes);
           // Add any server profiles that seedProfilesFromServer reported but
           // couldn't write to localStorage (quota issues) — we still want to
           // attempt to load them if they're already there under a different casing.
@@ -4778,18 +4788,8 @@ export default function Home() {
             // Network unavailable — fall back to whatever localStorage already holds.
           }
 
-          const seenSuffixes = new Set<string>();
-          const profileSuffixes: string[] = [];
-          const PREFIX = "run-calc-profile-";
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (!k?.startsWith(PREFIX)) continue;
-            const suffix = k.slice(PREFIX.length);
-            if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-              seenSuffixes.add(suffix);
-              profileSuffixes.push(suffix);
-            }
-          }
+          const profileSuffixes = cachedProfileKeys();
+          const seenSuffixes = new Set(profileSuffixes);
           for (const { brand, flavor } of serverPairs) {
             const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
             if (!seenSuffixes.has(suffix)) {
@@ -5197,11 +5197,6 @@ export default function Home() {
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
   const [confirmRemoveBlanks, setConfirmRemoveBlanks] = useState(false);
-  // The safe policy is persisted by pauseRun before this local prompt opens.
-  // This state only controls the short-lived operator decision UI; it is never
-  // required to keep a paused run safe across a reload, sync, or hidden screen.
-  const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
-  const pauseDecisionPauseIdRef = useRef<string | null>(null);
   const savedFlashRef = useRef<HTMLSpanElement>(null);
   const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeState = useRef<SwipeGestureState | null>(null);
@@ -5513,8 +5508,8 @@ export default function Home() {
   useEffect(() => {
     if (!canManageInventory) return;
     let active = true;
-    const refresh = () => {
-      void fetchPendingDuplicateReviews()
+    const refresh = async () => {
+      await fetchPendingDuplicateReviews()
         .then((result) => {
           if (active) persistPendingDuplicateReview(result.count);
         })
@@ -5522,15 +5517,18 @@ export default function Home() {
           // Preserve the last known reminder when the server is unavailable.
         });
     };
-    refresh();
-    const interval = window.setInterval(refresh, 30_000);
-    window.addEventListener("focus", refresh);
+    const unregister = visibleTabScheduler.register({
+      id: "duplicate-review",
+      cadenceMs: 30_000,
+      runOnStart: true,
+      order: 20,
+      run: refresh,
+    });
     return () => {
       active = false;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refresh);
+      unregister();
     };
-  }, [canManageInventory, persistPendingDuplicateReview]);
+  }, [canManageInventory, persistPendingDuplicateReview, visibleTabScheduler]);
 
   const openPendingDuplicateReview = useCallback(() => {
     setMergeFromImport(true);
@@ -6061,15 +6059,11 @@ export default function Home() {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
       settingsObjects.push(vals as unknown as Record<string, unknown>);
     }
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")) {
-        try {
-          const obj = JSON.parse(localStorage.getItem(key) ?? "null");
-          if (obj && typeof obj === "object") settingsObjects.push(obj as Record<string, unknown>);
-        } catch {}
-      }
+    for (const key of cachedProfileKeys()) {
+      const sep = key.indexOf("__");
+      if (sep < 0) continue;
+      const profile = loadRawProfile(key.slice(0, sep), key.slice(sep + 2));
+      if (profile) settingsObjects.push(profile);
     }
     for (const day of loadHistory()) {
       for (const vals of Object.values(day.runValues ?? {})) {
@@ -7610,10 +7604,12 @@ export default function Home() {
   // offline edits remain available before a connection establishes a baseline.
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
-    syncBaselineGateRef, synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
+    synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
     foregroundSyncBarrierRef, foregroundPushPendingRef, foregroundStopIntentRef,
     foregroundRecoveryRetryRef, foregroundRecoveryNoticeTimerRef,
     foregroundRecoveryOwnerRef, syncPushGenerationRef, syncPushAbortControllersRef,
+    syncRetryTimerRef, syncPushQueueRef, connectSse, writeToday, requestBaselinePush,
+    registerForegroundRecovery,
     autoTrackBlocked, setAutoTrackBlocked,
     autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock,
     pendingForegroundStopRunId, setPendingForegroundStopRunId,
@@ -7637,16 +7633,6 @@ export default function Home() {
   // durable last line of defense if an already-received request completes, but
   // stale responses/retries may no longer update this client's sync signature
   // or re-publish a captured running snapshot after a remote Stop is adopted.
-  const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncPushQueueRef = useRef(
-    new SingleFlightSyncQueue<{
-      payload: SyncPayload;
-      sig?: string;
-      queuedAtPerf?: number;
-      queuedAtEpoch?: number;
-      trigger?: SyncMeasurementTrigger;
-    }>(synchronizationStateMachineRef.current),
-  );
   const syncPushTimingRef = useRef<{ queuedAtPerf: number; queuedAtEpoch: number } | null>(null);
   const syncPushTriggerRef = useRef<SyncMeasurementTrigger>("edit");
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
@@ -7684,18 +7670,63 @@ export default function Home() {
   // adopt these refs without changing today's client-owned ticking semantics.
   const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
   const [serverCalc, setServerCalc] = useState<Calc | null>(null);
+  const serverProjectionRef = useRef<OperationalProjection | null>(null);
+  const [serverProjection, setServerProjection] = useState<OperationalProjection | null>(null);
+  const serverClockOffsetMsRef = useRef(0);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
   const [serverCalcReceipt, setServerCalcReceipt] =
     useState<OperationalSnapshotReceipt | null>(null);
+  // Operational commands have their own canonical adoption fence. A command
+  // response is not terminal until this callback has installed its snapshot
+  // and receipt, so ordinary snapshot writes and auto-track cannot race it.
+  const operationalCanonicalRevisionRef = useRef(0);
+  const operationalServerTimeOffsetRef = useRef(0);
+  const operationalAdoptionInFlightRef = useRef(0);
+  const operationalAdoptionGenerationRef = useRef(0);
+  function adoptOperationalRevision(revision: unknown): void {
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) return;
+    operationalCanonicalRevisionRef.current = Math.max(
+      operationalCanonicalRevisionRef.current,
+      revision,
+    );
+  }
+  function adoptOperationalProjection(
+    projection: OperationalProjection | null | undefined,
+    snapshotId: string | undefined,
+  ) {
+    if (!projection || !snapshotId || !Number.isFinite(projection.serverTimeMs)) return;
+    const offset = projection.serverTimeMs - Date.now();
+    serverClockOffsetMsRef.current = offset;
+    setServerClockOffsetMs(offset);
+    serverProjectionRef.current = projection;
+    setServerProjection(projection);
+    serverCalcRef.current = { runId: projection.runId, calc: projection.calc };
+    setServerCalc(projection.calc);
+    const receipt: OperationalSnapshotReceipt = {
+      runId: projection.runId,
+      snapshotId,
+      capturedAt: projection.capturedAtServerMs,
+    };
+    const previous = serverCalcReceiptRef.current;
+    if (
+      previous?.runId === receipt.runId
+      && previous.snapshotId === receipt.snapshotId
+      && previous.capturedAt === receipt.capturedAt
+    ) return;
+    serverCalcReceiptRef.current = receipt;
+    setServerCalcReceipt(receipt);
+  }
   function adoptServerCalcReceipt(
     serverCalc: { runId: string; calc: Calc } | null | undefined,
     snapshotId: string | undefined,
+    capturedAt = Date.now(),
   ) {
     if (!serverCalc || !snapshotId) return;
     const receipt: OperationalSnapshotReceipt = {
       runId: serverCalc.runId,
       snapshotId,
-      capturedAt: Date.now(),
+      capturedAt,
     };
     const previous = serverCalcReceiptRef.current;
     if (
@@ -7758,12 +7789,43 @@ export default function Home() {
   // The normal snapshot sync remains a recovery path; this separate queue keeps
   // operator occurrence times and can be retried after a tab/browser restart.
   useEffect(() => {
-    setOperationalIntentCanonicalAdopter((data, intent, outcome) => {
+    setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
+      const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
+      operationalAdoptionInFlightRef.current += 1;
+      setAutoTrackBlocked(true);
+      setAutoTrackRebaseAfterBlock(false);
+      adoptOperationalRevision(intent.canonicalRevision);
+      if (intent.serverTime !== undefined) {
+        operationalServerTimeOffsetRef.current = intent.serverTime - Date.now();
+        serverClockOffsetMsRef.current = operationalServerTimeOffsetRef.current;
+        setServerClockOffsetMs(operationalServerTimeOffsetRef.current);
+      }
+      let adoptionSucceeded = false;
+      const adoptReceipt = () => {
+        if (!intent.snapshotId || !intent.canonicalAdoptedAt) return;
+        const receipt: OperationalSnapshotReceipt = {
+          runId: intent.runId,
+          snapshotId: intent.snapshotId,
+          capturedAt: intent.canonicalAdoptedAt,
+          ...(intent.canonicalRevision !== undefined ? { canonicalRevision: intent.canonicalRevision } : {}),
+          ...(intent.serverTime !== undefined ? { serverTime: intent.serverTime } : {}),
+        };
+        const previous = serverCalcReceiptRef.current;
+        if (previous?.runId === receipt.runId && previous.capturedAt > receipt.capturedAt) return;
+        serverCalcReceiptRef.current = receipt;
+        setServerCalcReceipt(receipt);
+      };
+      try {
+      if (!data || typeof data !== "object") {
+        throw new Error("Operational command response did not include a canonical snapshot");
+      }
       const payload = data as SyncPayload;
       const acceptedFinalization =
         outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
       if (outcome === "accepted" && !acceptedFinalization) {
         applySyncCallbackRef.current(payload);
+        adoptReceipt();
+        adoptionSucceeded = true;
         return;
       }
       if (
@@ -7774,6 +7836,8 @@ export default function Home() {
         && outcome !== "review-required"
       ) {
         applySyncCallbackRef.current(payload);
+        adoptReceipt();
+        adoptionSucceeded = true;
         return;
       }
       // A finalization/review/rebase response is authoritative for the command it resolves,
@@ -7844,6 +7908,21 @@ export default function Home() {
         };
       }
       applySyncCallbackRef.current(inbound);
+      await Promise.resolve();
+      adoptReceipt();
+      adoptionSucceeded = true;
+      } finally {
+        operationalAdoptionInFlightRef.current = Math.max(0, operationalAdoptionInFlightRef.current - 1);
+        if (
+          operationalAdoptionInFlightRef.current === 0
+          && adoptionGeneration === operationalAdoptionGenerationRef.current
+          && !foregroundSyncBarrierRef.current
+          && adoptionSucceeded
+        ) {
+          setAutoTrackRebaseAfterBlock(true);
+          setAutoTrackBlocked(false);
+        }
+      }
     });
     const flush = () => { void flushOperationalIntentOutbox(); };
     flush();
@@ -8737,10 +8816,10 @@ export default function Home() {
       try {
         const res = await fetch("/api/sync/reset-epoch");
         if (!res.ok) return;
-        const { epoch } = (await res.json()) as { epoch: number };
+        const { epoch, rollover } = (await res.json()) as { epoch: number; rollover?: boolean };
         if (typeof epoch === "number" && epoch > getStoredResetEpoch()) {
           const generation = synchronizationStateMachineRef.current.beginReset(epoch);
-          if (applyResetWipe(epoch)) window.location.reload();
+          if ((rollover ? applyRolloverEpoch(epoch) : applyResetWipe(epoch))) window.location.reload();
           else synchronizationStateMachineRef.current.completeReset(generation);
         }
       } catch {}
@@ -8781,15 +8860,15 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Brand+flavor profile pool reconcile (boot + 60s poll) ──
+  // ── Brand+flavor profile pool reconcile (boot) ──
   // Profiles live in their own factory-wide server pool with per-profile
   // last-write-wins stamps (they are no longer part of the sync payload —
   // the old unstamped map let a stale device clobber fresh edits). On boot
   // this runs the marker-guarded one-time migration (existing local profiles
   // are pushed up with a floor stamp) and then reconciles: adopt server-newer
   // copies into the localStorage cache, push local-newer ones up, and drop
-  // local copies of profiles deleted remotely. The poll keeps long-lived tabs
-  // converged; queued pushes retry on each pass, so offline edits are safe.
+  // local copies of profiles deleted remotely. SSE invalidations and foreground
+  // recovery keep long-lived tabs converged; queued pushes retry on each pass.
   // Best-effort — a fetch failure changes nothing locally.
   useEffect(() => {
     let cancelled = false;
@@ -8805,8 +8884,7 @@ export default function Home() {
       } catch {}
     };
     void pass();
-    const t = setInterval(() => { void pass(); }, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    return () => { cancelled = true; };
   }, []);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
@@ -8819,49 +8897,187 @@ export default function Home() {
 
   // SSE connection — receives updates from other clients
   useEffect(() => {
-    syncBaselineGateRef.current.beginConnection();
-    const snapshot = syncSnapshotIdRef.current;
-    const esUrl = snapshot
-      ? `/api/sync/events?clientId=${clientId.current}&today=${todayStr()}&snapshot=${snapshot}`
-      : `/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`;
-    const es = new EventSource(esUrl);
-    es.onopen = () => {
+    let cancelled = false;
+    let configurationGeneration = 0;
+    const pendingConfigurationFamilies = new Set<
+      "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away"
+    >();
+    let configurationFlight: Promise<void> | null = null;
+    // Configuration frames are only invalidation nudges. Fetch each bounded
+    // family from its existing canonical source; never make an SSE payload the
+    // authority for a profile, factory value, name link, or tombstone.
+    const reconcileConfigurationPass = async (
+      families: ReadonlySet<"master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away">,
+    ) => {
+      const generation = ++configurationGeneration;
+      const current = () => !cancelled && generation === configurationGeneration;
+      if (families.has("master-data")) {
+        await invalidateMasterDataBootstrap(cycleCountQc).catch(() => {});
+        if (!current()) return;
+      }
+      if (families.has("profiles")) {
+        try {
+          const result = await reconcileProfilesFromServerDetailed();
+          if (!current()) return;
+          if (result.changed) {
+            setDieTypes(healDieTypesFromProfiles());
+            applyProfileReconcileRef.current(result);
+          }
+        } catch {}
+        if (!current()) return;
+      }
+      if (families.has("factory-data")) {
+        try {
+          const data = await fetchFactoryData();
+          if (!current()) return;
+          hydrateFromServer(data);
+          refreshFactoryDataConsumers();
+          await flushFactoryQueue();
+        } catch {}
+        if (!current()) return;
+      }
+      if (families.has("die-types")) {
+        await reconcileServerDieTypes().catch(() => {});
+        if (!current()) return;
+      }
+      if (families.has("supervisor-pin")) {
+        await cycleCountQc.invalidateQueries({ queryKey: ["supervisorPin"] }).catch(() => {});
+        if (!current()) return;
+      }
+      if (families.has("name-links")) {
+        // Both stores reload from canonical endpoints. Photo intake is mounted
+        // against a shared cache so open stations adopt learned links at once;
+        // import aliases are read canonically by each import flow.
+        await Promise.all([
+          fetchSpecImportAliases().catch(() => []),
+          refreshPhotoAliasesCache().catch(() => []),
+        ]);
+        if (!current()) return;
+      }
+      if (families.has("merged-away")) {
+        try {
+          const remoteNames = await fetchMergedAwayNames();
+          if (!current()) return;
+          // This endpoint is the canonical durable tombstone list. Replace the
+          // local cache instead of unioning it: union would make a remote
+          // un-merge impossible to observe because the stale local name would
+          // be added straight back.
+          const canonicalTomb = [...new Set(remoteNames)];
+          if (!deepEqual(loadMergedAway(), canonicalTomb)) saveMergedAway(canonicalTomb);
+          setMergedAwayTomb(canonicalTomb);
+          const tombSet = new Set(canonicalTomb.map(n => n.trim().toLowerCase()));
+          const prune = (key: string, defaults: string[], setter: (v: string[]) => void) => {
+            const stored = loadList(key, defaults);
+            const pruned = dropMergedAway(stored, tombSet);
+            if (pruned.length !== stored.length) {
+              saveList(key, pruned);
+              setter(pruned);
+            }
+          };
+          prune(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES, setIngredientTypes);
+          prune(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, setPepTypes);
+          prune(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, setDieTypes);
+          prune(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, setCheeseIngredients);
+          prune(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, setDoughIngredients);
+          prune(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, setFrontlineIngredients);
+          prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
+        } catch {}
+      }
+    };
+    // Coalesce bursts without dropping an earlier family while another canonical
+    // read is in flight. Each pass is fenced by its generation and cleanup;
+    // newly-arrived families run in the next pass rather than applying stale
+    // results over them.
+    const reconcileConfiguration = (
+      families: ReadonlySet<"master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away">,
+    ): Promise<void> => {
+      for (const family of families) pendingConfigurationFamilies.add(family);
+      if (configurationFlight) return configurationFlight;
+      configurationFlight = (async () => {
+        while (!cancelled && pendingConfigurationFamilies.size > 0) {
+          const next = new Set(pendingConfigurationFamilies);
+          pendingConfigurationFamilies.clear();
+          await reconcileConfigurationPass(next);
+        }
+      })().finally(() => {
+        configurationFlight = null;
+        // A frame can arrive in the tiny gap after the loop observes an empty
+        // set and before this finally runs. Start its queued canonical pass.
+        if (!cancelled && pendingConfigurationFamilies.size > 0) {
+          void reconcileConfiguration(new Set());
+        }
+      });
+      return configurationFlight;
+    };
+    const allConfigurationFamilies = () => new Set<
+      "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away"
+    >([
+      "master-data", "profiles", "factory-data", "die-types", "supervisor-pin", "name-links", "merged-away",
+    ]);
+    const reconcileConfigurationBaseline = () => void reconcileConfiguration(allConfigurationFamilies());
+    const disconnectSse = connectSse({
+      clientId: clientId.current,
+      getSnapshot: () => syncSnapshotIdRef.current,
+      onOpen: () => {
       setSyncConnected(true);
       recordSyncEvent("connected", "Live sync connection opened");
       // Queue the reconnect recovery push. It is released only after the stream's
       // first frame has established a baseline, so a new/stale device cannot
       // upload its local day before applying today's shared row.
       schedulePush(dayStateRef.current, 1000, "recovery");
-    };
-    es.onmessage = (e: MessageEvent) => {
+    },
+    onMessage: (e: MessageEvent) => {
       try {
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
           unchanged?: boolean;
           snapshotId?: string;
           reset?: boolean;
+          rollover?: boolean;
           resetEpoch?: number;
           initial?: boolean;
           serverCalc?: { runId: string; calc: Calc } | null;
+          operationalProjection?: OperationalProjection | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
+          serverTime?: number;
+          canonicalRevision?: number;
           masterDataChanged?: boolean;
+          configurationInvalidated?: boolean;
+          family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
-        if (msg.serverCalc) {
+        adoptOperationalRevision(msg.canonicalRevision);
+        if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
+          const offset = msg.serverTime - Date.now();
+          serverClockOffsetMsRef.current = offset;
+          setServerClockOffsetMs(offset);
+        }
+        if (msg.operationalProjection) {
+          adoptOperationalProjection(msg.operationalProjection, msg.snapshotId);
+        } else if (msg.serverCalc) {
           serverCalcRef.current = msg.serverCalc;
           setServerCalc(msg.serverCalc.calc);
-          adoptServerCalcReceipt(msg.serverCalc, msg.snapshotId);
+          adoptServerCalcReceipt(msg.serverCalc, msg.snapshotId, msg.serverTime);
         } else if (msg.initial && msg.snapshotId) {
           serverCalcRef.current = null;
           setServerCalc(null);
+          serverProjectionRef.current = null;
+          setServerProjection(null);
           serverCalcReceiptRef.current = null;
           setServerCalcReceipt(null);
         }
-        if (
-          msg.masterDataChanged &&
+        if (msg.initial) {
+          // An initial frame is also the reconnect baseline: refresh every
+          // independent configuration family in case its nudge was missed while
+          // this live stream was disconnected.
+          reconcileConfigurationBaseline();
+        } else if (
+          (msg.configurationInvalidated || msg.masterDataChanged) &&
           shouldRefreshMasterData(msg.senderId, clientId.current)
         ) {
-          void invalidateMasterDataBootstrap(cycleCountQc);
+          void reconcileConfiguration(new Set<"master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away">([
+            msg.family ?? "master-data",
+          ]));
         }
         if (msg.autoTrackSchedule) {
           autoTrackScheduleRef.current = msg.autoTrackSchedule;
@@ -8869,14 +9085,20 @@ export default function Home() {
         }
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
-        if (msg.reset && typeof msg.resetEpoch === "number") {
+        if ((msg.reset || msg.rollover) && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
-          if (msg.resetEpoch > getStoredResetEpoch()) {
+          if (initialResetRequiresReload(msg.resetEpoch, getStoredResetEpoch())) {
             const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
-            if (applyResetWipe(msg.resetEpoch)) window.location.reload();
+            const adopted = msg.rollover
+              ? applyRolloverEpoch(msg.resetEpoch)
+              : applyResetWipe(msg.resetEpoch);
+            if (adopted) window.location.reload();
             else synchronizationStateMachineRef.current.completeReset(generation);
+            return false;
           }
-          return;
+          // The server repeats its current reset marker on reconnect. Once this
+          // device has durably adopted that epoch, the same frame remains the
+          // only initial baseline and must continue through normal data handling.
         }
         if (msg.unchanged) {
           if (typeof msg.snapshotId === "string") {
@@ -8884,6 +9106,9 @@ export default function Home() {
           }
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
+          if (msg.data.operationalProjection) {
+            adoptOperationalProjection(msg.data.operationalProjection, msg.snapshotId);
+          }
           if (msg.data.doughTimerControls) {
             localStorage.setItem(
               "run-calculator:dough-timer-controls",
@@ -8918,30 +9143,31 @@ export default function Home() {
           lastFormRunIdRef.current = seedId;
           formHandoffRef.current = false;
         }
-        if (msg.initial) {
-          // applySyncCallbackRef clears its sync-apply suppression in a
-          // requestAnimationFrame. Queue behind that same frame so the recovery
-          // push builds from the adopted snapshot and is not discarded by the
-          // suppression guard.
-          const shouldPush = syncBaselineGateRef.current.completeInitialSnapshot();
-          if (shouldPush) {
-            requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
-          }
-        }
-      } catch {}
-    };
-    es.onerror = () => {
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    onError: () => {
       recordSyncEvent("failure", isOnline ? "Live sync connection delayed; local changes are retained" : "Offline; local changes are retained");
-      // EventSource reconnects itself after an error without recreating this
+      // The browser stream reconnects itself after an error without recreating this
       // effect. Fence automatic pushes until that reconnect delivers its own
       // initial snapshot.
-      syncBaselineGateRef.current.beginConnection();
       setSyncConnected(false);
-      // EventSource can't read the HTTP status, so a drop may be the daily reset
+      // The browser stream can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me; if the session is gone we land on login.
       revalidate();
-    };
+    },
+    onInitialBaseline: (shouldPush) => {
+      // applySyncCallbackRef clears its sync-apply suppression in a frame.
+      // The manager opens this gate only after Home has merged the baseline.
+      if (shouldPush) requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
+    },
+    onClose: () => {},
+    });
     return () => {
+      cancelled = true;
+      configurationGeneration += 1;
       setSyncConnected(false);
       if (syncRetryTimerRef.current) {
         clearTimeout(syncRetryTimerRef.current);
@@ -8949,7 +9175,7 @@ export default function Home() {
       }
       syncPushTimingRef.current = null;
       syncPushQueueRef.current.reset();
-      es.close();
+      disconnectSse();
     };
   }, []);
 
@@ -8959,7 +9185,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async (): Promise<boolean> => {
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       foregroundSyncBarrierRef.current = true;
@@ -8999,10 +9225,13 @@ export default function Home() {
           // authority for clearing pre-reset local state.
           const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
           if (epochRes.ok) {
-            const epochBody = await epochRes.json().catch(() => null) as { epoch?: number } | null;
+            const epochBody = await epochRes.json().catch(() => null) as { epoch?: number; rollover?: boolean } | null;
             if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
               const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
-              if (applyResetWipe(epochBody.epoch)) {
+              const adopted = epochBody.rollover
+                ? applyRolloverEpoch(epochBody.epoch)
+                : applyResetWipe(epochBody.epoch);
+              if (adopted) {
                 window.location.reload();
                 return false;
               }
@@ -9014,7 +9243,8 @@ export default function Home() {
            const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
            const res = await fetch(snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string } | null;
+           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string; canonicalRevision?: number } | null;
+           adoptOperationalRevision(body && "canonicalRevision" in body ? body.canonicalRevision : undefined);
            if (body && "unchanged" in body && body.unchanged === true) {
              if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
              pushAcknowledgedRef.current = true;
@@ -9026,6 +9256,12 @@ export default function Home() {
            if (responseSnapshot) syncSnapshotIdRef.current = responseSnapshot;
            if (payload) {
              canonicalRunValuesUpdatedAtRef.current = { ...(payload.runValuesUpdatedAt ?? {}) };
+             if (payload.operationalProjection) {
+               adoptOperationalProjection(
+                 payload.operationalProjection,
+                 responseSnapshot ?? syncSnapshotIdRef.current,
+               );
+             }
            }
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
@@ -9191,32 +9427,17 @@ export default function Home() {
         }
       })();
     });
-    foregroundRecoveryRetryRef.current = reconcileForeground;
-
-    function onVisibility() {
-      if (document.visibilityState === "visible") void reconcileForeground();
-    }
-    function onFocus() {
-      void reconcileForeground();
-    }
-    function onOnline() {
-      void reconcileForeground();
-    }
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("online", onOnline);
+    foregroundRecoveryRetryRef.current = foregroundRegistration.reconcile;
     return () => {
       cancelled = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("online", onOnline);
+      foregroundRegistration.dispose();
     };
-  }, []);
+  }, [visibleTabScheduler]);
 
   // ── Durable merged-away tombstone (once on mount) ──
   // The per-day sync blob can't carry a merge across a day boundary: a new day's
   // row starts empty and whichever device seeds it wins. So on load we fetch the
-  // factory-wide durable tombstone, union it into the local one, and strip those
+  // factory-wide durable tombstone, replace the local cache, and strip those
   // names from every master list. This makes a merge stick across days and
   // across a device that was offline during the merge. Best-effort: a failure
   // just leaves the existing local/sync behavior unchanged.
@@ -9229,11 +9450,13 @@ export default function Home() {
       } catch {
         return; // offline / server error — local + sync tombstones still apply
       }
-      if (cancelled || remoteNames.length === 0) return;
-      const mergedTomb = [...new Set([...loadMergedAway(), ...remoteNames])];
-      saveMergedAway(mergedTomb);
-      setMergedAwayTomb(mergedTomb);
-      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+      if (cancelled) return;
+      // The canonical empty list is meaningful: it clears names that a manager
+      // deliberately restored on another station.
+      const canonicalTomb = [...new Set(remoteNames)];
+      if (!deepEqual(loadMergedAway(), canonicalTomb)) saveMergedAway(canonicalTomb);
+      setMergedAwayTomb(canonicalTomb);
+      const tombSet = new Set(canonicalTomb.map(n => n.trim().toLowerCase()));
       const prune = (
         key: string,
         defaults: string[],
@@ -9258,9 +9481,13 @@ export default function Home() {
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
   useEffect(() => {
-    const id = setInterval(() => { schedulePush(dayStateRef.current, 0, "periodic"); }, 30_000);
-    return () => clearInterval(id);
-  }, []);
+    return visibleTabScheduler.register({
+      id: "periodic-sync-push",
+      cadenceMs: 30_000,
+      order: 40,
+      run: () => schedulePush(dayStateRef.current, 0, "periodic"),
+    });
+  }, [visibleTabScheduler]);
 
   // Auto-save dough recipe preset whenever name + rows are set. The typed
   // Target Doughball Weight rides along (falling back to any weight the preset
@@ -9356,163 +9583,6 @@ export default function Home() {
     if (changed) saveCheeseRecipePresets(presets);
   }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
 
-  // Detect day change while the tab is open (visibility change + periodic check)
-  useEffect(() => {
-    async function checkDateRollover() {
-      // A Home mount immediately after sign-in is already today's
-      // re-authentication. Consume this marker before the async rollover work
-      // so a duplicate interval/timer check cannot make the same session skip
-      // a later rollover.
-      const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
-      const stored = (() => {
-        try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
-      })();
-      if (stored.date && stored.date !== todayStr()) {
-        // Auto-end any active run before archiving yesterday
-        const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
-        if (prevDs && stored.date) {
-          const rolloverEndedAt = Date.now();
-          // Rollover completion uses the same durable atomic finalization as an
-          // explicit End. Preserve yesterday's date in the intent outbox.
-          for (const r of prevDs.runs) {
-            if (r.startedAt && !r.endedAt) {
-              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              queueOperationalIntent({
-                date: stored.date,
-                runId: r.id,
-                observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
-                effectiveAt: rolloverEndedAt,
-                action: "lifecycle",
-                lifecycle: "end",
-                preEndLifecycle: capturePreEndLifecycle(r),
-                inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, vals)),
-              });
-            }
-          }
-          if (browserIsOnline()) void flushOperationalIntentOutbox();
-          const finalDs: DayState = {
-            ...prevDs,
-            runs: prevDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: rolloverEndedAt, pausedAt: undefined } : r
-            ),
-          };
-          archiveDayToHistory(finalDs, stored.date);
-        }
-        const newDate = todayStr();
-        // Try to load any pre-scheduled data for the new day.
-        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
-        // there are no scheduled runs (GET succeeded with an empty row). If the
-        // GET itself fails (network error, transient 5xx), do NOT push — an
-        // empty push with a newer resetAt would wholesale-adopt over any
-        // previously saved scheduled runs (protectRunValues escape hatch). The
-        // session boundary (resetBoundaryAt) will be established on the next
-        // successful push once the connection recovers.
-        let serverConfirmedNoRuns = false;
-        try {
-          const res = await fetch(`/api/sync/${newDate}`);
-          if (res.ok) {
-            const payload = await res.json() as SyncPayload | null;
-            if (payload?.dayState?.runs?.length) {
-              // Apply the saved line-type (dough/crusts) preference to each run
-              // that has no subTab set — so brands always scheduled as "crusts"
-              // start in the right mode without a manual toggle every morning.
-              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
-                if (r.subTab) return r;
-                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
-                return pref ? { ...r, subTab: pref } : r;
-              });
-              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              clearActiveSubstitutions();
-              // Scheduled run values are a snapshot from scheduling time; blank
-              // sauce fields backfill from the CURRENT profile (mobile parity —
-              // its pull-up spreads the live profile).
-              const metaById = new Map(ds.runs.map(r => [r.id, r]));
-              const pulledVals: Record<string, FormValues> = {};
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
-                const meta = metaById.get(id);
-                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
-                saveRunValues(id, pulledVals[id]);
-              }
-              // Adopt the scheduled row's per-run value stamps: these values are
-              // server-sourced, not a local edit (stamping them with local time
-              // would fake one), but saving them completely unstamped would lose
-              // the per-run LWW merge to any peer that pushes a stamped copy.
-              {
-                const upd = loadRunValuesUpdated();
-                const remoteUpd = payload.runValuesUpdatedAt ?? {};
-                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
-                saveRunValuesUpdated(upd);
-              }
-              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-              saveDayState(ds);
-              setDayState(ds);
-              if (ds.runToTime) setRunToTime(ds.runToTime);
-              const firstId = ds.runs[0]?.id;
-              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
-              lastFormRunIdRef.current = firstId ?? "";
-              form.reset(firstVals);
-              resetFieldArrays(firstVals);
-              schedulePush(ds, 0);
-              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
-              // A restored session must sign out after rollover so a hard
-              // refresh cannot bypass the daily re-authentication boundary.
-              // A session just established by sign-in has already
-              // re-authenticated for this production day.
-              if (shouldSignOut) void signOut();
-              return;
-            }
-            serverConfirmedNoRuns = true;
-          }
-        } catch {}
-        // Fallback: fresh empty state. Only push to the server if the GET
-        // confirmed there are no scheduled runs — otherwise we'd risk wiping
-        // them via the wholesale-adopt escape hatch (see comment above).
-        const fresh = { ...freshDayState(), resetAt: Date.now() };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        saveDayState(fresh);
-        setDayState(fresh);
-        setRunToTime("19:15");
-        lastFormRunIdRef.current = "";
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
-        // See note above: restored sessions sign out after the daily reset,
-        // while the current sign-in transition is already re-authenticated.
-        if (shouldSignOut) void signOut();
-      }
-    }
-    // Run once on mount too. loadDayState() only resets the in-memory view when
-    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
-    // boundary, or sign out. Without this immediate call, the rollover (and its
-    // signOut) only fires up to 60s later via the interval — by which
-    // time another device's pushed resetAt may have already 401-bounced us to
-    // login, so the user sees the logout but never the reset. Mobile already
-    // rolls over on its mount effect; this brings web to parity.
-    void checkDateRollover();
-    const interval = setInterval(checkDateRollover, 60_000);
-    document.addEventListener("visibilitychange", checkDateRollover);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", checkDateRollover);
-    };
-  }, []);
-
-  // Re-push on tab-foreground restore so a run-start (or any action) that
-  // fired while the tab was backgrounded or the screen was off doesn't stay
-  // unsynced. The browser can cancel an in-flight fetch when a tab is hidden,
-  // and setTimeout-based retries are throttled to ≥1 min on mobile — so the
-  // tab returning to the foreground is the reliable recovery point.
-  useEffect(() => {
-    function onVisibility() {
-      if (document.visibilityState === "visible") {
-        schedulePush(dayStateRef.current, 300);
-      }
-    }
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
-
   // The server's PUT epoch guard fails CLOSED once the scope has ever been
   // reset: any sync write that doesn't carry a current `?epoch=` is answered
   // with {ok:true, stale:true} and silently DROPPED — the client thinks it
@@ -9522,11 +9592,11 @@ export default function Home() {
   // hasn't honoured the latest data reset: adopt it (wipe + reload) so we stop
   // pushing pre-reset data. Returns true when the write was rejected as stale.
   function handleStaleSyncWrite(body: unknown): boolean {
-    const b = body as { stale?: boolean; epoch?: number } | null;
+    const b = body as { stale?: boolean; epoch?: number; rollover?: boolean } | null;
     if (!b?.stale) return false;
     if (typeof b.epoch === "number" && b.epoch > getStoredResetEpoch()) {
       const generation = synchronizationStateMachineRef.current.beginReset(b.epoch);
-      if (applyResetWipe(b.epoch)) window.location.reload();
+      if ((b.rollover ? applyRolloverEpoch(b.epoch) : applyResetWipe(b.epoch))) window.location.reload();
       else synchronizationStateMachineRef.current.completeReset(generation);
     }
     return true;
@@ -9547,6 +9617,9 @@ export default function Home() {
         : undefined,
     });
     const snapshot = result.body?.snapshotId;
+    adoptOperationalRevision(
+      (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
+    );
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
     if (result.body?.partialFallback && result.body.data === null) {
       // A partial write against a missing row has no valid snapshot identity.
@@ -9558,18 +9631,27 @@ export default function Home() {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
     }
+    const operationalProjection = (
+      result.body as (typeof result.body & { operationalProjection?: unknown }) | null | undefined
+    )?.operationalProjection;
+    if (operationalProjection) {
+      adoptOperationalProjection(
+        operationalProjection as OperationalProjection,
+        typeof result.body?.snapshotId === "string"
+          ? result.body.snapshotId
+          : syncSnapshotIdRef.current,
+      );
+    }
     return result;
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
-    const res = await fetch(
-      `/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: clientId.current, payload, snapshotId: syncSnapshotIdRef.current || undefined }),
-      },
-    );
+    const res = await writeToday({
+      payload,
+      clientId: clientId.current,
+      snapshotId: syncSnapshotIdRef.current,
+      epoch: getStoredResetEpoch(),
+    });
     await consumeCanonicalSyncWriteResponse(res, true);
     return res;
   }
@@ -9630,11 +9712,13 @@ export default function Home() {
       ...(timing?.queuedAtEpoch ? { syncMeta: { queuedAt: timing.queuedAtEpoch } } : {}),
     });
     const requestBytes = new Blob([requestBody]).size;
-    fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: requestBody,
+    writeToday({
+      payload,
+      clientId: clientId.current,
+      snapshotId: syncSnapshotIdRef.current,
+      epoch: getStoredResetEpoch(),
       signal: controller.signal,
+      queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
       if (generation !== syncPushGenerationRef.current) return;
       // Authentication failures are permanent for this request. Retrying them
@@ -9828,7 +9912,7 @@ export default function Home() {
       completeness: canSendPartial ? "partial" : "complete",
       ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
       dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
-      runValues,
+      runValues: fencePendingOperationalValues(runValues),
       runValuesUpdatedAt,
       ...(() => {
         try {
@@ -9850,7 +9934,18 @@ export default function Home() {
     delay = SYNC_EDIT_DEBOUNCE_MS,
     trigger: SyncMeasurementTrigger = "edit",
   ) {
+    // Keep every timer-driven/debounced write asleep with the document. The
+    // foreground reconciliation barrier pulls canonical state first, then
+    // replays this pending local delta after adoption.
+    if (document.hidden) {
+      foregroundPushPendingRef.current = true;
+      return;
+    }
     if (foregroundSyncBarrierRef.current) {
+      foregroundPushPendingRef.current = true;
+      return;
+    }
+    if (operationalAdoptionInFlightRef.current > 0) {
       foregroundPushPendingRef.current = true;
       return;
     }
@@ -9862,7 +9957,7 @@ export default function Home() {
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
-    if (!syncBaselineGateRef.current.requestPush()) return;
+    if (!requestBaselinePush()) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     if (!syncPushTimingRef.current) {
       syncPushTimingRef.current = {
@@ -9875,6 +9970,11 @@ export default function Home() {
     setSyncPendingCount(1);
     recordSyncEvent("local", "Local change is queued for server sync");
     pushTimerRef.current = setTimeout(() => {
+      if (document.hidden) {
+        foregroundPushPendingRef.current = true;
+        syncPushTimingRef.current = null;
+        return;
+      }
       // Never push a stale-dated day into today's sync row. A tab left open
       // across midnight still holds yesterday's runs until the rollover fires;
       // pushing them to /api/sync/today (the server resolves "today" by its own
@@ -9935,6 +10035,7 @@ export default function Home() {
   // Home remains the sole owner of the canonical day, form, and providers.
   useHomeFormLifecycle({
     currentRunId,
+    persistenceScope: me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "signed-out",
     dayStateRef,
     form,
     values: v,
@@ -10424,14 +10525,10 @@ export default function Home() {
     if (!alreadyHealed && canManageProfiles) {
       localStorage.setItem(MARKER, "1");
 
-    const PREFIX = "run-calc-profile-";
     const toHeal: { brand: string; flavor: string }[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k?.startsWith(PREFIX)) continue;
-      const suffix = k.slice(PREFIX.length);
-      if (!suffix.includes("__")) continue;
+    for (const suffix of cachedProfileKeys()) {
       const dIdx = suffix.indexOf("__");
+      if (dIdx < 0) continue;
       const brand  = suffix.slice(0, dIdx);
       const flavor = suffix.slice(dIdx + 2);
       const p = loadProfile(brand, flavor);
@@ -10514,31 +10611,41 @@ export default function Home() {
     form.setValue(key as keyof FormValues, value as never, { shouldDirty: true });
   });
 
-  function switchToRun(newIndex: number) {
-    if (newIndex < 0 || newIndex >= dayState.runs.length) return;
-    const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
-    // Profile writes are manager-only: run values still save for everyone,
-    // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
-      }
-    }
-    const newId = dayState.runs[newIndex].id;
-    const newDs = { ...dayState, currentIndex: newIndex };
-    setDayState(newDs);
-    saveDayState(newDs);
-    const newVals = loadRunValues(newId);
-    lastFormRunIdRef.current = newId;
-    form.reset(newVals);
-    resetFieldArrays(newVals);
-    setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
-    // Restore open stoppage for the new run (or clear if none)
-    const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt);
-    setActiveStopId(openStop?.id ?? null);
-    setConfirmDeleteStopId(null);
-  }
+  const {
+    switchToRun,
+    startRun,
+    pauseRun,
+    setPauseTunnelPolicy,
+    resumeRun,
+    endRun,
+    pauseDecisionRunId,
+    dismissPauseDecision: setPauseDecisionRunId,
+  } = useRunLifecycleManager({
+    dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
+    flushFormWrites: flushPendingHomeFormWrites,
+    loadRunValues, saveRunValues, markRunValuesUpdated,
+    canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
+    setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
+    foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
+    operationalAdoptionInFlightRef, operationalCanonicalRevisionRef,
+    operationalIntentBlocksLifecycle,
+    showForegroundRecoveryNotice, recordSyncEvent,
+    queueOperationalIntent, flushOperationalIntentOutbox, browserIsOnline,
+    capturePreEndLifecycle, computeRunConsumptionLines, effectiveValuesForRun,
+    overlayRunMetaStamps, isolatePendingRunPackagingProgress,
+    recordManualPackagingProgress, persistManualPackagingProgress,
+    calcTotalTimeSec: () => calcRef.current?.totalTimeSec ?? 0,
+    initialFinishTimestampRef,
+    summarizeCarriedInCases: (run, originalTarget) => summarizeSurplusForRun({
+      runId: run.id, brand: run.brand, flavor: run.flavor, originalTarget,
+      lots: freezerSurplus.lots, allocations: freezerSurplus.allocations,
+    }).carriedInCases,
+    startRunAndQueueCompetingCompletions, todayStr,
+    reportRunInsightsAfterFinalize,
+    getRunInsightsSignal: () => runInsightsAbortControllerRef.current.signal,
+    genId, applyResumeToRun, canChoosePauseTunnelPolicy,
+    pauseDecisionRemainingMs, shouldClosePauseDecision, schedulePush,
+  });
 
   // ── Temporary ingredient substitutions (day-state overlay) ─────────────────
   // Floor staff overlay today's recipes when an ingredient is low/out. These
@@ -10611,6 +10718,7 @@ export default function Home() {
 
   function addRun() {
     if (dayState.runs.length >= MAX_RUNS) return;
+    flushPendingHomeFormWrites();
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
@@ -10641,6 +10749,7 @@ export default function Home() {
     const idx = dayState.currentIndex;
     const run = dayState.runs[idx];
     if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
+    flushPendingHomeFormWrites();
     const newRuns = dayState.runs.filter((_, i) => i !== idx);
     if (newRuns.length === 0) return; // always keep at least one run
     // Tombstone the removed run id so live-sync's additive run-union can't
@@ -10702,6 +10811,7 @@ export default function Home() {
   function removeRunById(id: string) {
     const result = removeRunByIdFromDayState(dayState, id);
     if (!result) return;
+    flushPendingHomeFormWrites();
     tombstoneDeleted("runs", result.removedRun.id);
     const { dayState: newDs, removedCurrent } = result;
     setDayState(newDs);
@@ -10725,6 +10835,7 @@ export default function Home() {
   // without touching anything.
   function addRunWithIdentity(brand: string, flavor: string): boolean {
     if (dayState.runs.length >= MAX_RUNS) return false;
+    flushPendingHomeFormWrites();
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
@@ -10761,6 +10872,7 @@ export default function Home() {
   }
 
   function setRunBrandFlavor(brand: string, flavor: string) {
+    flushPendingHomeFormWrites();
     // Save current values to old profile
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
@@ -11394,256 +11506,6 @@ export default function Home() {
     }
   }
 
-  function startRun() {
-    // A visible tab can be tapped before its foreground GET returns. Do not
-    // turn that stale UI into a lifecycle write; the reconciled state will
-    // render before the controls become actionable again.
-    if (foregroundSyncBarrierRef.current) return;
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const activeRun = base.runs[index];
-    if (!activeRun) return;
-    const activeRunId = activeRun.id;
-    const now = Date.now();
-    queueOperationalIntent({ runId: activeRunId, observedGeneration: `${activeRunId}:${activeRun.metaUpdatedAt ?? activeRun.startedAt ?? 0}`, effectiveAt: now, action: "lifecycle", lifecycle: "start" });
-    void flushOperationalIntentOutbox();
-    // A pending run owns no Packaging completion. If a run-switch handoff ever
-    // leaked the prior run's counters into this form/storage, clear them before
-    // the lifecycle starts so the new run cannot begin already "complete".
-    const rawOpeningValues = form.getValues();
-    const isolatedOpeningValues = isolatePendingRunPackagingProgress(
-      activeRun,
-      rawOpeningValues,
-    );
-    if (isolatedOpeningValues !== rawOpeningValues) {
-      form.setValue("skidsCompleted", 0, { shouldDirty: true });
-      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
-      recordManualPackagingProgress({
-        runId: activeRunId,
-        skidsCompleted: 0,
-        casesOnCurrentSkid: 0,
-        manualOverrideUntil: now,
-        now,
-      });
-      saveRunValues(activeRunId, form.getValues());
-      markRunValuesUpdated(activeRunId, now);
-    }
-    initialFinishTimestampRef.current =
-      now + (calcRef.current?.totalTimeSec ?? 0) * 1000;
-    // Starting a run stops any other run that is currently running. Finalize each
-    // through the same durable intent as an explicit End.
-    for (const r of base.runs) {
-      if (r.id !== activeRunId && r.startedAt && !r.endedAt) {
-        const runValues = loadRunValues(r.id);
-        queueOperationalIntent({
-          runId: r.id,
-          observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
-          effectiveAt: now,
-          action: "lifecycle",
-          lifecycle: "end",
-          preEndLifecycle: capturePreEndLifecycle(r),
-          inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, runValues)),
-        });
-      }
-    }
-    if (browserIsOnline()) void flushOperationalIntentOutbox();
-    // An explicit Warehouse allocation is carried into the live packaging
-    // register once, so the operator sees the confirmed opening count while
-    // the original casesNeeded target remains intact in the run form.
-    const carried = summarizeSurplusForRun({
-      runId: activeRunId,
-      brand: activeRun.brand,
-      flavor: activeRun.flavor,
-      originalTarget: Number(form.getValues("casesNeeded")) || 0,
-      lots: freezerSurplus.lots,
-      allocations: freezerSurplus.allocations,
-    }).carriedInCases;
-    const openingValues = form.getValues();
-    const openingCases =
-      (Number(openingValues.skidsCompleted) || 0) * (Number(openingValues.casesPerSkid) || 0) +
-      (Number(openingValues.casesOnCurrentSkid) || 0);
-    if (carried > 0 && openingCases === 0) {
-      const casesPerSkid = Number(openingValues.casesPerSkid) || 0;
-      const seededSkids = casesPerSkid > 0 ? Math.floor(carried / casesPerSkid) : 0;
-      const seededCases = casesPerSkid > 0 ? carried % casesPerSkid : carried;
-      form.setValue("skidsCompleted", seededSkids, { shouldDirty: true });
-      form.setValue("casesOnCurrentSkid", seededCases, { shouldDirty: true });
-      persistManualPackagingProgress(activeRunId, seededSkids, seededCases);
-      saveRunValues(activeRunId, form.getValues());
-    }
-    // Carry over prep batches into the starting run (once, guarded by prepCarriedOver).
-    // Adds dough prep batches to the run form's batchesReady field so the live
-    // calculation begins with the correct head start.
-    const prep = base.prepPhase;
-    let nextPrepPhase = prep;
-    if (prep && !prep.prepCarriedOver && prep.prepBatchesDough > 0) {
-      const curBatches = Number(form.getValues("batchesReady")) || 0;
-      form.setValue("batchesReady", curBatches + prep.prepBatchesDough, { shouldDirty: true });
-      markRunValuesUpdated(activeRunId, now);
-      nextPrepPhase = { ...prep, prepCarriedOver: true };
-    } else if (prep && !prep.prepCarriedOver) {
-      // Mark carried even if no dough batches — prevents re-check on next startRun.
-      nextPrepPhase = { ...prep, prepCarriedOver: true };
-    }
-    const { runs: newRuns, autoEnded } = startRunAndQueueCompetingCompletions({
-      date: base.date || todayStr(),
-      runs: base.runs,
-      currentIndex: index,
-      now,
-      loadValues: loadRunValues,
-    });
-    const newDs = { ...base, runs: newRuns, prepPhase: nextPrepPhase };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-    // Run Insights: runs auto-finalized by starting this one get the same
-    // post-run evaluation as an explicit Stop Run (best-effort).
-    if (autoEnded.length > 0) {
-      void reportRunInsightsAfterFinalize(
-        autoEnded,
-        newRuns,
-        runInsightsAbortControllerRef.current.signal,
-      );
-    }
-  }
-
-  function pauseRun() {
-    if (foregroundSyncBarrierRef.current) return;
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const run = base.runs[index];
-    // A double click or a stale compact strip must never create concurrent pause
-    // records for one lifecycle.
-    if (!run?.startedAt || run.pausedAt || run.endedAt) return;
-    const now = Date.now();
-    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "pause" });
-    void flushOperationalIntentOutbox();
-    // Persist the conservative default before displaying the question. This is
-    // intentionally not deferred to the ten-second timer: a reload, a lost
-    // foreground event, or another tablet must all see the same safe choice.
-    const pauseStop: Stoppage = {
-      id: genId(), reason: "", type: "pause", startedAt: now, stopTunnel: true,
-    };
-    const newRuns = base.runs.map((r, i) =>
-      i === index
-        ? {
-          ...r,
-          pausedAt: now,
-          pausedStoppageId: pauseStop.id,
-          stoppages: [...(r.stoppages ?? []), pauseStop],
-        }
-        : r
-    );
-    const newDs = { ...base, runs: newRuns };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-    setActiveTab("run");
-    pauseDecisionPauseIdRef.current = pauseStop.id;
-    setPauseDecisionRunId(run.id);
-  }
-
-  function setPauseTunnelPolicy(stopTunnel: boolean) {
-    const runId = pauseDecisionRunId ?? currentRunId;
-    const pauseId = pauseDecisionPauseIdRef.current;
-    const base = dayStateRef.current;
-    const run = base.runs.find((candidate) => candidate.id === runId);
-    if (
-      !pauseId ||
-      !run?.pausedAt ||
-      run.pausedStoppageId !== pauseId ||
-      !canChoosePauseTunnelPolicy(run.pausedAt, Date.now())
-    ) {
-      setPauseDecisionRunId(null);
-      return;
-    }
-    let changed = false;
-    const stoppages = (run.stoppages ?? []).map((stoppage) => {
-      if (
-        stoppage.id === pauseId && stoppage.type === "pause" && !stoppage.endedAt
-      ) {
-        changed = true;
-        return { ...stoppage, stopTunnel };
-      }
-      return stoppage;
-    });
-    if (changed) {
-      const newDs = {
-        ...base,
-        runs: base.runs.map((candidate) =>
-          candidate.id === runId ? { ...candidate, stoppages } : candidate,
-        ),
-      };
-      dayStateRef.current = newDs;
-      setDayState(newDs);
-      saveDayState(newDs);
-      schedulePush(newDs, 0);
-    }
-    setPauseDecisionRunId(null);
-  }
-
-  function resumeRun() {
-    if (foregroundSyncBarrierRef.current) return;
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const run = base.runs[index];
-    if (!run) return;
-    const now = Date.now();
-    queueOperationalIntent({ runId: run.id, observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`, effectiveAt: now, action: "resume" });
-    void flushOperationalIntentOutbox();
-    const resumed = applyResumeToRun(run, now);
-    if (!resumed) return;
-    const newRuns = base.runs.map((r, i) =>
-      i === index ? resumed : r
-    );
-    const newDs = { ...base, runs: newRuns };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-    setPauseDecisionRunId(null);
-  }
-
-  useEffect(() => {
-    if (!pauseDecisionRunId) return;
-    // Closing the prompt is deliberately harmless: the pause record already
-    // contains stopTunnel:true unless the operator explicitly chose No.
-    const pauseId = pauseDecisionPauseIdRef.current;
-    const pausedAt = currentRun?.id === pauseDecisionRunId ? currentRun.pausedAt : undefined;
-    if (!pausedAt || currentRun?.pausedStoppageId !== pauseId) {
-      setPauseDecisionRunId(null);
-      return;
-    }
-    const close = () => setPauseDecisionRunId(null);
-    const timer = window.setTimeout(
-      close,
-      pauseDecisionRemainingMs(pausedAt, Date.now()),
-    );
-    const closeWhenHidden = () => {
-      if (
-        shouldClosePauseDecision(pausedAt, Date.now(), document.visibilityState === "visible")
-      ) {
-        close();
-      }
-    };
-    document.addEventListener("visibilitychange", closeWhenHidden);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("visibilitychange", closeWhenHidden);
-    };
-  }, [currentRun, pauseDecisionRunId]);
-
-  useEffect(() => {
-    if (
-      pauseDecisionRunId &&
-      (!currentRun || currentRun.id !== pauseDecisionRunId || !currentRun.pausedAt)
-    ) {
-      setPauseDecisionRunId(null);
-    }
-  }, [currentRun, pauseDecisionRunId]);
-
   // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
   // never called automatically. Returns a confirmation line for the card.
   const applyRunSuggestion = useEvent(async (s: RunSuggestion): Promise<string> => {
@@ -11771,92 +11633,6 @@ export default function Home() {
     return null;
   });
 
-  function endRun(expectedRunId?: string, fromForegroundRecovery = false) {
-    // Guard: a run that was never started cannot be ended. Every UI call-site
-    // is already gated (STOP RUN only shows when runStatus==="running"), but
-    // this makes the function itself safe against future or unexpected paths.
-    const base = dayStateRef.current;
-    const index = base.currentIndex;
-    const activeRun = base.runs[index];
-    if (foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
-      if (
-        activeRun?.startedAt &&
-        !activeRun.endedAt &&
-        (!foregroundStopIntentRef.current || foregroundStopIntentRef.current.runId === activeRun.id)
-      ) {
-        foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
-        setPendingForegroundStopRunId(activeRun.id);
-        showForegroundRecoveryNotice(
-          "recovering",
-          "Stop requested. Checking the current run state before applying it…",
-        );
-        recordSyncEvent("local", "Stop request queued behind foreground recovery", undefined, activeRun.id);
-      }
-      return;
-    }
-    if (!activeRun?.startedAt || activeRun.endedAt) return;
-    if (expectedRunId && activeRun.id !== expectedRunId) {
-      showForegroundRecoveryNotice(
-        "outcome",
-        "Stop was not applied because the displayed run changed elsewhere. No other run was stopped.",
-      );
-      return;
-    }
-    const activeRunId = activeRun.id;
-    const cur = form.getValues();
-    saveRunValues(activeRunId, cur);
-    // Profile writes are manager-only: run values still save for everyone,
-    // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (activeRun.brand || activeRun.flavor)) {
-      if (saveProfile(activeRun.brand, activeRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
-      }
-    }
-    const endedAt = Date.now();
-    // Online and offline completion use the same durable command. The bounded
-    // canonical lines are captured now (not recomputed after recipes change).
-    // Until this commits, buildSyncPayload removes the optimistic endedAt.
-    const observedRun = overlayRunMetaStamps([activeRun])[0];
-    queueOperationalIntent({
-      runId: activeRunId,
-      observedGeneration: `${activeRunId}:${observedRun.metaUpdatedAt ?? observedRun.startedAt ?? 0}`,
-      effectiveAt: endedAt,
-      action: "lifecycle",
-      lifecycle: "end",
-      preEndLifecycle: capturePreEndLifecycle(observedRun),
-      inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(activeRun, cur)),
-    });
-    if (browserIsOnline()) void flushOperationalIntentOutbox();
-    const newRuns = base.runs.map((r, i) =>
-      i === index ? { ...r, pausedAt: undefined, endedAt } : r
-    );
-    const nextIndex = index + 1 < base.runs.length ? index + 1 : index;
-    const newDs = { ...base, runs: newRuns, currentIndex: nextIndex };
-    dayStateRef.current = newDs;
-    setDayState(newDs);
-    saveDayState(newDs);
-    // Run Insights: evaluate the just-finished run against its configured
-    // settings (best-effort, fire-and-forget — never disturbs the run flow).
-    void reportRunInsightsAfterFinalize(
-      newRuns.filter((r) => r.id === activeRunId),
-      newRuns,
-      runInsightsAbortControllerRef.current.signal,
-    );
-    if (nextIndex !== index) {
-      const nextId = base.runs[nextIndex].id;
-      const nextVals = loadRunValues(nextId);
-      lastFormRunIdRef.current = nextId;
-      form.reset(nextVals);
-      resetFieldArrays(nextVals);
-      const openStop = newRuns[nextIndex].stoppages?.find(s => !s.endedAt);
-      setActiveStopId(openStop?.id ?? null);
-    } else {
-      setActiveStopId(null);
-    }
-    setConfirmDeleteStopId(null);
-    schedulePush(newDs, 0);
-  }
-
   function moveRun(fromIdx: number, toIdx: number) {
     if (toIdx < 0 || toIdx >= dayState.runs.length) return;
     const runs = [...dayState.runs];
@@ -11977,42 +11753,7 @@ export default function Home() {
     });
   }
 
-  // Persist skid/case progress for a SPECIFIC (non-active) draining run. The
-  // active run writes through the live form + autosave effect; a just-ended run
-  // still draining its freezer is written here through the EXISTING per-run
-  // saveRunValues path (no new write surface), pushed to sync, and its shared
-  // write notification refreshes cached views. Manual logging only — we never
-  // auto-track a non-active ended run. Mirrored on mobile (replit.md parity).
-  function updateDrainingRunValues(
-    id: string,
-    partial: Partial<FormValues>,
-    source: "manual" | "auto" = "manual",
-  ) {
-    const vals = { ...DEFAULT_VALUES, ...loadRunValues(id), ...partial } as FormValues;
-    if (partial.skidsCompleted != null || partial.casesOnCurrentSkid != null) {
-      if (source === "auto") {
-        const accepted = recordAutomaticPackagingProgress({
-          runId: id,
-          skidsCompleted: vals.skidsCompleted,
-          casesOnCurrentSkid: vals.casesOnCurrentSkid,
-        });
-        if (!accepted) return;
-      } else {
-        persistManualPackagingProgress(
-          id,
-          vals.skidsCompleted,
-          vals.casesOnCurrentSkid,
-        );
-      }
-    }
-    saveRunValues(id, vals);
-    // Stamp: this run isn't the active form, so the autosave never stamps it;
-    // an unstamped value loses the per-run LWW merge to a peer's stale copy.
-    const now = Date.now();
-    markRunValuesUpdated(id, now);
-    lastLocalEditRef.current = now;
-    schedulePush(dayStateRef.current, 0);
-  }
+  const updateDrainingRunValues = packagingManager.updateDrainingRun;
 
   function flashSaved() {
     const el = savedFlashRef.current;
@@ -14104,137 +13845,6 @@ export default function Home() {
     };
   }, [floorModeEnabled]); // setShowFloorMode is a stable setter
 
-  // Reset all runs at midnight — archive current day first, auto-end any active run
-  useEffect(() => {
-    function msUntilMidnight() {
-      const now = new Date();
-      const midnight = new Date(now);
-      midnight.setHours(24, 0, 0, 0);
-      return midnight.getTime() - now.getTime();
-    }
-    let timeout: ReturnType<typeof setTimeout>;
-    function scheduleReset() {
-      timeout = setTimeout(async () => {
-        const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
-        const storedDs = (() => {
-          try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; }
-          catch { return null; }
-        })();
-        if (storedDs?.date && storedDs.date !== todayStr()) {
-          const rolloverEndedAt = Date.now();
-          for (const r of storedDs.runs) {
-            if (r.startedAt && !r.endedAt) {
-              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              queueOperationalIntent({
-                date: storedDs.date,
-                runId: r.id,
-                observedGeneration: `${r.id}:${r.metaUpdatedAt ?? r.startedAt ?? 0}`,
-                effectiveAt: rolloverEndedAt,
-                action: "lifecycle",
-                lifecycle: "end",
-                preEndLifecycle: capturePreEndLifecycle(r),
-                inventoryLines: computeRunConsumptionLines(effectiveValuesForRun(r, vals)),
-              });
-            }
-          }
-          if (browserIsOnline()) void flushOperationalIntentOutbox();
-          // Auto-end any run that was still active when midnight hit
-          const finalDs: DayState = {
-            ...storedDs,
-            runs: storedDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: rolloverEndedAt, pausedAt: undefined } : r
-            ),
-          };
-          archiveDayToHistory(finalDs, storedDs.date);
-        }
-        const newDate = todayStr();
-        // Try to load any pre-scheduled data for the new day.
-        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
-        // there are no scheduled runs (GET succeeded with an empty row). If the
-        // GET itself fails (network error, transient 5xx), do NOT push — an
-        // empty push with a newer resetAt would wholesale-adopt over any
-        // previously saved scheduled runs (protectRunValues escape hatch). The
-        // session boundary (resetBoundaryAt) will be established on the next
-        // successful push once the connection recovers.
-        let serverConfirmedNoRuns = false;
-        try {
-          const res = await fetch(`/api/sync/${newDate}`);
-          if (res.ok) {
-            const payload = await res.json() as SyncPayload | null;
-            if (payload?.dayState?.runs?.length) {
-              // Apply the saved line-type (dough/crusts) preference to each run
-              // that has no subTab set — so brands always scheduled as "crusts"
-              // start in the right mode without a manual toggle every morning.
-              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
-                if (r.subTab) return r;
-                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
-                return pref ? { ...r, subTab: pref } : r;
-              });
-              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              clearActiveSubstitutions();
-              // Scheduled run values are a snapshot from scheduling time; blank
-              // sauce fields backfill from the CURRENT profile (mobile parity —
-              // its pull-up spreads the live profile).
-              const metaById = new Map(ds.runs.map(r => [r.id, r]));
-              const pulledVals: Record<string, FormValues> = {};
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
-                const meta = metaById.get(id);
-                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
-                saveRunValues(id, pulledVals[id]);
-              }
-              // Adopt the scheduled row's per-run value stamps: these values are
-              // server-sourced, not a local edit (stamping them with local time
-              // would fake one), but saving them completely unstamped would lose
-              // the per-run LWW merge to any peer that pushes a stamped copy.
-              {
-                const upd = loadRunValuesUpdated();
-                const remoteUpd = payload.runValuesUpdatedAt ?? {};
-                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
-                saveRunValuesUpdated(upd);
-              }
-              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-              saveDayState(ds);
-              setDayState(ds);
-              if (ds.runToTime) setRunToTime(ds.runToTime);
-              const firstId = ds.runs[0]?.id;
-              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
-              lastFormRunIdRef.current = firstId ?? "";
-              form.reset(firstVals);
-              resetFieldArrays(firstVals);
-              schedulePush(ds, 0);
-              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
-              // A restored session must sign out after rollover; a session
-              // established by the current sign-in has already re-authenticated.
-              if (shouldSignOut) void signOut();
-              scheduleReset();
-              return;
-            }
-            serverConfirmedNoRuns = true;
-          }
-        } catch {}
-        // Fallback: fresh empty state. Only push to the server if the GET
-        // confirmed there are no scheduled runs — otherwise we'd risk wiping
-        // them via the wholesale-adopt escape hatch (see comment above).
-        const fresh = { ...freshDayState(), resetAt: Date.now() };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        setDayState(fresh);
-        saveDayState(fresh);
-        setRunToTime("19:15");
-        lastFormRunIdRef.current = "";
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
-        // Clear the rc_auth cookie for restored sessions so a hard refresh
-        // cannot bypass sign-in. The current sign-in transition is exempt.
-        if (shouldSignOut) void signOut();
-        scheduleReset();
-      }, msUntilMidnight());
-    }
-    scheduleReset();
-    return () => clearTimeout(timeout);
-  }, [consumeFreshSession]);
-
   // Clear hidden fields the moment their recipe-driven hide condition becomes true
   useEffect(() => {
     const lbs = (v.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
@@ -14670,7 +14280,7 @@ export default function Home() {
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
     premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
-    persistManualPackagingProgress, queueManualCorrection,
+    packagingManager, persistManualPackagingProgress, queueManualCorrection,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
     removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
@@ -15048,8 +14658,8 @@ export default function Home() {
           },
         ];
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
-            <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+          <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScreensDialog(false)}>
+            <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col`} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h3 id="cast-screens-dialog-title" className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
                 <button type="button" aria-label="Close cast to screens" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -15145,14 +14755,14 @@ export default function Home() {
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
       {showReorderDialog && (
         <div
-          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-4"
+          className={HOME_DIALOG_OVERLAY_CLASS}
           onClick={() => setShowReorderDialog(false)}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="reorder-runs-dialog-title"
-            className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]"
+            className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col`}
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -15164,7 +14774,7 @@ export default function Home() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="overflow-y-auto overscroll-contain flex-1 p-3 space-y-2">
+            <div className="min-h-0 overflow-y-auto overscroll-contain flex-1 p-3 space-y-2">
               {dayState.runs.map((run, idx) => {
                 const isCur = idx === dayState.currentIndex;
                 const statusDot = run.endedAt ? "bg-emerald-400" : run.startedAt ? "bg-primary animate-pulse" : "bg-muted-foreground/40";
@@ -15408,14 +15018,14 @@ export default function Home() {
 
         return (
           <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+            className={HOME_DIALOG_OVERLAY_CLASS}
             onClick={() => setShowManageDialog(false)}
           >
             <div
               role="dialog"
               aria-modal="true"
               aria-labelledby="manage-lists-dialog-title"
-              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
+              className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col`}
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
@@ -15458,7 +15068,7 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <div className="space-y-4">
@@ -16412,14 +16022,14 @@ export default function Home() {
       {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
       {showPinDialog && (
           <div
-           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+           className={HOME_DIALOG_OVERLAY_CLASS}
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="supervisor-access-dialog-title"
-            className="bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4 shadow-2xl"
+            className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4 shadow-2xl`}
             onClick={e => e.stopPropagation()}
           >
             <div className="text-center">
@@ -16454,7 +16064,7 @@ export default function Home() {
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto space-y-5">
+      <div className="app-shell space-y-5">
         {/* ─── Compact run strip — shown on every tab except Run (graduated mockup) ─── */}
         {activeTab !== "run" && <CompactRunStrip />}
         {/* Sandbox scope banner — persistent while signed in as the test user */}
@@ -16490,7 +16100,7 @@ export default function Home() {
         )}
 
         {/* Header */}
-        <header className="flex items-center justify-between gap-2 print:mb-4">
+        <header className="responsive-row flex items-center justify-between gap-2 print:mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0 print:hidden">
               <Factory className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -16505,7 +16115,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="print:hidden flex items-center gap-1.5 shrink-0">
+          <div className="responsive-row print:hidden flex items-center gap-1.5 shrink-0">
             <SyncStatusPopover
               status={syncStatus}
               connected={syncConnected}
@@ -16896,7 +16506,7 @@ export default function Home() {
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid h-12 min-h-12 grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+              <TabsList className="station-nav fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden">
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Run</span>
@@ -16973,8 +16583,8 @@ export default function Home() {
 
         {/* ── Re-import case-count offer: per-run Accept / Keep ────────────── */}
         {caseUpdatePrompt && caseUpdatePrompt.length > 0 && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className={HOME_DIALOG_OVERLAY_CLASS}>
+            <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4`}>
               <div className="flex items-center gap-2">
                 <h2 id="case-counts-dialog-title" className="text-base font-bold">Case counts changed</h2>
                 <button type="button" aria-label="Close case counts dialog" onClick={() => setCaseUpdatePrompt(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -18408,8 +18018,13 @@ export default function Home() {
         autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        onAutoTrackProgressChange={(enabled) => {
+          updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
+        }}
         operationalSnapshotReceipt={serverCalcReceipt}
         operationalServerCalc={serverCalc}
+        operationalProjection={serverProjection}
+        serverClockOffsetMs={serverClockOffsetMs}
         operationalOnline={isOnline}
         operationalSyncConnected={syncConnected}
       >
@@ -20466,7 +20081,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
-    lastEndedRun, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
+    lastEndedRun, packagingManager, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
     ve, freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
     confirmRunSurplus, refreshFreezerSurplus,
   } = hx;
@@ -20490,75 +20105,24 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     if (!autoTrackProgress) return;
     const nowMs = nowTime.getTime();
 
-    // Identify the draining prior run — identical filter to the panel above.
-    let drainingRun: (typeof dayState.runs)[number] | undefined;
-    let dv: ReturnType<typeof withTempOverrides> | undefined;
-    for (const r of dayState.runs) {
-      if (!r.endedAt || r.id === currentRunId) continue;
-      const rv = withTempOverrides(loadRunValues(r.id));
-      const rfT = Number(rv.freezerTime) || 0;
-      if (rfT <= 0 || nowMs >= r.endedAt + rfT * 60000) continue;
-      const cps = Number(rv.casesPerSkid) || 0;
-      const cn = Number(rv.casesNeeded) || 0;
-      const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
-      if (cn > 0 && Math.max(0, cn - cDone) <= 0) continue;
-      if (!drainingRun?.endedAt || r.endedAt > drainingRun.endedAt) {
-        drainingRun = r;
-        dv = rv;
-      }
-    }
-
-    if (!drainingRun || !dv) {
+    const draining = packagingManager.selectDrainingRun(dayState.runs, currentRunId, nowMs);
+    if (!draining) {
       priorDrainFreezerRef.current = { id: "", cases: -1 };
       return;
     }
-
-    // Compute cases still in the tunnel for this run.
-    const subTab = drainingRun.subTab ?? "dough";
-    const ppm = computeEffectiveLineSpeed({
-      mode: subTab === "crusts" ? "crusts" : "dough",
-      approxLineSpeed: Number(dv.approxLineSpeed),
-      crustsPerCycle: Number(dv.crustsPerCycle),
-      cycleSpeed: Number(dv.cycleSpeed),
-      speedAdjustment: Number(dv.speedAdjustment),
-    });
-    const curFreezer = Math.max(0, Math.floor(computeCasesInFreezer({
-      startedAt: drainingRun.startedAt ?? undefined,
-      endedAt: drainingRun.endedAt ?? undefined,
-      pausedAt: drainingRun.pausedAt ?? undefined,
-      stoppages: drainingRun.stoppages,
-      now: nowMs,
-      ppm,
-      pizzasPerCase: Number(dv.pizzasPerCase) || 0,
-      freezerTimeMin: Number(dv.freezerTime) || 0,
-    })));
+    const curFreezer = packagingManager.casesInDrainingFreezer(draining, nowMs);
 
     const prev = priorDrainFreezerRef.current;
     // First tick for this run — just baseline, don't back-fill a catch-up jump.
-    if (prev.id !== drainingRun.id) {
-      priorDrainFreezerRef.current = { id: drainingRun.id, cases: curFreezer };
+    if (prev.id !== draining.run.id) {
+      priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
       return;
     }
-    priorDrainFreezerRef.current = { id: drainingRun.id, cases: curFreezer };
+    priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
 
     const exited = Math.max(0, prev.cases - curFreezer);
-    if (exited <= 0) return;
-
-    const cps = Number(dv.casesPerSkid) || 0;
-    if (cps <= 0) return;
-    const casesNeeded = Number(dv.casesNeeded) || 0;
-    const curTotal =
-      (Number(dv.skidsCompleted) || 0) * cps + (Number(dv.casesOnCurrentSkid) || 0);
-    const target = curTotal + exited;
-    const newTotal =
-      casesNeeded > 0 ? Math.min(target, Math.max(curTotal, casesNeeded)) : target;
-    if (newTotal !== curTotal) {
-      updateDrainingRunValues(drainingRun.id, {
-        skidsCompleted: Math.floor(newTotal / cps),
-        casesOnCurrentSkid: Math.round(newTotal % cps),
-      }, "auto");
-    }
-  }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, updateDrainingRunValues]);
+    packagingManager.advanceDrainingRun(draining, exited);
+  }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, packagingManager]);
 
   return (
     <>
@@ -20589,25 +20153,9 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   // newer ended-but-finished run can't hide an older still-draining one.
                   // (The active run shows its own emptying bar elsewhere.)
                   const nowMsT = nowTime.getTime();
-                  let drainingRun: RunMeta | undefined;
-                  let dv: FormValues | undefined;
-                  for (const r of dayState.runs) {
-                    if (!r.endedAt) continue;
-                    if (r.id === currentRunId) continue;
-                    const rv = withTempOverrides(loadRunValues(r.id));
-                    const rfT = Number(rv.freezerTime) || 0;
-                    if (rfT <= 0) continue;
-                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // Freeze tunnel fully empty
-                    const cps = Number(rv.casesPerSkid) || 0;
-                    const cn = Number(rv.casesNeeded) || 0;
-                    const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
-                    if (cn > 0 && Math.max(0, cn - cDone) <= 0) continue; // all packaged
-                    if (!drainingRun?.endedAt || r.endedAt > drainingRun.endedAt) {
-                      drainingRun = r;
-                      dv = rv;
-                    }
-                  }
-                  if (!drainingRun?.endedAt || !dv) return null;
+                  const draining = packagingManager.selectDrainingRun(dayState.runs, currentRunId, nowMsT);
+                  if (!draining?.run.endedAt) return null;
+                  const { run: drainingRun, values: dv } = draining;
                   const fT = Number(dv.freezerTime) || 0;
                   const freezerMs = fT * 60000;
                   const remainMs = Math.max(0, drainingRun.endedAt + freezerMs - nowTime.getTime());
@@ -20665,7 +20213,18 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                             />
                             <button
                               type="button"
-                              onClick={() => { navigator.vibrate?.(15); updateDrainingRunValues(id, { skidsCompleted: skids + 1, casesOnCurrentSkid: 0 }); }}
+                              onClick={() => {
+                                navigator.vibrate?.(15);
+                                // A prior-run drain can already have moved cases
+                                // onto the next skid. Completing the skid adds
+                                // one full skid to the total; it must not erase
+                                // those newly arrived cases by resetting the
+                                // next skid's counter.
+                                updateDrainingRunValues(id, {
+                                  skidsCompleted: skids + 1,
+                                  casesOnCurrentSkid: casesOnSkid,
+                                });
+                              }}
                               className="w-12 h-10 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 rounded-lg flex items-center justify-center active:scale-95 transition-all shrink-0"
                               title="Skid done — log & reset"
                               data-testid="btn-draining-skid-done"
@@ -20879,6 +20438,18 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               manualOverrideUntil,
                             );
                           };
+                          const packagingControls = createPackagingControlAdapter({
+                            skidsCompleted: skids,
+                            casesOnCurrentSkid: casesOnSkid,
+                            casesPerSkid,
+                            applyProgress: (nextSkids, nextCases) => {
+                              onManual(nextSkids, nextCases);
+                              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                            },
+                            reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+                            vibrate: (durationMs) => navigator.vibrate?.(durationMs),
+                          });
                           const skidNearlyFull =
                             casesPerSkid > 0 && casesOnSkid > 0 &&
                             casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
@@ -20920,7 +20491,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={packagingControls.decrementSkids}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -20934,7 +20505,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={() => packagingControls.incrementSkids(maxSkids)}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -20955,7 +20526,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={packagingControls.decrementCases}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -20974,7 +20545,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectPackagingSpeedDrift(nextTotal - currentTotal); }}
+                                    onClick={packagingControls.incrementCases}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -21023,16 +20594,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               {(runStatus === "running" || runStatus === "paused") && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    navigator.vibrate?.(15);
-                                    const ns = skids + 1;
-                                    onManual(ns, 0);
-                                    form.setValue("skidsCompleted", ns, { shouldDirty: true });
-                                    form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
-                                    const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids;
-                                    const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid : ns;
-                                    detectPackagingSpeedDrift(nextTotal - currentTotal);
-                                  }}
+                                  onClick={packagingControls.completeSkid}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"
                                 >
@@ -21622,31 +21184,25 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
         const packOnPace = packGapCases <= 2;
         const packBehindSec = packGapCases * casePeriodSec;
-        const recordQuickCheckCorrection = (nextSkids: number, nextCases: number) => {
-          const currentTotal = hasCps ? packedTotal : packedSkids;
-          const nextTotal = hasCps ? nextSkids * cps + nextCases : nextSkids;
-          detectPackagingSpeedDrift(nextTotal - currentTotal);
-        };
-        const setPackedTotal = (t: number) => {
-          const total = Math.max(0, t);
-          const nextSkids = Math.floor(total / cps);
-          const nextCases = Math.round(total % cps);
-          persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
-          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-          form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-          recordQuickCheckCorrection(nextSkids, nextCases);
-        };
+        const packagingControls = createPackagingControlAdapter({
+          skidsCompleted: packedSkids,
+          casesOnCurrentSkid: packedCasesOnSkid,
+          casesPerSkid: cps,
+          applyProgress: (nextSkids, nextCases) => {
+            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+          },
+          reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+        });
+        const setPackedTotal = (total: number) => packagingControls.setTotal(total);
         const bumpSkids = (d: number) => {
-          const nextSkids = Math.max(0, packedSkids + d);
-          persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
-          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-          recordQuickCheckCorrection(nextSkids, packedCasesOnSkid);
+          if (d < 0) packagingControls.decrementSkids();
+          else if (d > 0) packagingControls.incrementSkids();
         };
         const bumpCases = (d: number) => {
-          const nextCases = Math.max(0, packedCasesOnSkid + d);
-          persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
-          form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-          recordQuickCheckCorrection(packedSkids, nextCases);
+          if (d < 0) packagingControls.decrementCases();
+          else if (d > 0) packagingControls.incrementCases();
         };
         const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
         return (
@@ -22076,16 +21632,16 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           )}
                           <div className="grid grid-cols-3 gap-2">
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
+                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
                               <p className="text-xs font-semibold text-foreground mt-1">Waiting</p>
-                              <p className="text-[9px] text-muted-foreground mt-0.5">spins when mixer frees</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">spins when mixer frees</p>
                             </div>
                             <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
-                              <p className="text-[9px] uppercase tracking-wider text-primary">2 · Spinning</p>
+                              <p className="text-[10px] uppercase tracking-wider text-primary">2 · Spinning</p>
                               <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
                                 {isDoughTimerPaused ? "—:—" : spinLeft !== null ? fmtMS(spinLeft) : "—:—"}
                               </p>
-                              <p className="text-[9px] text-muted-foreground mt-0.5">
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
                                 {isDoughTimerPaused
                                   ? "timers paused"
                                   : spinTotalSec <= 0
@@ -22098,11 +21654,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               </p>
                             </div>
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
-                              <p className="text-[9px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
+                              <p className="text-[10px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
                               <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">
                                 {isDoughTimerPaused ? "—:—" : hopperLeft !== null ? fmtMS(hopperLeft) : "—:—"}
                               </p>
-                              <p className="text-[9px] text-muted-foreground mt-0.5">
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
                                 {isDoughTimerPaused
                                   ? "timers paused"
                                   : safeHopper > 0 ? "until batch is all balls" : "enter hopper time below"}
@@ -22132,10 +21688,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </div>
                       <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 mb-3">
                         <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
                             <Timer className="w-2.5 h-2.5" /> Machine Times
                           </p>
-                          <p className="text-[9px] text-muted-foreground font-mono truncate">
+                          <p className="text-[10px] text-muted-foreground font-mono truncate">
                             {spinTotalSec > 0 || safeHopper > 0
                               ? `spin ${fmtMS(spinTotalSec)} + hopper ${fmtMS(safeHopper)}`
                               : "time your mixer & hopper for live timers"}
@@ -22394,37 +21950,31 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
                           const packOnPace = packGapCases <= 2;
                           const packBehindSec = packGapCases * casePeriodSec;
-                          const recordQuickCheckCorrection = (nextSkids: number, nextCases: number) => {
-                            const currentTotal = hasCps ? packedTotal : packedSkids;
-                            const nextTotal = hasCps ? nextSkids * cps + nextCases : nextSkids;
-                            detectPackagingSpeedDrift(nextTotal - currentTotal);
-                          };
-                          const setPackedTotal = (t: number) => {
-                            // No upper cap: manual counts can exceed the planned
-                            // need (run may over-produce). Auto-track still stops
-                            // at casesNeeded on its own.
-                            const total = Math.max(0, t);
-                            const nextSkids = Math.floor(total / cps);
-                            const nextCases = Math.round(total % cps);
-                            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
-                            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                            recordQuickCheckCorrection(nextSkids, nextCases);
-                          };
+                          const packagingControls = createPackagingControlAdapter({
+                            skidsCompleted: packedSkids,
+                            casesOnCurrentSkid: packedCasesOnSkid,
+                            casesPerSkid: cps,
+                            applyProgress: (nextSkids, nextCases) => {
+                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+                              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                            },
+                            reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+                          });
+                          // No upper cap: manual counts can exceed the planned
+                          // need (run may over-produce). Auto-track still stops
+                          // at casesNeeded on its own.
+                          const setPackedTotal = (total: number) => packagingControls.setTotal(total);
                           // Without a cases-per-skid setting the two counters
                           // can't be combined into one total — bump each field
                           // directly instead (same as the old plain steppers).
                           const bumpSkids = (d: number) => {
-                            const nextSkids = Math.max(0, packedSkids + d);
-                            persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
-                            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                            recordQuickCheckCorrection(nextSkids, packedCasesOnSkid);
+                            if (d < 0) packagingControls.decrementSkids();
+                            else if (d > 0) packagingControls.incrementSkids();
                           };
                           const bumpCases = (d: number) => {
-                            const nextCases = Math.max(0, packedCasesOnSkid + d);
-                            persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
-                            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                            recordQuickCheckCorrection(packedSkids, nextCases);
+                            if (d < 0) packagingControls.decrementCases();
+                            else if (d > 0) packagingControls.incrementCases();
                           };
                           const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
                           return (

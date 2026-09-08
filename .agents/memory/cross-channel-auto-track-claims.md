@@ -39,3 +39,19 @@ run's own anchors.
 **Why:** The form and channel-pending registry are shared across selected runs,
 so guarding only the successful value write does not protect retry and cleanup
 paths from cross-run contamination.
+
+Synchronized browser clients are passive for every automatic channel. Only the
+server tick engine may apply automatic progress; clients display canonical
+sync/SSE values and remain read-only while offline rather than accumulating
+replayable deltas. The Auto/Manual switch is canonical run metadata and the
+locked claim application boundary must reject every claim while Manual is set.
+Automatic next-run staging is not a client exception.
+
+**Why:** Expiring browser ownership leases let multiple awake or reconnecting
+devices race delayed claims. Builder-only Manual checks also allow an older
+client or already-built claim to bypass operator intent at the locked writer.
+
+**How to apply:** Keep browser calculation for countdowns and suggestions only.
+Enforce Manual mode both when building schedules and when applying claims under
+the row lock. Bind server ticks to the row's live/sandbox scope before inventory
+side effects, and broadcast accepted canonical rows only within that scope.

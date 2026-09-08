@@ -15,6 +15,11 @@ const PHONE_VIEWPORTS = [
   { width: 390, height: 844 },
 ] as const;
 
+const TABLET_VIEWPORTS = [
+  { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
+] as const;
+
 // 568x320 is a narrow phone in landscape (and is small enough to expose
 // layouts that accidentally depend on portrait height).
 const LANDSCAPE_VIEWPORT = { width: 568, height: 320 } as const;
@@ -107,8 +112,13 @@ async function assertPhoneLayout(
     const isInsideFixedNavigation = (element: Element) =>
       Boolean(element.closest('[role="tablist"]'));
     const isDevBanner = (element: Element) =>
-      element.tagName === "OL" &&
-      (element.textContent?.includes("Publish your app") ?? false);
+      Boolean(
+        element.id === "replit-dev-banner" ||
+        element.closest("#replit-dev-banner") ||
+        element.querySelector("#replit-dev-banner") ||
+        (element.tagName === "OL" &&
+          (element.textContent?.includes("Publish your app") ?? false)),
+      );
 
     const problems: string[] = [];
     if (document.documentElement.scrollWidth > viewportWidth + 1) {
@@ -198,6 +208,9 @@ async function assertPhoneLayout(
     for (const fixed of fixedElements) {
       if (skipModalOverlayCoverage) continue;
       if (isFixedNavigation(fixed)) continue;
+      // The preview publish banner can wrap the app in a fixed container
+      // without exposing its own id on that outer element.
+      if (fixed.textContent?.includes("Publish your app")) continue;
       const fixedRect = fixed.getBoundingClientRect();
       if (
         fixedRect.width >= viewportWidth - 2 &&
@@ -212,6 +225,12 @@ async function assertPhoneLayout(
       )) {
         if (!visible(control) || fixed.contains(control) || fixed === control)
           continue;
+        if (
+          control.closest("#replit-dev-banner") ||
+          control.textContent?.includes("Publish your app")
+        ) {
+          continue;
+        }
         const controlRect = control.getBoundingClientRect();
         const overlaps =
           fixedRect.left < controlRect.right &&
@@ -523,6 +542,11 @@ async function signInToManagerSandbox(page: Page): Promise<void> {
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  const manager = await page.evaluate(async () => {
+    const response = await fetch("/api/me", { cache: "no-store" });
+    return response.ok ? (await response.json()) as { role?: string } : null;
+  });
+  expect(manager?.role, "browser session role").toBe("manager");
 }
 
 async function promoteToManager(username: string): Promise<void> {
@@ -532,12 +556,12 @@ async function promoteToManager(username: string): Promise<void> {
     const user = await db.query("SELECT id FROM users WHERE username = $1", [username]);
     expect(user.rows).toHaveLength(1);
     await db.query(
-      `INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager')
-       ON CONFLICT (user_id) DO UPDATE SET role = 'manager'`,
+      `INSERT INTO user_roles (user_id, role, updated_at) VALUES ($1, 'manager', NOW())
+       ON CONFLICT (user_id) DO UPDATE SET role = 'manager', updated_at = NOW()`,
       [user.rows[0].id],
     );
     await db.query(
-      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+      "UPDATE roles SET capabilities = $1::jsonb, updated_at = NOW() WHERE name = 'manager'",
       [JSON.stringify([
         "manage-staff",
         "manage-inventory",
@@ -637,6 +661,106 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
   return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
 }
+
+test.describe("phone layout smoke", () => {
+  test.describe.configure({ mode: "serial" });
+
+  for (const viewport of PHONE_VIEWPORTS) {
+    test(`sign-in is usable without overflow at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+      await page
+        .locator("#username")
+        .waitFor({ state: "visible", timeout: 20_000 });
+
+      await assertPhoneLayout(page, "sign-in");
+      await expect(
+        page.getByRole("heading", { name: /sign in to run calculator/i }),
+      ).toBeVisible();
+      await expect(page.locator("#username")).toBeEditable();
+      await expect(page.locator("#password")).toBeEditable();
+      await expect(
+        page.getByRole("button", { name: /^sign in$/i }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: /log in as test user/i }),
+      ).toBeVisible();
+    });
+  }
+
+  for (const viewport of TABLET_VIEWPORTS) {
+    test(`tablet calculator stays readable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToSandbox(page);
+      await assertPhoneLayout(page, "tablet calculator shell");
+
+      for (const tab of PRIMARY_TABS) {
+        const tabLocator = page.locator(`[data-testid="${tab}"]`);
+        await expect(tabLocator, `${viewport.width}x${viewport.height} ${tab}`).toBeVisible();
+        await expect(tabLocator).toBeEnabled();
+      }
+
+      for (const tab of PRIMARY_TABS) {
+        await page.locator(`[data-testid="${tab}"]`).click();
+        await assertPhoneLayout(page, `tablet ${tab}`);
+      }
+
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
+      await expect(page.getByTestId("inventory-page-heading")).toBeVisible();
+      await assertPhoneLayout(page, "tablet inventory");
+    });
+  }
+
+  for (const viewport of TABLET_VIEWPORTS) {
+    test(`tablet manager settings remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToManagerSandbox(page);
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      const manageDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+      await expect(manageDialog).toBeVisible();
+      await assertPhoneLayout(page, "tablet manager settings");
+      await assertOverlayActionHitTargets(
+        manageDialog,
+        `tablet manager settings at ${viewport.width}x${viewport.height}`,
+      );
+
+      const setupProfilesTab = manageDialog.getByRole("button", {
+        name: "Setup Profiles",
+        exact: true,
+      });
+      if (await visible(setupProfilesTab)) {
+        await setupProfilesTab.click();
+        await assertPhoneLayout(page, "tablet setup profiles");
+        await assertKeyboardReachable(page, "tablet setup profiles", 8);
+      }
+
+      await page.keyboard.press("Escape");
+      await expect(manageDialog).toBeHidden();
+    });
+  }
+
+  for (const viewport of PHONE_VIEWPORTS) {
+    test(`authenticated calculator stays usable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToSandbox(page);
+
+      await assertPhoneLayout(page, "main calculator");
+      for (const tab of PRIMARY_TABS) {
         const tabLocator = page.locator(`[data-testid="${tab}"]`);
         await expect(
           tabLocator,
@@ -731,11 +855,13 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
       await assertPhoneLayout(page, "manager import controls");
       await assertKeyboardReachable(page, "manager import controls", 8);
 
-      // Use an invalid in-memory workbook to reach the real review/error dialog.
-      // No schedule, profile, or master-data write can occur on this path.
-      const importInput = page.locator('input[type="file"]').first();
-
-      const baselineDailySyncRows = await dailySyncRowCount();
+      // Close the manager surface, then open the real Guided Tour entry point
+      // so this journey verifies the tour rather than whichever dialog happens
+      // to remain mounted in the management portal.
+      await page.getByRole("button", { name: "Close settings", exact: true }).click();
+      await expect(manageDialog).toBeHidden();
+      await moreButton.click();
+      await page.getByRole("menuitem", { name: "Guided Tour", exact: true }).click();
       const tour = page.locator('[role="dialog"][aria-modal="true"]');
       await expect(tour).toBeVisible();
       await assertOverlayActionHitTargets(
@@ -775,9 +901,9 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
       await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
       const floorSwitch = page.getByTestId("switch-floor-mode");
       await expect(floorSwitch).toBeVisible();
-      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.click();
       await page.keyboard.press("Escape");
-      await page.getByTitle("Floor mode — big numbers, status color").tap();
+      await page.getByTitle("Floor mode — big numbers, status color").click();
 
       const overlay = page.getByTestId("floor-mode-overlay");
       await expect(overlay).toBeVisible();
@@ -829,29 +955,6 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
       }
       await expect(completeDialog).toBeHidden();
 
-      const geometry = await page.evaluate(() => {
-        const panel = document.querySelector("div.absolute.top-9");
-        if (!panel) return null;
-        const rect = panel.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          viewportWidth: window.innerWidth,
-          documentScrollWidth: document.documentElement.scrollWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        };
-      });
-      expect(geometry.width).toBeGreaterThanOrEqual(44);
-      expect(geometry.height).toBeGreaterThanOrEqual(44);
-      expect(geometry.rect.left).toBeGreaterThanOrEqual(geometry.safeArea.left - 1);
-      expect(geometry.rect.right).toBeLessThanOrEqual(
-        geometry.viewport.width - geometry.safeArea.right + 1,
-      );
-      expect(geometry.rect.top).toBeGreaterThanOrEqual(geometry.safeArea.top - 1);
-      expect(geometry.rect.bottom).toBeLessThanOrEqual(
-        geometry.viewport.height - geometry.safeArea.bottom + 1,
-      );
-
       await assertPhoneLayout(page, "Floor Mode overlay", {
         skipModalOverlayCoverage: true,
       });
@@ -890,46 +993,45 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
 
     const syncStatus = page.locator('button[title^="Sync"]');
     await expect(syncStatus).toBeVisible();
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
     await syncStatus.click();
+
     const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
     await expect(popover).toBeVisible();
-
-    await expect.poll(() => failedWrites, { timeout: 20_000 }).toBeGreaterThan(0);
-    await expect(popover.getByText("Sync failed", { exact: true })).toBeVisible({
-      timeout: 20_000,
-    });
-    await expect(
-      popover.getByText(
-        "Your local change is retained on this device. It is not shared until the server acknowledges it.",
-        { exact: true },
-      ),
-    ).toBeVisible();
     await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+    await expect(
+      popover.getByText("Last acknowledgment", { exact: true }),
+    ).toBeVisible();
     const retry = popover.getByRole("button", {
       name: /retry latest retained change/i,
     });
-      if (await retry.count()) await expect(retry).toBeVisible();
+    if (await retry.count()) await expect(retry).toBeVisible();
 
-      const geometry = await page.evaluate(() => {
-        const panel = document.querySelector("div.absolute.top-9");
-        if (!panel) return null;
-        const rect = panel.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          viewportWidth: window.innerWidth,
-          documentScrollWidth: document.documentElement.scrollWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        };
-      });
-      expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
-      expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
-      expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
-      expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
-      expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+    const geometry = await page.evaluate(() => {
+      const panel = document.querySelector("div.absolute.top-9");
+      if (!panel) return null;
+      const rect = panel.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+      };
+    });
+    expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
+    expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
+    expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
 
-      await syncStatus.click();
-    }
+    await syncStatus.click();
+  }
   });
 
   test("failed sync keeps the retained-change retry action visible on phone", async ({
@@ -998,15 +1100,113 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
     await expect(
       page.getByRole("heading", { name: "Manage Lists & Settings" }),
     ).toBeVisible();
+    await assertOverlayActionHitTargets(
+      page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+      "narrow landscape manager settings",
+    );
     await assertPhoneLayout(page, "narrow landscape manager settings", {
-      // The compact manager modal intentionally uses a clipped-height fixed
-      // backdrop while its scroll container owns the controls. Overflow and
-      // focus are still checked below; backdrop hit-testing is covered by the
-      // portrait dialog checks above.
+      // The dedicated dialog hit-test above probes the modal's actual controls.
+      // Exclude the backdrop from the page-wide fixed-layer scan so it is not
+      // mistaken for a separate obstruction over its own dialog contents.
       skipModalOverlayCoverage: true,
     });
     await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
   });
+
+  for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
+    test(`standalone setup editor actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await signInToManagerSandbox(page);
+      await page.addStyleTag({
+        content:
+          "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
+      });
+
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      const manageDialog = page.getByRole("dialog", {
+        name: "Manage Lists & Settings",
+      });
+      await expect(manageDialog).toBeVisible();
+      await manageDialog.getByRole("button", { name: "Tools", exact: true }).click();
+      await page.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+
+      const openEditor = manageDialog.getByRole("button", {
+        name: "Open Setup Profiles Editor",
+        exact: true,
+      });
+      await expect(openEditor).toBeVisible();
+      await openEditor.click();
+      await expect(manageDialog).toBeHidden();
+
+      const setupDialog = page.getByRole("dialog", { name: "Setup Profiles" });
+      await expect(setupDialog).toBeVisible();
+      await assertPhoneLayout(page, "standalone setup profiles editor", {
+        skipModalOverlayCoverage: true,
+      });
+      await assertOverlayActionHitTargets(
+        setupDialog,
+        `standalone setup profiles editor at ${viewport.width}x${viewport.height}`,
+      );
+
+      // Use a browser-only identity so the real save button is enabled, while
+      // intercepting the profile write so this journey cannot change saved
+      // production setup.
+      await page.route("**/api/brand-profiles", async route => {
+        if (route.request().method() === "POST") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ items: [] }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+      const disposableBrand = `Phone Layout ${viewport.width}`;
+      const disposableFlavor = "Disposable";
+      await setupDialog
+        .getByRole("button", { name: /Pick or add a brand/ })
+        .click();
+      const brandSearch = page.getByPlaceholder(/Search or add/);
+      await brandSearch.fill(disposableBrand);
+      await page
+        .getByRole("button", { name: `Add "${disposableBrand}"`, exact: true })
+        .click();
+      await setupDialog
+        .getByRole("button", { name: /Pick or add a flavor/ })
+        .click();
+      const flavorSearch = page.getByPlaceholder(/Search or add/);
+      await flavorSearch.fill(disposableFlavor);
+      await page
+        .getByRole("button", { name: `Add "${disposableFlavor}"`, exact: true })
+        .click();
+
+      const saveSetup = setupDialog.getByRole("button", {
+        name: "Save Setup",
+        exact: true,
+      });
+      await expect(saveSetup).toBeEnabled();
+      await assertReachableDialogAction(
+        saveSetup,
+        `standalone setup Save Setup at ${viewport.width}x${viewport.height}`,
+      );
+      await saveSetup.click();
+
+      const closeSetup = setupDialog.getByRole("button", {
+        name: "Close",
+        exact: true,
+      });
+      await assertReachableDialogAction(
+        closeSetup,
+        `standalone setup Close at ${viewport.width}x${viewport.height}`,
+      );
+      await closeSetup.click();
+      await expect(setupDialog).toBeHidden();
+    });
+  }
 
   for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
     test(`operational dialog actions remain reachable at ${viewport.width}x${viewport.height}`, async ({
@@ -1019,10 +1219,43 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
           "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
       });
 
+      const screensButton = page.getByTitle("Cast to other screens");
+      await expect(screensButton).toBeVisible();
+      await screensButton.click();
+      const screensDialog = page.getByRole("dialog", { name: "Cast to Screens" });
+      await expect(screensDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        screensDialog,
+        `Cast to Screens at ${viewport.width}x${viewport.height}`,
+      );
+      await screensDialog.getByRole("button", { name: "Close cast to screens" }).click();
+      await expect(screensDialog).toBeHidden();
+
+      // Add a second disposable run so the run-list reorder workflow is
+      // exercised from the same compact header action operators use.
+      await page.getByTestId("tab-run").click();
+      const newRun = page.locator("button").filter({ hasText: "New Run" }).first();
+      await expect(newRun).toBeVisible();
+      const reorderButton = page.getByTitle("Reorder runs");
+      for (let attempt = 0; attempt < 3 && !(await reorderButton.count()); attempt += 1) {
+        await newRun.click();
+        await page.waitForTimeout(350);
+      }
+      await expect(reorderButton).toBeVisible();
+      await reorderButton.click();
+      const reorderDialog = page.getByRole("dialog", { name: "Reorder Runs" });
+      await expect(reorderDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        reorderDialog,
+        `Reorder Runs at ${viewport.width}x${viewport.height}`,
+      );
+      await reorderDialog.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(reorderDialog).toBeHidden();
+
       // Start a disposable run through the real Run workflow so Log Line Stop
       // opens from the same action an operator uses on the station screen.
       await page.getByTestId("tab-run").click();
-        const casesNeeded = page.getByTestId("input-casesNeeded");
+      const casesNeeded = page.getByTestId("input-casesNeeded");
       await expect(casesNeeded).toBeVisible();
       await casesNeeded.fill("1");
       await page.getByTestId("button-start-run").click();
@@ -1459,8 +1692,6 @@ function workbookFixture(sheetName: string, rows: unknown[][]): Buffer {
   });
 });
 
-      const productionWrites: string[] = [];
-
 async function prepareGuideReviewForCommit(
   dialog: Locator,
   brandSelectTestId: string,
@@ -1474,8 +1705,6 @@ async function prepareGuideReviewForCommit(
     await acknowledgement.check();
   }
 }
-
-      const shipping = page.getByTestId("dialog-shipping-import");
 
 function crc32(bytes: Buffer): number {
   let crc = 0xffffffff;
@@ -1561,10 +1790,6 @@ function sauceGuideFixture(): Buffer {
   return singleFileZip("word/document.xml", xml);
 }
 
-      const sauce = page.getByTestId("dialog-sauce-guide-import");
-
-      const excel = page.getByRole("dialog", { name: "Import Excel" });
-
 function singleFileZip(fileName: string, contents: string): Buffer {
   // A minimal uncompressed ZIP is enough for the importer's DOCX reader and
   // keeps this disposable fixture independent of another archive package.
@@ -1602,8 +1827,6 @@ function singleFileZip(fileName: string, contents: string): Buffer {
   end.writeUInt32LE(local.length + data.length, 16);
   return Buffer.concat([local, data, central, end]);
 }
-
-      const dough = page.getByTestId("dialog-dough-guide-import");
 
 function scheduleFixture(): Buffer {
   return workbookFixture("Production Runs", [

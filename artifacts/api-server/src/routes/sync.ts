@@ -46,11 +46,11 @@ import {
   completedRunHistoryTable,
 } from "@workspace/db";
 import { and, eq, gt, gte, lte, asc, sql, inArray } from "drizzle-orm";
-import { currentScope, type Scope } from "../lib/requestScope";
+import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
-import { requireCapability } from "../middlewares/requireCapability";
+import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
 import {
@@ -70,18 +70,24 @@ import {
 } from "../lib/syncContract";
 import {
   computeAutoTrackSchedule,
+  buildOperationalProjection,
   computeServerCalc,
   applyTemporaryOverrides,
   type AutoTrackSchedule,
   type AutoTrackScheduleInput,
+  type OperationalProjection,
   type ServerCalcResult,
 } from "@workspace/live-calc";
+import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
+import { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
+import { buildSyncHealthReport } from "../lib/syncHealth";
+export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
 
 const router: IRouter = Router();
 
-type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string };
+type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string; resetEpoch: number };
 const clients = new Set<SseClient>();
 function requestedSnapshot(req: Request): string | undefined {
   const value = req.query.snapshot;
@@ -93,6 +99,8 @@ type ProtectedUpsertResult = {
   wrote: boolean;
   partialFallback: boolean;
   retries: number;
+  canonicalRevision: number;
+  serverTime: number;
   staleEpoch?: number;
 };
 
@@ -123,6 +131,8 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const SERVER_DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"] as const;
+
 function isValidDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
@@ -134,6 +144,43 @@ function isValidDate(s: string): boolean {
 function clientToday(req: Request): string {
   const t = req.query.today;
   return typeof t === "string" && isValidDate(t) ? t : todayStr();
+}
+
+const MAX_COMMAND_ACTION_BYTES = 64 * 1024;
+
+type CommandContext = {
+  actorId: string;
+  deviceId: string;
+  baseRevision: number;
+  actionData: Record<string, unknown>;
+};
+
+function commandContext(
+  req: Request,
+  actionData: Record<string, unknown>,
+  fallbackBaseRevision = 0,
+): CommandContext | null {
+  const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+    ? req.body as Record<string, unknown>
+    : {};
+  const requestedBase = body.baseRevision ?? fallbackBaseRevision;
+  if (!Number.isSafeInteger(requestedBase) || (requestedBase as number) < 0) return null;
+  const rawDevice = body.deviceId ?? body.senderId;
+  const deviceId = typeof rawDevice === "string" ? rawDevice.slice(0, 160) : "unknown";
+  if (rawDevice !== undefined && (typeof rawDevice !== "string" || rawDevice.length > 160)) return null;
+  let bytes: number;
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(actionData));
+  } catch {
+    return null;
+  }
+  if (bytes > MAX_COMMAND_ACTION_BYTES) return null;
+  return {
+    actorId: typeof req.userId === "string" && req.userId ? req.userId : "unknown",
+    deviceId: deviceId || "unknown",
+    baseRevision: requestedBase as number,
+    actionData,
+  };
 }
 
 // Only ever push to clients watching the SAME data scope AND the SAME local date,
@@ -154,7 +201,7 @@ export function buildAutoTrackSchedule(
   nowMs = Date.now(),
 ): AutoTrackSchedule | null {
   const run = payload?.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
-  if (!run || typeof run.id !== "string" || !calcResult) return null;
+  if (!run || typeof run.id !== "string" || run.autoTrackDisabled === true || !calcResult) return null;
   const runId = run.id;
   const rawValues = payload?.runValues?.[runId];
   if (!rawValues || typeof rawValues !== "object") return null;
@@ -177,24 +224,72 @@ export function buildAutoTrackSchedule(
   });
 }
 
-function computeServerLiveState(data: unknown, nowMs = Date.now()): {
+function computeServerLiveState(
+  data: unknown,
+  nowMs = Date.now(),
+  calculationRevision = 0,
+): {
   serverCalc: ServerCalcResult | null;
   autoTrackSchedule: AutoTrackSchedule | null;
+  operationalProjection: OperationalProjection | null;
+  serverTime: number;
+  calculationRevision: number;
+  snapshotId?: string;
 } {
+  const snapshotId = data == null ? undefined : syncSnapshotId(data);
   try {
     const payload = data as BroadcastPayload | null;
     const serverCalc = payload?.dayState
       ? computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs)
       : null;
-    return { serverCalc, autoTrackSchedule: buildAutoTrackSchedule(payload, serverCalc, nowMs) };
+    const autoTrackSchedule = buildAutoTrackSchedule(payload, serverCalc, nowMs);
+    const operationalProjection = payload && serverCalc && autoTrackSchedule
+      ? buildOperationalProjection({
+          payload: payload as Parameters<typeof buildOperationalProjection>[0]["payload"],
+          serverCalc,
+          schedule: autoTrackSchedule,
+          nowMs,
+          calculationRevision,
+        })
+      : null;
+    return {
+      serverCalc,
+      autoTrackSchedule,
+      operationalProjection,
+      serverTime: nowMs,
+      calculationRevision,
+      ...(snapshotId ? { snapshotId } : {}),
+    };
   } catch {
-    return { serverCalc: null, autoTrackSchedule: null };
+    return {
+      serverCalc: null,
+      autoTrackSchedule: null,
+      operationalProjection: null,
+      serverTime: nowMs,
+      calculationRevision,
+      ...(snapshotId ? { snapshotId } : {}),
+    };
   }
 }
 
-function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
-  const liveState = computeServerLiveState(data);
-  const msg = `data: ${JSON.stringify({ data, senderId, ...liveState })}\n\n`;
+function broadcast(
+  data: unknown,
+  senderId: string,
+  scope: Scope,
+  date: string,
+  meta: { canonicalRevision?: number; serverTime?: number } = {},
+): void {
+  const liveState = computeServerLiveState(
+    data,
+    meta.serverTime ?? Date.now(),
+    meta.canonicalRevision ?? 0,
+  );
+  const msg = `data: ${JSON.stringify({
+    data,
+    senderId,
+    canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+    ...liveState,
+  })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
       try { client.res.write(msg); } catch {}
@@ -206,14 +301,63 @@ function broadcast(data: unknown, senderId: string, scope: Scope, date: string):
 // sync stream, but send a bounded nudge instead of the recipe payload. The
 // sender is excluded so its optimistic mutation result is not immediately
 // invalidated by its own echo.
-export function broadcastMasterDataChanged(senderId: string, scope: Scope = currentScope()): void {
-  const msg = `data: ${JSON.stringify({
-    type: "master-data",
+/**
+ * The only configuration invalidation families sent over the sync stream.
+ * Keep this enum deliberately small: this is a reload nudge, never a transport
+ * for the changed row, request body, or a secret such as the supervisor PIN.
+ */
+export const CONFIGURATION_INVALIDATION_FAMILIES = [
+  "master-data",
+  "profiles",
+  "factory-data",
+  "die-types",
+  "supervisor-pin",
+  "name-links",
+  "merged-away",
+] as const;
+export type ConfigurationInvalidationFamily =
+  (typeof CONFIGURATION_INVALIDATION_FAMILIES)[number];
+
+export function configurationInvalidationPayload(
+  senderId: string,
+  family: ConfigurationInvalidationFamily | string = "master-data",
+) {
+  // This is a runtime guard as route input is not constrained by TypeScript.
+  // Unknown families degrade to the broad compatibility nudge rather than
+  // creating an unbounded event vocabulary.
+  const safeFamily = CONFIGURATION_INVALIDATION_FAMILIES.includes(
+    family as ConfigurationInvalidationFamily,
+  )
+    ? family
+    : "master-data";
+  return {
+    // `type` and `masterDataChanged` are retained for deployed clients.
+    type: "master-data" as const,
     masterDataChanged: true,
+    configurationInvalidated: true,
+    family: safeFamily,
     senderId,
-  })}\n\n`;
+  };
+}
+
+/** Configuration is facility-wide, so unlike day-sync broadcasts watchDate is
+ * intentionally not part of this predicate. */
+export function shouldReceiveConfigurationInvalidation(
+  client: Pick<SseClient, "clientId" | "scope" | "watchDate">,
+  senderId: string,
+  scope: Scope,
+): boolean {
+  return client.scope === scope && client.clientId !== senderId;
+}
+
+export function broadcastMasterDataChanged(
+  senderId: string,
+  scope: Scope = currentScope(),
+  family: ConfigurationInvalidationFamily = "master-data",
+): void {
+  const msg = `data: ${JSON.stringify(configurationInvalidationPayload(senderId, family))}\n\n`;
   for (const client of clients) {
-    if (client.scope === scope && client.clientId !== senderId) {
+    if (shouldReceiveConfigurationInvalidation(client, senderId, scope)) {
       try { client.res.write(msg); } catch {}
     }
   }
@@ -232,6 +376,211 @@ function broadcastReset(scope: Scope, resetEpoch: number): void {
   }
 }
 
+function broadcastRollover(scope: Scope, resetEpoch: number): void {
+  for (const client of clients) {
+    if (client.scope !== scope) continue;
+    try {
+      client.res.write(`data: ${JSON.stringify({ rollover: true, resetEpoch })}\n\n`);
+      client.resetEpoch = resetEpoch;
+    } catch {
+      clients.delete(client);
+    }
+  }
+}
+
+function canonicalSnapshot(value: unknown): Record<string, unknown> {
+  const stable = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(stable);
+    if (input && typeof input === "object") {
+      return Object.fromEntries(Object.entries(input as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, child]) => [key, stable(child)]));
+    }
+    return input;
+  };
+  return stable(JSON.parse(JSON.stringify(value))) as Record<string, unknown>;
+}
+
+export type DailyRolloverResult = {
+  scope: Scope;
+  fromDate: string | null;
+  toDate: string;
+  epoch: number;
+  finalizedRuns: number;
+  rolled: boolean;
+};
+
+/**
+ * Advances one scope to its facility-local production day. The reset row is
+ * locked before any daily document, matching every sync writer and making this
+ * operation exactly-once across concurrent processes and startup catch-up.
+ */
+export async function runDailyRollover(
+  scope: Scope,
+  opts: { nowMs?: number; timeZone?: string } = {},
+): Promise<DailyRolloverResult> {
+  // Background jobs have no request AsyncLocalStorage by default. Bind the
+  // requested scope here as a final safety net so inventory helpers cannot
+  // silently fall back to live while rolling the sandbox.
+  if (currentScope() !== scope) {
+    return runWithScope(scope, () => runDailyRollover(scope, opts));
+  }
+  const nowMs = opts.nowMs ?? Date.now();
+  const timeZone = opts.timeZone ?? facilityTimeZone();
+  const toDate = dateInTimeZone(nowMs, timeZone);
+  const result = await db.transaction(async (tx) => {
+    const insertedReset = await tx.insert(dataResetTable).values({
+      scope,
+      epoch: 0,
+      resetAt: new Date(0),
+    }).onConflictDoNothing().returning({ scope: dataResetTable.scope });
+    const [reset] = await tx.select().from(dataResetTable)
+      .where(eq(dataResetTable.scope, scope)).for("update");
+    const lastBoundaryDate = dateInTimeZone(reset?.resetAt.getTime() ?? 0, timeZone);
+
+    const priorRows = await tx.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), sql`${dailySyncTable.date} < ${toDate}`))
+      .orderBy(sql`${dailySyncTable.date} asc`)
+      .for("update");
+    const prior = priorRows.at(-1);
+    const [scheduled] = await tx.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, toDate)))
+      .for("update");
+    if (lastBoundaryDate >= toDate) {
+      return {
+        scope,
+        fromDate: prior?.date ?? null,
+        toDate,
+        epoch: reset?.epoch ?? 0,
+        finalizedRuns: 0,
+        rolled: false,
+      };
+    }
+    // A brand-new, empty scope has no production day to close. Anchor its
+    // boundary without manufacturing a reset event. Existing scopes still
+    // advance after a quiet day, and a pre-scheduled current row is activated.
+    if (insertedReset.length > 0 && !prior && !scheduled) {
+      await tx.update(dataResetTable).set({ resetAt: new Date(nowMs) })
+        .where(eq(dataResetTable.scope, scope));
+      return {
+        scope,
+        fromDate: null,
+        toDate,
+        epoch: 0,
+        finalizedRuns: 0,
+        rolled: false,
+      };
+    }
+
+    let finalizedRuns = 0;
+    // Startup catch-up must close runs in every missed production day. Looking
+    // only at the latest row is unsafe because that row can be a quiet scheduled
+    // day while an older production row still contains an active run.
+    for (const priorRow of priorRows) {
+      const priorData = (priorRow.data ?? emptySyncData(priorRow.date)) as Record<string, any>;
+      const runs = Array.isArray(priorData.dayState?.runs) ? priorData.dayState.runs : [];
+      const activeRunIds = new Set<string>(
+        runs.filter((run: any) => run?.id && run.startedAt && !run.endedAt)
+          .map((run: any) => String(run.id)),
+      );
+      if (activeRunIds.size === 0) continue;
+      const finalizedData = {
+        ...priorData,
+        dayState: {
+          ...priorData.dayState,
+          runs: runs.map((run: any) => activeRunIds.has(String(run.id))
+            ? { ...run, endedAt: nowMs, pausedAt: undefined, metaUpdatedAt: nowMs }
+            : run),
+        },
+      };
+      for (const runId of activeRunIds) {
+        const snapshot = canonicalSnapshot(finalizedData);
+        const snapshotHash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+        await tx.insert(completedRunHistoryTable).values({
+          id: randomUUID(),
+          scope,
+          operationId: `rollover:${priorRow.date}:${runId}`,
+          runId,
+          date: priorRow.date,
+          completedAt: new Date(nowMs),
+          snapshot,
+          snapshotHash,
+          actorId: "server:daily-rollover",
+        }).onConflictDoNothing();
+        const values = priorData.runValues?.[runId];
+        const substitutions = Array.isArray(priorData.dayState?.substitutions)
+          ? priorData.dayState.substitutions
+          : [];
+        const effectiveValues = values && typeof values === "object"
+          ? applySubstitutions(values, substitutions)
+          : values;
+        const pepTypes = Array.isArray(priorData.pepTypes)
+          ? priorData.pepTypes.filter((value: unknown): value is string => typeof value === "string")
+          : SERVER_DEFAULT_PEP_TYPES;
+        await consumeRunInTransaction(
+          tx,
+          runId,
+          effectiveValues && typeof effectiveValues === "object" && Object.keys(effectiveValues).length > 0
+            ? computeRunConsumptionLines(effectiveValues as any, pepTypes)
+            : [],
+        );
+      }
+      finalizedRuns += activeRunIds.size;
+      await tx.update(dailySyncTable).set({ data: finalizedData as any, updatedAt: new Date(nowMs) })
+        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, priorRow.date)));
+    }
+
+    const nextEpoch = (reset?.epoch ?? 0) + 1;
+    const todayData = (scheduled?.data ?? emptySyncData(toDate)) as Record<string, any>;
+    const activated = {
+      ...todayData,
+      dayState: {
+        ...(todayData.dayState ?? {}),
+        date: toDate,
+        resetAt: nowMs,
+        resetBoundaryAt: nowMs,
+        rolloverEpoch: nextEpoch,
+      },
+    };
+    if (scheduled) {
+      await tx.update(dailySyncTable).set({ data: activated as any, updatedAt: new Date(nowMs) })
+        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, toDate)));
+    } else {
+      await tx.insert(dailySyncTable).values({
+        scope,
+        date: toDate,
+        data: activated as any,
+        updatedAt: new Date(nowMs),
+      });
+    }
+    const [nextReset] = await tx.update(dataResetTable)
+      .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date(nowMs) })
+      .where(eq(dataResetTable.scope, scope))
+      .returning();
+    return {
+      scope,
+      fromDate: prior?.date ?? null,
+      toDate,
+      epoch: nextReset?.epoch ?? 0,
+      finalizedRuns,
+      rolled: true,
+    };
+  });
+  if (result.rolled) {
+    broadcastRollover(scope, result.epoch);
+    logger.info({
+      event: "daily_rollover",
+      scope,
+      outcome: "success",
+      safeCounts: { finalizedRuns: result.finalizedRuns },
+      fromDate: result.fromDate,
+      toDate: result.toDate,
+      epoch: result.epoch,
+    }, "Facility-local daily rollover completed");
+  }
+  return result;
+}
+
 // Current reset generation for a scope (0 when never reset). Clients compare this
 // against the epoch they last honored to decide whether to perform a local wipe.
 async function getResetEpoch(scope: Scope): Promise<number> {
@@ -240,6 +589,28 @@ async function getResetEpoch(scope: Scope): Promise<number> {
     .from(dataResetTable)
     .where(eq(dataResetTable.scope, scope));
   return row?.epoch ?? 0;
+}
+
+async function getResetState(scope: Scope): Promise<{ epoch: number; rollover: boolean }> {
+  const [reset] = await db.select().from(dataResetTable).where(eq(dataResetTable.scope, scope));
+  const epoch = reset?.epoch ?? 0;
+  if (!reset || epoch === 0) return { epoch, rollover: false };
+  const boundaryDate = dateInTimeZone(reset.resetAt.getTime(), facilityTimeZone());
+  const [day] = await db.select().from(dailySyncTable)
+    .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, boundaryDate)));
+  const data = day?.data as { dayState?: { rolloverEpoch?: unknown } } | null | undefined;
+  return { epoch, rollover: epoch > 0 && data?.dayState?.rolloverEpoch === epoch };
+}
+
+async function staleEpochResponse(scope: Scope, epoch: number) {
+  const state = await getResetState(scope);
+  return {
+    ok: true,
+    stale: true,
+    epoch,
+    rollover: state.epoch === epoch && state.rollover,
+    serverTime: Date.now(),
+  };
 }
 
 // Postgres unique-violation is SQLSTATE 23505. Drizzle wraps driver errors, so
@@ -319,6 +690,17 @@ function applyResetBoundary(
       ?.dayState?.resetBoundaryAt;
     if (typeof prev === "number" && prev > 0) day.resetBoundaryAt = prev;
     else delete day.resetBoundaryAt;
+  }
+  // The rollover discriminator is server-owned and must survive normal same-day
+  // sync writes. If a client could erase or forge it, a later reconnect could
+  // mistake a daily rollover for an administrative purge (or vice versa).
+  const previousRolloverEpoch = (
+    existingData as { dayState?: { rolloverEpoch?: unknown } } | null | undefined
+  )?.dayState?.rolloverEpoch;
+  if (typeof previousRolloverEpoch === "number" && previousRolloverEpoch > 0) {
+    day.rolloverEpoch = previousRolloverEpoch;
+  } else {
+    delete day.rolloverEpoch;
   }
 }
 
@@ -485,6 +867,7 @@ async function upsertProtected(
     try {
       let existingData: unknown = undefined;
       const merged = await db.transaction(async (tx) => {
+        const serverTime = Date.now();
         // Scope reset fence is always acquired before the daily document,
         // matching /sync/reset and operational intents.
         await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
@@ -492,7 +875,15 @@ async function upsertProtected(
         const [reset] = await tx.select().from(dataResetTable)
           .where(eq(dataResetTable.scope, scope)).for("update");
         if ((reset?.epoch ?? 0) !== expectedEpoch) {
-          return { data: null, wrote: false, partialFallback: false, retries: attempt, staleEpoch: reset?.epoch ?? 0 };
+          return {
+            data: null,
+            wrote: false,
+            partialFallback: false,
+            retries: attempt,
+            canonicalRevision: 0,
+            serverTime,
+            staleEpoch: reset?.epoch ?? 0,
+          };
         }
         const [existing] = await tx
           .select()
@@ -525,6 +916,8 @@ async function upsertProtected(
               wrote: false,
               partialFallback: true,
               retries: attempt,
+              canonicalRevision: existing?.canonicalRevision ?? 0,
+              serverTime,
             };
           }
         }
@@ -547,7 +940,14 @@ async function upsertProtected(
             .insert(dailySyncTable)
             .values({ date, scope, data: m as any, updatedAt: new Date() });
         }
-        return { data: m, wrote: true, partialFallback: false, retries: attempt };
+        return {
+          data: m,
+          wrote: true,
+          partialFallback: false,
+          retries: attempt,
+          canonicalRevision: existing?.canonicalRevision ?? 0,
+          serverTime,
+        };
       });
       if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
@@ -578,9 +978,25 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // same shape as a populated row keeps reset/wake recovery within the client
   // sync contract and gives it a stable snapshot identity.
   const data = row?.data ?? emptySyncData(clientToday(req));
+  const canonicalRevision = row?.canonicalRevision ?? 0;
+  const serverTime = Date.now();
+  res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
+  res.setHeader("X-Sync-Server-Time", String(serverTime));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
-  res.json(data);
+  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
+  if (!liveState.operationalProjection) {
+    // Preserve the empty-baseline response shape for clients that have no
+    // selected run yet. The server-time headers still provide the anchor.
+    res.json(data);
+    return;
+  }
+  res.json({
+    ...(data as Record<string, unknown>),
+    operationalProjection: liveState.operationalProjection,
+    serverTime,
+    canonicalRevision,
+  });
 });
 
 // A client pushes the reset epoch it last honored as `?epoch=`. If a data reset
@@ -607,7 +1023,7 @@ async function isStaleResetPush(req: Request, scope: Scope): Promise<number | nu
 }
 
 router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<void> => {
-  res.json({ epoch: await getResetEpoch(currentScope()) });
+  res.json(await getResetState(currentScope()));
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
@@ -626,18 +1042,18 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
   const result = await upsertProtected(today, scope, sanitized, today, expectedEpoch, req.ip);
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
-    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    res.json(await staleEpochResponse(scope, result.staleEpoch));
     return;
   }
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
-  if (result.wrote) broadcast(merged, senderId, scope, today);
+  if (result.wrote) broadcast(merged, senderId, scope, today, result);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? "unchanged"
@@ -648,9 +1064,19 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    canonicalRevision: result.canonicalRevision,
+    serverTime: result.serverTime,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
-  res.json(responseBody);
+  const liveState = merged
+    ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
+    : null;
+  res.json({
+    ...responseBody,
+    operationalProjection: liveState?.operationalProjection ?? null,
+    serverTime: result.serverTime,
+    canonicalRevision: result.canonicalRevision,
+  });
 });
 
 // Offline operational commands are not snapshots. Their stable ID is retained
@@ -662,12 +1088,34 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
   if (!intent || intent.date !== clientToday(req)) {
     res.status(400).json({ error: "Invalid operational intent or production date" }); return;
   }
+  const command = commandContext(req, {
+    version: intent.version,
+    id: intent.id,
+    date: intent.date,
+    runId: intent.runId,
+    action: intent.action,
+    lifecycle: intent.lifecycle,
+    effectiveAt: intent.effectiveAt,
+    observedGeneration: intent.observedGeneration,
+    resetEpoch: intent.resetEpoch,
+    values: intent.values,
+    inventoryLines: intent.inventoryLines,
+  }, intent.baseRevision ?? 0);
+  if (!command) {
+    res.status(400).json({ error: "Invalid or oversized operational command" });
+    return;
+  }
   const scope = currentScope();
   try {
-    let result: (ReturnType<typeof applyOperationalIntent> & { cursor?: number }) | undefined;
+    let result: (ReturnType<typeof applyOperationalIntent> & {
+      cursor?: number;
+      canonicalRevision: number;
+      serverTime: number;
+    }) | undefined;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         result = await db.transaction(async (tx) => {
+          const serverTime = Date.now();
           // Fence reset and intent under one transaction. A reset that wins
           // this lock makes the command review-required; it cannot resurrect
           // state between a preflight epoch read and the document write.
@@ -689,17 +1137,43 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
             outcome: seen.outcome as any,
             duplicate: true,
             cursor: seen.sequence,
+            canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
+            serverTime: seen.serverReceivedAt?.getTime() ?? serverTime,
           };
           if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
+            const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
+            const snapshot = existing?.data ?? emptySyncData(intent.date);
+            if (existing) {
+              await tx.update(dailySyncTable)
+                .set({ canonicalRevision, updatedAt: new Date(serverTime) })
+                .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
+            } else {
+              await tx.insert(dailySyncTable).values({
+                scope,
+                date: intent.date,
+                data: snapshot as any,
+                canonicalRevision,
+                updatedAt: new Date(serverTime),
+              });
+            }
             const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
               scope, date: intent.date, intentId: intent.id, outcome: "review-required",
-              snapshot: (existing?.data ?? emptySyncData(intent.date)) as any,
+              snapshot: snapshot as any,
+              commandType: "operational-intent",
+              actorId: command.actorId,
+              deviceId: command.deviceId,
+              baseRevision: command.baseRevision,
+              canonicalRevision,
+              actionData: command.actionData,
+              serverReceivedAt: new Date(serverTime),
             }).returning({ sequence: operationalIntentLedgerTable.sequence });
             return {
-              data: existing?.data ?? emptySyncData(intent.date),
+              data: snapshot,
               outcome: "review-required" as const,
               duplicate: false,
               cursor: receipt!.sequence,
+              canonicalRevision,
+              serverTime,
             };
           }
           const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
@@ -782,14 +1256,33 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
               await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
             }
           }
+          const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
           if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
-          else await tx.insert(dailySyncTable).values({ date: intent.date, scope, data: applied.data as any, updatedAt: new Date() });
+          else await tx.insert(dailySyncTable).values({
+            date: intent.date,
+            scope,
+            data: applied.data as any,
+            canonicalRevision,
+            updatedAt: new Date(),
+          });
+          if (existing) {
+            await tx.update(dailySyncTable)
+              .set({ canonicalRevision, updatedAt: new Date() })
+              .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
+          }
           const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
             scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
             snapshot: applied.data as any,
+            commandType: "operational-intent",
+            actorId: command.actorId,
+            deviceId: command.deviceId,
+            baseRevision: command.baseRevision,
+            canonicalRevision,
+            actionData: command.actionData,
+            serverReceivedAt: new Date(serverTime),
           }).returning({ sequence: operationalIntentLedgerTable.sequence });
-          return { ...applied, cursor: receipt!.sequence };
+          return { ...applied, cursor: receipt!.sequence, canonicalRevision, serverTime };
         });
         break;
       } catch (error) {
@@ -798,8 +1291,25 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
       }
     }
     if (!result) throw new Error("Operational intent did not complete");
-    if (!result.duplicate) broadcast(result.data, typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "", scope, intent.date);
-    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, cursor: result.cursor, data: result.data, snapshotId: syncSnapshotId(result.data) });
+    if (!result.duplicate) {
+      broadcast(
+        result.data,
+        command.deviceId,
+        scope,
+        intent.date,
+        { canonicalRevision: result.canonicalRevision, serverTime: result.serverTime },
+      );
+    }
+    res.json({
+      ok: true,
+      outcome: result.outcome,
+      duplicate: result.duplicate,
+      cursor: result.cursor,
+      canonicalRevision: result.canonicalRevision,
+      serverTime: result.serverTime,
+      data: result.data,
+      snapshotId: syncSnapshotId(result.data),
+    });
   } catch (error) {
     req.log.error({ err: error, event: "operational_intent" }, "Operational intent reconciliation failed");
     res.status(500).json({ error: "Operational intent could not sync. Please retry." });
@@ -824,6 +1334,12 @@ router.get("/sync/operational-intents/cursor", async (req: Request, res: Respons
       date: operationalIntentLedgerTable.date,
       outcome: operationalIntentLedgerTable.outcome,
       snapshot: operationalIntentLedgerTable.snapshot,
+      commandType: operationalIntentLedgerTable.commandType,
+      actorId: operationalIntentLedgerTable.actorId,
+      deviceId: operationalIntentLedgerTable.deviceId,
+      baseRevision: operationalIntentLedgerTable.baseRevision,
+      canonicalRevision: operationalIntentLedgerTable.canonicalRevision,
+      serverReceivedAt: operationalIntentLedgerTable.serverReceivedAt,
       createdAt: operationalIntentLedgerTable.createdAt,
     }).from(operationalIntentLedgerTable)
       .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
@@ -867,25 +1383,122 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
   }
   const date = clientToday(req);
   const scope = currentScope();
-  const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) {
-    res.setHeader("X-Sync-Response", "stale");
-    res.json({ ok: true, stale: true, epoch: staleEpoch });
+  const command = commandContext(req, {
+    version: claim.version,
+    runId: claim.runId,
+    channel: claim.channel,
+    generation: claim.generation,
+    sequence: claim.sequence,
+    eventId: claim.eventId,
+    dueAt: claim.dueAt,
+    nextDueAt: claim.nextDueAt,
+    baseUpdatedAt: claim.baseUpdatedAt,
+    correctionGeneration: claim.correctionGeneration,
+    mutations: claim.mutations,
+  });
+  if (!command) {
+    res.status(400).json({ error: "Invalid or oversized automatic command" });
     return;
   }
-
   try {
     let result:
-      | ReturnType<typeof applyAutoTrackClaim>
+      | (ReturnType<typeof applyAutoTrackClaim> & {
+        canonicalRevision: number;
+        serverTime: number;
+        duplicate: boolean;
+        resetStale?: number;
+      })
       | undefined;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         result = await db.transaction(async (tx) => {
+          const serverTime = Date.now();
+          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(serverTime) })
+            .onConflictDoNothing();
+          const [reset] = await tx.select().from(dataResetTable)
+            .where(eq(dataResetTable.scope, scope)).for("update");
           const [existing] = await tx
             .select()
             .from(dailySyncTable)
             .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
             .for("update");
+          const commandId = `auto-track:${claim.eventId}`;
+          const [seen] = await tx.select().from(operationalIntentLedgerTable)
+            .where(and(
+              eq(operationalIntentLedgerTable.scope, scope),
+              eq(operationalIntentLedgerTable.date, date),
+              eq(operationalIntentLedgerTable.intentId, commandId),
+            ))
+            .for("update");
+          if (seen) {
+            const snapshot = (seen.snapshot ?? existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
+            const state = ((snapshot as any).autoTrackCoordination?.runs?.[claim.runId]?.[claim.channel] ?? {
+              generation: claim.generation,
+              sequence: claim.sequence,
+              nextDueAt: claim.nextDueAt,
+              updatedAt: seen.serverReceivedAt.getTime(),
+            }) as ReturnType<typeof applyAutoTrackClaim>["channelState"];
+            const values = ((snapshot as any).runValues?.[claim.runId] ?? {}) as Record<string, unknown>;
+            return {
+              data: snapshot,
+              outcome: (seen.outcome === "accepted" ? "duplicate" : seen.outcome) as ReturnType<typeof applyAutoTrackClaim>["outcome"],
+              channelState: state,
+              values,
+              canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
+              serverTime: seen.serverReceivedAt.getTime(),
+              duplicate: true,
+              ...(seen.outcome === "stale" ? { resetStale: reset?.epoch ?? 0 } : {}),
+            };
+          }
+          const rawEpoch = req.query.epoch;
+          const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
+          if (!Number.isSafeInteger(suppliedEpoch) || suppliedEpoch < 0
+            || (reset?.epoch ?? 0) !== suppliedEpoch) {
+            const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
+            const snapshot = (existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
+            if (existing) {
+              await tx.update(dailySyncTable)
+                .set({ canonicalRevision, updatedAt: new Date(serverTime) })
+                .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+            } else {
+              await tx.insert(dailySyncTable).values({
+                scope,
+                date,
+                data: snapshot as any,
+                canonicalRevision,
+                updatedAt: new Date(serverTime),
+              });
+            }
+            await tx.insert(operationalIntentLedgerTable).values({
+              scope,
+              date,
+              intentId: commandId,
+              outcome: "stale",
+              snapshot: snapshot as any,
+              commandType: "auto-track",
+              actorId: command.actorId,
+              deviceId: command.deviceId,
+              baseRevision: command.baseRevision,
+              canonicalRevision,
+              actionData: command.actionData,
+              serverReceivedAt: new Date(serverTime),
+            });
+            return {
+              data: snapshot,
+              outcome: "stale" as const,
+              channelState: {
+                generation: claim.generation,
+                sequence: 0,
+                nextDueAt: claim.nextDueAt,
+                updatedAt: serverTime,
+              },
+              values: {},
+              canonicalRevision,
+              serverTime,
+              duplicate: false,
+              resetStale: reset?.epoch ?? 0,
+            };
+          }
           const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
           if (applied.outcome === "accepted") {
              if (applied.inventoryConsumption?.kind === "sauce-barrel") {
@@ -900,16 +1513,31 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
                  consumption.eventId,
                );
              }
-            if (existing) {
-              await tx.update(dailySyncTable)
-                .set({ data: applied.data as any, updatedAt: new Date() })
-                .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-            } else {
-              await tx.insert(dailySyncTable)
-                .values({ date, scope, data: applied.data as any, updatedAt: new Date() });
-            }
           }
-          return applied;
+          const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
+          if (existing) {
+            await tx.update(dailySyncTable)
+              .set({ data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) })
+              .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+          } else {
+            await tx.insert(dailySyncTable)
+              .values({ date, scope, data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) });
+          }
+          await tx.insert(operationalIntentLedgerTable).values({
+            scope,
+            date,
+            intentId: commandId,
+            outcome: applied.outcome,
+            snapshot: applied.data as any,
+            commandType: "auto-track",
+            actorId: command.actorId,
+            deviceId: command.deviceId,
+            baseRevision: command.baseRevision,
+            canonicalRevision,
+            actionData: command.actionData,
+            serverReceivedAt: new Date(serverTime),
+          });
+          return { ...applied, canonicalRevision, serverTime, duplicate: false };
         });
         break;
       } catch (error) {
@@ -918,9 +1546,20 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       }
     }
     if (!result) throw new Error("Auto-track claim did not complete");
+    if (result.resetStale !== undefined) {
+      res.setHeader("X-Sync-Response", "stale");
+      res.json(await staleEpochResponse(scope, result.resetStale));
+      return;
+    }
     const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
-    if (result.outcome === "accepted") broadcast(result.data, senderId, scope, date);
-    const liveState = computeServerLiveState(result.data);
+    if (result.outcome === "accepted") {
+      broadcast(result.data, senderId, scope, date, result);
+    }
+    const liveState = computeServerLiveState(
+      result.data,
+      result.serverTime,
+      result.canonicalRevision,
+    );
     req.log.info({
       event: "auto_track_claim",
       outcome: result.outcome,
@@ -933,9 +1572,11 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
     res.json({
       ok: true,
       outcome: result.outcome,
+      duplicate: result.duplicate,
       state: result.channelState,
       values: result.values,
       data: result.data,
+      canonicalRevision: result.canonicalRevision,
       ...liveState,
       snapshotId: syncSnapshotId(result.data),
     });
@@ -972,10 +1613,11 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
-  const [row] = await db
-    .select()
-    .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
+  const [[row], initialResetState] = await Promise.all([
+    db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope))),
+    getResetState(scope),
+  ]);
   if (closed) return;
   // Always send a first frame, including when no row exists. The web client uses
   // this acknowledgement as its sync baseline and must not upload local state
@@ -983,22 +1625,32 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const data = row?.data ?? null;
   const snapshotId = data ? syncSnapshotId(data) : undefined;
   const requested = requestedSnapshot(req);
-  const liveState = data ? computeServerLiveState(data) : {
-    serverCalc: null,
-    autoTrackSchedule: null,
-  };
+  const initialServerTime = Date.now();
+  const liveState = data
+    ? computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0)
+    : {
+        serverCalc: null,
+        autoTrackSchedule: null,
+        operationalProjection: null,
+        serverTime: initialServerTime,
+        calculationRevision: row?.canonicalRevision ?? 0,
+      };
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
     senderId: null,
     initial: true,
+    canonicalRevision: row?.canonicalRevision ?? 0,
+    ...(initialResetState.epoch > 0
+      ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }
+      : {}),
     ...liveState,
   })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  client = { res, clientId, scope, watchDate };
+  client = { res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch };
   clients.add(client);
 
   // Refresh schedule leases on the established heartbeat. A schedule never
@@ -1007,11 +1659,29 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   heartbeat = setInterval(() => {
     void (async () => {
       try {
-        const [fresh] = await db.select().from(dailySyncTable)
-          .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
-        const live = fresh?.data ? computeServerLiveState(fresh.data) : null;
-        if (live?.autoTrackSchedule) {
-          res.write(`data: ${JSON.stringify({ autoTrackSchedule: live.autoTrackSchedule, heartbeat: true })}\n\n`);
+        const [[fresh], resetState] = await Promise.all([
+          db.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope))),
+          getResetState(scope),
+        ]);
+        if (client && resetState.epoch > client.resetEpoch) {
+          client.resetEpoch = resetState.epoch;
+          res.write(`data: ${JSON.stringify({
+            [resetState.rollover ? "rollover" : "reset"]: true,
+            resetEpoch: resetState.epoch,
+          })}\n\n`);
+          return;
+        }
+        const heartbeatServerTime = Date.now();
+        const live = fresh?.data
+          ? computeServerLiveState(fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0)
+          : null;
+        if (live) {
+          res.write(`data: ${JSON.stringify({
+            ...live,
+            canonicalRevision: fresh?.canonicalRevision ?? 0,
+            heartbeat: true,
+          })}\n\n`);
         } else {
           res.write(": heartbeat\n\n");
         }
@@ -1061,6 +1731,55 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
   );
 });
 
+router.get(
+  "/sync/health",
+  requireLiveScope,
+  requireCapability("manage-staff"),
+  async (req: Request, res: Response): Promise<void> => {
+    const date = typeof req.query.date === "string"
+      ? req.query.date
+      : clientToday(req);
+    if (!isValidDate(date)) {
+      res.status(400).json({ error: "Invalid date format" });
+      return;
+    }
+    const startedAt = Date.now();
+    const correlationId = String(
+      (req as Request & { correlationId?: string }).correlationId ?? req.id ?? "sync-health",
+    );
+    try {
+      const report = await buildSyncHealthReport(db, currentScope(), date);
+      logger.info({
+        event: "sync_health_check",
+        correlationId,
+        scope: currentScope(),
+        date,
+        outcome: report.status,
+        checkStatuses: Object.fromEntries(report.checks.map((check) => [check.name, check.status])),
+        durationMs: Date.now() - startedAt,
+      }, "sync health check completed");
+      res.setHeader("X-Correlation-ID", correlationId);
+      res.json({ ...report, correlationId });
+    } catch (error) {
+      logger.warn({
+        event: "sync_health_check",
+        correlationId,
+        scope: currentScope(),
+        date,
+        outcome: "unavailable",
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.name : "unknown",
+      }, "sync health check unavailable");
+      res.status(503).json({
+        error: "Sync health check unavailable",
+        correlationId,
+        status: "warning",
+        nextAction: "Retry the check; no data was changed.",
+      });
+    }
+  },
+);
+
 router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
@@ -1069,6 +1788,8 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
     .from(dailySyncTable)
     .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, currentScope())));
   const data = row?.data ?? null;
+  res.setHeader("X-Sync-Canonical-Revision", String(row?.canonicalRevision ?? 0));
+  res.setHeader("X-Sync-Server-Time", String(Date.now()));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
   res.json(data);
@@ -1098,19 +1819,19 @@ router.put(
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
   const result = await upsertProtected(date, scope, sanitized, clientToday(req), expectedEpoch, req.ip);
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
-    res.json({ ok: true, stale: true, epoch: result.staleEpoch });
+    res.json(await staleEpochResponse(scope, result.staleEpoch));
     return;
   }
   const merged = result.data;
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (result.wrote && date === clientToday(req)) {
-    broadcast(merged, senderId, scope, date);
+    broadcast(merged, senderId, scope, date, result);
   }
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
@@ -1122,6 +1843,8 @@ router.put(
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    canonicalRevision: result.canonicalRevision,
+    serverTime: result.serverTime,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
     res.json(responseBody);
@@ -1298,7 +2021,6 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
   const nowMs = opts.nowMs ?? Date.now();
   const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
   const rows = await db.select().from(dailySyncTable).where(and(
-    eq(dailySyncTable.scope, "live"),
     gte(dailySyncTable.date, serverTickStartDate(nowMs)),
     // Client-local dates may be one calendar day ahead of server UTC.
     lte(dailySyncTable.date, new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
@@ -1308,10 +2030,20 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
   const outcomes: Record<string, number> = {};
   for (const row of rows) {
     if (builtClaims >= maxClaims) break;
+    if (row.scope !== "live" && row.scope !== "sandbox") {
+      outcomes.invalidScope = (outcomes.invalidScope ?? 0) + 1;
+      continue;
+    }
+    const scope: Scope = row.scope;
     try {
-      const result = await db.transaction(async (tx) => {
+      const result = await runWithScope(scope, () => db.transaction(async (tx) => {
+        const serverTime = Date.now();
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(serverTime) })
+          .onConflictDoNothing();
+        await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
         const [locked] = await tx.select().from(dailySyncTable)
-          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live"))).for("update");
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope))).for("update");
         const stored = locked?.data ?? emptySyncData(row.date);
         const wall = buildWallClockServerClaims(stored, nowMs);
         const netClaims = buildNetSecondServerClaims(stored, nowMs);
@@ -1323,13 +2055,53 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
           .slice(0, remainingBudget);
         let data = stored as Record<string, unknown>;
         let acceptedHere = 0;
+        let canonicalRevision = locked?.canonicalRevision ?? 0;
         const acceptedNet: AutoTrackClaim[] = [];
         const outcomesHere: Record<string, number> = {};
         for (const rawClaim of rawClaims) {
           const claim = parseAutoTrackClaim(rawClaim, nowMs);
           if (!claim) { outcomesHere.invalid = (outcomesHere.invalid ?? 0) + 1; continue; }
+          const commandId = `auto-track:${claim.eventId}`;
+          const [seen] = await tx.select({
+            outcome: operationalIntentLedgerTable.outcome,
+          }).from(operationalIntentLedgerTable).where(and(
+            eq(operationalIntentLedgerTable.scope, scope),
+            eq(operationalIntentLedgerTable.date, row.date),
+            eq(operationalIntentLedgerTable.intentId, commandId),
+          )).for("update");
+          if (seen) {
+            outcomesHere.duplicate = (outcomesHere.duplicate ?? 0) + 1;
+            continue;
+          }
           const applied = applyAutoTrackClaim(data, claim, nowMs);
           outcomesHere[applied.outcome] = (outcomesHere[applied.outcome] ?? 0) + 1;
+          canonicalRevision++;
+          await tx.insert(operationalIntentLedgerTable).values({
+            scope,
+            date: row.date,
+            intentId: commandId,
+            outcome: applied.outcome,
+            snapshot: applied.data as any,
+            commandType: "auto-track",
+            actorId: "server:auto-track",
+            deviceId: "server:auto-track",
+            baseRevision: locked?.canonicalRevision ?? 0,
+            canonicalRevision,
+            actionData: {
+              version: claim.version,
+              runId: claim.runId,
+              channel: claim.channel,
+              generation: claim.generation,
+              sequence: claim.sequence,
+              eventId: claim.eventId,
+              dueAt: claim.dueAt,
+              nextDueAt: claim.nextDueAt,
+              baseUpdatedAt: claim.baseUpdatedAt,
+              correctionGeneration: claim.correctionGeneration,
+              mutations: claim.mutations,
+            },
+            serverReceivedAt: new Date(serverTime),
+          });
           if (applied.outcome !== "accepted") continue;
           if (applied.inventoryConsumption?.kind === "sauce-barrel") {
             const consumption = applied.inventoryConsumption;
@@ -1368,14 +2140,27 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
           }
           data = { ...data, autoTrackServerState: { ...previous, version: 1, netOwnership: ownership } };
         }
-        if (locked) await tx.update(dailySyncTable).set({ data: data as any, updatedAt: new Date() })
-          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, "live")));
-        return { data, claims: rawClaims.length, accepted: acceptedHere, outcomes: outcomesHere };
-      });
+        if (locked) await tx.update(dailySyncTable).set({
+          data: data as any,
+          canonicalRevision,
+          updatedAt: new Date(serverTime),
+        })
+          .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope)));
+        return {
+          data,
+          claims: rawClaims.length,
+          accepted: acceptedHere,
+          outcomes: outcomesHere,
+          canonicalRevision,
+          serverTime,
+        };
+      }));
       builtClaims += result.claims;
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
-      if (result.accepted) broadcast(result.data, "server:tick", "live", row.date);
+      if (result.accepted) {
+        broadcast(result.data, "server:tick", scope, row.date, result);
+      }
     } catch (err) {
       logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;
@@ -1396,6 +2181,34 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
   }, intervalMs);
   timer.unref();
   return timer;
+}
+
+const DAILY_ROLLOVER_CHECK_MS = 15_000;
+
+export function startDailyRolloverScheduler(
+  scopes: Scope[] = ["live"],
+): { stop: () => void } {
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      for (const scope of scopes) {
+        await runWithScope(scope, () => runDailyRollover(scope));
+      }
+    } catch (err) {
+      logger.error({ err, event: "daily_rollover", outcome: "degraded" }, "Daily rollover pass failed");
+    } finally {
+      running = false;
+    }
+  };
+  void run();
+  const timer = setInterval(() => { void run(); }, Math.max(
+    5_000,
+    Number(process.env.DAILY_ROLLOVER_CHECK_MS) || DAILY_ROLLOVER_CHECK_MS,
+  ));
+  timer.unref();
+  return { stop: () => clearInterval(timer) };
 }
 
 export default router;

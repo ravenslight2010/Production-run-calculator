@@ -31,6 +31,13 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("server auto-track claim builders", () => {
+  it("honors the canonical per-run manual mode switch", () => {
+    const source = payload();
+    (source.dayState!.runs![0] as Record<string, unknown>).autoTrackDisabled = true;
+    expect(buildNetSecondServerClaims(source, NOW)).toEqual([]);
+    expect(buildWallClockServerClaims(source, NOW)).toBeNull();
+  });
+
   it("builds one advancing net-second claim per eligible due channel", () => {
     const claims = buildNetSecondServerClaims(payload(), NOW);
     expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "app1-batch"]);

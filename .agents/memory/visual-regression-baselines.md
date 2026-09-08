@@ -37,3 +37,16 @@ though the isolated visual suite passed under its reviewed tolerance.
 `maxDiffPixels`/`threshold`, mirror those values in the visual assertions used
 by the full browser suite; never regenerate baselines solely to clear capture
 variance.
+
+For factory-backed visual surfaces, prefer a page-scoped bootstrap fixture that
+replaces the relevant master-data slice over deleting or mutating shared rows.
+Assert the intended UI state before the screenshot, then keep that state visible
+in the reviewed baseline instead of masking its copy.
+
+**Why:** Master-data contents can legitimately vary between isolated browser
+runs, while destructive cleanup broadens the test's database impact and leaves
+copy regressions invisible.
+
+**How to apply:** Intercept the authenticated bootstrap in the visual test,
+return a minimal fixture with a unique identity, and update only the snapshots
+whose visible content intentionally changed.

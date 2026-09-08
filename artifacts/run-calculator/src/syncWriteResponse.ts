@@ -1,3 +1,5 @@
+import type { OperationalProjection } from "@workspace/live-calc";
+
 export interface SyncWriteResponseBody<T> {
   data?: T;
   stale?: boolean;
@@ -5,6 +7,7 @@ export interface SyncWriteResponseBody<T> {
   unchanged?: boolean;
   snapshotId?: string;
   partialFallback?: boolean;
+  operationalProjection?: OperationalProjection | null;
 }
 
 interface ConsumeSyncWriteResponseOptions<T> {

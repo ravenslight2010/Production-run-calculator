@@ -82,6 +82,34 @@ export type SyncDiagnosticReport = {
   events: SyncDiagnostic[];
 };
 
+export type SyncHealthCheck = {
+  name: "canonical-document" | "snapshot-revision" | "operational-projection" | "command-history";
+  status: "healthy" | "warning" | "failing" | "unknown";
+  summary: string;
+  nextAction: string;
+};
+
+export type SyncHealthReport = {
+  contractVersion: 1;
+  scope: "live";
+  date: string;
+  checkedAt: string;
+  status: "healthy" | "warning" | "failing";
+  nextAction: string;
+  checks: SyncHealthCheck[];
+  bounds: { maxLedgerRows: number; maxHistoryRows: number };
+  evidence: {
+    dailyRowPresent: boolean;
+    canonicalRevision: number | null;
+    snapshotId: string | null;
+    ledgerRowsScanned: number;
+    ledgerRowsTruncated: boolean;
+    historyRowsScanned: number;
+    historyRowsTruncated: boolean;
+  };
+  correlationId?: string;
+};
+
 const MAX_EVENTS = 20;
 const MAX_MEASUREMENTS = 50;
 
@@ -242,4 +270,12 @@ export function buildSyncDiagnosticReport(input: {
     measurementSummary: summarizeMeasurements(measurements),
     events,
   };
+}
+
+export async function fetchSyncHealth(date: string): Promise<SyncHealthReport> {
+  const response = await fetch(`/api/sync/health?date=${encodeURIComponent(date)}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Failed to run sync health check: ${response.status}`);
+  return await response.json() as SyncHealthReport;
 }

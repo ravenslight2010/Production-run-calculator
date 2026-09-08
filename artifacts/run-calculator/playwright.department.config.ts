@@ -24,7 +24,9 @@ export default defineConfig({
   use: {
     baseURL,
     headless: true,
-    trace: "on-first-retry",
+    // This workflow deliberately has no retries: preserve the first genuine
+    // failure rather than requiring a retry that could conceal startup races.
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
     launchOptions: {

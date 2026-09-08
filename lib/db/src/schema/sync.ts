@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, numeric, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // Per-day run state, one JSONB blob per date. `scope` isolates the live factory
 // data from the seeded sandbox account's copy, so a date has at most one row per
@@ -13,6 +13,12 @@ export const dailySyncTable = pgTable(
     date: text("date").notNull(),
     scope: text("scope").notNull().default("live"),
     data: jsonb("data").notNull(),
+    // Server-owned command revision for this scoped production day. This is
+    // separate from client edit stamps in the JSON document and advances only
+    // while the row is locked by a command writer.
+    canonicalRevision: numeric("canonical_revision", { precision: 16, scale: 0, mode: "number" })
+      .notNull()
+      .default(0),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("daily_sync_date_scope_idx").on(t.date, t.scope)],

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle } from "lucide-react";
 import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
+import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -308,6 +309,11 @@ export default function SetupProfileEditor({
   onRemoveFrontlineRecipeName,
   ingredientUniverse,
 }: SetupProfileEditorProps) {
+  const profileCacheVersion = useSyncExternalStore(
+    subscribeProfileCache,
+    getProfileCacheVersion,
+    getProfileCacheVersion,
+  );
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [brand, setBrand] = useState(initialBrand ?? "");
   const [flavor, setFlavor] = useState(initialFlavor ?? "");
@@ -510,7 +516,7 @@ export default function SetupProfileEditor({
     setAutofill(null);
     setAutofillError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, brand, flavor]);
+  }, [open, brand, flavor, profileCacheVersion]);
 
   useEffect(() => {
     if (open) {
@@ -771,7 +777,7 @@ export default function SetupProfileEditor({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
       onClick={onClose}
     >
       <div
@@ -779,7 +785,7 @@ export default function SetupProfileEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-profile-dialog-title"
-        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
+        className="responsive-dialog-card my-auto bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -792,7 +798,7 @@ export default function SetupProfileEditor({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         <Form {...form}>
         {!isSupervisor ? (
           <p className="text-sm text-muted-foreground py-6 text-center">
@@ -800,7 +806,7 @@ export default function SetupProfileEditor({
           </p>
         ) : (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Brand</label>
                 <IngredientSelect

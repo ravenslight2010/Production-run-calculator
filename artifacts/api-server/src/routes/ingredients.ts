@@ -19,6 +19,7 @@ import {
   resolveIngredientMergeTarget,
 } from "../lib/ingredientMerge";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
+import { broadcastMasterDataChanged } from "./sync";
 
 // Factory-wide ingredient catalog. Reading is open to any signed-in
 // user (both apps resolve recipe rows and build category pickers from this),
@@ -163,6 +164,7 @@ router.post(
         }
       });
       invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "master-data");
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -188,6 +190,7 @@ router.delete(
       .filter((id) => id.length > 0);
 
     try {
+      const scope = currentScope();
       if (ids.length > 0) {
         // Soft delete: keep the row (disabled) so historical recipe rows that
         // still reference this id can resolve to its last known name.
@@ -197,11 +200,12 @@ router.delete(
           .where(
             and(
               inArray(ingredientsTable.id, ids),
-              eq(ingredientsTable.scope, currentScope()),
+              eq(ingredientsTable.scope, scope),
             ),
           );
       }
       invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "master-data");
       const items = await listAll();
       res.json({ items });
     } catch (err) {
@@ -305,6 +309,7 @@ router.post(
       }
 
       invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "master-data");
       const items = await listAll();
       res.json({ items });
     } catch (err) {

@@ -13,9 +13,9 @@ type CheckStatus = "ok" | "error" | "pending";
 async function readiness(req: Request, res: Response): Promise<void> {
   const startup = getStartupHealth();
   const correlationId = String(
-    (req as Request & { correlationId?: string }).correlationId
-    ?? req.id
-    ?? "health",
+    (req as Request & { correlationId?: string }).correlationId ??
+      req.id ??
+      "health",
   );
   const checks: Record<string, { status: CheckStatus; detail?: string }> = {
     process: { status: "ok" },
@@ -51,7 +51,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
   const allHealthy =
     startup.phase === "ready" &&
     Object.values(checks).every((c) => c.status === "ok");
-  const flatChecks = Object.fromEntries(Object.entries(checks).map(([key, value]) => [key, value.status]));
+  const flatChecks = Object.fromEntries(
+    Object.entries(checks).map(([key, value]) => [key, value.status]),
+  );
   const diagnostics =
     startup.phase === "ready"
       ? { cacheMaintenance: await getCacheMaintenanceDiagnostics() }
@@ -77,11 +79,23 @@ async function readiness(req: Request, res: Response): Promise<void> {
   if (allHealthy) {
     // Keep the existing contract for any caller that checks the shape
     const data = HealthCheckResponse.parse({ status: "ok" });
-    res.json({ ...data, checks: flatChecks, diagnostics, correlationId, timestamp: new Date().toISOString() });
+    res.json({
+      ...data,
+      checks: flatChecks,
+      diagnostics,
+      correlationId,
+      timestamp: new Date().toISOString(),
+    });
   } else {
     res.status(503).json({
       status: startup.phase === "starting" ? "starting" : "degraded",
       checks: flatChecks,
+      startup: {
+        phase: startup.phase,
+        stage: startup.stage,
+        durationMs: startup.durationMs,
+        ...(startup.failure ? { errorCode: startup.failure.errorCode } : {}),
+      },
       ...(diagnostics ? { diagnostics } : {}),
       correlationId,
       timestamp: new Date().toISOString(),

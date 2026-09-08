@@ -1,5 +1,6 @@
 import * as z from "zod";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
+import type { OperationalProjection } from "@workspace/live-calc";
 
 export type { IngredientSubstitution, SubstitutionLogEntry };
 
@@ -367,6 +368,8 @@ export type RunMeta = {
    */
   pausedStoppageId?: string;
   endedAt?: number;
+  /** Canonical per-run switch consumed by the server auto-track engine. */
+  autoTrackDisabled?: boolean;
   subTab?: "dough" | "crusts";
   notes?: string;
   actualCases?: number;
@@ -447,6 +450,10 @@ export type SyncPayload = {
   syncVersion?: 1;
   completeness?: "complete" | "partial";
   baseSnapshotId?: string;
+  /** Server-owned live read model; never persisted as part of the snapshot. */
+  operationalProjection?: OperationalProjection | null;
+  serverTime?: number;
+  canonicalRevision?: number;
   dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a

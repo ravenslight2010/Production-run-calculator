@@ -1,7 +1,15 @@
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   CACHE_MAINTENANCE_FAILURE_THRESHOLD,
   clearCacheMaintenanceDiagnosticsForTests,
@@ -41,7 +49,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server)
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   if (previousOpenAiKey === undefined) {
     delete process.env.OPENAI_API_KEY;
   } else {
@@ -63,13 +72,18 @@ describe("GET /healthz cache maintenance diagnostics", () => {
     const maintenanceLog = { info: vi.fn(), warn: vi.fn() };
     for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_THRESHOLD; i += 1) {
       await recordCacheMaintenance(
-        { scope: "live", operation: "prune", waitDurationMs: 10, outcome: "error" },
+        {
+          scope: "live",
+          operation: "prune",
+          waitDurationMs: 10,
+          outcome: "error",
+        },
         maintenanceLog,
       );
     }
 
     const response = await fetch(`${baseUrl}/healthz`);
-    const body = await response.json() as {
+    const body = (await response.json()) as {
       status: string;
       diagnostics: {
         cacheMaintenance: {
@@ -89,7 +103,9 @@ describe("GET /healthz cache maintenance diagnostics", () => {
       status: "ok",
       recentErrorCount: 0,
     });
-    expect(JSON.stringify(body.diagnostics)).not.toMatch(/prompt|result|cache.?key/i);
+    expect(JSON.stringify(body.diagnostics)).not.toMatch(
+      /prompt|result|cache.?key/i,
+    );
   });
 });
 
@@ -109,22 +125,49 @@ describe("startup probes", () => {
   it("returns a bounded 503 while startup is in progress or failed", async () => {
     beginStartup(2_000);
     let response = await fetch(`${baseUrl}/readyz`);
-    let body = await response.json() as { status: string; checks: Record<string, string> };
+    let body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      startup: {
+        phase: string;
+        stage: string | null;
+        durationMs: number;
+        errorCode?: string;
+      };
+      correlationId: string;
+    };
     expect(response.status).toBe(503);
     expect(body).toMatchObject({
       status: "starting",
-      checks: { startup: "error", database: "pending", dependencies: "pending" },
+      checks: {
+        startup: "error",
+        database: "pending",
+        dependencies: "pending",
+      },
+      startup: { phase: "starting", stage: null },
     });
+    expect(body.correlationId).toBeTruthy();
 
     markStartupFailed("data_heals", "data_heals_failed", 2_500);
     response = await fetch(`${baseUrl}/healthz`);
-    body = await response.json() as { status: string; checks: Record<string, string> };
+    body = (await response.json()) as typeof body;
     expect(response.status).toBe(503);
     expect(body).toMatchObject({
       status: "degraded",
-      checks: { startup: "error", database: "pending", dependencies: "pending" },
+      checks: {
+        startup: "error",
+        database: "pending",
+        dependencies: "pending",
+      },
+      startup: {
+        phase: "failed",
+        stage: "data_heals",
+        errorCode: "data_heals_failed",
+      },
     });
-    expect(JSON.stringify(body)).not.toMatch(/password|secret|database_url|stack/i);
+    expect(JSON.stringify(body)).not.toMatch(
+      /password|secret|database_url|stack/i,
+    );
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

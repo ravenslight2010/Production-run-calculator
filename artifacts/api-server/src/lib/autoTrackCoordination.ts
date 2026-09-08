@@ -290,6 +290,7 @@ export function applyAutoTrackClaim(
   const lifecycleValid =
     expectedGeneration === claim.generation
     && finiteNumber(runMeta.startedAt)
+    && runMeta.autoTrackDisabled !== true
     && (isCaseChannel || (!finiteNumber(runMeta.pausedAt) && !finiteNumber(runMeta.endedAt)));
 
   let outcome: AutoTrackClaimOutcome = lifecycleValid ? "accepted" : "stale";

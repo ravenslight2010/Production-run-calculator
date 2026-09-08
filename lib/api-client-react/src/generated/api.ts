@@ -114,6 +114,8 @@ import type {
   ListInventoryLedgerParams,
   ListManagerActionQueueParams,
   ListMergeAliasesParams,
+  ListOperationalIntentReceipts200,
+  ListOperationalIntentReceiptsParams,
   ListQualityChecksParams,
   ManagerActionItemUpdate,
   ManagerActionQueue,
@@ -134,6 +136,8 @@ import type {
   ObserveRunSuggestion200,
   ObserveRunSuggestionInput,
   OkResponse,
+  OperationalIntentRequest,
+  OperationalIntentResponse,
   OperationalReport,
   OperationalReportInput,
   OperationalRunView,
@@ -211,6 +215,7 @@ import type {
   SpecReconcileResult,
   StaffMember,
   StaffRoleUpdate,
+  SubmitOperationalIntentParams,
   SuggestMergesInput,
   SuggestMergesResult,
   SummaryInput,
@@ -15067,3 +15072,167 @@ export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
       > => {
       return useMutation(getClaimAutoTrackEventMutationOptions(options));
     }
+
+export const getSubmitOperationalIntentUrl = (params?: SubmitOperationalIntentParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/operational-intents?${stringifiedParams}` : `/api/sync/operational-intents`
+}
+
+/**
+ * @summary Apply one server-authoritative production command
+ */
+export const submitOperationalIntent = async (operationalIntentRequest: OperationalIntentRequest,
+    params?: SubmitOperationalIntentParams, options?: Parameters<typeof customFetch>[1]): Promise<OperationalIntentResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<OperationalIntentResponse>(getSubmitOperationalIntentUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(operationalIntentRequest)
+  }
+);}
+
+
+
+
+
+export const getSubmitOperationalIntentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitOperationalIntent>>, TError,SubmitOperationalIntentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitOperationalIntent>>, TError,SubmitOperationalIntentMutationVariables, TContext> => {
+
+const mutationKey = ['submitOperationalIntent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitOperationalIntent>>, SubmitOperationalIntentMutationVariables> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  submitOperationalIntent(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitOperationalIntentMutationResult = NonNullable<Awaited<ReturnType<typeof submitOperationalIntent>>>
+    export type SubmitOperationalIntentMutationBody = BodyType<OperationalIntentRequest>
+    export type SubmitOperationalIntentMutationError = ErrorType<void>
+    export type SubmitOperationalIntentMutationVariables = {data: BodyType<OperationalIntentRequest>;params?: SubmitOperationalIntentParams}
+
+    /**
+ * @summary Apply one server-authoritative production command
+ */
+export const useSubmitOperationalIntent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitOperationalIntent>>, TError,SubmitOperationalIntentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitOperationalIntent>>,
+        TError,
+        SubmitOperationalIntentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSubmitOperationalIntentMutationOptions(options));
+    }
+
+export const getListOperationalIntentReceiptsUrl = (params?: ListOperationalIntentReceiptsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/operational-intents/cursor?${stringifiedParams}` : `/api/sync/operational-intents/cursor`
+}
+
+/**
+ * @summary Read durable command receipts after a scoped cursor
+ */
+export const listOperationalIntentReceipts = async (params?: ListOperationalIntentReceiptsParams, options?: Parameters<typeof customFetch>[1]): Promise<ListOperationalIntentReceipts200> => {
+
+  return customFetch<ListOperationalIntentReceipts200>(getListOperationalIntentReceiptsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOperationalIntentReceiptsQueryKey = (params?: ListOperationalIntentReceiptsParams,) => {
+    return [
+    `/api/sync/operational-intents/cursor`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOperationalIntentReceiptsQueryOptions = <TData = Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError = ErrorType<void>>(params?: ListOperationalIntentReceiptsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOperationalIntentReceiptsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOperationalIntentReceipts>>> = ({ signal }) => listOperationalIntentReceipts(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOperationalIntentReceiptsQueryResult = NonNullable<Awaited<ReturnType<typeof listOperationalIntentReceipts>>>
+export type ListOperationalIntentReceiptsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read durable command receipts after a scoped cursor
+ */
+
+export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError = ErrorType<void>>(
+ params?: ListOperationalIntentReceiptsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOperationalIntentReceiptsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}

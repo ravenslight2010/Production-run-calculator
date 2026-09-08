@@ -41,9 +41,9 @@ export default function ScreenModeView() {
     const dashDowntimeSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
     const dashMinutesDelta = calc.ppm > 0 && calc.paceDelta !== 0 ? Math.round(Math.abs(calc.paceDelta) * v.pizzasPerCase / calc.ppm) : 0;
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-6 gap-6 select-none">
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-6 gap-6 select-none overflow-x-hidden">
         {/* Top bar */}
-        <div className="flex items-center justify-between">
+        <div className="responsive-row flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <Factory className="w-5 h-5 text-primary-foreground" />
@@ -55,7 +55,7 @@ export default function ScreenModeView() {
 
         {/* Run name + status */}
         <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-5xl font-black tracking-tight break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+          <h1 className="min-w-0 max-w-full text-4xl sm:text-5xl font-black tracking-tight break-words">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
           {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
           {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
           {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}

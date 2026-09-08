@@ -8,8 +8,23 @@ const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const suffix = Math.random().toString(36).slice(2, 10);
 const username = `visual_${suffix}`;
 const phoneUsername = `visual_phone_${suffix}`;
+const tabletUsername = `visual_tablet_${suffix}`;
 const password = "VisualRegression123!";
 let cleanupDb: Client | undefined;
+
+const visualMixFixture = {
+  id: `visual_mix_${suffix}`,
+  name: "Visual Fixture Mix",
+  brand: "Visual Regression Bakery",
+  flavor: "Screenshot Fixture",
+  batchSize: 40,
+  daysEarly: 0,
+  notes: "Deterministic visual fixture",
+  amountAlreadyMade: 0,
+  components: [{ ingredient: "Visual Fixture Ingredient", perPizza: 1.5 }],
+  isPrep: false,
+  enabled: true,
+};
 
 async function signUp(page: Page, account = username): Promise<void> {
   await signUpAndHandleOnboarding(page, account, password, {
@@ -50,6 +65,17 @@ async function signUp(page: Page, account = username): Promise<void> {
         });
       }
     },
+  });
+}
+
+async function freezeMixMasterData(page: Page): Promise<void> {
+  await page.route("**/api/master-data/bootstrap", async (route) => {
+    const response = await route.fetch();
+    const data = (await response.json()) as Record<string, unknown>;
+    await route.fulfill({
+      response,
+      body: JSON.stringify({ ...data, mixes: [visualMixFixture] }),
+    });
   });
 }
 
@@ -104,7 +130,7 @@ test.describe("intentional visual regression baselines", () => {
     if (!cleanupDb) return;
     try {
       await cleanupDb.query("DELETE FROM users WHERE username = ANY($1::text[])", [
-        [username, phoneUsername],
+        [username, phoneUsername, tabletUsername],
       ]);
     } finally {
       await cleanupDb.end().catch(() => {});
@@ -115,6 +141,7 @@ test.describe("intentional visual regression baselines", () => {
   test("desktop production states: live run, Mix Plan, import review, and alert dialog", async ({
     page,
   }) => {
+    await freezeMixMasterData(page);
     await signUp(page, phoneUsername);
     const startRun = page.getByRole("button", { name: /start run/i });
     if (await startRun.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -138,6 +165,9 @@ test.describe("intentional visual regression baselines", () => {
     // runs. Clear that transient focus ring so the Mix Plan baseline captures
     // the page, not the menu interaction that navigated to it.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect(page.getByTestId("mix-plan-empty")).toHaveText(
+      "No mixes to make for this day. Pick a make-day with scheduled runs whose product matches a mix (within its days-early window).",
+    );
     await expect(page).toHaveScreenshot("mix-plan-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
@@ -184,6 +214,27 @@ test.describe("intentional visual regression baselines", () => {
     await signUp(page);
     await page.locator('[data-testid="tab-run"]').click();
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
+      fullPage: false,
+      mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
+    });
+  });
+
+  test("tablet portrait and landscape compact presentation", async ({ page }) => {
+    await signUp(page, tabletUsername);
+    await page.locator('[data-testid="tab-run"]').click();
+
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expect(page).toHaveScreenshot("run-overview-tablet-portrait.png", {
+      fullPage: false,
+      mask: dynamicMask(page),
+      maxDiffPixels: 80,
+      threshold: 0.2,
+    });
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await expect(page).toHaveScreenshot("run-overview-tablet-landscape.png", {
       fullPage: false,
       mask: dynamicMask(page),
       maxDiffPixels: 80,

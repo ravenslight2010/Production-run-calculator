@@ -121,7 +121,7 @@ describe("master-data bootstrap loading", () => {
     expect(unchangedResult).toEqual(initial);
   });
 
-  it("uses one active poller, pauses while idle or hidden, and refreshes once on resume", async () => {
+  it("uses one observer without interval polling and refreshes once on resume", async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, "random").mockReturnValue(0);
     const body = JSON.stringify(bootstrapBody);
@@ -158,10 +158,10 @@ describe("master-data bootstrap loading", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    // The shared useIdle singleton flips after three minutes. The canonical
-    // observer has no idle interval, so no further bootstrap request is made.
+    // The shared useIdle singleton flips after three minutes. No periodic
+    // bootstrap request is made before or after that transition.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(180_000);
     });
@@ -179,7 +179,7 @@ describe("master-data bootstrap loading", () => {
     });
     expect(fetchSpy).toHaveBeenCalledTimes(idleCount + 1);
 
-    // Hidden pages do not run the shared interval.
+    // Hidden pages do not perform background refreshes.
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       value: "hidden",

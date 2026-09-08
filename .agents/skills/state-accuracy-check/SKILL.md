@@ -186,7 +186,7 @@ an archived repository path.
 - `adjustedTimeSec` uses `pressCasesLeft` only while the run is live (`startedAt && !endedAt && casesNeeded > 0`); all other cases fall back to `casesForTiming`.
 - The two-stage warehouse switchover alerts use **independent Set latches** per run ID (`switchover-frontline-${runId}`, `switchover-packaging-${runId}`) — not a single flag. Both must arm and re-arm correctly when the run ID changes.
 - Dough auto-track stop: `useAutoTrack` receives `calc.pressDone` as the `pressDone` field of its `calc` param. The tray/batch decrement gate checks `calc.pressDone`, not elapsed time.
-- Next-run pre-seed: when `pressDone` flips true, a one-shot effect seeds `traysOnLine`/`batchesReady` on the NEXT unstarted non-crust run via `markRunValuesUpdated`. Guards: skip if crew already entered values, skip cast/wall screens, skip if auto-track is off, latch consumed only after an actual write.
+- Next-run staging remains an explicit operator action. A passive synchronized browser must not pre-seed `traysOnLine`/`batchesReady`; automatic writes belong to the server claim engine only.
 - The carry-over card was removed (2026-07-10). `carryOverDone` field is kept only for sync compat — do not revive it or depend on it for logic.
 
 ---

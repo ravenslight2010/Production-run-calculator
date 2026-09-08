@@ -18,4 +18,9 @@ export interface AutoTrackClaimResponse {
   data: SyncPayload;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId: string;
+  duplicate?: boolean;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
 }

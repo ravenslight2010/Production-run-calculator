@@ -447,7 +447,7 @@ function NamedRecipeEditor({
               {(draft.doughballVariants ?? []).map((variant, idx) => (
                 <div key={idx} className="rounded-md border border-border/40 bg-muted/10 p-2 space-y-1.5">
                   {/* Variant numbers row */}
-                  <div className="flex items-center gap-2">
+                  <div className="responsive-row flex items-center gap-2">
                     <input
                       type="text"
                       value={variant.label}
@@ -455,7 +455,7 @@ function NamedRecipeEditor({
                       onBlur={() => commit()}
                       disabled={disabled}
                       placeholder={'Variant (e.g. 11" CRB)…'}
-                      className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
+                      className="min-w-[10rem] flex-[1_1_10rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
                     />
                     <input
                       type="number"
@@ -505,7 +505,7 @@ function NamedRecipeEditor({
                   <div className="space-y-1">
                     <p className="text-[10px] text-muted-foreground font-medium">Applies to (Brand / Flavor):</p>
                     {(variant.customers ?? []).map((c, cidx) => (
-                      <div key={cidx} className="flex items-center gap-1.5">
+                      <div key={cidx} className="responsive-row flex items-center gap-1.5">
                         <input
                           type="text"
                           value={c.brand}

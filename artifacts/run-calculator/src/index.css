@@ -185,6 +185,12 @@
     @apply border-border;
   }
 
+  html {
+    min-width: 320px;
+    overflow-x: hidden;
+    scroll-padding-bottom: var(--app-bottom-nav-space);
+  }
+
   /*
    * Keep keyboard focus visible even on controls whose Tailwind styles use
    * outline-none. This is intentionally global: operators move between the
@@ -198,6 +204,101 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    min-width: 320px;
+    overflow-x: hidden;
+  }
+}
+
+/*
+ * Shared responsive vocabulary.
+ *
+ * Keep the production surfaces single-column by default. Tablet width is used
+ * for readable measures and larger controls, not for turning the station flow
+ * into a dashboard. These classes are intentionally small so dialogs and
+ * page-specific surfaces can opt into the same rules without duplicating
+ * breakpoint math.
+ */
+:root {
+  --app-gutter: 0.75rem;
+  --app-content-max: 64rem;
+  --app-bottom-nav-space: calc(4rem + env(safe-area-inset-bottom));
+  --app-dialog-gutter: max(0.75rem, env(safe-area-inset-left));
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --app-gutter: 1rem;
+  }
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --app-gutter: 1.5rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --app-gutter: 2rem;
+  }
+}
+
+.app-shell {
+  width: min(100%, var(--app-content-max));
+  margin-inline: auto;
+  padding-inline: var(--app-gutter);
+  padding-bottom: var(--app-bottom-nav-space);
+}
+
+.responsive-row {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.responsive-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.station-nav {
+  min-height: var(--app-bottom-nav-space);
+  height: var(--app-bottom-nav-space);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.responsive-dialog-overlay {
+  padding: max(0.75rem, env(safe-area-inset-top))
+    max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom))
+    max(0.75rem, env(safe-area-inset-left));
+}
+
+.responsive-dialog-card {
+  width: min(100%, 42rem);
+  max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  min-height: 0;
+}
+
+@media (max-height: 40rem) {
+  .responsive-dialog-overlay {
+    align-items: flex-start;
+  }
+
+  .responsive-dialog-card {
+    margin-block: 0;
+  }
+}
+
+@media (min-width: 48rem) {
+  .responsive-dialog-card {
+    max-height: calc(100dvh - 3rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .responsive-dialog-overlay *,
+  .station-nav * {
+    scroll-behavior: auto;
   }
 }
 
