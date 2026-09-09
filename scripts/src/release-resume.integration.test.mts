@@ -442,7 +442,13 @@ async function runStoppedSummaryScenario(): Promise<void> {
       try {
         await writeFile(
           join(evidenceDir, "release-check-checkpoint.md"),
-          "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+          [
+            "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+            "",
+            "Root blockers: fixture gate one (FAIL)",
+            "Blocked gates: fixture gate two (blocked by fixture gate one)",
+            "",
+          ].join("\n"),
           "utf8",
         );
         const result = await runStoppedSummary(
@@ -475,6 +481,10 @@ async function runStoppedSummaryScenario(): Promise<void> {
           mode === "full"
             ? "The full release check stopped before all gates completed."
             : "The release check stopped before all gates completed.",
+          "",
+          "## Release blockers",
+          "Root blockers: fixture gate one (FAIL)",
+          "Blocked gates: fixture gate two (blocked by fixture gate one)",
           "",
           artifactLine,
           "",
@@ -521,8 +531,45 @@ async function runStoppedSummaryScenario(): Promise<void> {
     }
   }
 
+  for (const checkpointText of [
+    "not a release checkpoint\n",
+    "Root blockers: [untrusted payload](https://example.test)\n",
+  ]) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), "release-summary-malformed-checkpoint-"),
+    );
+    const summaryPath = join(evidenceDir, "step-summary.md");
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        checkpointText,
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        summaryPath,
+        "standard",
+        "",
+      );
+      assert.equal(result.code, 0, result.output);
+      const summary = await readFile(summaryPath, "utf8");
+      assert.match(
+        summary,
+        /Blocker summary unresolved: checkpoint text is missing or malformed\./,
+        "malformed checkpoint text must remain an explicit unresolved condition",
+      );
+      assert.doesNotMatch(
+        summary,
+        /untrusted payload|https:\/\/example\.test/,
+        "malformed checkpoint text must not be copied into the job summary",
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
   console.log(
-    "Stopped release summary contract passed (standard/full; artifact link and upload-failure; non-retained verification only).",
+    "Stopped release summary contract passed (standard/full; blocker display, safe fallback, artifact link, and upload-failure).",
   );
 }
 
