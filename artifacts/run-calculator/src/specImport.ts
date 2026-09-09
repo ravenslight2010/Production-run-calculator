@@ -48,7 +48,6 @@ import {
   partitionTombstonedParse,
   pruneSpecImportAgainstSnapshot,
   recipeLinkSuggestionKey,
-  recipeTargets,
   resolveRetriedParsePass,
   shouldRetryParsePass,
   specImportNameMatchKey,
@@ -139,14 +138,11 @@ import {
   fillCheeseRecipeTags,
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
-import type { ReviewVerdict } from "@workspace/ai-review";
 import {
   classifyFormulaChanges,
   type FormulaChange,
   type FormulaRecipe,
 } from "@workspace/formula-guard";
-
-export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
 
 export class ImportReviewReconfirmationError extends Error {
   constructor(readonly importReview: ImportReview) {
@@ -189,8 +185,6 @@ export type SpecImportPrepared = {
   summary: SpecImportSummary;
   /** New label→canonical mappings learned this import (persisted on confirm). */
   newAliases: SpecImportAlias[];
-  /** Reviewer-AI flags on parsed profiles/recipes (warn/reject only; advisory). */
-  flagged: SpecFlaggedItem[];
   /**
    * Deterministic diff of the incoming spec recipes against the CURRENT recipe
    * library — i.e. exactly what applying this import would change. Advisory; no
@@ -640,7 +634,6 @@ function canonicalizeParsed(
 type ParseCore = {
   parsed: ParsedSpecImport;
   resolved: ReturnType<typeof canonicalizeParsed>["resolved"];
-  flagged: SpecFlaggedItem[];
   /** Rows dropped because the workbook was too large to chunk fully. */
   droppedRows: number;
   /** Cells whose tails were cut by the per-cell prompt clamp (AI never saw them). */
@@ -653,7 +646,7 @@ type ParseCore = {
 
 /**
  * Read one workbook → AI parse → canonicalize, returning the canonicalized
- * parse, the resolved alias pairs, and the reviewer-AI flags for that single
+ * parse and the resolved alias pairs for that single
  * file. A workbook too large for one prompt is split into chunks and parsed in
  * several calls (full ingestion instead of silent truncation); the per-chunk
  * raw parses are merged before canonicalizing. Throws on a hard failure (empty
@@ -682,7 +675,6 @@ async function parseWorkbookCore(
     return {
       parsed: canonical.parsed,
       resolved: canonical.resolved,
-      flagged: [],
       droppedRows: 0,
       truncatedCells: [],
       overflowRows: [],
@@ -731,7 +723,6 @@ async function parseWorkbookCore(
   const pace = makeParseCallPacer({ signal });
 
   const rawList: ParsedSpecImport[] = [];
-  const flagged: SpecFlaggedItem[] = [];
   for (const chunk of chunks) {
     if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
     const workbookText = gridsToPromptText(chunk);
@@ -778,21 +769,6 @@ async function parseWorkbookCore(
       ...(ai.note ? { note: ai.note } : {}),
       ...(ai.warnings?.length ? { warnings: ai.warnings } : {}),
     });
-    // Reviewer-AI flags ride on the raw AI profiles/recipes (warn/reject only).
-    for (const p of ai.profiles) {
-      if (p.review && p.review.status !== "ok") {
-        flagged.push({ label: `${p.brand} / ${p.flavor}`.trim(), review: p.review });
-      }
-    }
-    for (const r of ai.recipes) {
-      if (r.review && r.review.status !== "ok") {
-        const tgts = recipeTargets(r);
-        const ctx = tgts.length
-          ? ` — ${tgts[0].brand}/${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more` : ""}`
-          : "";
-        flagged.push({ label: `${r.kind} recipe${ctx}`, review: r.review });
-      }
-    }
   }
 
   if (!rawList.length) {
@@ -812,7 +788,7 @@ async function parseWorkbookCore(
   );
   const { parsed, resolved } = canonicalizeParsed(rawMerged, known, aliases);
 
-  return { parsed, resolved, flagged, droppedRows, truncatedCells, overflowRows };
+  return { parsed, resolved, droppedRows, truncatedCells, overflowRows };
 }
 
 /**
@@ -1513,8 +1489,7 @@ async function findReusableParse(
  * hygiene as a fresh parse (current tombstones still respected, cheese-name
  * canonicalize + dedupe, summary/discrepancies against CURRENT data) minus the
  * AI passes — the snapshot data was already canonicalized and linked when it
- * was first imported. newAliases/flagged stay empty: nothing new was learned
- * and any reviewer flags were already surfaced on the original import.
+ * was first imported. newAliases stays empty: nothing new was learned.
  */
 async function buildReusedPrepared(
   snapshotData: ParsedSpecImport,
@@ -1597,7 +1572,6 @@ async function buildReusedPrepared(
     parsed: working,
     summary,
     newAliases: [],
-    flagged: [],
     discrepancies,
     formulaChanges: buildFormulaChanges(working, ingredientMergeAliases),
     importReview: buildSpecImportReview(working),
@@ -1868,7 +1842,7 @@ export async function prepareSpecImport(
     };
   }
   const allowAi = options.allowAi === true;
-  const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows, aiFallbackGrids } =
+  const { parsed: rawParsed, resolved, droppedRows, truncatedCells, overflowRows, aiFallbackGrids } =
     await parseWorkbookCore(grids, known, aliases, signal, { allowAi });
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
@@ -1935,7 +1909,6 @@ export async function prepareSpecImport(
     parsed,
     summary,
     newAliases,
-    flagged,
     discrepancies,
     formulaChanges: buildFormulaChanges(parsed, ingredientMergeAliases),
     importReview,
@@ -2030,7 +2003,6 @@ export async function prepareSpecImportMulti(
   // know WHICH file each parse came from.
   const parsedLabels: string[] = [];
   const allResolved: ParseCore["resolved"] = [];
-  const flagged: SpecFlaggedItem[] = [];
   const errors: string[] = [];
   const failedNames: string[] = [];
   let totalDropped = 0;
@@ -2090,7 +2062,6 @@ export async function prepareSpecImportMulti(
       parsedList.push(core.parsed);
       parsedLabels.push(label);
       allResolved.push(...core.resolved);
-      flagged.push(...core.flagged);
       allUnresolved.push(...(core.parsed.unresolved ?? []));
       if (core.aiFallbackGrids) allFallbackGrids.push(...core.aiFallbackGrids);
       totalDropped += core.droppedRows;
@@ -2221,7 +2192,6 @@ export async function prepareSpecImportMulti(
     parsed,
     summary,
     newAliases,
-    flagged,
     discrepancies,
     formulaChanges: buildFormulaChanges(parsed, ingredientMergeAliases),
     importReview,

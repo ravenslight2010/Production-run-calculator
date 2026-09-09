@@ -327,54 +327,6 @@ describe("buildProposals", () => {
   });
 });
 
-// ── aiCandidates ─────────────────────────────────────────────────────────────
-
-describe("aiCandidates", () => {
-  it("returns only fillable, AI-eligible fields with no known source", () => {
-    const proposals = fm.buildProposals(fm.detectMissingFields({}), lookup);
-    const keys = fm.aiCandidates(proposals).map((p) => p.key);
-    // dieType + skidStacking have no source and are AI-eligible & fillable.
-    expect(keys).toEqual(["dieType", "skidStacking"]);
-    // brand/flavor are "none" too but not fillable -> excluded.
-    expect(keys).not.toContain("brand");
-    expect(keys).not.toContain("flavor");
-    // shipper had a profile source -> excluded.
-    expect(keys).not.toContain("shipper");
-  });
-
-  it("excludes slot AI-eligible fields that resolve to a default", () => {
-    // app1BatchLbs has a documentedDefault, so it never reaches "none".
-    const proposals = fm.buildProposals(
-      fm.detectMissingFields({ app1Type: "Mozz" }),
-      lookup,
-    );
-    const keys = fm.aiCandidates(proposals).map((p) => p.key);
-    expect(keys).toContain("app1OzPerPizza"); // no default -> none -> AI
-    expect(keys).not.toContain("app1BatchLbs"); // default -> not AI
-  });
-});
-
-// ── buildFillMissingInput ────────────────────────────────────────────────────
-
-describe("buildFillMissingInput", () => {
-  it("packs identity, known context, and requested fields", () => {
-    const candidates = fm.aiCandidates(
-      fm.buildProposals(fm.detectMissingFields({}), lookup),
-    );
-    const input = fm.buildFillMissingInput("Lucia's", "PEPPERONI", "12in", candidates, {
-      pizzasPerCase: 12,
-      brand: "Lucia's",
-    });
-    expect(input.brand).toBe("Lucia's");
-    expect(input.flavor).toBe("PEPPERONI");
-    expect(input.dieType).toBe("12in");
-    // brand/flavor are never echoed back as context.
-    expect(input.context?.some((c) => c.key === "brand" || c.key === "flavor")).toBe(false);
-    expect(input.context).toContainEqual({ key: "pizzasPerCase", label: "Pizzas / Case", value: "12" });
-    expect(input.fields.map((f) => f.key)).toEqual(["dieType", "skidStacking"]);
-  });
-});
-
 // ── pickLearnedForProduct ────────────────────────────────────────────────────
 
 describe("pickLearnedForProduct", () => {

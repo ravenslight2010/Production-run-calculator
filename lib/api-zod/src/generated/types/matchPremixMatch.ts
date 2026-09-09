@@ -5,7 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { ReviewVerdict } from './reviewVerdict';
 
 export interface MatchPremixMatch {
   /** The imported premix name (echoes an unmatchedNames entry) */
@@ -14,5 +13,4 @@ export interface MatchPremixMatch {
   brand: string;
   /** The saved flavor under that brand, or empty when none fits */
   flavor: string;
-  review?: ReviewVerdict;
 }

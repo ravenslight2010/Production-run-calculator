@@ -1,17 +1,13 @@
-// "Fill in missing data" assistant — pure detection + proposal logic.
+// Deterministic "fill in missing data" detection + proposal logic.
 //
 // This is the single source of truth shared by the web app
 // (artifacts/run-calculator) and the mobile app
 // (artifacts/run-calculator-mobile) so both platforms detect the SAME blank
-// fields, propose the SAME known values from the SAME sources, and send the AI
-// the SAME request (replit.md parity rule). Each app keeps only its own
-// platform glue (how current values / known sources are read, and how the
-// read-only /ai/fill-missing fetch is authenticated).
+// fields, and propose the SAME known values from the SAME sources.
 //
 // This module NEVER writes anything. It detects blanks, proposes values
-// (marking each source), and shapes the read-only AI request for fields with no
-// known source. The UI commits confirmed values through the existing update
-// paths; there is no auto-apply.
+// (marking each source). The UI commits confirmed values through the existing
+// update paths; there is no auto-apply.
 
 export type FieldCategory =
   | "identity"
@@ -25,7 +21,6 @@ export type FieldKind = "number" | "text" | "select";
 
 // One field a valid run needs. `fillable: false` marks run identity (brand/flavor)
 // which the panel surfaces as "needs to be set on the run" but cannot apply here.
-// `aiEligible` fields fall through to the AI endpoint when no known source exists.
 export type FieldSpec = {
   key: string;
   label: string;
@@ -33,11 +28,10 @@ export type FieldSpec = {
   kind: FieldKind;
   options?: string[];
   documentedDefault?: string | number;
-  aiEligible: boolean;
   fillable: boolean;
 };
 
-export type ProposalSource = "learned" | "profile" | "spec" | "default" | "ai" | "none";
+export type ProposalSource = "learned" | "profile" | "spec" | "default" | "none";
 
 export type FieldProposal = {
   key: string;
@@ -47,9 +41,8 @@ export type FieldProposal = {
   options?: string[];
   fillable: boolean;
   currentValue: string | number;
-  value: string | number | null; // proposed value; null when awaiting AI / no source
+  value: string | number | null; // proposed value; null when no source exists
   source: ProposalSource;
-  rationale?: string; // present for source === "ai"
 };
 
 // Documented defaults — the .default() values from the web formSchema. These are
@@ -82,18 +75,17 @@ export const DOCUMENTED_DEFAULTS: Record<string, number> = {
 const SHIPPER_OPTIONS = ["costco", "12in", "11in", "7in", "edwardos"];
 const SKID_STACKING_OPTIONS = ["lucia", "hannaford", "column"];
 
-function num(def?: number): Pick<FieldSpec, "kind" | "documentedDefault" | "aiEligible" | "fillable"> {
-  return { kind: "number", documentedDefault: def, aiEligible: def === undefined, fillable: true };
+function num(def?: number): Pick<FieldSpec, "kind" | "documentedDefault" | "fillable"> {
+  return { kind: "number", documentedDefault: def, fillable: true };
 }
-
 // Canonical field list, shared by both platforms. Recipes are intentionally NOT
 // included: a run is computable from the flat batch-lbs / oz figures, so recipes
 // are an enhancement rather than a field "needed for a valid run".
 export const FIELD_SPECS: FieldSpec[] = [
   // Identity
-  { key: "brand", label: "Brand", category: "identity", kind: "text", aiEligible: false, fillable: false },
-  { key: "flavor", label: "Flavor", category: "identity", kind: "text", aiEligible: false, fillable: false },
-  { key: "dieType", label: "Die / Size", category: "identity", kind: "text", aiEligible: true, fillable: true },
+  { key: "brand", label: "Brand", category: "identity", kind: "text", fillable: false },
+  { key: "flavor", label: "Flavor", category: "identity", kind: "text", fillable: false },
+  { key: "dieType", label: "Die / Size", category: "identity", kind: "text", fillable: true },
 
   // Line / speed
   { key: "casesNeeded", label: "Cases Needed", category: "line", ...num(DOCUMENTED_DEFAULTS.casesNeeded) },
@@ -107,8 +99,8 @@ export const FIELD_SPECS: FieldSpec[] = [
   { key: "casesPerSkid", label: "Cases / Skid", category: "packaging", ...num(DOCUMENTED_DEFAULTS.casesPerSkid) },
   { key: "casesPerLayer", label: "Cases / Layer", category: "packaging", ...num(DOCUMENTED_DEFAULTS.casesPerLayer) },
   { key: "cartonsPerCase", label: "Cartons / Case", category: "packaging", ...num(DOCUMENTED_DEFAULTS.cartonsPerCase) },
-  { key: "shipper", label: "Shipper", category: "packaging", kind: "select", options: SHIPPER_OPTIONS, aiEligible: true, fillable: true },
-  { key: "skidStacking", label: "Skid Stacking Style", category: "packaging", kind: "select", options: SKID_STACKING_OPTIONS, aiEligible: true, fillable: true },
+  { key: "shipper", label: "Shipper", category: "packaging", kind: "select", options: SHIPPER_OPTIONS, fillable: true },
+  { key: "skidStacking", label: "Skid Stacking Style", category: "packaging", kind: "select", options: SKID_STACKING_OPTIONS, fillable: true },
 
   // Dough supply
   { key: "doughballsPerTray", label: "Doughballs / Tray", category: "dough", ...num(DOCUMENTED_DEFAULTS.doughballsPerTray) },
@@ -130,23 +122,21 @@ export const FIELD_SPECS: FieldSpec[] = [
 function applicatorSpecs(): FieldSpec[] {
   const out: FieldSpec[] = [];
   for (const n of [1, 2, 3, 4]) {
-    out.push({ key: `app${n}Type`, label: `App ${n} Type`, category: "applicator", kind: "text", aiEligible: true, fillable: true });
+    out.push({ key: `app${n}Type`, label: `App ${n} Type`, category: "applicator", kind: "text", fillable: true });
     out.push({ key: `app${n}OzPerPizza`, label: `App ${n} oz / Pizza`, category: "applicator", ...num(undefined) });
     out.push({ key: `app${n}BatchLbs`, label: `App ${n} Batch (lbs)`, category: "applicator", ...num(DOCUMENTED_DEFAULTS[`app${n}BatchLbs`]) });
   }
   return out;
 }
-
 function pepperoniSpecs(): FieldSpec[] {
   const out: FieldSpec[] = [];
   for (const n of [1, 2]) {
-    out.push({ key: `pep${n}Type`, label: `Pep ${n} Type`, category: "pepperoni", kind: "text", aiEligible: true, fillable: true });
+    out.push({ key: `pep${n}Type`, label: `Pep ${n} Type`, category: "pepperoni", kind: "text", fillable: true });
     out.push({ key: `pep${n}OzPerPizza`, label: `Pep ${n} oz / Pizza`, category: "pepperoni", ...num(undefined) });
     out.push({ key: `pep${n}BatchLbs`, label: `Pep ${n} Batch (lbs)`, category: "pepperoni", ...num(DOCUMENTED_DEFAULTS[`pep${n}BatchLbs`]) });
   }
   return out;
 }
-
 // ── Blank detection ──────────────────────────────────────────────────────────
 
 type Rec = Record<string, unknown>;
@@ -292,7 +282,7 @@ export type KnownLookup = (key: string, kind: FieldKind) => {
 };
 
 // A flat record of learned values for ONE product, keyed by field key. Values
-// are stored/transmitted as strings (the same shape the AI endpoint returns).
+// are stored/transmitted as strings for stable web/mobile persistence.
 export type LearnedValueRow = {
   brand: string;
   flavor: string;
@@ -347,70 +337,4 @@ export function buildProposals(missing: MissingField[], lookup: KnownLookup): Fi
     return { ...base, value: null, source: "none" };
   });
 }
-
-// Fields with no known source AND eligible for AI suggestion. The panel sends
-// these to /ai/fill-missing, then merges suggestions back by key.
-export function aiCandidates(proposals: FieldProposal[]): FieldProposal[] {
-  return proposals.filter((p) => {
-    if (p.source !== "none" || !p.fillable) return false;
-    const spec = FIELD_SPECS.find((s) => s.key === p.key);
-    return !!spec?.aiEligible;
-  });
-}
-
-// ── AI request ───────────────────────────────────────────────────────────────
-
-// Mirrors the OpenAPI FillMissingInput contract.
-export type FillMissingRequestField = {
-  key: string;
-  label: string;
-  category: FieldCategory;
-  kind: FieldKind;
-  options?: string[];
-};
-export type FillMissingContextItem = { key: string; label: string; value: string };
-export type FillMissingInput = {
-  brand: string;
-  flavor: string;
-  dieType?: string;
-  context?: FillMissingContextItem[];
-  fields: FillMissingRequestField[];
-};
-export type FillMissingSuggestion = { key: string; value: string; rationale: string };
-export type FillMissingResult = {
-  suggestions: FillMissingSuggestion[];
-  generatedAt: number;
-  note?: string;
-};
-
-// Build the read-only AI request: the blank fields needing a value, plus the
-// already-known context fields for grounding.
-export function buildFillMissingInput(
-  brand: string,
-  flavor: string,
-  dieType: string,
-  candidates: FieldProposal[],
-  contextRec: Rec,
-): FillMissingInput {
-  const context = FIELD_SPECS.filter(
-    (s) => s.key !== "brand" && s.key !== "flavor" && !isBlankValue(s.kind, contextRec[s.key]),
-  ).map((s) => ({
-    key: s.key,
-    label: s.label,
-    value: String(contextRec[s.key]),
-  }));
-
-  return {
-    brand,
-    flavor,
-    dieType,
-    context,
-    fields: candidates.map((c) => ({
-      key: c.key,
-      label: c.label,
-      category: c.category,
-      kind: c.kind,
-      ...(c.options ? { options: c.options } : {}),
-    })),
-  };
-}
+export {};

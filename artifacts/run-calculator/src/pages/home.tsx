@@ -507,7 +507,6 @@ import {
   type MergeSuggestCategory,
 } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
-import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
@@ -6184,14 +6183,12 @@ export default function Home() {
     setMergeError("");
   }
 
-  // Ask for duplicate-group suggestions: combines an optional AI clustering
-  // pass with learned
-  // "previously merged" aliases. Results are reviewed (never auto-applied);
+  // Ask for deterministic duplicate-group suggestions from learned aliases and
+  // conservative near-duplicate matching. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
   async function handleSuggestMerges(
     forceRefresh = false,
-    useAi = false,
   ): Promise<number | null> {
     setMergeFromImport(false);
     const scope = mergeSuggestScope;
@@ -6205,15 +6202,15 @@ export default function Home() {
     setMergeSuggestNote("");
     setMergeSuggestRan(true);
     try {
-      const { suggestions, usedAi, error } = await suggestMerges(
+      const { suggestions } = await suggestMerges(
         scope.universe,
         scope.category,
         scope.brand,
         // Known brands power the deterministic cross-brand guard: a suggestion
         // pairing names that mention DIFFERENT brands ("Lowes …" vs "Bashas …")
-        // is dropped no matter what the AI said.
+        // is dropped before it reaches the manager.
         brands,
-        { signal: controller.signal, forceRefresh, useAi },
+        { signal: controller.signal, forceRefresh },
       );
       if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
        let visibleSuggestions = suggestions;
@@ -6250,12 +6247,7 @@ export default function Home() {
        }
        setMergeSuggestions(visibleSuggestions);
       setMergeSuggestSelected(new Set());
-      if (useAi && !usedAi && error) {
-        setMergeSuggestError(
-          `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
-        );
-      }
-       if (usedAi && visibleSuggestions.length === 0) {
+        if (visibleSuggestions.length === 0) {
         setMergeSuggestNote("No duplicate groups found.");
       }
        return visibleSuggestions.length;
@@ -15338,23 +15330,15 @@ export default function Home() {
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>
                             <p className="text-[11px] text-muted-foreground">
-                              Start with look-alike and remembered matches. Managers and QC managers can optionally request an AI suggestion pass afterward.
+                              Review look-alike and remembered matches before applying any merge.
                             </p>
                           </div>
                           <button
                             type="button"
                             disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
-                            onClick={() => handleSuggestMerges(true, false)}
+                            onClick={() => handleSuggestMerges(true)}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
                           >{mergeSuggestBusy ? "Scanning…" : "Scan deterministic matches"}</button>
-                          {canUseAiTools && mergeSuggestRan && (
-                            <button
-                              type="button"
-                              disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
-                              onClick={() => handleSuggestMerges(true, true)}
-                              className="px-3 py-1.5 rounded-md border border-primary/40 text-primary text-xs font-semibold hover:bg-primary/10 transition-colors disabled:opacity-50 whitespace-nowrap"
-                            >{mergeSuggestBusy ? "Working…" : "Get optional AI suggestions"}</button>
-                          )}
                         </div>
 
                         {mergeSuggestError && (
@@ -15415,7 +15399,6 @@ export default function Home() {
                                   {s.reason && (
                                     <p className="text-[11px] text-muted-foreground">{s.reason}</p>
                                   )}
-                                  {s.review && <ReviewBadge review={s.review} />}
                                   <div className="flex items-center gap-2 pt-0.5">
                                     <button
                                       type="button"

@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ClipboardList,
-  Loader2,
-  Sparkles,
   Check,
-  AlertTriangle,
   Lock,
   SkipForward,
 } from "lucide-react";
@@ -18,21 +15,11 @@ import {
   type LearnedValueRow,
   detectMissingFields,
   buildProposals,
-  aiCandidates,
-  buildFillMissingInput,
-  requestFillMissing,
-  fillMissingErrorMessage,
   makeWebLookup,
   fetchFillMissingValues,
   saveFillMissingValues,
 } from "../fillMissing";
-import type { ReviewVerdict } from "@workspace/ai-review";
-import ReviewBadge from "./ReviewBadge";
 import { useMe } from "../useRole";
-
-// AI suggestions may carry an advisory reviewer verdict; the shared lib's
-// FieldProposal doesn't, so widen it locally for display.
-type ReviewedProposal = FieldProposal & { review?: ReviewVerdict };
 
 const CATEGORY_LABEL: Record<FieldCategory, string> = {
   identity: "Run Identity",
@@ -58,7 +45,6 @@ const SOURCE_META: Record<ProposalSource, { label: string; cls: string }> = {
   profile: { label: "From profile", cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
   spec: { label: "From spec sheet", cls: "bg-sky-500/15 text-sky-400 border-sky-500/30" },
   default: { label: "Default", cls: "bg-slate-500/15 text-slate-300 border-slate-500/30" },
-  ai: { label: "AI suggestion", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   none: { label: "No suggestion", cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
 };
 
@@ -72,25 +58,19 @@ export default function FillMissingPanel({
   getRecord,
   brand,
   flavor,
-  dieType,
   canEdit,
   onCommit,
 }: {
   getRecord: () => Record<string, unknown>;
   brand: string;
   flavor: string;
-  dieType: string;
   canEdit: boolean;
   onCommit: (key: string, value: string | number) => void;
 }) {
   const { hasCapability } = useMe();
-  const canUseAiTools = hasCapability("use-ai-tools");
   const canManageProfiles = hasCapability("manage-profiles");
-  const [proposals, setProposals] = useState<ReviewedProposal[] | null>(null);
+  const [proposals, setProposals] = useState<FieldProposal[] | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiNote, setAiNote] = useState<string | null>(null);
   // Server-persisted learned values (factory-wide). Fetched once on mount;
   // best-effort, so any failure just leaves the list empty.
   const [learnedValues, setLearnedValues] = useState<LearnedValueRow[]>([]);
@@ -114,48 +94,11 @@ export default function FillMissingPanel({
     const missing = detectMissingFields(rec);
     const props = buildProposals(missing, makeWebLookup(brand, flavor, learnedValues));
     setProposals(props);
-    setAiError(null);
-    setAiNote(null);
     const next: Record<string, RowState> = {};
     for (const p of props) {
       next[p.key] = { draft: p.value == null ? "" : String(p.value), applied: false, skipped: false };
     }
     setRows(next);
-  }
-
-  async function getAiSuggestions() {
-    if (!proposals) return;
-    const candidates = aiCandidates(proposals);
-    if (candidates.length === 0) return;
-    setAiLoading(true);
-    setAiError(null);
-    setAiNote(null);
-    try {
-      const input = buildFillMissingInput(brand, flavor, dieType, candidates, getRecord());
-      const res = await requestFillMissing(input);
-      const byKey = new Map(res.suggestions.map((s) => [s.key, s]));
-      setProposals((prev) =>
-        (prev ?? []).map((p) => {
-          const s = byKey.get(p.key);
-          if (!s || p.source !== "none") return p;
-          return { ...p, value: s.value, source: "ai", rationale: s.rationale, review: s.review };
-        }),
-      );
-      setRows((prev) => {
-        const next = { ...prev };
-        for (const [key, s] of byKey) {
-          if (next[key] && !next[key].applied && !next[key].skipped) {
-            next[key] = { ...next[key], draft: s.value };
-          }
-        }
-        return next;
-      });
-      if (res.note) setAiNote(res.note);
-    } catch (e) {
-      setAiError(fillMissingErrorMessage(e));
-    } finally {
-      setAiLoading(false);
-    }
   }
 
   function apply(p: FieldProposal) {
@@ -202,10 +145,6 @@ export default function FillMissingPanel({
     const r = rows[p.key];
     return r && !r.applied && !r.skipped;
   });
-  const hasAiCandidates = (proposals ?? []).some(
-    (p) => p.source === "none" && p.fillable && !rows[p.key]?.applied && !rows[p.key]?.skipped,
-  );
-
   return (
     <Card className="border-primary/30">
       <CardHeader>
@@ -215,7 +154,7 @@ export default function FillMissingPanel({
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           Find blank fields this run needs and propose values from your profile, the spec sheet,
-          documented defaults, or AI. Nothing is applied until you confirm each one.
+          or documented defaults. Nothing is applied until you confirm each one.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -224,23 +163,6 @@ export default function FillMissingPanel({
             <ClipboardList className="w-4 h-4" />
             {proposals ? "Re-scan" : "Scan for missing data"}
           </Button>
-          {proposals && hasAiCandidates && canUseAiTools && (
-            <Button
-              onClick={getAiSuggestions}
-              size="sm"
-              className="gap-2"
-              disabled={aiLoading}
-              data-testid="button-ai-suggestions"
-            >
-              {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {aiLoading ? "Asking AI…" : "Get AI suggestions"}
-            </Button>
-          )}
-          {proposals && hasAiCandidates && !canUseAiTools && (
-            <span className="text-[11px] text-muted-foreground">
-              AI suggestions require AI tools access.
-            </span>
-          )}
         </div>
 
         {proposals && pending.length > 0 && !canManageProfiles && (
@@ -252,18 +174,6 @@ export default function FillMissingPanel({
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               You can apply a confirmed value to this run, but saving it for future runs requires profile management access.
             </p>
-          </div>
-        )}
-
-        {aiError && (
-          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-            <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
-            <span>{aiError}</span>
-          </div>
-        )}
-        {aiNote && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-            {aiNote}
           </div>
         )}
 
@@ -299,14 +209,6 @@ export default function FillMissingPanel({
                           {meta.label}
                         </span>
                       </div>
-                      {p.rationale && (
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{p.rationale}</p>
-                      )}
-                      {p.source === "ai" && p.review && (
-                        <div className="mt-1">
-                          <ReviewBadge review={p.review} />
-                        </div>
-                      )}
                       {!p.fillable ? (
                         <p className="mt-2 text-[11px] text-amber-400">
                           Set this on the run itself before configuring — it can&apos;t be filled here.

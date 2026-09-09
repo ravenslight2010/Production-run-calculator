@@ -13,7 +13,7 @@ import {
   toReconcileProfiles,
   toReconcileRecipes,
 } from "@workspace/spec-reconcile";
-import { recipeTargets, type ParsedSpecImport } from "@workspace/spec-import";
+import type { ParsedSpecImport } from "@workspace/spec-import";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { canonicalReportCsv, canonicalReportPrintHtml, canonicalReportSnapshotId, canonicalReportXlsx, type CanonicalReportExportFormat } from "./canonicalReportExport";
 import { writeServerJobArtifact } from "./serverJobArtifactCache";
@@ -23,7 +23,6 @@ import type { Scope } from "./requestScope";
 import { logger } from "./logger";
 import { extractReviewedDocument, workbookTextAdapter } from "./reviewedDocumentExtraction";
 import { groundPromptWithMemory } from "../routes/aiMemoryContext";
-import { reviewSuggestions } from "../routes/aiReviewer";
 import {
   toCurrentReconcileProfiles,
   toCurrentReconcileRecipes,
@@ -65,21 +64,6 @@ registerServerJob("workbook-parse", {
       },
       sanitize: (raw) => sanitizeParseSpecSheet(raw, validation.data),
       empty: (): ParsedSpecImport => ({ profiles: [], recipes: [] }),
-      review: async (parsed) => {
-        const verdicts = await reviewSuggestions({
-          featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",
-          instructions: "Flag implausible weights, mismatched brand/flavor, and values outside normal pizza-production ranges. This is advisory only.",
-          items: [
-            ...parsed.profiles.map((p, i) => ({ id: `profile-${i}`, text: `Spec profile: ${p.brand} / ${p.flavor}` })),
-            ...parsed.recipes.map((r, i) => ({ id: `recipe-${i}`, text: `${r.kind} recipe ${r.name} ${recipeTargets(r).map((target) => `${target.brand}/${target.flavor}`).join(", ")}` })),
-          ], log: logger,
-        });
-        return {
-          ...parsed,
-          profiles: parsed.profiles.map((profile, i) => verdicts.has(`profile-${i}`) ? { ...profile, review: verdicts.get(`profile-${i}`) } : profile),
-          recipes: parsed.recipes.map((recipe, i) => verdicts.has(`recipe-${i}`) ? { ...recipe, review: verdicts.get(`recipe-${i}`) } : recipe),
-        };
-      },
     });
     if (!extraction.ok) throw new Error(extraction.metadata.modelStatus === "rate-limited"
       ? "Workbook parsing is rate-limited; retry this review-only job later."

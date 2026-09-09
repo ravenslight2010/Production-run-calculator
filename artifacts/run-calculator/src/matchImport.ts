@@ -10,7 +10,6 @@
 // This module NEVER writes anything. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/matchImport.ts (replit.md parity).
 
-import type { ReviewVerdict } from "@workspace/ai-review";
 import type { AiStatus } from "./aiStatus";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
@@ -28,20 +27,18 @@ export type MatchImportInput = {
   unmatchedPepTypes?: string[];
 };
 
-export type BrandMatch = { candidate: string; match: string; review?: ReviewVerdict };
+export type BrandMatch = { candidate: string; match: string };
 export type FlavorMatch = {
   brand: string;
   candidate: string;
   match: string;
-  review?: ReviewVerdict;
 };
 export type IngredientMatch = {
   kind: "dough" | "sauce" | "cheese";
   candidate: string;
   match: string;
-  review?: ReviewVerdict;
 };
-export type NameMatch = { candidate: string; match: string; review?: ReviewVerdict };
+export type NameMatch = { candidate: string; match: string };
 
 export type MatchImportResult = {
   brandMatches: BrandMatch[];

@@ -6,7 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MatchImportIngredientMatchKind } from './matchImportIngredientMatchKind';
-import type { ReviewVerdict } from './reviewVerdict';
 
 export interface MatchImportIngredientMatch {
   /** The recipe kind whose ingredient pool the match belongs to */
@@ -15,5 +14,4 @@ export interface MatchImportIngredientMatch {
   candidate: string;
   /** The saved ingredient it best matches (within that kind's pool) */
   match: string;
-  review?: ReviewVerdict;
 }

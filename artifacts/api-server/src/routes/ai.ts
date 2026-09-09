@@ -23,18 +23,11 @@ import {
   workbookTextAdapter,
 } from "../lib/reviewedDocumentExtraction";
 import {
-  resolveUnresolvedData,
   resolveUnresolvedDataWithEnrichment,
 } from "../lib/unresolvedDataResolution";
 import { aiCostLimit, chargeAiCost } from "../middlewares/costLimitMiddleware";
 import { fixedWindowPerUserPolicy } from "../lib/fixedWindowPolicy";
 import { requireCapability } from "../middlewares/requireCapability";
-import {
-  buildFillMissingPrompt,
-  sanitizeFillMissingSuggestions,
-  validateFillMissingBody,
-  type RequestedField,
-} from "./aiFillMissing";
 import {
   buildMatchImportPrompt,
   resolveDeterministicMatchImport,
@@ -53,14 +46,7 @@ import {
   sanitizeMatchPremix,
   validateMatchPremixBody,
 } from "./aiMatchPremix";
-import { recipeTargets, type ParsedSpecImport } from "@workspace/spec-import";
-import {
-  buildSuggestMergesPrompt,
-  buildKnownPairsNote,
-  filterKnownMerges,
-  sanitizeSuggestMerges,
-  validateSuggestMergesBody,
-} from "./aiSuggestMerges";
+import type { ParsedSpecImport } from "@workspace/spec-import";
 import {
   toCurrentReconcileRecipes,
   toCurrentReconcileProfiles,
@@ -85,14 +71,12 @@ import {
   toScheduleRules,
   optimizeSchedule,
 } from "./aiScheduleOptimize";
-import { reviewSuggestions } from "./aiReviewer";
 import {
   AI_RESULT_CACHE_TTL_MS,
   fingerprintAiOperation,
   getOrCreateAiResult,
   type AiCacheLoadResult,
 } from "../lib/aiResultCache";
-import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 import {
   loadFacilityKnowledge,
   appendFacilityMemoryBlock,
@@ -108,7 +92,6 @@ const router: IRouter = Router();
 const CACHEABLE_AI_PATHS = new Set([
   "/match-import",
   "/match-premix",
-  "/suggest-merges",
 ]);
 // These routes retain their historical /ai URLs for client compatibility, but
 // their results are now entirely deterministic. Keep them out of the paid AI
@@ -457,98 +440,6 @@ router.post(
 );
 
 router.post(
-  "/ai/fill-missing",
-  requireCapability("use-ai-tools"),
-  fixedWindowPerUserPolicy("ai-fill-missing"),
-  async (req, res): Promise<void> => {
-    const validation = validateFillMissingBody(req.body);
-    if (!validation.ok) {
-      res.status(validation.status).json({ error: validation.error });
-      return;
-    }
-
-    const { system, user } = buildFillMissingPrompt(validation.data);
-    const userPrompt = await groundPromptWithMemory(req.log, user, {
-      correctionDomains: ["brand", "flavor", "die", "item", "ingredient", "recipe"],
-    });
-
-    // Source-priority resolution already happened in the client. Declare each
-    // validated requested field unresolved explicitly so this retained route
-    // still uses the shared two-phase status/orchestration boundary.
-    const requested: RequestedField[] = validation.data.fields.map((f) => ({
-      key: f.key,
-      kind: f.kind,
-      options: f.options,
-    }));
-    const resolution = await resolveUnresolvedData({
-      label: "ai-fill-missing",
-      log: req.log,
-      input: requested,
-      resolveDeterministically: (fields) => ({ resolved: undefined, unresolved: fields }),
-      hasUnresolved: (fields) => fields.length > 0,
-      buildModelInput: (fields) => ({ fields, system, userPrompt }),
-      call: async ({ system: promptSystem, userPrompt: promptUser }) => {
-        const response = await openai.chat.completions.create({
-          model: pickModel("cheap"),
-          max_completion_tokens: 4096,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: promptSystem },
-            { role: "user", content: promptUser },
-          ],
-        });
-        return response.choices[0]?.message?.content ?? "";
-      },
-      sanitize: (raw, fields) => sanitizeFillMissingSuggestions(raw, fields),
-      merge: (_resolved, suggestions) => suggestions,
-    });
-    if (resolution.metadata.aiStatus === "unavailable") {
-      if (
-        resolution.metadata.modelStatus === "provider-unavailable" ||
-        resolution.metadata.modelStatus === "rate-limited"
-      ) {
-        const failure = aiCallFailureHttp(
-          {
-            reason:
-              resolution.metadata.modelStatus === "rate-limited" ? "rate-limited" : "provider",
-          },
-          "AI provider error",
-        );
-        res.status(failure.status).json({ error: failure.error });
-        return;
-      }
-      res.json({
-        suggestions: [],
-        generatedAt: Date.now(),
-        ...resolution.metadata,
-      });
-      return;
-    }
-    const verdicts = await reviewSuggestions({
-      featureLabel: "auto-filled values for missing product/run setup fields",
-      instructions:
-        "Flag any value that is implausible for its field, contradicts the product's known brand/flavor/size, or is an unsafe default to commit. Approve values that are clearly correct and well-justified.",
-      items: resolution.data.suggestions.map((s, i) => ({
-        id: `fm-${i}`,
-        text: `${s.key} = "${s.value}" — ${s.rationale}`,
-      })),
-      log: req.log,
-    });
-    const reviewed = resolution.data.suggestions.map((s, i) => {
-      const v = verdicts.get(`fm-${i}`);
-      return v ? { ...s, review: v } : s;
-    });
-
-    res.json({
-      suggestions: reviewed,
-      generatedAt: Date.now(),
-      ...resolution.metadata,
-      ...(resolution.data.note ? { note: resolution.data.note } : {}),
-    });
-  },
-);
-
-router.post(
   "/ai/match-import",
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-match-import"),
@@ -654,59 +545,16 @@ router.post(
             pepTypeMatches,
             note,
           } = sanitizeMatchImport(raw, unresolved);
-          const verdicts = await reviewSuggestions({
-            featureLabel: "spreadsheet name matches to existing saved names",
-            instructions:
-              "Flag any match where the imported name is likely NOT the same real-world item as the matched saved name (a wrong or coincidental match). Approve matches that clearly refer to the same item.",
-            items: [
-              ...brandMatches.map((m, i) => ({
-                id: `brand-${i}`,
-                text: `Imported brand "${m.candidate}" matched to saved "${m.match}"`,
-              })),
-              ...flavorMatches.map((m, i) => ({
-                id: `flavor-${i}`,
-                text: `Imported flavor "${m.candidate}" (brand ${m.brand}) matched to saved "${m.match}"`,
-              })),
-              ...ingredientMatches.map((m, i) => ({
-                id: `ingredient-${i}`,
-                text: `Imported ${m.kind} ingredient "${m.candidate}" matched to saved "${m.match}"`,
-              })),
-              ...appTypeMatches.map((m, i) => ({
-                id: `app-${i}`,
-                text: `Imported applicator type "${m.candidate}" matched to saved "${m.match}"`,
-              })),
-              ...pepTypeMatches.map((m, i) => ({
-                id: `pep-${i}`,
-                text: `Imported pepperoni type "${m.candidate}" matched to saved "${m.match}"`,
-              })),
-            ],
-            log: req.log,
-          });
           const value: MatchImportCacheBody = {
             // Cache only the model-owned unresolved suggestions. Deterministic
             // matches are request-local and are merged below on every response;
             // storing them under a fingerprint built from the reduced unresolved
             // prompt could replay another request's deterministic matches.
-            brandMatches: brandMatches.map((m, i) => {
-              const v = verdicts.get(`brand-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            flavorMatches: flavorMatches.map((m, i) => {
-              const v = verdicts.get(`flavor-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            ingredientMatches: ingredientMatches.map((m, i) => {
-              const v = verdicts.get(`ingredient-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            appTypeMatches: appTypeMatches.map((m, i) => {
-              const v = verdicts.get(`app-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
-            pepTypeMatches: pepTypeMatches.map((m, i) => {
-              const v = verdicts.get(`pep-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
+            brandMatches,
+            flavorMatches,
+            ingredientMatches,
+            appTypeMatches,
+            pepTypeMatches,
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
@@ -810,38 +658,6 @@ router.post(
       },
       sanitize: (raw) => sanitizeParseSpecSheet(raw, validation.data),
       empty: (): ParsedSpecImport => ({ profiles: [], recipes: [] }),
-      review: async (parsed) => {
-        const verdicts = await reviewSuggestions({
-          featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",
-          instructions:
-            "Flag any profile or recipe with implausible weights, a mismatched brand/flavor, or values outside normal pizza-production ranges. Approve entries that look correctly parsed and plausible. Die types are commonly non-numeric custom dies (e.g. \"Argus\", \"Mystic\"), not inch sizes — do NOT flag a die merely for not being a standard numeric pizza size.",
-          items: [
-            ...parsed.profiles.map((p, i) => ({
-              id: `profile-${i}`,
-              text: `Spec profile: brand "${p.brand}", flavor "${p.flavor}"${p.dieType ? `, die ${p.dieType}` : ""}`,
-            })),
-            ...parsed.recipes.map((r, i) => {
-              const tgts = recipeTargets(r);
-              const ctx = tgts.length
-                ? ` (brand ${tgts[0].brand}, flavor ${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more profiles` : ""})`
-                : "";
-              return { id: `recipe-${i}`, text: `${r.kind} recipe "${r.name}"${ctx}` };
-            }),
-          ],
-          log: req.log,
-        });
-        return {
-          ...parsed,
-          profiles: parsed.profiles.map((p, i) => {
-            const v = verdicts.get(`profile-${i}`);
-            return v ? { ...p, review: v } : p;
-          }),
-          recipes: parsed.recipes.map((r, i) => {
-            const v = verdicts.get(`recipe-${i}`);
-            return v ? { ...r, review: v } : r;
-          }),
-        };
-      },
     });
     if (!extraction.ok) {
       if (
@@ -1075,21 +891,8 @@ router.post(
           const raw = result.raw;
           const rawIsValidShape = isObject(raw) && Array.isArray(raw.matches);
           const matches = sanitizeMatchPremix(raw, aiInput);
-          const verdicts = await reviewSuggestions({
-            featureLabel: "premix product names matched to existing saved brand/flavor products",
-            instructions:
-              "Flag any match where the imported premix name is likely NOT the same real-world product as the matched saved brand/flavor (a wrong or coincidental match). Approve matches that clearly refer to the same product.",
-            items: matches.map((m, i) => ({
-              id: `match-${i}`,
-              text: `Imported premix "${m.name}" matched to saved brand "${m.brand}"${m.flavor ? ` flavor "${m.flavor}"` : ""}`,
-            })),
-            log: req.log,
-          });
           const value: MatchPremixCacheBody = {
-            matches: matches.map((m, i) => {
-              const v = verdicts.get(`match-${i}`);
-              return v ? { ...m, review: v } : m;
-            }),
+            matches,
             aiStatus: "enriched",
           };
           return { value, cacheable: rawIsValidShape };
@@ -1117,151 +920,6 @@ router.post(
           aiStatus: "unavailable",
           decision: "suggestion",
           note: "AI matching is unavailable; deterministic matches were retained for review.",
-          generatedAt: Date.now(),
-        });
-        return;
-      }
-      throw err;
-    }
-
-    res.json({ ...resolution.data, ...resolution.metadata, generatedAt: Date.now() });
-  },
-);
-
-router.post(
-  "/ai/suggest-merges",
-  requireCapability("use-ai-tools"),
-  fixedWindowPerUserPolicy("ai-suggest-merges"),
-  async (req, res): Promise<void> => {
-    const validation = validateSuggestMergesBody(req.body);
-    if (!validation.ok) {
-      res.status(validation.status).json({ error: validation.error });
-      return;
-    }
-
-    // Load corrections now so we can (a) add a prompt hint listing already-
-    // known pairs (saves tokens, helps the model skip them) and (b) apply a
-    // deterministic post-filter after the AI responds that guarantees known
-    // pairs are never returned regardless of model behaviour.
-    const corrections = await loadCorrections(req.log);
-    type MergeCacheBody = {
-      suggestions: unknown[];
-      aiStatus: "enriched" | "unavailable";
-      note?: string;
-    };
-    const model = pickModel("cheap");
-    let resolution;
-    try {
-      resolution = await resolveUnresolvedDataWithEnrichment({
-        input: validation.data.names,
-        // Corrections are a post-sanitize exclusion, not auto-applied merges.
-        // Every remaining name is unresolved and needs advisory enrichment.
-        resolveDeterministically: (names) => ({ resolved: [], unresolved: names }),
-        hasUnresolved: (names) => names.length > 1,
-        enrichUnresolved: async (names) => {
-          const promptInput = { ...validation.data, names };
-          const { system, user } = buildSuggestMergesPrompt(promptInput);
-          const knownPairsNote = buildKnownPairsNote(corrections, names);
-          const userWithHint = knownPairsNote ? `${user}\n\n${knownPairsNote}` : user;
-          const userPrompt = await groundPromptWithMemory(req.log, userWithHint, {
-            correctionDomains: ["ingredient", "die"],
-          });
-          const cached = await cachedAiResponse<MergeCacheBody>(req, res, {
-        operation: "suggest-merges",
-        model,
-        system,
-        user: userPrompt,
-        validate: (value): value is MergeCacheBody =>
-          isObject(value) &&
-          Array.isArray(value.suggestions) &&
-          value.suggestions.every(isObject) &&
-          (value.aiStatus === "enriched" || value.aiStatus === "unavailable") &&
-          (value.note === undefined || typeof value.note === "string"),
-        load: async () => {
-          const result = await fetchModelJsonWithRetry({
-            label: "ai-suggest-merges",
-            log: req.log,
-            call: async () => {
-              const response = await openai.chat.completions.create({
-                model,
-                max_completion_tokens: 16384,
-                response_format: { type: "json_object" },
-                messages: [
-                  { role: "system", content: system },
-                  { role: "user", content: userPrompt },
-                ],
-              });
-              return response.choices[0]?.message?.content ?? "";
-            },
-          });
-          if (!result.ok) {
-            if (result.reason === "provider" || result.reason === "rate-limited") {
-              const failure = aiCallFailureHttp(result, "AI provider error");
-              throw new AiResponseError(failure.status, failure.error);
-            }
-            return {
-              value: { suggestions: [], aiStatus: "unavailable" as const },
-              cacheable: false,
-            };
-          }
-          const raw = result.raw;
-          const rawIsValidShape = isObject(raw) && Array.isArray(raw.suggestions);
-          const suggestions = filterKnownMerges(
-            sanitizeSuggestMerges(raw, names),
-            corrections,
-          );
-          const note =
-            isObject(raw) && typeof raw.note === "string"
-              ? raw.note.trim().slice(0, 500)
-              : "";
-          const verdicts = await reviewSuggestions({
-            featureLabel: "proposed ingredient-name merges (folding duplicates into one canonical name)",
-            instructions:
-              "Flag any group that would merge names which are actually DIFFERENT products or ingredients (a merge that loses a real distinction). Approve groups that are clearly the same item spelled differently.",
-            items: suggestions.map((s, i) => ({
-              id: `merge-${i}`,
-              text: `Merge [${s.sources.join(", ")}] into "${s.target}"${s.reason ? ` — ${s.reason}` : ""}`,
-            })),
-            log: req.log,
-          });
-          const value: MergeCacheBody = {
-            suggestions: suggestions.map((s, i) => {
-              const v = verdicts.get(`merge-${i}`);
-              return v ? { ...s, review: v } : s;
-            }),
-            aiStatus: "enriched",
-            ...(note ? { note } : {}),
-          };
-          return { value, cacheable: rawIsValidShape };
-        },
-          });
-          return {
-            suggestions: cached.value,
-            status: cached.value.aiStatus,
-            ...(cached.value.aiStatus === "unavailable" ? { modelStatus: "malformed" as const } : {}),
-          };
-        },
-        emptySuggestions: (): MergeCacheBody => ({
-          suggestions: [],
-          aiStatus: "unavailable",
-        }),
-        merge: (_resolved, suggestions) => ({
-          suggestions: suggestions.suggestions,
-          ...(suggestions.note ? { note: suggestions.note } : {}),
-        }),
-      });
-    } catch (err) {
-      if (err instanceof AiCostLimitError) {
-        finishAiCostLimitResponse(res);
-        return;
-      }
-      if (err instanceof AiResponseError) {
-        res.json({
-          suggestions: [],
-          aiGenerated: false,
-          aiStatus: "unavailable",
-          decision: "suggestion",
-          note: "AI merge suggestions are unavailable. No changes were applied.",
           generatedAt: Date.now(),
         });
         return;

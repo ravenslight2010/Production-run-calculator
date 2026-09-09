@@ -15,7 +15,7 @@
 //
 // Strategy: stand up the real router against a disposable Postgres DB and sign
 // a fresh operator user (no use-ai-tools capability). The cost limiter counts
-// every retained fill-missing request, but the route then 403s on the missing
+// every retained match-import request, but the route then 403s on the missing
 // capability, so budget is consumed without calling the provider. Three hundred
 // base-cost requests fill the budget and request 301 receives 429.
 //
@@ -29,7 +29,7 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
 
 const provider = vi.hoisted(() => ({
@@ -37,6 +37,7 @@ const provider = vi.hoisted(() => ({
   wait: false,
   started: undefined as (() => void) | undefined,
   release: undefined as (() => void) | undefined,
+  gate: undefined as Promise<void> | undefined,
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => {
@@ -46,16 +47,14 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
       chat: {
         completions: {
           create: async (args: { messages?: Array<{ content?: unknown }> }) => {
-            const system = String(args.messages?.[0]?.content ?? "");
-            if (system.includes("careful reviewer")) {
-              return { choices: [{ message: { content: "{}" } }] };
-            }
+            void args;
             provider.calls += 1;
             provider.started?.();
             if (provider.wait) {
-              await new Promise<void>((resolve) => {
+              provider.gate ??= new Promise<void>((resolve) => {
                 provider.release = resolve;
               });
+              await provider.gate;
             }
             return {
               choices: [{
@@ -177,6 +176,7 @@ beforeEach(async () => {
   provider.wait = false;
   provider.started = undefined;
   provider.release = undefined;
+  provider.gate = undefined;
 });
 
 // A distinct user per call site, so two callers in one test never share a
@@ -219,10 +219,10 @@ async function exhaustBudget(): Promise<{ blocked: Response; userId: string }> {
   const userId = freshUser();
   await insertUser(userId);
   for (let i = 0; i < 300; i++) {
-    const res = await aiCall(userId, "/ai/fill-missing");
-    expect(res.status, `fill-missing #${i + 1} should pass cost limit and 403`).toBe(403);
+    const res = await aiCall(userId, "/ai/match-import");
+    expect(res.status, `match-import #${i + 1} should pass cost limit and 403`).toBe(403);
   }
-  return { blocked: await aiCall(userId, "/ai/fill-missing"), userId };
+  return { blocked: await aiCall(userId, "/ai/match-import"), userId };
 }
 
 describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
@@ -286,7 +286,7 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
     // (403 = passed the cost limiter, refused only by their missing capability).
     const other = freshUser();
     await insertUser(other);
-    const res = await aiCall(other, "/ai/fill-missing");
+    const res = await aiCall(other, "/ai/match-import");
     expect(res.status).toBe(403);
   });
 
@@ -328,13 +328,18 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
 
   it("charges one cache-miss owner, not its concurrent waiter or later cache hit", async () => {
     const manager = freshUser();
-    await insertManager(manager);
+    await insertUser(manager);
 
     // Leave exactly one unit of provider budget. Invalid non-cacheable requests
-    // are still charged by the historical global middleware ordering.
+    // are still charged before capability gating. Grant manager capability only
+    // after priming so these requests do not consume the route's fixed window.
     for (let i = 0; i < 299; i += 1) {
-      await aiCall(manager, "/ai/fill-missing");
+      await aiCall(manager, "/ai/match-import");
     }
+    await db
+      .update(userRolesTable)
+      .set({ role: "manager" })
+      .where(eq(userRolesTable.userId, manager));
 
     let signalStarted!: () => void;
     const started = new Promise<void>((resolve) => {

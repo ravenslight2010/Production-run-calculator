@@ -69,8 +69,6 @@ import type {
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
   FieldChecksReport,
-  FillMissingInput,
-  FillMissingResult,
   FillMissingValueList,
   FinalizedOperationalReport,
   FinalizedOperationalReportSummary,
@@ -216,8 +214,6 @@ import type {
   StaffMember,
   StaffRoleUpdate,
   SubmitOperationalIntentParams,
-  SuggestMergesInput,
-  SuggestMergesResult,
   SummaryInput,
   SummaryResult,
   SupervisorPin,
@@ -4439,85 +4435,6 @@ export const useOperationsScheduleOrdering = <TError = ErrorType<void>,
       return useMutation(getOperationsScheduleOrderingMutationOptions(options));
     }
 
-export const getAiFillMissingUrl = () => {
-
-
-
-
-  return `/api/ai/fill-missing`
-}
-
-/**
- * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
- * @summary Suggest values for blank run-setup fields (AI); read-only
- */
-export const aiFillMissing = async (fillMissingInput: FillMissingInput, options?: Parameters<typeof customFetch>[1]): Promise<FillMissingResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<FillMissingResult>(getAiFillMissingUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(fillMissingInput)
-  }
-);}
-
-
-
-
-
-export const getAiFillMissingMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,AiFillMissingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,AiFillMissingMutationVariables, TContext> => {
-
-const mutationKey = ['aiFillMissing'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiFillMissing>>, AiFillMissingMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiFillMissing(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiFillMissingMutationResult = NonNullable<Awaited<ReturnType<typeof aiFillMissing>>>
-    export type AiFillMissingMutationBody = BodyType<FillMissingInput>
-    export type AiFillMissingMutationError = ErrorType<void>
-    export type AiFillMissingMutationVariables = {data: BodyType<FillMissingInput>}
-
-    /**
- * @summary Suggest values for blank run-setup fields (AI); read-only
- */
-export const useAiFillMissing = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,AiFillMissingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiFillMissing>>,
-        TError,
-        AiFillMissingMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiFillMissingMutationOptions(options));
-    }
-
 export const getAiMatchImportUrl = () => {
 
 
@@ -4753,85 +4670,6 @@ export const useAiParseSpecSheet = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiParseSpecSheetMutationOptions(options));
-    }
-
-export const getAiSuggestMergesUrl = () => {
-
-
-
-
-  return `/api/ai/suggest-merges`
-}
-
-/**
- * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
- * @summary Suggest groups of duplicate ingredient names to merge (AI)
- */
-export const aiSuggestMerges = async (suggestMergesInput: SuggestMergesInput, options?: Parameters<typeof customFetch>[1]): Promise<SuggestMergesResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<SuggestMergesResult>(getAiSuggestMergesUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(suggestMergesInput)
-  }
-);}
-
-
-
-
-
-export const getAiSuggestMergesMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,AiSuggestMergesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,AiSuggestMergesMutationVariables, TContext> => {
-
-const mutationKey = ['aiSuggestMerges'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSuggestMerges>>, AiSuggestMergesMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiSuggestMerges(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiSuggestMergesMutationResult = NonNullable<Awaited<ReturnType<typeof aiSuggestMerges>>>
-    export type AiSuggestMergesMutationBody = BodyType<SuggestMergesInput>
-    export type AiSuggestMergesMutationError = ErrorType<void>
-    export type AiSuggestMergesMutationVariables = {data: BodyType<SuggestMergesInput>}
-
-    /**
- * @summary Suggest groups of duplicate ingredient names to merge (AI)
- */
-export const useAiSuggestMerges = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,AiSuggestMergesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiSuggestMerges>>,
-        TError,
-        AiSuggestMergesMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiSuggestMergesMutationOptions(options));
     }
 
 export const getListMergeAliasesUrl = (params?: ListMergeAliasesParams,) => {

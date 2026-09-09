@@ -120,7 +120,6 @@
   },
   "dependencies": {
     "@workspace/ai-memory": "workspace:*",
-    "@workspace/ai-review": "workspace:*",
     "@workspace/allergen": "workspace:*",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",

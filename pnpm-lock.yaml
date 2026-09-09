@@ -179,9 +179,6 @@ importers:
       '@workspace/ai-memory':
         specifier: workspace:*
         version: link:../../lib/ai-memory
-      '@workspace/ai-review':
-        specifier: workspace:*
-        version: link:../../lib/ai-review
       '@workspace/anomaly':
         specifier: workspace:*
         version: link:../../lib/anomaly
@@ -495,9 +492,6 @@ importers:
       '@workspace/ai-memory':
         specifier: workspace:*
         version: link:../../lib/ai-memory
-      '@workspace/ai-review':
-        specifier: workspace:*
-        version: link:../../lib/ai-review
       '@workspace/allergen':
         specifier: workspace:*
         version: link:../../lib/allergen
@@ -837,8 +831,6 @@ importers:
         version: 3.25.76
 
   lib/ai-memory: {}
-
-  lib/ai-review: {}
 
   lib/allergen: {}
 

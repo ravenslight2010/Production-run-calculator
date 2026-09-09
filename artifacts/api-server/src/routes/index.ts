@@ -277,8 +277,8 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
-    "POST /ai/fill-missing", "POST /ai/match-import", "POST /ai/parse-spec-sheet", "POST /ai/parse-spec-images",
-    "POST /ai/match-premix", "POST /ai/suggest-merges",
+    "POST /ai/match-import", "POST /ai/parse-spec-sheet", "POST /ai/parse-spec-images",
+    "POST /ai/match-premix",
   ]),
   // This route retains its intentional signed-in contribution policy; its
   // handler enforces per-domain write rules and capability requirements before

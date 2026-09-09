@@ -1,22 +1,15 @@
-// Pure, framework-free logic for AI-assisted ingredient merging.
+// Pure, framework-free logic for deterministic ingredient merging.
 //
-// Two cooperating ideas, mirroring the spec-import AI + learned-memory pattern:
-//   1. AI suggestions — the server asks a model to cluster the app's mergeable
-//      ingredient names into groups of duplicates, each with a recommended
-//      canonical name to keep. The model is untrusted, so `sanitizeMergeSuggestions`
-//      coerces its JSON and only ever keeps names that already exist in the app.
-//   2. Learned memory — every confirmed merge persists source -> canonical
+// Learned memory — every confirmed merge persists source -> canonical
 //      aliases (`collectMergeAliases`); `suggestionsFromAliases` re-proposes those
 //      consolidations purely from memory (with an existence guard), and
-//      `mergeSuggestionLists` folds remembered + AI groups together by shared
-//      target.
+//      `mergeSuggestionLists` folds remembered + near-duplicate groups together.
 //
 // This module owns ONLY pure data shaping. Network/storage/UI live in the web
 // (`run-calculator/src/mergeSuggest.ts`) and mobile
 // (`run-calculator-mobile/context/mergeSuggest.ts`) glue, kept at parity.
 //
-// A third, deterministic idea (no AI, no memory): `nearDupSuggestions` scans a
-// name pool with @workspace/name-match's near-duplicate matcher (word-order +
+// The deterministic near-duplicate scan uses @workspace/name-match's matcher (word-order +
 // single-typo layers, extra-word layer intentionally OFF) so obvious look-alike
 // duplicates surface even when the AI is unavailable or the caller lacks the
 // AI capability. Human review still gates every merge.
@@ -429,76 +422,9 @@ export function filterDeniedSuggestions<T extends MergeSuggestion>(
 }
 
 /**
- * Coerce the model's raw JSON into safe suggestions. The model is untrusted:
- *   - both `target` and every `source` must resolve (case-insensitively) to a
- *     name that ALREADY exists in `knownNames` — we never merge invented names;
- *   - a group needs a valid target and at least one distinct source;
- *   - one group per target (case-insensitive), sources de-duplicated;
- *   - counts are bounded so a single response can't blow up the UI.
- * Returns the known-name spelling (not the model's) so downstream merges hit the
- * exact stored values. Never throws.
- */
-export function sanitizeMergeSuggestions(
-  raw: unknown,
-  knownNames: string[],
-  opts?: { maxGroups?: number; maxSourcesPerGroup?: number },
-): MergeSuggestion[] {
-  const maxGroups = opts?.maxGroups ?? 100;
-  const maxSources = opts?.maxSourcesPerGroup ?? 50;
-
-  const canon = new Map<string, string>(); // norm -> actual known name
-  for (const n of knownNames) {
-    const k = norm(n);
-    if (k && !canon.has(k)) canon.set(k, n);
-  }
-
-  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const arr: unknown[] = Array.isArray(obj.suggestions)
-    ? (obj.suggestions as unknown[])
-    : Array.isArray(raw)
-      ? (raw as unknown[])
-      : [];
-
-  const out: MergeSuggestion[] = [];
-  const usedTargets = new Set<string>();
-  for (const item of arr) {
-    if (out.length >= maxGroups) break;
-    if (!item || typeof item !== "object") continue;
-    const g = item as Record<string, unknown>;
-    const targetRaw = typeof g.target === "string" ? g.target : "";
-    const tgt = canon.get(norm(targetRaw));
-    if (!tgt) continue; // target must be a real, existing name
-    if (usedTargets.has(norm(tgt))) continue; // one group per target
-
-    const srcRaw = Array.isArray(g.sources) ? (g.sources as unknown[]) : [];
-    const sources: string[] = [];
-    const seen = new Set<string>([norm(tgt)]);
-    for (const s of srcRaw) {
-      if (sources.length >= maxSources) break;
-      if (typeof s !== "string") continue;
-      const actual = canon.get(norm(s));
-      if (!actual) continue; // source must be a real, existing name
-      const k = norm(actual);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      sources.push(actual);
-    }
-    if (sources.length === 0) continue;
-
-    const reason =
-      typeof g.reason === "string" && g.reason.trim()
-        ? g.reason.trim().slice(0, 300)
-        : undefined;
-    usedTargets.add(norm(tgt));
-    out.push({ target: tgt, sources, ...(reason ? { reason } : {}) });
-  }
-  return out;
-}
-
-/**
- * Fold remembered (alias-derived) and AI suggestions into one list, combining
+ * Fold remembered (alias-derived) and near-duplicate suggestions into one list, combining
  * groups that share a target (case-insensitive). Remembered groups come first
- * and seed the target's display name/reason; AI sources are appended. Empty
+ * and seed the target's display name/reason; additional sources are appended. Empty
  * groups are dropped.
  */
 export function mergeSuggestionLists(
