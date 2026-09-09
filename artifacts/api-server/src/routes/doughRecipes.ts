@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, doughRecipesTable, type DoughRecipeRow } from "@workspace/db";
 import { SaveDoughRecipesBody, DeleteDoughRecipesBody } from "@workspace/api-zod";
 import { normalizeNamedRecipe, type NamedRecipe } from "@workspace/named-recipes";
@@ -19,9 +19,31 @@ import { broadcastMasterDataChanged } from "./sync";
 
 const MAX_BATCH = 500;
 
+class RecipeRevisionConflict extends Error {
+  constructor(readonly rejectedIds: string[]) {
+    super("Recipe snapshot is stale");
+  }
+}
+
+function comparable(item: NamedRecipe): string {
+  return JSON.stringify({
+    id: item.id,
+    name: item.name,
+    notes: item.notes,
+    components: item.components,
+    enabled: item.enabled,
+    brand: item.brand,
+    flavors: item.flavors,
+    doughballWeightOz: item.doughballWeightOz,
+    doughballsPerTray: item.doughballsPerTray,
+    doughballVariants: item.doughballVariants,
+  });
+}
+
 function toApiItem(row: DoughRecipeRow): NamedRecipe {
   const item: NamedRecipe = {
     id: row.id,
+    updatedAt: row.updatedAt.toISOString(),
     name: row.name,
     notes: row.notes,
     components: row.components ?? [],
@@ -51,6 +73,10 @@ function toDbValues(item: NamedRecipe) {
     doughballVariants: item.doughballVariants ?? [],
     updatedAt: new Date(),
   };
+}
+
+function nextRevision(previous?: Date): Date {
+  return new Date(Math.max(Date.now(), (previous?.getTime() ?? 0) + 1));
 }
 
 async function listAll(): Promise<NamedRecipe[]> {
@@ -97,8 +123,43 @@ router.post(
       // re-point local references only after this endpoint succeeds — a
       // partial commit would strand references to half-renamed names).
       await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${"dough-recipes:" + currentScope()}))`,
+        );
+        const existingRows = await tx
+          .select()
+          .from(doughRecipesTable)
+          .where(eq(doughRecipesTable.scope, currentScope()))
+          .for("update");
+        const existingById = new Map(existingRows.map((row) => [row.id, row]));
+        const rejectedIds: string[] = [];
+        for (const [id, recipe] of byId) {
+          const existing = existingById.get(id);
+          if (!existing) continue;
+          const incomingRevision = recipe.updatedAt ? new Date(recipe.updatedAt) : null;
+          const storedRevision = existing.updatedAt.getTime();
+          if (
+            !incomingRevision ||
+            !Number.isFinite(incomingRevision.getTime()) ||
+            incomingRevision.getTime() < storedRevision
+          ) {
+            rejectedIds.push(id);
+          }
+        }
+        if (rejectedIds.length > 0) throw new RecipeRevisionConflict(rejectedIds);
+
         for (const recipe of byId.values()) {
+          const existing = existingById.get(recipe.id);
           const values = toDbValues(recipe);
+          values.updatedAt = nextRevision(existing?.updatedAt);
+          if (
+            existing &&
+            recipe.updatedAt &&
+            new Date(recipe.updatedAt).getTime() === existing.updatedAt.getTime() &&
+            comparable(recipe) === comparable(toApiItem(existing))
+          ) {
+            continue;
+          }
           await tx
             .insert(doughRecipesTable)
             .values(values)
@@ -124,6 +185,14 @@ router.post(
       const items = await listAll();
       res.json({ items });
     } catch (err) {
+      if (err instanceof RecipeRevisionConflict) {
+        res.status(409).json({
+          error: "STALE_RECIPE_SNAPSHOT",
+          rejectedIds: err.rejectedIds,
+          items: await listAll(),
+        });
+        return;
+      }
       req.log.error({ err }, "failed to save dough recipes");
       res.status(500).json({ error: "Failed to save dough recipes" });
     }

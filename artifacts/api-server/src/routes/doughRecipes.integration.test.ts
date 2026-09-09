@@ -37,6 +37,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let doughRecipesTable: DbModule["doughRecipesTable"];
+let sauceRecipesTable: DbModule["sauceRecipesTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -83,6 +84,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   doughRecipesTable = dbMod.doughRecipesTable;
+  sauceRecipesTable = dbMod.sauceRecipesTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -122,7 +124,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${doughRecipesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${doughRecipesTable}, ${sauceRecipesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([{ id: MANAGER, username: "manager-dough", passwordHash: "x" }]);
@@ -147,6 +149,39 @@ async function getDoughRecipes(): Promise<NamedRecipe[]> {
   });
   expect(res.status).toBe(200);
   return normalizeNamedRecipes(((await res.json()) as { items: unknown }).items);
+}
+
+async function postSauceRecipes(items: NamedRecipe[]): Promise<{ status: number; items: NamedRecipe[] }> {
+  const res = await fetch(`${baseUrl}/api/sauce-recipes`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...AUTH() },
+    body: JSON.stringify({ items }),
+  });
+  return {
+    status: res.status,
+    items: normalizeNamedRecipes(((await res.json()) as { items?: unknown }).items),
+  };
+}
+
+async function getSauceRecipes(): Promise<NamedRecipe[]> {
+  const res = await fetch(`${baseUrl}/api/sauce-recipes`, {
+    headers: AUTH(),
+  });
+  expect(res.status).toBe(200);
+  return normalizeNamedRecipes(((await res.json()) as { items: unknown }).items);
+}
+
+function namedRecipe(overrides: Partial<NamedRecipe> = {}): NamedRecipe {
+  return {
+    id: "recipe-1",
+    name: "House Recipe",
+    notes: "",
+    components: [{ ingredient: "Flour", lbs: 10 }],
+    enabled: true,
+    brand: "",
+    flavors: [],
+    ...overrides,
+  };
 }
 
 describe("POST /dough-recipes — customer preservation on re-import (Bug 1 regression)", () => {
@@ -317,5 +352,119 @@ describe("POST /dough-recipes — customer preservation on re-import (Bug 1 regr
     // Both the original and the new customer must be present.
     expect(variant?.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
     expect(variant?.customers).toContainEqual({ brand: "Hannaford", flavor: "BBQ Chicken" });
+  });
+});
+
+describe("POST /dough-recipes — freshness fence", () => {
+  async function rawPost(items: NamedRecipe[]) {
+    const res = await fetch(`${baseUrl}/api/dough-recipes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...AUTH() },
+      body: JSON.stringify({ items }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("rejects stale and missing revisions with the authoritative pool", async () => {
+    const created = await postDoughRecipes([namedRecipe({ id: "dough-stale" })]);
+    const revision = created[0].updatedAt;
+    expect(revision).toBeTruthy();
+    await postDoughRecipes([namedRecipe({ id: "dough-stale", name: "Canonical Dough", updatedAt: revision })]);
+
+    const stale = await rawPost([
+      namedRecipe({ id: "dough-stale", name: "Stale Dough", updatedAt: revision }),
+    ]);
+    expect(stale.status).toBe(409);
+    expect(stale.body.rejectedIds).toEqual(["dough-stale"]);
+    expect((stale.body.items as NamedRecipe[]).find((item) => item.id === "dough-stale")?.name)
+      .toBe("Canonical Dough");
+
+    const missing = await rawPost([
+      namedRecipe({ id: "dough-stale", name: "Missing Revision Dough" }),
+    ]);
+    expect(missing.status).toBe(409);
+    expect(missing.body.rejectedIds).toEqual(["dough-stale"]);
+    expect((await getDoughRecipes()).find((item) => item.id === "dough-stale")?.name)
+      .toBe("Canonical Dough");
+  });
+
+  it("rejects a mixed batch before either recipe changes", async () => {
+    const created = await postDoughRecipes([
+      namedRecipe({ id: "dough-a", name: "Dough A" }),
+      namedRecipe({ id: "dough-b", name: "Dough B" }),
+    ]);
+    const oldB = created.find((item) => item.id === "dough-b")?.updatedAt;
+    await postDoughRecipes([
+      namedRecipe({ id: "dough-a", name: "Dough A canonical", updatedAt: created.find((item) => item.id === "dough-a")?.updatedAt }),
+      namedRecipe({ id: "dough-b", name: "Dough B canonical", updatedAt: oldB }),
+    ]);
+    const current = await getDoughRecipes();
+    const attempted = await rawPost([
+      namedRecipe({ id: "dough-a", name: "Dough A attempted", updatedAt: current.find((item) => item.id === "dough-a")?.updatedAt }),
+      namedRecipe({ id: "dough-b", name: "Dough B attempted", updatedAt: oldB }),
+    ]);
+    expect(attempted.status).toBe(409);
+    expect((attempted.body.items as NamedRecipe[]).find((item) => item.id === "dough-a")?.name)
+      .toBe("Dough A canonical");
+    expect((attempted.body.items as NamedRecipe[]).find((item) => item.id === "dough-b")?.name)
+      .toBe("Dough B canonical");
+  });
+});
+
+describe("POST /sauce-recipes — freshness fence", () => {
+  async function rawPost(items: NamedRecipe[]) {
+    const res = await fetch(`${baseUrl}/api/sauce-recipes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...AUTH() },
+      body: JSON.stringify({ items }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("rejects stale and missing revisions with the authoritative pool", async () => {
+    const created = await postSauceRecipes([namedRecipe({ id: "sauce-stale", name: "House Sauce" })]);
+    const revision = created.items[0].updatedAt;
+    expect(revision).toBeTruthy();
+    await postSauceRecipes([
+      namedRecipe({ id: "sauce-stale", name: "Canonical Sauce", updatedAt: revision }),
+    ]);
+
+    const stale = await rawPost([
+      namedRecipe({ id: "sauce-stale", name: "Stale Sauce", updatedAt: revision }),
+    ]);
+    expect(stale.status).toBe(409);
+    expect(stale.body.rejectedIds).toEqual(["sauce-stale"]);
+    expect((stale.body.items as NamedRecipe[]).find((item) => item.id === "sauce-stale")?.name)
+      .toBe("Canonical Sauce");
+
+    const missing = await rawPost([
+      namedRecipe({ id: "sauce-stale", name: "Missing Revision Sauce" }),
+    ]);
+    expect(missing.status).toBe(409);
+    expect(missing.body.rejectedIds).toEqual(["sauce-stale"]);
+    expect((await getSauceRecipes()).find((item) => item.id === "sauce-stale")?.name)
+      .toBe("Canonical Sauce");
+  });
+
+  it("rejects a mixed batch before either recipe changes", async () => {
+    const created = await postSauceRecipes([
+      namedRecipe({ id: "sauce-a", name: "Sauce A" }),
+      namedRecipe({ id: "sauce-b", name: "Sauce B" }),
+    ]);
+    const oldB = created.items.find((item) => item.id === "sauce-b")?.updatedAt;
+    await postSauceRecipes([
+      namedRecipe({ id: "sauce-a", name: "Sauce A canonical", updatedAt: created.items.find((item) => item.id === "sauce-a")?.updatedAt }),
+      namedRecipe({ id: "sauce-b", name: "Sauce B canonical", updatedAt: oldB }),
+    ]);
+    const current = await getSauceRecipes();
+    const attempted = await rawPost([
+      namedRecipe({ id: "sauce-a", name: "Sauce A attempted", updatedAt: current.find((item) => item.id === "sauce-a")?.updatedAt }),
+      namedRecipe({ id: "sauce-b", name: "Sauce B attempted", updatedAt: oldB }),
+    ]);
+    expect(attempted.status).toBe(409);
+    expect((attempted.body.items as NamedRecipe[]).find((item) => item.id === "sauce-a")?.name)
+      .toBe("Sauce A canonical");
+    expect((attempted.body.items as NamedRecipe[]).find((item) => item.id === "sauce-b")?.name)
+      .toBe("Sauce B canonical");
   });
 });

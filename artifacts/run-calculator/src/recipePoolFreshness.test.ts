@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { saveCheeseRecipes, StaleCheeseRecipeSnapshotError } from "./cheeseRecipes";
 import { saveMixes, StaleMixSnapshotError } from "./mixes";
+import { saveNamedRecipes, StaleNamedRecipeSnapshotError } from "./namedRecipes";
 import {
   MASTER_DATA_QUERY_KEY,
   registerMasterDataQueryClient,
@@ -147,4 +148,47 @@ describe("recipe-pool freshness conflicts", () => {
       },
     ]);
   });
+
+  it.each(["dough", "sauce"] as const)(
+    "adopts the authoritative %s pool and never retries a stale write",
+    async (kind) => {
+      const queryClient = seedQueryClient();
+      const canonicalItems = [
+        {
+          id: `${kind}-1`,
+          name: `Canonical ${kind}`,
+          notes: "",
+          components: [{ ingredient: "Flour", lbs: 10 }],
+          enabled: true,
+          brand: "",
+          flavors: [],
+          updatedAt: "2026-09-09T12:00:00.000Z",
+        },
+      ];
+      const fetchMock = vi.fn().mockResolvedValue(conflictResponse(canonicalItems, [`${kind}-1`]));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        saveNamedRecipes(kind, [
+          {
+            id: `${kind}-1`,
+            name: `Stale ${kind}`,
+            notes: "",
+            components: [{ ingredient: "Flour", lbs: 5 }],
+            enabled: true,
+            brand: "",
+            flavors: [],
+            updatedAt: "2026-09-09T11:00:00.000Z",
+          },
+        ]),
+      ).rejects.toBeInstanceOf(StaleNamedRecipeSnapshotError);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(
+        queryClient.getQueryData<MasterDataBootstrap>(MASTER_DATA_QUERY_KEY)?.[
+          kind === "dough" ? "doughRecipes" : "sauceRecipes"
+        ],
+      ).toEqual(canonicalItems);
+    },
+  );
 });

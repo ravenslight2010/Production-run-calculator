@@ -9432,6 +9432,10 @@ components:
         id:
           type: string
           description: Stable client-generated id
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server persistence revision; required when updating an existing row
         name:
           type: string
           description: Display name of the recipe

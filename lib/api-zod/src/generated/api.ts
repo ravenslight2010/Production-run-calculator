@@ -3106,6 +3106,7 @@ export const DeleteCheeseRecipesResponse = zod.object({
 export const ListDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3137,6 +3138,7 @@ export const ListDoughRecipesResponse = zod.object({
 export const SaveDoughRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3163,6 +3165,7 @@ export const SaveDoughRecipesBody = zod.object({
 export const SaveDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3198,6 +3201,7 @@ export const DeleteDoughRecipesBody = zod.object({
 export const DeleteDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3229,6 +3233,7 @@ export const DeleteDoughRecipesResponse = zod.object({
 export const ListSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3260,6 +3265,7 @@ export const ListSauceRecipesResponse = zod.object({
 export const SaveSauceRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3286,6 +3292,7 @@ export const SaveSauceRecipesBody = zod.object({
 export const SaveSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3321,6 +3328,7 @@ export const DeleteSauceRecipesBody = zod.object({
 export const DeleteSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
