@@ -4,7 +4,7 @@ This repository is worked on by **multiple coding agents** (Codex, Replit Agent,
 
 ## Before making any change
 
-1. **Check `.agents/memory/codex-fixes.md`** — this file logs every fix Codex has made. If a fix is already documented there, do NOT re-apply it.
+1. **Check `.agents/memory/codex-fixes.md`** — this file logs every fix Codex has made.
 2. **Check `.agents/memory/`** — other memory files contain design decisions, patterns, and gotchas. Read them before modifying code.
 3. **Never force-push to `main`** — always use a feature branch + PR. Branch protection is enabled.
 
