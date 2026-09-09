@@ -133,6 +133,42 @@ normal release command remains fail-closed: outside the narrowly identified
 disposable CI test database, the production reconciliation verifier and its
 retained evidence are mandatory.
 
+### Bind production reconciliation evidence to the deployed build
+
+Set `RELEASE_REVISION` on the controlled deployment to the full 40-character
+Git commit SHA that was deployed. The operational report exposes that value at
+`evidence.release.revision`; malformed or absent revision metadata is reported
+as `unknown` and is not valid release proof. `REPLIT_GIT_COMMIT` and
+`GIT_COMMIT` remain compatibility fallbacks, but operators should not depend on
+either being supplied automatically by the deployment platform.
+
+Capture production reconciliation evidence with the exact revision returned by
+the deployed operational report:
+
+```bash
+SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
+SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT=release \
+pnpm --filter @workspace/scripts exec tsx \
+  ./src/verify-source-library-reconciliation.mts \
+  --environment release \
+  --revision <deployed-40-character-sha> \
+  --output /secure/path/source-library-reconciliation.json
+```
+
+Import that file into a release run with the same explicit revision:
+
+```bash
+SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
+pnpm run release:check -- \
+  --source-library-environment release \
+  --source-library-revision <deployed-40-character-sha> \
+  --source-library-evidence /secure/path/source-library-reconciliation.json
+```
+
+Release captures and imports reject a missing, malformed, `unknown`, or
+different revision. The production revision must come from the controlled
+deployment/report path; never substitute the current repository `HEAD`.
+
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume
 command, and the matching fresh-run command. The stopped-summary probe uses the

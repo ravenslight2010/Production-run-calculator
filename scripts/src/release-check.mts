@@ -106,6 +106,7 @@ export type ReleaseEvidenceOptions = {
   expectedLabels?: readonly string[];
   allowIncompleteCheckpoint?: boolean;
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
+  expectedSourceLibraryRevision?: string;
 };
 
 export type BrowserDurationRegression = {
@@ -499,15 +500,49 @@ const sourceLibraryFromDate =
   process.env.SOURCE_LIBRARY_RECONCILIATION_FROM_DATE ??
   sourceLibraryHealDate ??
   DEFAULT_FROM_DATE;
-const sourceLibraryEnvironment = parseSourceLibraryEvidenceEnvironment(
-  cliOptionValue("--source-library-environment") ??
-    process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT ??
-    (process.env.CI ? "release" : "development"),
-);
 const sourceLibraryEvidenceInput =
   (cliOptionValue("--source-library-evidence") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT?.trim()) ||
   undefined;
+export function resolveSourceLibraryEvidenceEnvironment(
+  configuredEnvironment: string | undefined,
+  importsEvidence: boolean,
+  isCi: boolean,
+): SourceLibraryEvidenceEnvironment {
+  return parseSourceLibraryEvidenceEnvironment(
+    configuredEnvironment ?? (importsEvidence || isCi ? "release" : "development"),
+  );
+}
+const sourceLibraryEnvironment = resolveSourceLibraryEvidenceEnvironment(
+  cliOptionValue("--source-library-environment") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT,
+  sourceLibraryEvidenceInput !== undefined,
+  Boolean(process.env.CI),
+);
+const configuredSourceLibraryRevision =
+  (cliOptionValue("--source-library-revision") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
+  undefined;
+
+export function resolveSourceLibraryReleaseRevision(
+  releaseRevision: string,
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredRevision: string | undefined,
+): string {
+  const revision = configuredRevision ??
+    (environment === "development" ? releaseRevision : undefined);
+  if (!revision) {
+    throw new Error(
+      "Production source-library evidence requires --source-library-revision with the exact deployed 40-character Git commit SHA.",
+    );
+  }
+  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+    throw new Error(
+      "Source-library evidence revision must be the exact deployed 40-character Git commit SHA.",
+    );
+  }
+  return revision;
+}
 export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   label: "source-library reconciliation verification",
   args: [
@@ -591,7 +626,6 @@ export function sourceLibraryReconciliationRequired(
 const requiresProductionSourceLibraryReconciliation =
   sourceLibraryReconciliationRequired();
 const importsProductionSourceLibraryReconciliation =
-  !requiresProductionSourceLibraryReconciliation &&
   sourceLibraryEvidenceInput !== undefined;
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
@@ -619,10 +653,10 @@ const steps: ReleaseStep[] = [
     stage: "prerequisites",
   },
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
-  ...(requiresProductionSourceLibraryReconciliation
-    ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
-    : importsProductionSourceLibraryReconciliation
+  ...(importsProductionSourceLibraryReconciliation
       ? [SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP]
+      : requiresProductionSourceLibraryReconciliation
+        ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
       : [SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP]),
   {
     label: "shell lint inventory",
@@ -895,7 +929,10 @@ function printHelp(): void {
     "  pnpm run release:check:full -- --verify-evidence  Verify full retained evidence files",
   );
   console.log(
-    "  --source-library-evidence <path>  Import fresh revision-bound production reconciliation evidence into a disposable CI run",
+    "  --source-library-evidence <path>  Import fresh revision-bound production reconciliation evidence",
+  );
+  console.log(
+    "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -1079,11 +1116,14 @@ export async function verifyReleaseEvidence(
   });
   const expectedSourceLibraryEnvironment =
     options.expectedSourceLibraryEnvironment ?? sourceLibraryEnvironment;
+  const expectedSourceLibraryRevision =
+    options.expectedSourceLibraryRevision ?? revision;
   validateReleaseReport(report, {
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
     expectedSourceLibraryEnvironment,
+    expectedSourceLibraryRevision,
   });
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
@@ -1092,7 +1132,7 @@ export async function verifyReleaseEvidence(
     const sourceLibraryReportBytes = await readFile(sourceLibraryReport);
     validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence, {
       expectedEnvironment: expectedSourceLibraryEnvironment,
-      expectedRevision: revision,
+      expectedRevision: expectedSourceLibraryRevision,
       expectedHealId: sourceLibraryHealId,
       expectedFromDate: sourceLibraryFromDate,
       expectedReportSha256: createHash("sha256")
@@ -1359,6 +1399,9 @@ export function validateSourceLibraryReconciliationEvidence(
   }
   if (
     typeof output.revision !== "string" ||
+    output.revision.trim() === "" ||
+    output.revision === "unknown" ||
+    output.revision === "development-unbound" ||
     (options.expectedRevision !== undefined &&
       output.revision !== options.expectedRevision)
   ) {
@@ -1635,6 +1678,7 @@ export function validateReleaseReport(
     expectedMode?: "standard" | "full";
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
+    expectedSourceLibraryRevision?: string;
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
@@ -1712,12 +1756,23 @@ export function validateReleaseReport(
   const sourceLibraryReportEnvironment = report.match(
     /^Source-library evidence environment:\s*(development|release)\s*$/m,
   )?.[1];
+  const sourceLibraryReportRevision = report.match(
+    /^Source-library evidence revision:\s*(\S+)\s*$/m,
+  )?.[1];
   if (
     options.expectedSourceLibraryEnvironment !== undefined &&
     sourceLibraryReportEnvironment !== options.expectedSourceLibraryEnvironment
   ) {
     throw new Error(
       `Release report source-library evidence targets ${sourceLibraryReportEnvironment ?? "unknown"}, but ${options.expectedSourceLibraryEnvironment} evidence was requested.`,
+    );
+  }
+  if (
+    options.expectedSourceLibraryRevision !== undefined &&
+    sourceLibraryReportRevision !== options.expectedSourceLibraryRevision
+  ) {
+    throw new Error(
+      `Release report source-library evidence revision is missing or stale (expected ${options.expectedSourceLibraryRevision}).`,
     );
   }
   const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
@@ -1890,6 +1945,7 @@ export function formatReleaseReport(
     revision?: string;
     environment?: string;
     sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
+    sourceLibraryRevision?: string;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
@@ -1976,6 +2032,7 @@ export function formatReleaseReport(
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
     `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
+    `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     "",
@@ -2082,6 +2139,7 @@ async function writeReleaseReport(
   results: ReleaseStepResult[],
   metadata: {
     revision: string;
+    sourceLibraryRevision: string;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
@@ -2180,6 +2238,7 @@ async function writeReleaseReport(
             : "disposable CI gate test (not production reconciliation evidence)"
           : "local release validation",
         sourceLibraryEnvironment,
+        sourceLibraryRevision: metadata.sourceLibraryRevision,
         browserDurationRegressions,
         timing: metadata.timing,
       },
@@ -2191,6 +2250,7 @@ async function writeReleaseReport(
 
 type ReleaseCheckpoint = {
   revision: string;
+  sourceLibraryRevision?: string;
   mode: "standard" | "full";
   results: Array<ReleaseStepResult & { passed: boolean }>;
   timing?: ReleaseTiming;
@@ -2243,6 +2303,7 @@ function upsertStageTiming(
 async function readCheckpoint(
   checkpointPath: string,
   revision: string,
+  sourceLibraryRevision: string,
 ): Promise<ReleaseCheckpoint | undefined> {
   try {
     const checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as
@@ -2253,6 +2314,7 @@ async function readCheckpoint(
     }
     if (
       checkpoint.revision !== revision ||
+      checkpoint.sourceLibraryRevision !== sourceLibraryRevision ||
       checkpoint.mode !== (fullRun ? "full" : "standard") ||
       !Array.isArray(checkpoint.results)
     ) {
@@ -2294,7 +2356,7 @@ async function currentRevision(): Promise<string> {
   });
 }
 
-async function promoteSourceLibraryEvidence(revision: string): Promise<void> {
+async function promoteSourceLibraryEvidence(sourceLibraryRevision: string): Promise<void> {
   const pendingPath = resolve(
     rootDir,
     releaseEvidenceDir,
@@ -2312,7 +2374,7 @@ async function promoteSourceLibraryEvidence(revision: string): Promise<void> {
   ]);
   validateSourceLibraryReconciliationEvidence(retainedEvidence, {
     expectedEnvironment: sourceLibraryEnvironment,
-    expectedRevision: revision,
+    expectedRevision: sourceLibraryRevision,
     expectedHealId: sourceLibraryHealId,
     expectedFromDate: sourceLibraryFromDate,
     expectedReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
@@ -2327,8 +2389,18 @@ async function main(): Promise<void> {
 
   if (process.argv.includes("--verify-evidence")) {
     try {
+      const revision = await currentRevision();
+      const sourceLibraryRevision = hasProductionSourceLibraryReconciliation
+        ? resolveSourceLibraryReleaseRevision(
+            revision,
+            sourceLibraryEnvironment,
+            configuredSourceLibraryRevision,
+          )
+        : revision;
       await verifyReleaseEvidence(undefined, {
+        currentRevision: revision,
         expectedMode: fullRun ? "full" : undefined,
+        expectedSourceLibraryRevision: sourceLibraryRevision,
       });
       process.exit(0);
     } catch (error) {
@@ -2340,7 +2412,6 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   }
-
   await assertApiIntegrationTestShardInventory();
   console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
   let revision: string;
@@ -2352,6 +2423,19 @@ async function main(): Promise<void> {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    process.exit(1);
+  }
+  let sourceLibraryRevision: string;
+  try {
+    sourceLibraryRevision = hasProductionSourceLibraryReconciliation
+      ? resolveSourceLibraryReleaseRevision(
+          revision,
+          sourceLibraryEnvironment,
+          configuredSourceLibraryRevision,
+        )
+      : revision;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
@@ -2375,7 +2459,7 @@ async function main(): Promise<void> {
   if (resume) {
     let checkpoint: ReleaseCheckpoint | undefined;
     try {
-      checkpoint = await readCheckpoint(checkpointPath, revision);
+      checkpoint = await readCheckpoint(checkpointPath, revision, sourceLibraryRevision);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message.replace(/^Cannot resume release check:\s*/, ""));
@@ -2417,6 +2501,7 @@ async function main(): Promise<void> {
     checkpointWrite = checkpointWrite.then(() =>
       writeCheckpoint(checkpointPath, {
         revision,
+        sourceLibraryRevision,
         mode: fullRun ? "full" : "standard",
         results,
         timing: {
@@ -2515,14 +2600,17 @@ async function main(): Promise<void> {
           task = (async () => {
             const effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
-              step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
+              step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
+              step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label
                 ? {
                     ...step,
                     env: {
                       ...step.env,
                       ...(step.label === FULL_BROWSER_GATE_LABEL
                         ? { RELEASE_REVISION: revision }
-                        : { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }),
+                        : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
+                          ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
+                          : { SOURCE_LIBRARY_RECONCILIATION_REVISION: sourceLibraryRevision }),
                     },
                   }
                 : step;
@@ -2649,10 +2737,11 @@ async function main(): Promise<void> {
       if (steps.some(
         (step) => step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label,
       )) {
-        await promoteSourceLibraryEvidence(revision);
+        await promoteSourceLibraryEvidence(sourceLibraryRevision);
       }
       const reportPath = await writeReleaseReport(results, {
         revision,
+        sourceLibraryRevision,
         decision: releaseDecision,
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
         timing: {
@@ -2666,6 +2755,7 @@ async function main(): Promise<void> {
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
         expectedMode: fullRun ? "full" : "standard",
+        expectedSourceLibraryRevision: sourceLibraryRevision,
         allowIncompleteCheckpoint: true,
       });
       await rm(checkpointReportPath, { force: true });
@@ -2694,6 +2784,7 @@ async function main(): Promise<void> {
   try {
     const checkpointReportPath = await writeReleaseReport(results, {
         revision,
+        sourceLibraryRevision,
         decision: "NO-GO",
         expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
         reportKind: "checkpoint",

@@ -18,6 +18,8 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  resolveSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryReleaseRevision,
   assertUniqueReleaseSteps,
   PRODUCTION_AUDIT_TIMEOUT_MS,
   PRODUCTION_AUDIT_WARNING_MS,
@@ -172,6 +174,28 @@ async function run(): Promise<void> {
     configuredKeyrings.length,
     2,
     "standard and full disposable release jobs must both configure a report keyring",
+  );
+  assert.equal(
+    resolveSourceLibraryEvidenceEnvironment(undefined, true, false),
+    "release",
+    "imported production evidence must default to the release environment",
+  );
+  assert.equal(
+    resolveSourceLibraryEvidenceEnvironment(undefined, false, false),
+    "development",
+    "a local live verifier must keep its explicit development identity",
+  );
+  assert.equal(
+    resolveSourceLibraryReleaseRevision(
+      "a".repeat(40),
+      "release",
+      "b".repeat(40),
+    ),
+    "b".repeat(40),
+  );
+  assert.throws(
+    () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
+    /requires --source-library-revision/,
   );
   assert.deepEqual(
     configuredKeyrings,
@@ -478,6 +502,14 @@ async function run(): Promise<void> {
       ),
     /revision is stale or missing/,
     "source reconciliation evidence from another revision must not be accepted",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({ revision: "unknown" }))),
+      ),
+    /revision is stale or missing/,
+    "unbound source reconciliation evidence must not be accepted",
   );
   assert.throws(
     () =>

@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   ownedFields,
   parseReport,
+  resolveSourceLibraryRevision,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
@@ -40,6 +41,18 @@ assert.ok(Object.prototype.hasOwnProperty.call(ownedFields(mixWithNotes as any),
 assert.ok(!Object.prototype.hasOwnProperty.call(ownedFields(mixWithoutNotes as any), "notes"));
 assert.ok(!Object.prototype.hasOwnProperty.call(ownedFields(mixWithNotes as any), "batchSize"));
 assert.ok(!Object.prototype.hasOwnProperty.call(ownedFields(mixWithoutNotes as any), "batchSize"));
+assert.equal(
+  resolveSourceLibraryRevision("release", "a".repeat(40)),
+  "a".repeat(40),
+);
+assert.throws(
+  () => resolveSourceLibraryRevision("release", undefined),
+  /exact deployed 40-character Git commit SHA/,
+);
+assert.throws(
+  () => resolveSourceLibraryRevision("release", "unknown"),
+  /full 40-character Git commit SHA/,
+);
 
 const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
 for (const proposal of report.proposals) {

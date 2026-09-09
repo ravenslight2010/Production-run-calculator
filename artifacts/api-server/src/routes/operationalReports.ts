@@ -545,6 +545,26 @@ export function adaptCanonicalOperationalSnapshot(data: unknown): OperationalSyn
   } as OperationalSyncSnapshotV1);
 }
 
+export function operationalReleaseEvidence(
+  env: NodeJS.ProcessEnv = process.env,
+): { version: string; revision: string; environment: string } {
+  const controlledRevision = env.RELEASE_REVISION?.trim();
+  const compatibilityRevision = [
+    env.REPLIT_GIT_COMMIT,
+    env.GIT_COMMIT,
+  ].map((value) => value?.trim()).find((value) => value && /^[a-f0-9]{40}$/u.test(value));
+  const revision = controlledRevision === undefined || controlledRevision === ""
+    ? compatibilityRevision
+    : /^[a-f0-9]{40}$/u.test(controlledRevision)
+      ? controlledRevision
+      : undefined;
+  return {
+    version: env.npm_package_version?.trim() || "unknown",
+    revision: revision ?? "unknown",
+    environment: env.NODE_ENV?.trim() || "unknown",
+  };
+}
+
 function operationalError(res: import("express").Response, status: number, code: string, message: string): void {
   res.status(status).json({ error: { code, message } });
 }
@@ -1115,11 +1135,7 @@ router.post(
         note: unresolvedRows.length === 0 ? "No unresolved actions were identified from available report sections." : undefined,
       },
       evidence: {
-        release: {
-          version: process.env.npm_package_version ?? "unknown",
-          revision: process.env.REPLIT_GIT_COMMIT ?? process.env.GIT_COMMIT ?? "unknown",
-          environment: process.env.NODE_ENV ?? "unknown",
-        },
+        release: operationalReleaseEvidence(),
         recovery: {
           generatedAt: new Date().toISOString(),
           source: "live-database",

@@ -80,6 +80,19 @@ try {
     /revision is stale or missing/,
   );
 
+  await assert.rejects(
+    importSourceLibraryReconciliationEvidence({
+      input,
+      output,
+      report,
+      healId: DEFAULT_HEAL_ID,
+      fromDate: DEFAULT_FROM_DATE,
+      revision: "unknown",
+      now,
+    }),
+    /exact deployed 40-character Git commit SHA/,
+  );
+
   const tamperedInput = path.join(directory, "tampered.json");
   const tampered = evidence(reportSha256);
   tampered.ok = false;

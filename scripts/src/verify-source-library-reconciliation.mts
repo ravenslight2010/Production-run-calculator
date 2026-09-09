@@ -636,6 +636,23 @@ function currentRevision(): string {
   }).trim();
 }
 
+export function resolveSourceLibraryRevision(
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredRevision: string | undefined,
+): string {
+  const revision = configuredRevision?.trim() ||
+    (environment === "development" ? currentRevision() : undefined);
+  if (!revision) {
+    throw new Error(
+      "Missing --revision for release evidence; pass the exact deployed 40-character Git commit SHA",
+    );
+  }
+  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+    throw new Error("Invalid --revision; expected the full 40-character Git commit SHA");
+  }
+  return revision;
+}
+
 async function main() {
   const reportArgument = argument("--report");
   const reportPath = reportArgument
@@ -653,13 +670,10 @@ async function main() {
     );
   }
   const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
-  const revision = argument(
-    "--revision",
-    process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION ?? currentRevision(),
-  )!;
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error("Invalid --revision; expected the full 40-character Git commit SHA");
-  }
+  const revision = resolveSourceLibraryRevision(
+    environment,
+    argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION),
+  );
   const outputPath = outputPathArgument();
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);

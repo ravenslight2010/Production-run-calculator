@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,13 +13,13 @@ export type SourceLibraryEvidenceImportOptions = {
   report: string;
   healId: string;
   fromDate: string;
-  revision?: string;
+  revision: string;
   now?: Date;
 };
 
-function argument(name: string): string {
+function argument(name: string, fallback?: string): string {
   const index = process.argv.indexOf(name);
-  const value = index >= 0 ? process.argv[index + 1] : undefined;
+  const value = index >= 0 ? process.argv[index + 1] : fallback;
   if (!value || value.startsWith("--")) {
     throw new Error(`Missing value for ${name}`);
   }
@@ -44,12 +43,12 @@ export async function importSourceLibraryReconciliationEvidence(
   if (healDate !== undefined && healDate !== fromDate) {
     throw new Error("--from-date must match the dated heal identity.");
   }
-  const revision =
-    options.revision ??
-    execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: ROOT,
-      encoding: "utf8",
-    }).trim();
+  const revision = options.revision.trim();
+  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+    throw new Error(
+      "Invalid --revision; pass the exact deployed 40-character Git commit SHA.",
+    );
+  }
 
   const stats = await lstat(input);
   if (!stats.isFile() || stats.isSymbolicLink()) {
@@ -85,6 +84,10 @@ async function main(): Promise<void> {
     report: argument("--report"),
     healId: argument("--heal-id"),
     fromDate: argument("--from-date"),
+    revision: argument(
+      "--revision",
+      process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION,
+    ),
   });
 }
 
