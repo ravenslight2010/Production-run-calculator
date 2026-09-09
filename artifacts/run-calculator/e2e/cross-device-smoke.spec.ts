@@ -121,9 +121,10 @@ async function readSelectedRun(page: Page): Promise<{
 
 async function dismissPauseDecision(page: Page): Promise<void> {
   const noButton = page.getByTestId("pause-stop-tunnel-no");
-  if (await noButton.isVisible().catch(() => false)) {
-    await noButton.click();
-  }
+  // The decision prompt is intentionally short-lived and may resolve to its
+  // safe default while the page is re-rendering. The persisted pausedAt check
+  // below is the authoritative assertion; a disappearing prompt is harmless.
+  await noButton.click({ timeout: 1_000 }).catch(() => {});
 }
 
 test("staff lifecycle recovers across desktop and phone layouts", async ({

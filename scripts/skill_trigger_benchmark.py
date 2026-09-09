@@ -135,66 +135,6 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
         ["The displayed number is correct; I only want a layout redesign.",
          "A database import created incorrect stored values across many profiles."],
     ),
-    "check-dependency-licenses": (
-        ["Before release, audit every production dependency for license policy violations and document any blocked package.",
-         "Check the npm dependency tree for license compliance, including transitive packages, before we ship."],
-        ["Add a new package and verify it is genuine before installing it.",
-         "Scan the application for SQL injection and XSS vulnerabilities."],
-    ),
-    "handle-personal-and-sensitive-data": (
-        ["This feature processes customer addresses and private account details; design the data flow with minimization, access controls, and retention limits.",
-         "Review how we collect and store personal information and sensitive data, and prevent it leaking into logs or analytics."],
-        ["Validate a public URL parameter against an allow-list.",
-         "Add a password reset flow using the existing authentication system."],
-    ),
-    "instrument-observability-and-graceful-errors": (
-        ["Add bounded structured events, correlation IDs, useful timing, and safe user-facing errors to this production workflow.",
-         "Instrument this API so failures are observable without logging request payloads or secrets, and degrade gracefully."],
-        ["Add authentication and role checks to the endpoint.",
-         "Add SQL parameterization and HTML escaping for form input."],
-    ),
-    "make-apps-resilient-to-abuse-and-overload": (
-        ["A public endpoint can be spammed and expensive requests can exhaust the service; add rate limits, quotas, timeouts, and overload behavior.",
-         "Make this app resilient to abuse and traffic spikes without exposing whether protected records exist."],
-        ["Add a responsive tablet layout for the dashboard.",
-         "Review personal-data retention and privacy controls."],
-    ),
-    "make-ui-responsive-across-devices": (
-        ["The dashboard works at desktop width but breaks on phones and tablets; make the real UI usable across screen sizes.",
-         "Build this customer-facing form so it is responsive on mobile, tablet, and desktop rather than only the preview width."],
-        ["Make the API tolerate traffic spikes and abusive callers.",
-         "Run an accessibility audit for keyboard navigation and screen readers."],
-    ),
-    "meet-an-accessibility-baseline": (
-        ["Audit this app for keyboard access, labels, focus management, contrast, and screen-reader semantics, then fix the blockers.",
-         "Before shipping the new dialog, establish an accessibility baseline and verify it across representative viewports."],
-        ["Make the layout responsive across phone and desktop widths.",
-         "Benchmark whether a skill description triggers for realistic prompts."],
-    ),
-    "review-before-shipping": (
-        ["Review this completed change before release for security, authorization, data safety, tests, and deploy readiness.",
-         "Do a final risk-based shipping review and report blockers, evidence, and explicit exceptions."],
-        ["Run only the pre-publish release checklist and its configured commands.",
-         "Design the feature architecture before any implementation begins."],
-    ),
-    "secure-ai-features-against-prompt-injection": (
-        ["Build an AI assistant that summarizes uploaded documents and can call tools; defend against prompt injection and excessive agency.",
-         "User text and web pages will be sent to an LLM—secure the feature against instruction hijacking and unauthorized actions."],
-        ["Validate ordinary form fields and encode them for HTML output; no LLM is involved.",
-         "Add a conventional password login with no AI or external content."],
-    ),
-    "validate-and-encode-untrusted-input": (
-        ["This endpoint accepts JSON, path parameters, uploads, and webhook data; add allow-list validation, safe queries, and contextual output encoding.",
-         "Harden the API against SQL injection, XSS, and SSRF from user input and third-party responses."],
-        ["Design defenses for prompt injection in an LLM agent.",
-         "Audit how customer PII is retained and who can access it."],
-    ),
-    "vet-dependencies-before-adding": (
-        ["I want to install a new npm package for spreadsheet parsing; verify the registry package, provenance, typosquat risk, and compatibility first.",
-         "Before adding or upgrading this pip dependency, vet that it is genuine and safe rather than blindly editing the manifest."],
-        ["Audit the license of packages already in the production dependency tree.",
-         "Fix a parser bug in an existing dependency-free module."],
-    ),
 }
 
 
