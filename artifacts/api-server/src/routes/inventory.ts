@@ -1318,11 +1318,12 @@ async function findExpectedConsumptionForRun(
     .where(eq(dailySyncTable.scope, scope));
   for (const row of rows) {
     const data = row.data as {
-      dayState?: { runs?: Array<{ id?: string }>; substitutions?: IngredientSubstitution[] };
+      dayState?: { runs?: Array<{ id?: string; actualCases?: number }>; substitutions?: IngredientSubstitution[] };
       runValues?: Record<string, unknown>;
     } | null;
     const runs = data?.dayState?.runs ?? [];
-    if (!runs.some((r) => r?.id === runId)) continue;
+    const matchedRun = runs.find((r) => r?.id === runId);
+    if (!matchedRun) continue;
     const vals = data?.runValues?.[runId];
     if (!vals || typeof vals !== "object") continue;
     const substitutions = data?.dayState?.substitutions ?? [];
@@ -1333,6 +1334,21 @@ async function findExpectedConsumptionForRun(
       effective as unknown as RunLinesInput,
       SERVER_DEFAULT_PEP_TYPES,
     );
+    // Feature D: scale all lines proportionally when actualCases is known.
+    // actualCases is entered by the manager after a run ends; when it differs
+    // from the planned casesNeeded, every ingredient and packaging line is
+    // scaled so inventory matches reality. Falls back to planned (no scaling)
+    // when actualCases is not set or equals casesNeeded.
+    const casesNeeded = Number((vals as Record<string, unknown>).casesNeeded) || 0;
+    const actualCases = matchedRun.actualCases;
+    if (actualCases != null && actualCases > 0 && casesNeeded > 0 && actualCases !== casesNeeded) {
+      const scale = actualCases / casesNeeded;
+      const scaled = expectedLines.map((l) => ({
+        itemKey: l.itemKey,
+        qty: Math.round(l.qty * scale * 1000) / 1000,
+      }));
+      return new Map(scaled.map((l) => [l.itemKey, l.qty]));
+    }
     return new Map(expectedLines.map((l) => [l.itemKey, l.qty]));
   }
   return null;

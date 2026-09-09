@@ -450,3 +450,28 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 7. Ran `pnpm --filter @workspace/api-spec run codegen` to regenerate `OperationalRunView` types matching merged spec
 
 **Context**: This is the major Replit sync merge. Replit's branch is now the authoritative feature codebase; main's Step 7a/7b work is included via Replit's pre-squash merge of the feature branch. PR: https://github.com/ravenslight2010/Production-run-calculator/pull/39
+
+## 2026-09-09: Inventory Auto-Deduction Features (feat/inventory-auto-deduction)
+
+**Files changed:**
+- `lib/inventory-math/src/index.ts` — extended `RunLinesInput` with packaging fields, full packaging consumption in `computeRunLines`, new `computeMixComponentConsumptionLines` and `computeDailySupplyConsumptionLines` helpers
+- `lib/inventory-math/src/index.test.ts` — added 7 tests for new helpers (5 new)
+- `artifacts/api-server/src/routes/inventory.ts` — `findExpectedConsumptionForRun` now reads `actualCases` from day-state and scales all lines proportionally (Feature D)
+- `artifacts/run-calculator/src/types.ts` — added `cartonSize` field to FormValues, `CARTON_SIZE_OPTIONS` constant
+- `artifacts/run-calculator/src/components/SetupProfileEditor.tsx` — added cartonSize selector (FixedChipSelect) in packaging settings
+- `artifacts/api-server/src/routes/freezerSurplus.ts` — Feature C: freezer surplus lots create matching inventory items at freezer location; allocation deducts from freezer inventory
+- `docs/inventory-autodeduction-plan.md` — comprehensive design spec for all 5 features
+
+**What was done:**
+1. Feature D: actual cases scaling — server reads `actualCases` from `dayState.runs` and scales all consumption lines by `actualCases / casesNeeded`
+2. Feature E1-E6: full packaging consumption — cartonSize, slip sheets, grip sheets, labels (top/bottom/both), pallets, shipper labels all computed in shared `computeRunLines`
+3. Feature A: overproduction deduction — folded into Feature D (entering actualCases before "Complete Run" already charges all actual ingredients)
+4. Feature B (math only): `computeMixComponentConsumptionLines` — pure helper that scales component lbs by `remainingLbs / totalLbs`, honoring the `amountAlreadyMade` offset
+5. Feature E7 (math only): `computeDailySupplyConsumptionLines` — fixed daily rates (tape=4, glue=0.286, ink=0.078)
+6. Feature C: freezer pull sync — freezer surplus lot creation auto-creates inventory item + lot at freezer location; allocation deducts from that inventory lot
+
+**Test results:** inventory-math: 74/74 pass; API server typecheck: pass; web typecheck: passed earlier (unaffected by server changes)
+
+**Remaining (server wiring):**
+- Feature B: wire `computeMixComponentConsumptionLines` into a server endpoint for daily mix deduction
+- Feature E7: wire `computeDailySupplyConsumptionLines` into day-start consumption endpoint

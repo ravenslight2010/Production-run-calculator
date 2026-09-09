@@ -6,6 +6,10 @@ import {
   dailySyncTable,
   freezerSurplusAllocationsTable,
   freezerSurplusLotsTable,
+  inventoryItemsTable,
+  inventoryLotsTable,
+  inventoryLedgerTable,
+  inventoryLocationsTable,
   type FreezerSurplusAllocationRow,
   type FreezerSurplusLotRow,
 } from "@workspace/db";
@@ -34,6 +38,150 @@ class SurplusRequestError extends Error {
   ) {
     super(message);
   }
+}
+
+// Feature C: Freezer Pull → Inventory Sync
+//
+// When a freezer surplus lot is created, a matching inventory item + lot is
+// created at the freezer location so finished cases are visible in both systems.
+// When a surplus lot is allocated to a run, the cases are deducted from the
+// freezer location's inventory lot (lot movement only, no ingredient re-deduction).
+//
+// Inventory item key convention: "finished:{brand}:{flavor}" (or "finished:{brand}"
+// when flavor is empty). This keeps finished cases separate from ingredients/packaging
+// and lets the warehouse view show finished goods alongside raw materials.
+const FINISHED_PREFIX = "finished:";
+
+function finishedItemKey(brand: string, flavor: string): string {
+  const b = brand.trim().toLowerCase();
+  const f = flavor.trim().toLowerCase();
+  return f ? `${FINISHED_PREFIX}${b}:${f}` : `${FINISHED_PREFIX}${b}`;
+}
+
+function finishedItemName(brand: string, flavor: string): string {
+  return flavor ? `${brand} — ${flavor}` : brand;
+}
+
+// Structural type that accepts both db and PgTransaction
+type DbExecutor = { select: typeof db.select; insert: typeof db.insert; update: typeof db.update; delete: typeof db.delete };
+
+async function ensureFinishedInventoryItem(
+  tx: DbExecutor,
+  scope: string,
+  brand: string,
+  flavor: string,
+): Promise<{ id: number }> {
+  const key = finishedItemKey(brand, flavor);
+  const [existing] = await tx
+    .select({ id: inventoryItemsTable.id })
+    .from(inventoryItemsTable)
+    .where(and(eq(inventoryItemsTable.key, key), eq(inventoryItemsTable.scope, scope)))
+    .limit(1);
+  if (existing) return { id: existing.id };
+  const [created] = await tx
+    .insert(inventoryItemsTable)
+    .values({
+      scope,
+      key,
+      category: "ingredient",
+      name: finishedItemName(brand, flavor),
+      unit: "cases",
+      reorderThreshold: 0,
+    })
+    .returning();
+  if (!created) throw new Error("Failed to create finished-case inventory item");
+  return { id: created.id };
+}
+
+async function getFreezerLocationId(tx: DbExecutor, scope: string): Promise<number | null> {
+  const [loc] = await tx
+    .select({ id: inventoryLocationsTable.id })
+    .from(inventoryLocationsTable)
+    .where(and(eq(inventoryLocationsTable.scope, scope), eq(inventoryLocationsTable.isOnsite, false)))
+    .limit(1);
+  return loc?.id ?? null;
+}
+
+async function upsertFinishedInventoryLot(
+  tx: DbExecutor,
+  scope: string,
+  itemId: number,
+  freezerLocationId: number | null,
+  cases: number,
+): Promise<void> {
+  if (freezerLocationId == null) return;
+  const [lot] = await tx
+    .select()
+    .from(inventoryLotsTable)
+    .where(
+      and(
+        eq(inventoryLotsTable.itemId, itemId),
+        eq(inventoryLotsTable.locationId, freezerLocationId),
+        eq(inventoryLotsTable.scope, scope),
+      ),
+    )
+    .limit(1);
+  if (lot) {
+    const newQty = Math.max(0, lot.qtyRemaining - cases);
+    await tx
+      .update(inventoryLotsTable)
+      .set({ qtyRemaining: newQty })
+      .where(eq(inventoryLotsTable.id, lot.id));
+  }
+  await tx.insert(inventoryLedgerTable).values({
+    scope,
+    itemId,
+    lotId: lot?.id ?? null,
+    type: "consume",
+    qtyDelta: -cases,
+    runId: null,
+    note: "Freezer surplus allocation",
+  });
+}
+
+async function addFinishedInventoryStock(
+  tx: DbExecutor,
+  scope: string,
+  itemId: number,
+  freezerLocationId: number | null,
+  cases: number,
+): Promise<void> {
+  if (freezerLocationId == null) return;
+  const [existingLot] = await tx
+    .select()
+    .from(inventoryLotsTable)
+    .where(
+      and(
+        eq(inventoryLotsTable.itemId, itemId),
+        eq(inventoryLotsTable.locationId, freezerLocationId),
+        eq(inventoryLotsTable.scope, scope),
+      ),
+    )
+    .limit(1);
+  if (existingLot) {
+    await tx
+      .update(inventoryLotsTable)
+      .set({ qtyRemaining: existingLot.qtyRemaining + cases })
+      .where(eq(inventoryLotsTable.id, existingLot.id));
+  } else {
+    await tx.insert(inventoryLotsTable).values({
+      scope,
+      itemId,
+      locationId: freezerLocationId,
+      lotNumber: "",
+      qtyReceived: cases,
+      qtyRemaining: cases,
+    });
+  }
+  await tx.insert(inventoryLedgerTable).values({
+    scope,
+    itemId,
+    lotId: existingLot?.id ?? null,
+    type: "restock",
+    qtyDelta: cases,
+    runId: null,
+    note: "Freezer surplus lot confirmed",
+  });
 }
 
 function toApiLot(row: FreezerSurplusLotRow): FreezerSurplusLot {
@@ -120,28 +268,34 @@ router.post("/freezer-surplus", requireCapability("manage-inventory"), async (re
   }
   try {
     const now = new Date();
-    const [row] = await db
-      .insert(freezerSurplusLotsTable)
-      .values({
-        id: randomUUID(),
-        scope: currentScope(),
-        brand: product.brand,
-        flavor: product.flavor,
-        productKey: product.productKey,
-        productionDate,
-        totalCases: cases,
-        remainingCases: cases,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-    if (!row) throw new Error("Lot insert returned no row");
-    const ledger = await listLedger();
+    const result = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(freezerSurplusLotsTable)
+        .values({
+          id: randomUUID(),
+          scope: currentScope(),
+          brand: product.brand,
+          flavor: product.flavor,
+          productKey: product.productKey,
+          productionDate,
+          totalCases: cases,
+          remainingCases: cases,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      if (!row) throw new Error("Lot insert returned no row");
+      // Feature C: create + restock the finished-case inventory at the freezer location
+      const item = await ensureFinishedInventoryItem(tx, currentScope(), product.brand, product.flavor);
+      const freezerLoc = await getFreezerLocationId(tx, currentScope());
+      await addFinishedInventoryStock(tx, currentScope(), item.id, freezerLoc, cases);
+      return { row, ledger: await listLedger(tx) };
+    });
     req.log.info(
-      { operation: "confirm", scope: currentScope(), lotId: row.id, cases },
+      { operation: "confirm", scope: currentScope(), lotId: result.row.id, cases },
       "freezer_surplus_operation",
     );
-    res.status(201).json({ ...ledger, createdLot: toApiLot(row) });
+    res.status(201).json({ ...result.ledger, createdLot: toApiLot(result.row) });
   } catch (err) {
     req.log.error({ err, operation: "confirm", scope: currentScope() }, "freezer_surplus_operation_failed");
     res.status(500).json({ error: "Couldn't save the finished-case surplus. Try again." });
@@ -287,6 +441,15 @@ router.put(
               ),
             );
         }
+        // Feature C: also release/restore the finished-case inventory for old allocations
+        if (existingAllocations.length > 0) {
+          const totalOldCases = existingAllocations.reduce((sum, a) => sum + a.cases, 0);
+          if (totalOldCases > 0) {
+            const item = await ensureFinishedInventoryItem(tx, currentScope(), product.brand, product.flavor);
+            const freezerLoc = await getFreezerLocationId(tx, currentScope());
+            await addFinishedInventoryStock(tx, currentScope(), item.id, freezerLoc, totalOldCases);
+          }
+        }
         for (const [lotId, cases] of requested) {
           const lot = lotById.get(lotId);
           if (!lot) continue;
@@ -312,6 +475,13 @@ router.put(
             createdAt: new Date(),
             updatedAt: new Date(),
           });
+        }
+        // Feature C: deduct newly allocated cases from finished-case inventory
+        const totalNewCases = [...requested.values()].reduce((sum, c) => sum + c, 0);
+        if (totalNewCases > 0) {
+          const item = await ensureFinishedInventoryItem(tx, currentScope(), product.brand, product.flavor);
+          const freezerLoc = await getFreezerLocationId(tx, currentScope());
+          await upsertFinishedInventoryLot(tx, currentScope(), item.id, freezerLoc, totalNewCases);
         }
         return listLedger(tx);
       });
