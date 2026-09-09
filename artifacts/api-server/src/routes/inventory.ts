@@ -2259,16 +2259,36 @@ router.post(
         .map((r) => normalizeMix({ ...r, components: r.components }))
         .filter((m): m is Mix => m !== null);
       if (mixes.length > 0) {
+        // Build a lookup from mix.id to the DB mix row for amountActualMade + carry
+        const mixById = new Map<string, (typeof mixRows)[number]>();
+        for (const r of mixRows) mixById.set(r.id, r);
         const plan = buildMixPlan({ runs: scheduledRuns, mixes, today: dateStr });
+        const mixesToUpdate: Array<{ id: string; amountAlreadyMade: number }> = [];
         for (const group of plan) {
           for (const run of group.runs) {
             for (const entry of run.mixes) {
+              // Feature B2: if mixer entered amountActualMade, use it as the
+              // fresh production basis. If > remainingLbs, overproduction of mix
+              // is carried forward as amountAlreadyMade for the next run.
+              const dbMix = mixById.get(entry.mixId);
+              const actualMade = Number(dbMix?.amountActualMade) || 0;
+              const freshLbs = actualMade > 0
+                ? Math.max(entry.totalLbs, actualMade)
+                : entry.remainingLbs;
               const mixLines = computeMixComponentConsumptionLines(
                 entry.components,
                 entry.totalLbs,
-                entry.remainingLbs,
+                freshLbs,
               );
               lines.push(...mixLines);
+              // Surplus carry: if actual > fresh needed, excess → alreadyMade for next run
+              if (actualMade > 0 && entry.remainingLbs > 0) {
+                const surplus = Math.max(0, actualMade - entry.remainingLbs);
+                if (surplus > 0 && dbMix) {
+                  const newAlreadyMade = Math.round((entry.amountAlreadyMade + surplus) * 100) / 100;
+                  mixesToUpdate.push({ id: entry.mixId, amountAlreadyMade: newAlreadyMade });
+                }
+              }
             }
           }
           for (const entry of group.prepMixes) {
@@ -2278,6 +2298,15 @@ router.post(
               entry.remainingLbs,
             );
             lines.push(...mixLines);
+          }
+        }
+        // Persist surplus carry-forwards (update amountAlreadyMade on each mix)
+        if (mixesToUpdate.length > 0) {
+          for (const upd of mixesToUpdate) {
+            await db
+              .update(mixesTable)
+              .set({ amountAlreadyMade: upd.amountAlreadyMade, updatedAt: new Date() })
+              .where(eq(mixesTable.id, upd.id));
           }
         }
       }
