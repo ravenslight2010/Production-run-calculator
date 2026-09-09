@@ -12272,8 +12272,8 @@ export const getSaveIngredientBatchWeightsUrl = () => {
 }
 
 /**
- * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing entries are updated; new ones are inserted. Available to any signed-in user.
- * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing positive entries are updated; new positive entries are inserted. An entry with lbs set to zero removes the learned value and stops future auto-fill. Available to any signed-in user.
+ * @summary Save or clear learned ingredient batch weights (case-insensitive)
  */
 export const saveIngredientBatchWeights = async (saveIngredientBatchWeightsInput: SaveIngredientBatchWeightsInput, options?: Parameters<typeof customFetch>[1]): Promise<IngredientBatchWeightList> => {
 
@@ -12329,7 +12329,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveIngredientBatchWeightsMutationVariables = {data: BodyType<SaveIngredientBatchWeightsInput>}
 
     /**
- * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ * @summary Save or clear learned ingredient batch weights (case-insensitive)
  */
 export const useSaveIngredientBatchWeights = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveIngredientBatchWeights>>, TError,SaveIngredientBatchWeightsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

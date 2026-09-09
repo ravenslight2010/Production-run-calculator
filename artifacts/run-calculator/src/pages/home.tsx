@@ -426,9 +426,11 @@ import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
   saveIngredientBatchWeights,
+  normalizeBatchWeightChanges,
   buildBatchWeightMap,
   lookupBatchWeight,
   collectBatchWeightCandidates,
+  collectBatchWeightCandidatesFromProfile,
   executeBatchWeightPropagation,
   type BatchWeightCandidate,
   type IngredientBatchWeightRow,
@@ -4623,6 +4625,10 @@ export default function Home() {
   // Saves are chained so an older in-flight request can never land after (and
   // overwrite) a newer one — the server applies them in the order entered.
   const batchWeightSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  // Keep failed writes in memory so a later edit retries the failed entry
+  // instead of making a profile save look complete while its learned weight is
+  // silently lost.
+  const pendingBatchWeightChangesRef = useRef<Map<string, BatchWeightCandidate>>(new Map());
   // Called from the type dropdowns when an ingredient is picked: fills the
   // matching batch-lbs field with the remembered weight (if any). Reads the
   // ref so the inline JSX handlers never go stale.
@@ -4748,6 +4754,47 @@ export default function Home() {
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [form, canManageProfiles],
+  );
+
+  // All learned-weight writers use this queue. The server response is the
+  // acknowledgement boundary: only its canonical list is published to the
+  // local cache and only acknowledged positive entries fan out to profiles and
+  // pending/open runs. A failed write remains retryable on the next edit.
+  const queueBatchWeightChanges = useCallback(
+    (entries: { name: string; lbs: number }[]): void => {
+      const changes = normalizeBatchWeightChanges(entries);
+      if (changes.length === 0) return;
+      for (const change of changes) {
+        pendingBatchWeightChangesRef.current.set(change.name.toLowerCase(), change);
+      }
+      batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
+        .then(async () => {
+          const submitted = [...pendingBatchWeightChangesRef.current.values()];
+          const canonical = await saveIngredientBatchWeights(submitted);
+          cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+            ["ingredientBatchWeights"],
+            canonical,
+          );
+          for (const change of submitted) {
+            const current = pendingBatchWeightChangesRef.current.get(change.name.toLowerCase());
+            if (current?.lbs === change.lbs) {
+              pendingBatchWeightChangesRef.current.delete(change.name.toLowerCase());
+            }
+          }
+          const positive = submitted.filter((entry) => entry.lbs > 0);
+          if (positive.length > 0) await propagateBatchWeightUpdates(positive);
+        })
+        .catch((error) => {
+          toast({
+            title: "Batch weight was not saved",
+            description: error instanceof Error
+              ? error.message
+              : "The server did not acknowledge this weight. Try again.",
+            variant: "destructive",
+          });
+        });
+    },
+    [cycleCountQc, propagateBatchWeightUpdates],
   );
 
   // After a cheese recipe workbook import, fan the updated per-batch lbs into
@@ -10029,7 +10076,22 @@ export default function Home() {
   // profile writer must handle). Per-run inputs (cases needed, temp overrides)
   // and progress fields of a started run are kept: mergeProfileIntoOpenForm
   // only overlays profile-owned fields.
-  function handleSetupProfileSaved(brand: string, flavor: string) {
+  async function handleSetupProfileSaved(
+    brand: string,
+    flavor: string,
+    savedValues?: FormValues,
+  ) {
+    // SetupProfileEditor calls this only after saveProfileAndWaitForServer
+    // receives an exact server acknowledgement. Publish only the values from
+    // that acknowledged save, never a stale open-run form.
+    if (savedValues) {
+      const entries = collectBatchWeightCandidatesFromProfile(
+        savedValues as unknown as Record<string, unknown>,
+        learnedBatchWeightsRef.current,
+        DEFAULT_PEP_TYPES,
+      );
+      queueBatchWeightChanges(entries);
+    }
     // The profile is the source of truth for every run that hasn't started:
     // fan the fresh save out to today's pending runs and future scheduled days.
     void propagateProfileToPendingRuns(brand, flavor);
@@ -13974,15 +14036,11 @@ export default function Home() {
     const candidates = JSON.parse(batchWeightCandidatesSig) as BatchWeightCandidate[];
     if (candidates.length === 0) return;
     const t = setTimeout(() => {
-      batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
-        .then(() => saveIngredientBatchWeights(candidates))
-        .then(() => propagateBatchWeightUpdates(candidates))
-        .then(() => cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
-        .catch(() => {}); // best-effort: never block the user's entry
+      queueBatchWeightChanges(candidates);
     }, 2000);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchWeightCandidatesSig]);
+  }, [batchWeightCandidatesSig, queueBatchWeightChanges]);
 
   // ── Next-run die type (for change warning) ────────────────────────────────
   const nextRunDieType = useMemo(() => {
@@ -15631,32 +15689,7 @@ export default function Home() {
                       items={weightItems}
                       learnedWeights={learnedBatchWeights}
                       onSave={(entries) => {
-                        const positive = entries.filter(e => e.lbs > 0);
-                        const cleared = entries.filter(e => e.lbs <= 0);
-                        // Cleared entries: remove from local cache immediately so
-                        // applyLearnedBatchLbs stops auto-filling that ingredient.
-                        // The server ignores zero/non-positive writes, so the
-                        // prior server row becomes stale — local removal is enough.
-                        if (cleared.length > 0) {
-                          const clearedKeys = new Set(
-                            cleared.map(e => (e.name ?? "").trim().toLowerCase()),
-                          );
-                          cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
-                            ["ingredientBatchWeights"],
-                            (prev) =>
-                              (prev ?? []).filter(
-                                r => !clearedKeys.has((r.name ?? "").trim().toLowerCase()),
-                              ),
-                          );
-                        }
-                        // Positive entries: POST to server, propagate to profiles, then refresh cache.
-                        if (positive.length > 0) {
-                          batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
-                            .then(() => saveIngredientBatchWeights(positive))
-                            .then(() => propagateBatchWeightUpdates(positive))
-                            .then(() => void cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
-                            .catch(() => {});
-                        }
+                        queueBatchWeightChanges(entries);
                       }}
                     />
                   );

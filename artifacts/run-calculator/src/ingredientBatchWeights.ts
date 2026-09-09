@@ -20,23 +20,55 @@ export async function fetchIngredientBatchWeights(): Promise<IngredientBatchWeig
     headers: { "x-client-id": inventoryClientId() },
   });
   if (!res.ok) throw new Error(`List ingredient batch weights failed (${res.status})`);
-  const data = (await res.json()) as { weights: IngredientBatchWeightRow[] };
-  return data.weights ?? [];
+  const data = (await res.json()) as { weights?: unknown };
+  if (!Array.isArray(data.weights)) {
+    throw new Error("List ingredient batch weights was not acknowledged by the server");
+  }
+  return data.weights.filter((row): row is IngredientBatchWeightRow =>
+    !!row &&
+    typeof row === "object" &&
+    typeof (row as IngredientBatchWeightRow).name === "string" &&
+    Number.isFinite(Number((row as IngredientBatchWeightRow).lbs)) &&
+    Number((row as IngredientBatchWeightRow).lbs) > 0,
+  );
 }
 
 export async function saveIngredientBatchWeights(
   weights: IngredientBatchWeightRow[],
-): Promise<void> {
-  if (weights.length === 0) return;
+): Promise<IngredientBatchWeightRow[]> {
+  const changes = normalizeBatchWeightChanges(weights);
+  if (changes.length === 0) return [];
   const res = await fetch("/api/ingredient-batch-weights", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ weights }),
+    body: JSON.stringify({ weights: changes }),
   });
   if (!res.ok) throw new Error(`Save ingredient batch weights failed (${res.status})`);
+  const data = (await res.json()) as { weights?: unknown };
+  if (!Array.isArray(data.weights)) {
+    throw new Error("Save ingredient batch weights was not acknowledged by the server");
+  }
+  const canonical = data.weights.filter((row): row is IngredientBatchWeightRow =>
+    !!row &&
+    typeof row === "object" &&
+    typeof (row as IngredientBatchWeightRow).name === "string" &&
+    Number.isFinite(Number((row as IngredientBatchWeightRow).lbs)) &&
+    Number((row as IngredientBatchWeightRow).lbs) > 0,
+  );
+  const canonicalByKey = buildBatchWeightMap(canonical);
+  for (const change of changes) {
+    const key = change.name.toLowerCase();
+    if (change.lbs > 0 && canonicalByKey.get(key) !== change.lbs) {
+      throw new Error(`Save ingredient batch weight "${change.name}" was not acknowledged by the server`);
+    }
+    if (change.lbs === 0 && canonicalByKey.has(key)) {
+      throw new Error(`Clear ingredient batch weight "${change.name}" was not acknowledged by the server`);
+    }
+  }
+  return canonical;
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
@@ -68,6 +100,20 @@ export function lookupBatchWeight(
 // a mix / recipe-backed slot hides the manual field, so its stale form value
 // must never be learned.
 export type BatchWeightCandidate = { name: string; lbs: number };
+
+/** Normalize one serialized batch-weight write. Zero is an explicit clear. */
+export function normalizeBatchWeightChanges(
+  entries: IngredientBatchWeightRow[],
+): IngredientBatchWeightRow[] {
+  const byKey = new Map<string, IngredientBatchWeightRow>();
+  for (const entry of entries) {
+    const name = (entry.name ?? "").trim();
+    const lbs = Number(entry.lbs);
+    if (!name || !Number.isFinite(lbs) || lbs < 0) continue;
+    byKey.set(name.toLowerCase(), { name, lbs });
+  }
+  return [...byKey.values()];
+}
 
 type RecipeRowLike = { lbs?: number | string | null };
 
@@ -224,8 +270,10 @@ function isMixType(type: unknown): boolean {
 }
 
 function isDefaultPepType(type: unknown, defaultPepTypes: unknown): boolean {
-  const trimmed = typeof type === "string" ? type.trim() : "";
-  return Array.isArray(defaultPepTypes) && defaultPepTypes.includes(trimmed);
+  const trimmed = typeof type === "string" ? type.trim().toLowerCase() : "";
+  return Array.isArray(defaultPepTypes) && defaultPepTypes.some(
+    (candidate) => typeof candidate === "string" && candidate.trim().toLowerCase() === trimmed,
+  );
 }
 
 function buildNewBatchWeightMap(
@@ -259,6 +307,25 @@ export function collectBatchWeightProfileUpdates(
   }
 
   return updates;
+}
+
+/** Collect visible, positive manual weights from a saved profile. */
+export function collectBatchWeightCandidatesFromProfile(
+  profile: BatchWeightProfileLike,
+  learned: Map<string, number>,
+  defaultPepTypes: string[],
+): BatchWeightCandidate[] {
+  const out = new Map<string, BatchWeightCandidate>();
+  for (const { typeField, lbsField, hidden } of BATCH_WEIGHT_PROFILE_SLOTS) {
+    if (hidden(profile, defaultPepTypes)) continue;
+    const name = typeof profile[typeField] === "string" ? profile[typeField].trim() : "";
+    const lbs = Number(profile[lbsField]);
+    if (!name || !Number.isFinite(lbs) || lbs <= 0) continue;
+    const key = name.toLowerCase();
+    if (learned.get(key) === lbs) continue;
+    out.set(key, { name, lbs });
+  }
+  return [...out.values()];
 }
 
 export function buildBatchWeightPropagationPlan(
@@ -341,7 +408,7 @@ export function collectBatchWeightCandidates(
     const type = (pep.type ?? "").trim();
     if (!type) continue;
     // Default pep types are measured in sticks; the lbs field is hidden.
-    if (slice.defaultPepTypes.includes(type)) continue;
+    if (isDefaultPepType(type, slice.defaultPepTypes)) continue;
     consider(type, pep.batchLbs);
   }
 

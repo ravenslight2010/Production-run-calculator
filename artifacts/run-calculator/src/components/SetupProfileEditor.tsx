@@ -197,7 +197,7 @@ export interface SetupProfileEditorProps {
    * live-refresh an open run form that uses the same brand+flavor (the
    * "unified setup editing" flow — edit once, updates everywhere).
    */
-  onSaved?: (brand: string, flavor: string) => void;
+  onSaved?: (brand: string, flavor: string, values: FormValues) => void | Promise<void>;
   initialBrand?: string;
   initialFlavor?: string;
   isSupervisor: boolean;
@@ -555,7 +555,7 @@ export default function SetupProfileEditor({
         return;
       }
       toast({ title: `Saved setup for ${b} — ${f}` });
-      onSaved?.(b, f);
+      await onSaved?.(b, f, values);
     } catch (error) {
       const message = error instanceof Error ? error.message : "The server did not acknowledge this setup.";
       const retryMessage = /retry the save/i.test(message)

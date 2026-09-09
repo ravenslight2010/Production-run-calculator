@@ -1,13 +1,20 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   buildBatchWeightMap,
   lookupBatchWeight,
+  normalizeBatchWeightChanges,
+  saveIngredientBatchWeights,
   collectBatchWeightCandidates,
+  collectBatchWeightCandidatesFromProfile,
   buildBatchWeightPropagationPlan,
   batchWeightPropagationToast,
   executeBatchWeightPropagation,
   type BatchWeightFormSlice,
 } from "./ingredientBatchWeights";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const DEFAULT_PEPS = ["Pepperoni", "Cup & Char"];
 
@@ -34,6 +41,55 @@ describe("buildBatchWeightMap / lookupBatchWeight", () => {
     expect(lookupBatchWeight(map, "BACON CRUMBLE  ")).toBe(25);
     expect(lookupBatchWeight(map, "sausage")).toBeNull();
     expect(lookupBatchWeight(map, "")).toBeNull();
+  });
+});
+
+describe("normalizeBatchWeightChanges", () => {
+  it("dedupes case-insensitively and preserves zero as an explicit clear", () => {
+    expect(normalizeBatchWeightChanges([
+      { name: " Bacon ", lbs: 30 },
+      { name: "bacon", lbs: 32 },
+      { name: "Sauce", lbs: 0 },
+      { name: "negative", lbs: -1 },
+      { name: "", lbs: 4 },
+    ])).toEqual([
+      { name: "bacon", lbs: 32 },
+      { name: "Sauce", lbs: 0 },
+    ]);
+  });
+});
+
+describe("saveIngredientBatchWeights acknowledgement", () => {
+  it("accepts a canonical positive update and an acknowledged clear", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ weights: [{ name: "Bacon", lbs: 32 }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(saveIngredientBatchWeights([
+      { name: " bacon ", lbs: 32 },
+      { name: "Sauce", lbs: 0 },
+    ])).resolves.toEqual([{ name: "Bacon", lbs: 32 }]);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+      weights: [
+        { name: "bacon", lbs: 32 },
+        { name: "Sauce", lbs: 0 },
+      ],
+    });
+  });
+
+  it("rejects a malformed or stale server response instead of propagating", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ weights: [{ name: "Bacon", lbs: 20 }] }),
+    }));
+
+    await expect(saveIngredientBatchWeights([{ name: "Bacon", lbs: 32 }]))
+      .rejects.toThrow(/not acknowledged/i);
   });
 });
 
@@ -73,6 +129,12 @@ describe("collectBatchWeightCandidates", () => {
     ]);
   });
 
+  it("matches default stick-pep types case-insensitively", () => {
+    const slice = emptySlice();
+    slice.peps = [{ type: "pepperoni", batchLbs: 18 }];
+    expect(collectBatchWeightCandidates(slice, new Map())).toEqual([]);
+  });
+
   it("learns ready-made sauce barrels but never recipe-backed sauces", () => {
     const readyMade = emptySlice();
     readyMade.sauce = { recipeName: "BBQ", barrelLbs: 55, recipe: [] };
@@ -97,6 +159,35 @@ describe("collectBatchWeightCandidates", () => {
     ];
     expect(collectBatchWeightCandidates(slice, new Map())).toEqual([
       { name: "bacon", lbs: 32 },
+    ]);
+  });
+});
+
+describe("collectBatchWeightCandidatesFromProfile", () => {
+  it("collects only visible positive profile weights and excludes recipes/defaults", () => {
+    expect(collectBatchWeightCandidatesFromProfile(
+      {
+        app1Type: "Bacon",
+        app1BatchLbs: 30,
+        app2Type: "Veggie Mix",
+        app2BatchLbs: 20,
+        app3Type: "Cheese",
+        app3BatchLbs: 10,
+        app3CheeseRecipe: [{ lbs: 10 }],
+        pep1Type: "pepperoni",
+        pep1BatchLbs: 7,
+        pep1TypeB: "Turkey Pep",
+        pep1BatchLbsB: 12,
+        frontlineRecipeName: "BBQ",
+        sauceBarrelLbs: 55,
+        frontlineRecipe: [],
+      },
+      new Map(),
+      DEFAULT_PEPS,
+    )).toEqual([
+      { name: "Bacon", lbs: 30 },
+      { name: "Turkey Pep", lbs: 12 },
+      { name: "BBQ", lbs: 55 },
     ]);
   });
 });

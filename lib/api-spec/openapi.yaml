@@ -3675,11 +3675,12 @@ paths:
     post:
       operationId: saveIngredientBatchWeights
       tags: [ingredientBatchWeights]
-      summary: Save learned ingredient batch weights (case-insensitive upsert)
+      summary: Save or clear learned ingredient batch weights (case-insensitive)
       description: >-
         Persists a batch of entered batch weights, keyed case-insensitively on
-        ingredient name. Existing entries are updated; new ones are inserted.
-        Available to any signed-in user.
+        ingredient name. Existing positive entries are updated; new positive
+        entries are inserted. An entry with lbs set to zero removes the learned
+        value and stops future auto-fill. Available to any signed-in user.
       requestBody:
         required: true
         content:
