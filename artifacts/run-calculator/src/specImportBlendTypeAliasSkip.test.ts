@@ -135,7 +135,7 @@ vi.mock("./mixes", () => ({
   saveMixes: async (items: Mix[]) => items,
 }));
 
-import { prepareSpecImport } from "./specImport";
+import { prepareSpecImportWithAi } from "./specImport";
 
 beforeEach(() => {
   parseSpy.mockReset();
@@ -144,7 +144,7 @@ beforeEach(() => {
 
 describe("prepare — blend-name aliases rename recipe + slots in lockstep", () => {
   it("applies the remembered blend link to the recipe AND its slot together, and still aliases the plain topping", async () => {
-    const prepared = await prepareSpecImport(realBuffer(), undefined, ["specs.xlsx"]);
+    const prepared = await prepareSpecImportWithAi(realBuffer(), "specs.xlsx");
 
     // The remembered reassignment applies to the RECIPE…
     const cheese = prepared.parsed.recipes.find((r) => r.kind === "cheese");

@@ -131,7 +131,7 @@ vi.mock("./namedRecipes", () => ({
   addNamedRecipesToServerIfAbsent: async () => {},
 }));
 
-import { prepareSpecImportMulti, hashSpecImportSource } from "./specImport";
+import { prepareSpecImportMultiWithAi, hashSpecImportSource } from "./specImport";
 import { recipeLinkSuggestionKey, blendLinkSuggestionKey } from "@workspace/spec-import";
 import { deriveSourceKey } from "./savedSpecSheets";
 import {
@@ -213,7 +213,7 @@ function fixtureParse(): ParsedSpecImport {
 const lc = (s: string | undefined | null) => (s ?? "").trim().toLowerCase();
 
 async function reimport() {
-  return prepareSpecImportMulti([specBuf()], undefined, [SPEC_NAME]);
+  return prepareSpecImportMultiWithAi([specBuf()], undefined, [SPEC_NAME]);
 }
 
 beforeEach(() => {
@@ -361,7 +361,7 @@ describe("spec re-import remembers merges/renames (real workbook, deterministic 
       throw new Error("AI parse must not run on exact re-import");
     });
 
-    const second = await prepareSpecImportMulti([buf], undefined, [SPEC_NAME]);
+    const second = await prepareSpecImportMultiWithAi([buf], undefined, [SPEC_NAME]);
     expect(parseSpy).not.toHaveBeenCalled();
     for (const p of second.parsed.profiles) expect(p.brand).toBe("Aldo Foods");
     const cheeseProfile = second.parsed.profiles.find((p) => lc(p.flavor) !== "pepperoni");

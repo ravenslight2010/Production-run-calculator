@@ -155,7 +155,7 @@ vi.mock("./mixes", () => ({
   },
 }));
 
-import { prepareSpecImport, commitSpecImport, readWorkbookGrids } from "./specImport";
+import { prepareSpecImportWithAi, commitSpecImport, readWorkbookGrids } from "./specImport";
 
 beforeEach(() => {
   parseSpy.mockReset();
@@ -189,7 +189,7 @@ function cheeseRecipesOf(parsed: ParsedSpecImport) {
 
 describe("spec-import pipeline — one named cheese mix does not split into two", () => {
   it("prepareSpecImport collapses both weights to a single cheese pool recipe", async () => {
-    const prepared = await prepareSpecImport(realAldoBuffer(), undefined, ["Aldo's_Pizza_Specs.xlsx"]);
+    const prepared = await prepareSpecImportWithAi(realAldoBuffer(), "Aldo's_Pizza_Specs.xlsx");
 
     // Exactly one cheese pool recipe despite two distinct per-pizza weights.
     const cheese = cheeseRecipesOf(prepared.parsed);
@@ -210,7 +210,7 @@ describe("spec-import pipeline — one named cheese mix does not split into two"
   });
 
   it("commitSpecImport seeds exactly ONE cheese recipe into the pool", async () => {
-    const prepared = await prepareSpecImport(realAldoBuffer(), undefined, ["Aldo's_Pizza_Specs.xlsx"]);
+    const prepared = await prepareSpecImportWithAi(realAldoBuffer(), "Aldo's_Pizza_Specs.xlsx");
     const { cheeseRecipesAdded } = await commitSpecImport(prepared);
 
     expect(cheeseRecipesAdded).toBe(1);

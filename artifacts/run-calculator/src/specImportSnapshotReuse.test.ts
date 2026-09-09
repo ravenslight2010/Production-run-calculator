@@ -87,8 +87,8 @@ vi.mock("./mixes", () => ({
 }));
 
 import {
-  prepareSpecImport,
-  prepareSpecImportMulti,
+  prepareSpecImportWithAi,
+  prepareSpecImportMultiWithAi,
   commitSpecImport,
   hashSpecImportSource,
 } from "./specImport";
@@ -176,7 +176,7 @@ describe("exact re-import parse reuse", () => {
       { id: 1, label: "Prev", sourceKey: "specs", sourceHash: hash, createdAt: 100, data: fixtureParse() },
     ]);
 
-    const prepared = await prepareSpecImport(data, "Specs.xlsx");
+    const prepared = await prepareSpecImportWithAi(data, "Specs.xlsx");
 
     expect(parseSpy).not.toHaveBeenCalled();
     expect(prepared.parsed.profiles).toHaveLength(1);
@@ -199,7 +199,7 @@ describe("exact re-import parse reuse", () => {
       { kind: "brand", externalName: "Aldo's", canonicalName: "Aldo Brothers", context: null },
     ];
 
-    const prepared = await prepareSpecImport(data, "Specs.xlsx");
+    const prepared = await prepareSpecImportWithAi(data, "Specs.xlsx");
 
     expect(parseSpy).not.toHaveBeenCalled();
     expect(prepared.parsed.profiles).toHaveLength(1);
@@ -215,7 +215,7 @@ describe("exact re-import parse reuse", () => {
 
     // Bytes differ → no reuse → the normal parse path runs (and rejects here
     // because the buffer isn't a real workbook / the AI stub throws).
-    await expect(prepareSpecImport(bufOf("new-bytes"), "Specs.xlsx")).rejects.toThrow();
+    await expect(prepareSpecImportWithAi(bufOf("new-bytes"), "Specs.xlsx")).rejects.toThrow();
   });
 
   it("multi file: reuses only for the SAME file set, before buffers are consumed", async () => {
@@ -226,7 +226,7 @@ describe("exact re-import parse reuse", () => {
     ]);
 
     const seen: Array<[number, number]> = [];
-    const prepared = await prepareSpecImportMulti(bufs, (d, t) => seen.push([d, t]), [
+    const prepared = await prepareSpecImportMultiWithAi(bufs, (d, t) => seen.push([d, t]), [
       "b.xlsx",
       "a.xlsx",
     ]);
@@ -237,7 +237,7 @@ describe("exact re-import parse reuse", () => {
 
     // A single-file re-import from that batch must NOT reuse the batch
     // snapshot (its data is the merged whole-batch parse).
-    await expect(prepareSpecImport(bufOf("file-a"), "a.xlsx")).rejects.toThrow();
+    await expect(prepareSpecImportWithAi(bufOf("file-a"), "a.xlsx")).rejects.toThrow();
   });
 });
 

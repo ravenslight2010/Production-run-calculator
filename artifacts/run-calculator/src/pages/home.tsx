@@ -11927,6 +11927,8 @@ export default function Home() {
   const premixImportGenRef = useRef(0);
   const cheeseImportGenRef = useRef(0);
   const specImportAbortRef = useRef<AbortController | null>(null);
+  const specImportBuffersRef = useRef<ArrayBuffer[]>([]);
+  const specImportSourceNamesRef = useRef<string[]>([]);
   const premixImportAbortRef = useRef<AbortController | null>(null);
   const cheeseImportAbortRef = useRef<AbortController | null>(null);
   const shippingImportGenRef = useRef(0);
@@ -12016,7 +12018,7 @@ export default function Home() {
     if (!canImportSpec) {
       toast({
         title: "Import access required",
-        description: "Spec imports require AI, profile, and inventory permissions.",
+        description: "Spec imports require profile and inventory permissions.",
         variant: "destructive",
       });
       return;
@@ -12047,6 +12049,11 @@ export default function Home() {
       for (const f of files) {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
+      // The multi-file preparation releases its input buffers. Keep a private
+      // copy only while this review is open for the explicit unresolved AI
+      // fallback; never persist the raw workbook bytes.
+      specImportBuffersRef.current = buffers.map((buffer) => buffer.slice(0));
+      specImportSourceNamesRef.current = files.map((file) => file.name);
       const prepared =
         buffers.length === 1
           ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
@@ -12093,8 +12100,84 @@ export default function Home() {
     }
   }
 
+  async function handleSpecAiFallback() {
+    const baseline = specImportPrepared;
+    const buffers = specImportBuffersRef.current;
+    if (!canUseAiTools || !baseline?.unresolved?.length || buffers.length === 0) return;
+    const gen = ++specImportGenRef.current;
+    specImportAbortRef.current?.abort();
+    const controller = new AbortController();
+    specImportAbortRef.current = controller;
+    setSpecImportLoading(true);
+    setSpecImportError(null);
+    try {
+      const workflow = await loadWorkbookWorkflow();
+      const aiPrepared =
+        buffers.length === 1
+          ? await workflow.specImport.prepareSpecImportWithAi(
+              buffers[0].slice(0),
+              specImportSourceNamesRef.current[0],
+              controller.signal,
+            )
+          : await workflow.specImport.prepareSpecImportMultiWithAi(
+              buffers.map((buffer) => buffer.slice(0)),
+              undefined,
+              specImportSourceNamesRef.current,
+              controller.signal,
+            );
+      if (gen !== specImportGenRef.current) return;
+      const profileKeys = new Set(
+        baseline.parsed.profiles.map((profile) => `${profile.brand}\u0000${profile.flavor}`.toLowerCase()),
+      );
+      const recipeKeys = new Set(
+        baseline.parsed.recipes.map((recipe) => `${recipe.kind}\u0000${recipe.name}`.toLowerCase()),
+      );
+      const merged = {
+        ...aiPrepared,
+        sourceNames: baseline.sourceNames,
+        parsed: {
+          ...aiPrepared.parsed,
+          profiles: [
+            ...baseline.parsed.profiles,
+            ...aiPrepared.parsed.profiles.filter((profile) => {
+              const key = `${profile.brand}\u0000${profile.flavor}`.toLowerCase();
+              return !profileKeys.has(key);
+            }),
+          ],
+          recipes: [
+            ...baseline.parsed.recipes,
+            ...aiPrepared.parsed.recipes.filter((recipe) => {
+              const key = `${recipe.kind}\u0000${recipe.name}`.toLowerCase();
+              return !recipeKeys.has(key);
+            }),
+          ],
+        },
+      };
+      setSpecImportPrepared(merged);
+      toast({
+        title: "Unresolved items interpreted",
+        description: "Review the additions below. Nothing was applied automatically.",
+      });
+    } catch (err) {
+      if (gen === specImportGenRef.current) {
+        setSpecImportError(err instanceof Error ? err.message : "Could not interpret the unresolved import items.");
+      }
+    } finally {
+      if (gen === specImportGenRef.current) setSpecImportLoading(false);
+    }
+  }
+
   async function handleSpecPhotoImport() {
-    if (!canImportSpec || specPhotoFiles.length === 0) return;
+    if (!canImportSpec || !canUseAiTools || specPhotoFiles.length === 0) {
+      if (specPhotoFiles.length > 0 && !canUseAiTools) {
+        toast({
+          title: "AI access required",
+          description: "Photo transcription is available only to users with AI tools access.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
     const files = specPhotoFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
     const gen = ++specImportGenRef.current;
     specImportAbortRef.current?.abort();
@@ -12152,7 +12235,7 @@ export default function Home() {
     if (!canImportSpec) {
       toast({
         title: "Import access required",
-        description: "Spec imports require AI, profile, and inventory permissions.",
+        description: "Spec imports require profile and inventory permissions.",
         variant: "destructive",
       });
       return;
@@ -15697,7 +15780,7 @@ export default function Home() {
                             )}
                             <button
                               type="button"
-                              disabled={specImportLoading}
+                              disabled={specImportLoading || !canUseAiTools}
                               onClick={() => void handleSpecPhotoImport()}
                               className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                             >
@@ -17052,6 +17135,8 @@ export default function Home() {
             }
             setShowSpecImport(false);
             setSpecImportPrepared(null);
+            specImportBuffersRef.current = [];
+            specImportSourceNamesRef.current = [];
             setSpecImportError(null);
             setSpecImportLoading(false);
             setSpecImportProgress(null);
@@ -17063,6 +17148,8 @@ export default function Home() {
               error: specImportError,
               prepared: specImportPrepared,
               applying: specImportApplying,
+              canUseAiTools,
+              onUseAiFallback: () => void handleSpecAiFallback(),
               existingRecipeNamesByKind: existingImportRecipeNames,
               onConfirm: handleSpecImportConfirm,
             }}

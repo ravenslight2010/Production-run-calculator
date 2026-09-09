@@ -177,7 +177,7 @@ vi.mock("./mixes", () => ({
   saveMixes: async (items: Mix[]) => items,
 }));
 
-import { prepareSpecImport, commitSpecImport } from "./specImport";
+import { prepareSpecImportWithAi, commitSpecImport } from "./specImport";
 
 beforeEach(() => {
   parseSpy.mockReset();
@@ -208,7 +208,7 @@ function seedNamedPool(
 
 describe("web spec-import — one named dough/sauce recipe across flavors does not split", () => {
   it("prepared parse carries exactly one distinct dough name and one sauce name", async () => {
-    const prepared = await prepareSpecImport(goodBuffer());
+    const prepared = await prepareSpecImportWithAi(goodBuffer());
 
     const doughNames = new Set(
       prepared.parsed.recipes.filter((r) => r.kind === "dough").map((r) => r.name.trim()),
@@ -221,7 +221,7 @@ describe("web spec-import — one named dough/sauce recipe across flavors does n
   });
 
   it("seeds exactly ONE dough and ONE sauce pool entry from the prepared parse", async () => {
-    const prepared = await prepareSpecImport(goodBuffer());
+    const prepared = await prepareSpecImportWithAi(goodBuffer());
     // commit runs cleanly (cheese/mix pools untouched here) and never throws.
     await commitSpecImport(prepared);
 

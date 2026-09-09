@@ -237,7 +237,318 @@ export type ParsedSpecImport = {
    * callouts) instead of burying them in free text.
    */
   warnings?: SpecImportWarning[];
+  /**
+   * Source rows the deterministic importer could not safely interpret.
+   * These are review context only: they must never be converted into writes or
+   * silently discarded. The explicit AI fallback may use these bounded rows.
+   */
+  unresolved?: SpecImportUnresolved[];
 };
+
+export type SpecImportUnresolved = {
+  source: string;
+  row?: number;
+  values: string[];
+  reason: string;
+};
+
+export type DeterministicSpecImportResult = {
+  parsed: ParsedSpecImport;
+  supported: boolean;
+  unresolved: SpecImportUnresolved[];
+};
+
+const deterministicCell = (value: unknown): string =>
+  String(value ?? "").replace(/\s+/g, " ").trim();
+
+const deterministicKey = (value: string): string =>
+  deterministicCell(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+function deterministicNumber(value: string): number | undefined {
+  const cleaned = deterministicCell(value).replace(/,/g, "");
+  if (!cleaned) return undefined;
+  const match = cleaned.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return undefined;
+  const n = Number(match[0]);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function deterministicHeaderIndex(headers: string[], ...names: string[]): number {
+  const wanted = new Set(names.map(deterministicKey));
+  return headers.findIndex((header) => wanted.has(deterministicKey(header)));
+}
+
+function deterministicRecipeKind(sheetName: string): ParsedRecipe["kind"] | null {
+  const key = deterministicKey(sheetName);
+  if (key.includes("dough")) return "dough";
+  if (key.includes("sauce")) return "sauce";
+  if (key.includes("cheese")) return "cheese";
+  return null;
+}
+
+function deterministicTargets(value: string): ParsedRecipeTarget[] {
+  const colon = value.indexOf(":");
+  if (colon <= 0) return [];
+  const brand = value.slice(0, colon).trim();
+  if (!brand) return [];
+  return value
+    .slice(colon + 1)
+    .split(",")
+    .map((flavor) => ({ brand, flavor: flavor.trim() }))
+    .filter((target) => target.flavor);
+}
+
+function parseDeterministicProfiles(
+  grid: SheetGrid,
+  unresolved: SpecImportUnresolved[],
+): ParsedProfile[] {
+  const nonEmpty = grid.rows.filter((row) => row.some((cell) => deterministicCell(cell)));
+  if (nonEmpty.length === 0) return [];
+  const header = nonEmpty[0].map(deterministicCell);
+  const brandIndex = deterministicHeaderIndex(header, "Brand");
+  const flavorIndex = deterministicHeaderIndex(header, "Flavor");
+  if (brandIndex < 0 || flavorIndex < 0) return [];
+
+  const dieIndex = deterministicHeaderIndex(header, "Die Type");
+  const sauceOzIndex = deterministicHeaderIndex(header, "Sauce oz/pizza", "Sauce oz per pizza");
+  const doughIndex = deterministicHeaderIndex(header, "Dough Recipe");
+  const sauceIndex = deterministicHeaderIndex(header, "Sauce Recipe");
+  const doughballIndex = deterministicHeaderIndex(header, "Target Doughball Weight (oz)");
+  const trayIndex = deterministicHeaderIndex(header, "Doughballs Per Tray");
+  const appColumns = new Map<number, { type: number; oz: number; recipe: number }>();
+  const pepColumns = new Map<number, { type: number; sticks: number; oz: number }>();
+  for (let i = 0; i < header.length; i++) {
+    const app = header[i].match(/^Applicator\s+(\d+)\s+(Type|oz\/pizza|Recipe)$/i);
+    if (app) {
+      const slot = Number(app[1]) - 1;
+      const current = appColumns.get(slot) ?? { type: -1, oz: -1, recipe: -1 };
+      if (app[2].toLowerCase() === "type") current.type = i;
+      else if (app[2].toLowerCase() === "recipe") current.recipe = i;
+      else current.oz = i;
+      appColumns.set(slot, current);
+    }
+    const pep = header[i].match(/^Pepperoni\s+(\d+)\s+(Type|Sticks|oz\/pizza)$/i);
+    if (pep) {
+      const slot = Number(pep[1]) - 1;
+      const current = pepColumns.get(slot) ?? { type: -1, sticks: -1, oz: -1 };
+      const field = pep[2].toLowerCase();
+      if (field === "type") current.type = i;
+      else if (field === "sticks") current.sticks = i;
+      else current.oz = i;
+      pepColumns.set(slot, current);
+    }
+  }
+
+  const profiles: ParsedProfile[] = [];
+  for (let rowIndex = 1; rowIndex < nonEmpty.length; rowIndex++) {
+    const row = nonEmpty[rowIndex].map(deterministicCell);
+    const brand = row[brandIndex] ?? "";
+    const flavor = row[flavorIndex] ?? "";
+    if (!brand && !flavor) continue;
+    if (!brand || !flavor) {
+      unresolved.push({
+        source: grid.name,
+        row: rowIndex + 1,
+        values: row,
+        reason: "Profile row is missing a brand or flavor.",
+      });
+      continue;
+    }
+    const profile: ParsedProfile = {
+      brand,
+      flavor,
+      applicators: [],
+      pepperonis: [],
+      ...(dieIndex >= 0 && row[dieIndex] ? { dieType: row[dieIndex] } : {}),
+      ...(doughIndex >= 0 && row[doughIndex] ? { doughName: row[doughIndex] } : {}),
+      ...(sauceIndex >= 0 && row[sauceIndex] ? { sauceName: row[sauceIndex] } : {}),
+      ...(sauceOzIndex >= 0 && deterministicNumber(row[sauceOzIndex]) !== undefined
+        ? { sauceOzPerPizza: deterministicNumber(row[sauceOzIndex]) }
+        : {}),
+      ...(doughballIndex >= 0 && deterministicNumber(row[doughballIndex]) !== undefined
+        ? { targetDoughballWeight: deterministicNumber(row[doughballIndex]) }
+        : {}),
+      ...(trayIndex >= 0 && deterministicNumber(row[trayIndex]) !== undefined
+        ? { doughballsPerTray: deterministicNumber(row[trayIndex]) }
+        : {}),
+    };
+    for (const [slot, columns] of [...appColumns.entries()].sort(([a], [b]) => a - b)) {
+      const type = columns.type >= 0 ? row[columns.type] ?? "" : "";
+      if (!type) continue;
+      const oz = columns.oz >= 0 ? deterministicNumber(row[columns.oz] ?? "") : undefined;
+      profile.applicators.push({
+        type,
+        ozPerPizza: oz ?? 0,
+        ...(columns.recipe >= 0 && row[columns.recipe]
+          ? { recipeName: row[columns.recipe] }
+          : {}),
+        slot: slot + 1,
+      });
+    }
+    for (const [, columns] of [...pepColumns.entries()].sort(([a], [b]) => a - b)) {
+      const type = columns.type >= 0 ? row[columns.type] ?? "" : "";
+      if (!type) continue;
+      profile.pepperonis.push({
+        type,
+        sticks: columns.sticks >= 0 ? deterministicNumber(row[columns.sticks] ?? "") ?? 0 : 0,
+        ozPerPizza: columns.oz >= 0 ? deterministicNumber(row[columns.oz] ?? "") ?? 0 : 0,
+      });
+    }
+    profiles.push(profile);
+  }
+  return profiles;
+}
+
+function parseDeterministicRecipeSheet(
+  grid: SheetGrid,
+  kind: ParsedRecipe["kind"],
+  unresolved: SpecImportUnresolved[],
+): ParsedRecipe[] {
+  const recipes: ParsedRecipe[] = [];
+  let current: ParsedRecipe | null = null;
+  let inIngredients = false;
+  const flush = () => {
+    if (!current) return;
+    if (!current.rows.length) {
+      unresolved.push({
+        source: grid.name,
+        values: [`Recipe: ${current.name}`],
+        reason: "Recipe block has no readable ingredient rows.",
+      });
+    } else {
+      recipes.push(current);
+    }
+    current = null;
+    inIngredients = false;
+  };
+
+  for (let rowIndex = 0; rowIndex < grid.rows.length; rowIndex++) {
+    const row = grid.rows[rowIndex].map(deterministicCell);
+    const first = row[0] ?? "";
+    if (!first && row.every((cell) => !cell)) {
+      flush();
+      continue;
+    }
+    const recipeMatch = first.match(/^Recipe\s*:\s*(.+)$/i);
+    if (recipeMatch) {
+      flush();
+      current = {
+        kind,
+        name: recipeMatch[1].trim(),
+        rows: [],
+      };
+      continue;
+    }
+    if (!current) {
+      unresolved.push({
+        source: grid.name,
+        row: rowIndex + 1,
+        values: row,
+        reason: "Row is outside a supported Recipe: block.",
+      });
+      continue;
+    }
+    if (!inIngredients) {
+      if (/^Ingredient$/i.test(first)) {
+        current.rowsUnit = deterministicCell(row[1]) || undefined;
+        inIngredients = true;
+        continue;
+      }
+      const targets = deterministicTargets(first);
+      if (targets.length) {
+        current.targets = [...(current.targets ?? []), ...targets];
+        continue;
+      }
+      const key = deterministicKey(first);
+      const value = deterministicNumber(row[1] ?? "");
+      if (kind === "dough" && key === deterministicKey("Target Doughball Weight (oz)") && value !== undefined) {
+        current.doughballOz = value;
+        continue;
+      }
+      if (kind === "dough" && key === deterministicKey("Doughballs Per Tray") && value !== undefined) {
+        current.doughballsPerTray = value;
+        continue;
+      }
+      if (kind === "cheese" && key === deterministicKey("Applicator Slot") && value !== undefined) {
+        current.app = Math.round(value);
+        continue;
+      }
+      unresolved.push({
+        source: grid.name,
+        row: rowIndex + 1,
+        values: row,
+        reason: "Recipe metadata row is not in the supported export layout.",
+      });
+      continue;
+    }
+    const amount = deterministicNumber(row[1] ?? "");
+    if (!first || amount === undefined) {
+      unresolved.push({
+        source: grid.name,
+        row: rowIndex + 1,
+        values: row,
+        reason: "Ingredient row is missing a name or numeric amount.",
+      });
+      continue;
+    }
+    current.rows.push({ ingredient: first, lbs: amount });
+  }
+  flush();
+  for (const recipe of recipes) {
+    const targets = recipe.targets ?? [];
+    if (targets.length === 1) {
+      recipe.brand = targets[0].brand;
+      recipe.flavor = targets[0].flavor;
+    }
+  }
+  return recipes;
+}
+
+/**
+ * Parse the app's documented export layout without a model. This intentionally
+ * fails closed: a workbook is supported only when every recognized block has
+ * explicit headers and numeric cells; other source rows remain unresolved for
+ * review or the explicit AI fallback.
+ */
+export function parseDeterministicSpecWorkbook(
+  grids: ReadonlyArray<SheetGrid>,
+): DeterministicSpecImportResult {
+  const unresolved: SpecImportUnresolved[] = [];
+  const profiles: ParsedProfile[] = [];
+  const recipes: ParsedRecipe[] = [];
+  let recognized = false;
+  for (const grid of grids) {
+    const profileRows = parseDeterministicProfiles(grid, unresolved);
+    if (profileRows.length) {
+      recognized = true;
+      profiles.push(...profileRows);
+      continue;
+    }
+    const kind = deterministicRecipeKind(grid.name);
+    const hasRecipeBlock = grid.rows.some((row) => /^Recipe\s*:/i.test(deterministicCell(row[0])));
+    if (kind && hasRecipeBlock) {
+      recognized = true;
+      recipes.push(...parseDeterministicRecipeSheet(grid, kind, unresolved));
+      continue;
+    }
+    if (grid.rows.some((row) => row.some((cell) => deterministicCell(cell)))) {
+      unresolved.push({
+        source: grid.name,
+        values: grid.rows.find((row) => row.some((cell) => deterministicCell(cell)))?.map(deterministicCell) ?? [],
+        reason: "Workbook layout is not one of the supported deterministic layouts.",
+      });
+    }
+  }
+  const parsed: ParsedSpecImport = {
+    profiles,
+    recipes,
+    ...(unresolved.length ? { unresolved } : {}),
+    ...(unresolved.length
+      ? { note: `${unresolved.length} source row${unresolved.length === 1 ? "" : "s"} need review; no guesses were applied.` }
+      : {}),
+  };
+  return { parsed, supported: recognized, unresolved };
+}
 
 /**
  * Overlay `next`'s DEFINED fields onto `prev` — a later file only overrides

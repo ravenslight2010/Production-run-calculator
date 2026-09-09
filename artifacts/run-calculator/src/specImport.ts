@@ -1,10 +1,10 @@
 // Excel spec-sheet importer — web orchestration glue.
 //
-// Pipeline: read the .xlsx into a SheetGrid[] → flatten to compact prompt text →
-// call the read-only AI parse endpoint → canonicalize the returned names against
-// the app's known lists (learned aliases first, then exact, then confident
-// fuzzy) → summarize new-vs-updated → on confirm, write profiles + recipe
-// presets (overwrite existing, add new) and persist any newly learned aliases.
+// Pipeline: read the .xlsx into a SheetGrid[] → parse documented layouts locally
+// → canonicalize against known lists (learned aliases first, then exact, then
+// conservative near-exact) → surface unresolved rows for review. The explicit
+// manager/QC-manager fallback may then send only unresolved source rows to the
+// read-only AI parser. Nothing is written until the review is confirmed.
 //
 // All pure logic lives in @workspace/spec-import; storage writes live in
 // storage.ts. This module only sequences them. Mirrors the mobile glue in
@@ -42,6 +42,7 @@ import {
   formatTruncatedCellsNote,
   gridSanityIssue,
   gridsToPromptText,
+  parseDeterministicSpecWorkbook,
   mergeParsedSpecImports,
   mergePruneSnapshots,
   partitionTombstonedParse,
@@ -70,6 +71,7 @@ import {
   type SpecImportLinkSuggestion,
   type SpecImportSkipped,
   type SpecImportSummary,
+  type SpecImportUnresolved,
   type SpecMatchKnown,
   type OverflowColumnRow,
   type TruncatedCell,
@@ -248,6 +250,13 @@ export type SpecImportPrepared = {
    */
   profilesRemovedFromWorkbook?: Array<{brand: string; flavor: string}>;
   note?: string;
+  /**
+   * In-memory source retained only while the review is open. It is used by the
+   * explicit AI fallback button for unsupported/unresolved workbook rows and is
+   * never part of the saved import snapshot.
+   */
+  aiFallbackGrids?: SheetGrid[];
+  unresolved?: SpecImportUnresolved[];
   /**
    * New ingredient rows the spec sheet added to EXISTING mixes — components
    * present in the import but missing from the saved mix. Populated during
@@ -482,7 +491,13 @@ function applyBrandFlavorAliasesToParse(
     const brand = mapBrand(w.brand);
     return { ...w, brand, flavor: mapFlavor(w.flavor, brand) };
   });
-  return { ...parsed, profiles, recipes, ...(warnings ? { warnings } : {}) };
+  return {
+    ...parsed,
+    profiles,
+    recipes,
+    ...(warnings ? { warnings } : {}),
+    ...(parsed.unresolved?.length ? { unresolved: parsed.unresolved } : {}),
+  };
 }
 
 /**
@@ -632,6 +647,8 @@ type ParseCore = {
   truncatedCells: TruncatedCell[];
   /** Rows with non-empty cells past the column cap (dropped entirely, AI never saw them). */
   overflowRows: OverflowColumnRow[];
+  /** Source retained for the explicit AI fallback, never written to storage. */
+  aiFallbackGrids?: SheetGrid[];
 };
 
 /**
@@ -648,6 +665,7 @@ async function parseWorkbookCore(
   known: ReturnType<typeof loadSpecImportKnown>,
   aliases: SpecImportAlias[],
   signal?: AbortSignal,
+  options: { allowAi: boolean } = { allowAi: false },
 ): Promise<ParseCore> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   // Cheap pre-AI guard: the xlsx reader does NOT throw on garbage bytes (a
@@ -657,6 +675,27 @@ async function parseWorkbookCore(
   const sanity = gridSanityIssue(grids);
   if (sanity) {
     throw new Error(sanity);
+  }
+  const deterministic = parseDeterministicSpecWorkbook(grids);
+  if (!options.allowAi) {
+    const canonical = canonicalizeParsed(deterministic.parsed, known, aliases);
+    return {
+      parsed: canonical.parsed,
+      resolved: canonical.resolved,
+      flagged: [],
+      droppedRows: 0,
+      truncatedCells: [],
+      overflowRows: [],
+      aiFallbackGrids: deterministic.unresolved.length ? grids : undefined,
+    };
+  }
+  // When only part of a workbook is unsupported, the explicit fallback gets
+  // only those unresolved rows. Deterministic rows remain authoritative.
+  if (deterministic.supported && deterministic.unresolved.length > 0) {
+    grids = deterministic.unresolved.map((item) => ({
+      name: item.source,
+      rows: [item.values],
+    }));
   }
   const { chunks, droppedRows } = splitGridsForPrompt(grids);
   if (!chunks.length) {
@@ -788,6 +827,7 @@ async function linkParsed(
   parsed: ParsedSpecImport,
   known: ReturnType<typeof loadSpecImportKnown>,
   sourceNames?: ReadonlyArray<string>,
+  options: { allowAi: boolean } = { allowAi: false },
 ): Promise<{
   parsed: ParsedSpecImport;
   matchAliases: SpecImportAlias[];
@@ -839,11 +879,14 @@ async function linkParsed(
       c1.flavors.map((f) => `${f.brand.trim().toLowerCase()}\u0000${f.flavor.trim().toLowerCase()}`),
     );
     if (
-      c1.brands.length ||
-      c1.flavors.length ||
-      c1.ingredients.length ||
-      c1.appTypes.length ||
-      c1.pepTypes.length
+      options.allowAi &&
+      (
+        c1.brands.length ||
+        c1.flavors.length ||
+        c1.ingredients.length ||
+        c1.appTypes.length ||
+        c1.pepTypes.length
+      )
     ) {
       const result = await requestMatchImportWithRetry({
         brands: known.brands,
@@ -1407,7 +1450,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "37";
+export const SPEC_PARSE_VERSION = "38";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1782,13 +1825,15 @@ function parseDoughVariantTableFromGrids(grids: SheetGrid[]): DoughVariantTableE
 }
 
 /**
- * Full read → AI → canonicalize → summarize step. Throws on a hard failure
- * (e.g. unreadable workbook, AI unavailable/forbidden) so the UI can show why.
+ * Full read → deterministic parse → canonicalize → summarize step. AI is
+ * intentionally opt-in via `allowAi`; unsupported/unresolved content remains
+ * reviewable without a model request.
  */
 export async function prepareSpecImport(
   data: ArrayBuffer,
   name?: string,
   signal?: AbortSignal,
+  options: { allowAi?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
@@ -1822,14 +1867,16 @@ export async function prepareSpecImport(
       ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
     };
   }
-  const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows } =
-    await parseWorkbookCore(grids, known, aliases, signal);
+  const allowAi = options.allowAi === true;
+  const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows, aiFallbackGrids } =
+    await parseWorkbookCore(grids, known, aliases, signal, { allowAi });
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
   const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(
     rawParsed,
     known,
     name ? [name] : [],
+    { allowAi },
   );
 
   // Respect the user's prior merges/deletions: an import must not resurrect a
@@ -1901,12 +1948,26 @@ export async function prepareSpecImport(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(aiFallbackGrids ? { aiFallbackGrids } : {}),
+    ...(rawParsed.unresolved?.length ? { unresolved: rawParsed.unresolved } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
     ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
     ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
+    ...(aiFallbackGrids ? { aiFallbackGrids } : {}),
+    ...(rawParsed.unresolved?.length ? { unresolved: rawParsed.unresolved } : {}),
   };
+}
+
+/** Explicit manager/QC-manager action: run the existing AI parser only after
+ * deterministic preparation has left unresolved workbook content. */
+export async function prepareSpecImportWithAi(
+  data: ArrayBuffer,
+  name?: string,
+  signal?: AbortSignal,
+): Promise<SpecImportPrepared> {
+  return prepareSpecImport(data, name, signal, { allowAi: true });
 }
 
 /**
@@ -1943,6 +2004,7 @@ export async function prepareSpecImportMulti(
   onProgress?: (done: number, total: number) => void,
   names?: string[],
   signal?: AbortSignal,
+  options: { allowAi?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
@@ -1974,6 +2036,8 @@ export async function prepareSpecImportMulti(
   let totalDropped = 0;
   const allTruncated: TruncatedCell[] = [];
   const allOverflow: OverflowColumnRow[] = [];
+  const allUnresolved: SpecImportUnresolved[] = [];
+  const allFallbackGrids: SheetGrid[] = [];
   // Collected deterministic customer assignments from every file's header
   // section (merged across files — a multi-workbook dough import may split
   // the assignment list across sheets).
@@ -2020,11 +2084,15 @@ export async function prepareSpecImportMulti(
           allVariantsFromTable.push(v);
         }
       }
-      const core = await parseWorkbookCore(grids, known, aliases, signal);
+      const core = await parseWorkbookCore(grids, known, aliases, signal, {
+        allowAi: options.allowAi === true,
+      });
       parsedList.push(core.parsed);
       parsedLabels.push(label);
       allResolved.push(...core.resolved);
       flagged.push(...core.flagged);
+      allUnresolved.push(...(core.parsed.unresolved ?? []));
+      if (core.aiFallbackGrids) allFallbackGrids.push(...core.aiFallbackGrids);
       totalDropped += core.droppedRows;
       // Prefix the sheet label with the file so a multi-file review says WHICH
       // workbook holds the shortened cell.
@@ -2086,7 +2154,9 @@ export async function prepareSpecImportMulti(
 
   const merged = mergeParsedSpecImports(parsedList);
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(merged, known, names);
+  const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(merged, known, names, {
+    allowAi: options.allowAi === true,
+  });
 
   // Respect prior merges/deletions (see prepareSpecImport).
   const { kept, skipped } = partitionTombstonedParse(
@@ -2169,7 +2239,19 @@ export async function prepareSpecImportMulti(
     ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
     ...(allCustomerAssignments.length > 0 ? { doughCustomerAssignments: allCustomerAssignments } : {}),
     ...(allVariantsFromTable.length > 0 ? { doughVariantsFromTable: allVariantsFromTable } : {}),
+    ...(allUnresolved.length > 0 ? { unresolved: allUnresolved } : {}),
+    ...(allFallbackGrids.length > 0 ? { aiFallbackGrids: allFallbackGrids } : {}),
   };
+}
+
+/** Explicit manager/QC-manager action for a multi-file unresolved review. */
+export async function prepareSpecImportMultiWithAi(
+  buffers: ArrayBuffer[],
+  onProgress?: (done: number, total: number) => void,
+  names?: string[],
+  signal?: AbortSignal,
+): Promise<SpecImportPrepared> {
+  return prepareSpecImportMulti(buffers, onProgress, names, signal, { allowAi: true });
 }
 
 /**
