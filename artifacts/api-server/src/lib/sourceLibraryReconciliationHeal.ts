@@ -33,6 +33,14 @@ export const SOURCE_LIBRARY_RECONCILIATION_MANIFEST = {
   excludedOlderDuplicates: 0,
 } as const;
 export const SOURCE_LIBRARY_RECONCILIATION_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
+/**
+ * The original marker is immutable. A later production drift requires a new
+ * marker so startup can rerun the same reviewed repair after the stale-write
+ * fence has shipped, without pretending that the original execution happened
+ * again.
+ */
+export const SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID =
+  "source-library-reconciliation-2026-08-26-v2";
 // Independent, hand-reviewed release contract. Updating generated input alone
 // cannot alter this v1 payload; a changed plan needs a new repair/version.
 export const SOURCE_LIBRARY_RECONCILIATION_V1_EXPECTED_PLAN_SHA256 =
@@ -441,7 +449,17 @@ export async function sourceLibraryReconciliationStatus(
   executor: ReconciliationExecutor,
   scope: string,
 ): Promise<SourceLibraryReconciliationStatus> {
-  const [dough, sauce, cheese, mixes, profiles, days, aliases, marker] = await Promise.all([
+  const [
+    dough,
+    sauce,
+    cheese,
+    mixes,
+    profiles,
+    days,
+    aliases,
+    marker,
+    rerunMarker,
+  ] = await Promise.all([
     executor.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)),
     executor.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)),
     executor.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.scope, scope)),
@@ -453,9 +471,19 @@ export async function sourceLibraryReconciliationStatus(
       eq(specImportAliasesTable.kind, "appType"),
     )),
     executor.select({
+      id: dataHealsTable.id,
       appliedAt: dataHealsTable.appliedAt,
       result: dataHealsTable.result,
-    }).from(dataHealsTable).where(eq(dataHealsTable.id, SOURCE_LIBRARY_RECONCILIATION_HEAL_ID)).limit(1),
+    }).from(dataHealsTable).where(
+      eq(dataHealsTable.id, SOURCE_LIBRARY_RECONCILIATION_HEAL_ID),
+    ).limit(1),
+    executor.select({
+      id: dataHealsTable.id,
+      appliedAt: dataHealsTable.appliedAt,
+      result: dataHealsTable.result,
+    }).from(dataHealsTable).where(
+      eq(dataHealsTable.id, SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID),
+    ).limit(1),
   ]);
   const rowsByTable = {
     dough_recipes: rows(dough),
@@ -471,7 +499,10 @@ export async function sourceLibraryReconciliationStatus(
   findings.push(...references.findings);
   findings.push(...stubFindings(rows(cheese), references.protectedHistoryReferenceKeys));
   findings.sort((left, right) => left.id.localeCompare(right.id));
-  const markerRow = scope === "live" ? marker[0] : undefined;
+  // Prefer the fresh rerun marker. The v1 fallback keeps historical
+  // development/status callers readable while production converges on v2.
+  const markerRow = scope === "live" ? (rerunMarker[0] ?? marker[0]) : undefined;
+  const markerId = markerRow?.id ?? SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID;
   const markerResult = record(markerRow?.result);
   const markerKeys = ["replacements", "aliasesInserted", "repointedProfiles", "repointedRuns", "deletedStubs"];
   const markerValid = scope === "live" && Boolean(markerRow?.appliedAt) &&
@@ -509,7 +540,7 @@ export async function sourceLibraryReconciliationStatus(
       manifest: SOURCE_LIBRARY_RECONCILIATION_MANIFEST,
     },
     heal: {
-      id: SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+      id: markerId,
       fromDate: SOURCE_LIBRARY_RECONCILIATION_FROM_DATE,
       appliedAt: markerRow?.appliedAt?.toISOString?.() ?? null,
       markerValid,
