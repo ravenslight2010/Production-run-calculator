@@ -27,7 +27,7 @@ type WeightRow = {
 };
 
 function weightKey(name: string): string {
-  return name.toLowerCase();
+  return name.trim().toLowerCase();
 }
 
 function toApiWeight(row: IngredientBatchWeight): WeightRow {

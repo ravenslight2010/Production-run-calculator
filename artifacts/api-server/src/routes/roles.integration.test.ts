@@ -86,6 +86,7 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let ingredientsTable: DbModule["ingredientsTable"];
+let ingredientBatchWeightsTable: DbModule["ingredientBatchWeightsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -156,6 +157,7 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
   ingredientsTable = dbMod.ingredientsTable;
+  ingredientBatchWeightsTable = dbMod.ingredientBatchWeightsTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
   rolesTable = dbMod.rolesTable;
@@ -205,7 +207,7 @@ async function resetRoleFixture(): Promise<void> {
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientBatchWeightsTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog (manager/operator builtins + editable starters) so the
   // capability middleware can resolve each user's role to a capability set. Plus
@@ -1241,6 +1243,161 @@ describe("POST /ingredients/merge endpoint behavior", () => {
     expect(storedTarget.categories).toEqual(["dough", "general", "mix", "pep"]);
     expect(storedSource.mergedInto).toBe("ingredient-target");
     expect(storedSource.enabled).toBe(false);
+  });
+
+  it("moves a one-sided learned weight from a merged source to the target", async () => {
+    await db.insert(ingredientsTable).values([
+      {
+        id: "ingredient-weight-target",
+        scope: "live",
+        name: "Canonical Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+      {
+        id: "ingredient-weight-source",
+        scope: "live",
+        name: "Legacy Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+    ]);
+    await db.insert(ingredientBatchWeightsTable).values({
+      scope: "live",
+      name: "legacy flour",
+      lbs: 18,
+    });
+
+    const res = await req(MANAGER, "POST", "/api/ingredients/merge", {
+      targetId: "ingredient-weight-target",
+      sourceIds: ["ingredient-weight-source"],
+    });
+    expect(res.status).toBe(200);
+
+    const weights = await db
+      .select()
+      .from(ingredientBatchWeightsTable);
+    expect(weights.map(({ name, lbs }) => ({ name, lbs }))).toEqual([
+      { name: "Canonical Flour", lbs: 18 },
+    ]);
+  });
+
+  it("keeps the target weight when source and target weights conflict", async () => {
+    await db.insert(ingredientsTable).values([
+      {
+        id: "ingredient-conflict-target",
+        scope: "live",
+        name: "Canonical Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+      {
+        id: "ingredient-conflict-source",
+        scope: "live",
+        name: "Legacy Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+    ]);
+    await db.insert(ingredientBatchWeightsTable).values([
+      { scope: "live", name: "Canonical Flour", lbs: 22 },
+      { scope: "live", name: "Legacy Flour", lbs: 18 },
+    ]);
+
+    const res = await req(MANAGER, "POST", "/api/ingredients/merge", {
+      targetId: "ingredient-conflict-target",
+      sourceIds: ["ingredient-conflict-source"],
+    });
+    expect(res.status).toBe(200);
+
+    const weights = await db
+      .select()
+      .from(ingredientBatchWeightsTable);
+    expect(weights.map(({ name, lbs }) => ({ name, lbs }))).toEqual([
+      { name: "Canonical Flour", lbs: 22 },
+    ]);
+  });
+
+  it("collapses case-variant learned rows and keeps the newest target row", async () => {
+    await db.insert(ingredientsTable).values([
+      {
+        id: "ingredient-case-target",
+        scope: "live",
+        name: "Canonical Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+      {
+        id: "ingredient-case-source",
+        scope: "live",
+        name: "Legacy Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+    ]);
+    const [oldTarget] = await db
+      .insert(ingredientBatchWeightsTable)
+      .values({ scope: "live", name: "canonical flour", lbs: 14 })
+      .returning();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const [newTarget] = await db
+      .insert(ingredientBatchWeightsTable)
+      .values({ scope: "live", name: "CANONICAL FLOUR", lbs: 21 })
+      .returning();
+    await db.insert(ingredientBatchWeightsTable).values({
+      scope: "live",
+      name: "legacy flour",
+      lbs: 19,
+    });
+
+    const res = await req(MANAGER, "POST", "/api/ingredients/merge", {
+      targetId: "ingredient-case-target",
+      sourceIds: ["ingredient-case-source"],
+    });
+    expect(res.status).toBe(200);
+
+    const weights = await db
+      .select()
+      .from(ingredientBatchWeightsTable);
+    expect(weights).toHaveLength(1);
+    expect(weights[0]).toMatchObject({
+      id: newTarget.id,
+      name: "Canonical Flour",
+      lbs: 21,
+    });
+    expect(oldTarget.id).not.toBe(weights[0].id);
+  });
+
+  it("repoints a learned weight when a catalog ingredient is renamed", async () => {
+    await db.insert(ingredientsTable).values({
+      id: "ingredient-rename",
+      scope: "live",
+      name: "Legacy Flour",
+      categories: ["dough"],
+      enabled: true,
+    });
+    await db.insert(ingredientBatchWeightsTable).values({
+      scope: "live",
+      name: "legacy flour",
+      lbs: 18,
+    });
+
+    const res = await req(MANAGER, "POST", "/api/ingredients", {
+      items: [{
+        id: "ingredient-rename",
+        name: "Canonical Flour",
+        categories: ["dough"],
+        enabled: true,
+      }],
+    });
+    expect(res.status).toBe(200);
+
+    const weights = await db
+      .select()
+      .from(ingredientBatchWeightsTable);
+    expect(weights.map(({ name, lbs }) => ({ name, lbs }))).toEqual([
+      { name: "Canonical Flour", lbs: 18 },
+    ]);
   });
 
   it("flattens chained merges while retaining categories from every predecessor", async () => {

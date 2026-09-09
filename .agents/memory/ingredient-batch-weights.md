@@ -27,8 +27,21 @@ and auto-filled the next time the ingredient is picked on any device.
   mount blind-resaves whatever the form already holds.
 - Applying on pick reads the learned map through a ref so the inline JSX
   dropdown handlers never capture a stale map.
+- Ingredient renames and merges use the surviving target name as the explicit
+  winner: keep its positive learned weight when present, otherwise move the
+  newest source weight, and retire all other affected/case-variant rows in the
+  same transaction.
 
 **Why:** the user asked that "the weight follows the ingredient" like mixes /
 cheese recipes carry theirs; any weight the crew types becomes shared memory
 with no confirm step, so the visibility gates are the only thing preventing
 garbage from being learned.
+
+For merge conflicts, target precedence makes the manager's selected surviving
+identity authoritative instead of letting source order or case spelling decide
+which value wins. Newest-row ordering only resolves legacy duplicates within the
+same identity.
+
+**How to apply:** Any future ingredient merge or rename path must repoint the
+learned store under its existing transaction and must preserve this target-first
+rule; do not solve it with a separate best-effort client write.
