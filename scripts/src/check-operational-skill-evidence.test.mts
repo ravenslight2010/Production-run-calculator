@@ -72,11 +72,18 @@ async function createFixture(
   return root;
 }
 
-function runChecker(root: string): Promise<CheckResult> {
+function runChecker(root?: string): Promise<CheckResult> {
   return new Promise((resolveResult, reject) => {
+    const env = { ...process.env };
+    if (root === undefined) {
+      delete env.SKILL_EVIDENCE_ROOT;
+    } else {
+      env.SKILL_EVIDENCE_ROOT = root;
+    }
+
     const child = spawn("pnpm", ["exec", "tsx", checkerPath], {
       cwd: packageRoot,
-      env: { ...process.env, SKILL_EVIDENCE_ROOT: root },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -103,6 +110,13 @@ test("passes a complete set of policy documents", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("passes the repository policy documents without an evidence-root override", async () => {
+  const result = await runChecker();
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "Operational policy and skill evidence check passed.\n");
+  assert.equal(result.stderr, "");
 });
 
 test("reports only the relative document and remediation when a rule is missing", async () => {
