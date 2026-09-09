@@ -18,7 +18,7 @@ from gemini_skill_trigger_benchmark import (
     review_queue,
     validate_classification,
 )
-from skill_trigger_benchmark import PROMPTS, build
+from skill_trigger_benchmark import MANAGED_FIXTURE_SKILLS, PROMPTS, build
 
 
 def corpus():
@@ -71,11 +71,12 @@ class GeminiBenchmarkTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
             payload = json.loads(generated.read_text())
-            expected = {
+            project_owned = {
                 path.parent.name
                 for skill_root in (root / ".agents" / "skills",)
                 for path in skill_root.glob("*/SKILL.md")
             }
+            expected = project_owned | set(MANAGED_FIXTURE_SKILLS)
             actual = {skill["name"] for skill in payload["skills"]}
             self.assertEqual(actual, expected)
             self.assertEqual(payload["catalog_validation"]["status"], "pass")
@@ -85,7 +86,31 @@ class GeminiBenchmarkTests(unittest.TestCase):
             )
             self.assertEqual(
                 payload["catalog_validation"]["intentional_fixture_skills"],
-                [],
+                sorted(MANAGED_FIXTURE_SKILLS),
+            )
+            self.assertEqual(
+                payload["catalog_validation"]["coverage"]["project_owned"],
+                sorted(project_owned),
+            )
+            self.assertEqual(
+                payload["catalog_validation"]["coverage"]["managed_curated"],
+                sorted(MANAGED_FIXTURE_SKILLS),
+            )
+            self.assertEqual(
+                {
+                    skill["name"]
+                    for skill in payload["skills"]
+                    if skill["ownership"] == "managed"
+                },
+                set(MANAGED_FIXTURE_SKILLS),
+            )
+            self.assertEqual(
+                {
+                    skill["name"]
+                    for skill in payload["skills"]
+                    if skill["coverage"] == "project-owned"
+                },
+                project_owned,
             )
             self.assertTrue(all(skill["metadata_name"] == skill["name"] for skill in payload["skills"]))
             self.assertTrue(all(

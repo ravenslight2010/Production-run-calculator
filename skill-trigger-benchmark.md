@@ -1,19 +1,20 @@
-# Editable skills trigger benchmark
+# Skill trigger benchmark
 
-- Skills: **18**
-- Prompts: **72** (36 should-trigger, 36 near-miss should-not-trigger)
-- Catalog validation: **PASS** (every prompt targets an available skill; no intentional unavailable fixtures)
-- Runtime model rates: **blocked** (the complete 100-prompt run and balanced 40% held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
+- Skills: **23**
+- Coverage: **18** project-owned, **5** managed curated fixtures
+- Prompts: **92** (46 should-trigger, 46 near-miss should-not-trigger)
+- Catalog validation: **PASS** (every prompt targets an available skill; managed fixtures are intentional and documented)
+- Runtime model rates: **blocked** (the complete 92-prompt run and balanced held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
 
 ## Runtime attempt
 
-The prior Claude evaluator attempt covered the former 25-skill corpus: 100 prompts × 3 repetitions (300 attempts). A deterministic balanced 40% held-out split (one positive and one near-miss per skill) was also exercised: 50 prompts × 3 repetitions (150 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
+The runtime attempt targeted this 92-prompt corpus: 92 prompts × 3 repetitions (276 attempts). A deterministic balanced held-out split (one positive and one near-miss per skill) was also exercised: 46 prompts × 3 repetitions (138 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
 
 Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 rates are synthetic failure output, not model observations. Precision, recall, false-positive, and false-negative rates are therefore **unavailable** for every skill.
 
 ## Preflight findings
 
-These are lexical review signals only, not claims that Claude would trigger. When the Claude CLI is available, rerun `run_eval.py` with three runs per prompt and this balanced 40% held-out split before changing any description.
+These are lexical review signals only, not claims that Claude would trigger. When the Claude CLI is available, rerun `run_eval.py` with three runs per prompt and this balanced held-out split before changing any description.
 
 ## Per-skill runtime metrics
 
@@ -39,8 +40,13 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 | `test-gap-triage` | N/A | N/A | N/A | N/A | none |
 | `verify-before-commit` | N/A | N/A | N/A | N/A | none |
 | `wrong-number-triage` | N/A | N/A | N/A | N/A | none |
+| `ad-creative` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
+| `deep-research` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `design-thinker` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `recipe-creator` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `seo-auditor` | N/A | N/A | N/A | N/A | none |
 
 ## Interpretation
 
-The preflight surfaced 4 skills for review: `customer-import-audit`, `db-schema-change`, `production-go`, `sync-invariant-check`.
+The preflight surfaced 8 skills for review: `customer-import-audit`, `db-schema-change`, `production-go`, `sync-invariant-check`, `ad-creative`, `deep-research`, `design-thinker`, `recipe-creator`.
 No skill description was changed: the runtime attempt produced no model-trigger evidence. The lexical flags remain review signals only and must not be converted into description edits until the held-out model run succeeds.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and preflight a held-out trigger benchmark for editable skills.
+"""Build and preflight a held-out trigger benchmark for project and managed skills.
 
 The production-grade evaluator is skill-creator/scripts/run_eval.py, which
 asks Claude whether each skill is consulted. This script intentionally does
@@ -26,7 +26,16 @@ AVAILABLE_SKILL_ROOTS = (
     ROOT / ".agents" / "skills",
     ROOT / ".local" / "secondary_skills",
 )
-INTENTIONAL_FIXTURE_SKILLS: frozenset[str] = frozenset()
+# Managed skills are platform-provided and are not benchmarked wholesale. This
+# reviewed subset is intentionally small so each prompt remains hand-curated.
+MANAGED_FIXTURE_SKILLS: frozenset[str] = frozenset({
+    "ad-creative",
+    "deep-research",
+    "design-thinker",
+    "recipe-creator",
+    "seo-auditor",
+})
+INTENTIONAL_FIXTURE_SKILLS = MANAGED_FIXTURE_SKILLS
 
 # Four deliberately substantive prompts per skill: one clear and one casual
 # positive, plus two adjacent negative cases. The negatives share vocabulary
@@ -62,6 +71,24 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
         ["Create a new project-owned skill from requirements we wrote ourselves.",
          "Install a vetted npm dependency from the public registry after checking its package provenance."],
     ),
+    "ad-creative": (
+        ["Create three static Instagram and LinkedIn ads for our product, with copy, a CTA, and square and portrait variants.",
+         "Refresh our display banner campaign into several A/B-tested visual ad concepts using the brand assets I uploaded."],
+        ["Write five organic Instagram posts for our launch; do not make paid ads or banner assets.",
+         "Plan a 30-second animated video ad with scenes, transitions, and motion."],
+    ),
+    "deep-research": (
+        ["Do a multi-source deep dive on the 2026 cold-chain packaging market, score source credibility, and deliver a cited report.",
+         "Research whether we should enter this market, triangulate current evidence, and synthesize an evidence-backed briefing with citations."],
+        ["Look up the current price of one API and give me the answer.",
+         "Analyze this CSV I uploaded and summarize its trends in a chart."],
+    ),
+    "design-thinker": (
+        ["We are unsure which customer problem to solve; define the audience, reframe the problem, explore options, and prioritize a direction.",
+         "Before investing in this idea, run a structured human-centered validation exercise and narrow us to one concept."],
+        ["The bug and solution are already clear; implement the ticket without exploring alternatives.",
+         "Audit the finished page's colors, spacing, and responsive layout."],
+    ),
     "import-bug-investigation": (
         ["The cheese Excel import skipped several varieties and created duplicate links; trace parse versus apply versus pool data.",
          "A premix workbook misnamed recipes after import—investigate which layer produced the bad result before changing code."],
@@ -85,6 +112,18 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
          "I want the pre-publish verification checklist completed before we suggest a deployment."],
         ["Give me a final production-ready GO or NO-GO decision.",
          "A deployed app is returning 500s; diagnose production rather than running release gates."],
+    ),
+    "recipe-creator": (
+        ["Create a structured recipe for vegan mushroom ramen with ingredients, steps, nutrition, timers, and serving scaling.",
+         "Turn my grandmother's notes into a complete cookable recipe and save it to my recipe collection."],
+        ["Make a weekly high-protein meal plan with calorie targets and a grocery list.",
+         "Build the React page that displays my recipe collection; do not create or edit recipe data."],
+    ),
+    "seo-auditor": (
+        ["Audit my website for crawlability, technical SEO, metadata, and actionable improvements to search visibility.",
+         "Review these pages for SEO issues and recommend better titles, descriptions, and target keywords."],
+        ["Create a paid advertising campaign with display banners and social ad variants.",
+         "Compare two competitors' pricing and positioning without auditing their search visibility."],
     ),
     "rollback-recovery": (
         ["After restoring an old checkpoint, recover the missing post-merge behavior incrementally and prove parity without replacing the branch wholesale.",
@@ -144,7 +183,16 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
 
 
 def skill_files() -> list[Path]:
-    return sorted(p for root in BENCHMARK_SKILL_ROOTS for p in root.glob("*/SKILL.md"))
+    project_files = [
+        path
+        for root in BENCHMARK_SKILL_ROOTS
+        for path in root.glob("*/SKILL.md")
+    ]
+    managed_files = [
+        ROOT / ".local" / "secondary_skills" / name / "SKILL.md"
+        for name in sorted(MANAGED_FIXTURE_SKILLS)
+    ]
+    return sorted([*project_files, *managed_files])
 
 
 def frontmatter(path: Path) -> tuple[str, str]:
@@ -166,6 +214,14 @@ def frontmatter(path: Path) -> tuple[str, str]:
 def canonical_name(name: str) -> str:
     """Match legacy display-case metadata to the directory-style key."""
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def ownership(path: Path) -> str:
+    try:
+        path.relative_to(ROOT / ".agents" / "skills")
+    except ValueError:
+        return "managed"
+    return "project-owned"
 
 
 def available_skill_names() -> set[str]:
@@ -198,15 +254,20 @@ def build() -> dict:
     names = []
     skills = []
     for path in files:
+        if not path.exists():
+            raise SystemExit(f"Managed fixture skill is unavailable: {path.relative_to(ROOT)}")
         raw_name, description = frontmatter(path)
         name = canonical_name(raw_name)
         names.append(name)
         if name not in PROMPTS:
             raise SystemExit(f"Missing benchmark prompts for {name} ({path})")
         yes, no = PROMPTS[name]
+        skill_ownership = ownership(path)
         skills.append({
             "name": name,
             "metadata_name": name,
+            "ownership": skill_ownership,
+            "coverage": "curated-managed" if skill_ownership == "managed" else "project-owned",
             "path": str(path.relative_to(ROOT)),
             "description": description,
             "evals": [
@@ -219,9 +280,13 @@ def build() -> dict:
     missing = sorted(set(PROMPTS) - set(names) - INTENTIONAL_FIXTURE_SKILLS)
     if missing:
         raise SystemExit(f"Benchmark prompts have no benchmarked skill: {missing}")
+    total_prompts = sum(len(skill["evals"]) for skill in skills)
     return {
-        "benchmark": "editable-skills-trigger-2026-08",
-        "method": "held-out, balanced, two positive and two near-miss negative prompts per skill",
+        "benchmark": "skills-trigger-2026-09",
+        "method": (
+            "held-out, balanced, two positive and two near-miss negative prompts per "
+            "project-owned skill, plus a reviewed managed-skill fixture subset"
+        ),
         "catalog_validation": {
             "status": "pass",
             "available_roots": [
@@ -231,11 +296,19 @@ def build() -> dict:
                 str(root.relative_to(ROOT)) for root in BENCHMARK_SKILL_ROOTS
             ],
             "intentional_fixture_skills": sorted(INTENTIONAL_FIXTURE_SKILLS),
+            "coverage": {
+                "project_owned": sorted(
+                    skill["name"] for skill in skills if skill["ownership"] == "project-owned"
+                ),
+                "managed_curated": sorted(
+                    skill["name"] for skill in skills if skill["ownership"] == "managed"
+                ),
+            },
         },
         "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
         "runtime_status": (
-            "blocked: run_eval.py was exercised on 100 prompts with 3 repetitions "
-            "and a balanced 40% held-out split, but the claude CLI is unavailable"
+            f"blocked: run_eval.py was exercised on {total_prompts} prompts with 3 repetitions "
+            "and a balanced held-out split, but the claude CLI is unavailable"
         ),
         "runtime_metrics": [
             {
@@ -284,24 +357,31 @@ def main() -> None:
         args.write.write_text(json.dumps(data, indent=2) + "\n")
     if args.report:
         flagged = [r for r in data["preflight"] if r["status"] == "review"]
+        total_prompts = sum(len(s["evals"]) for s in data["skills"])
+        total_positive = sum(
+            sum(e["should_trigger"] for e in s["evals"]) for s in data["skills"]
+        )
+        project_count = len(data["catalog_validation"]["coverage"]["project_owned"])
+        managed_count = len(data["catalog_validation"]["coverage"]["managed_curated"])
         lines = [
-            "# Editable skills trigger benchmark",
+            "# Skill trigger benchmark",
             "",
             f"- Skills: **{len(data['skills'])}**",
-            f"- Prompts: **{sum(len(s['evals']) for s in data['skills'])}** "
-            f"({sum(sum(e['should_trigger'] for e in s['evals']) for s in data['skills'])} should-trigger, "
-            f"{sum(sum(not e['should_trigger'] for e in s['evals']) for s in data['skills'])} near-miss should-not-trigger)",
+            f"- Coverage: **{project_count}** project-owned, **{managed_count}** managed curated fixtures",
+            f"- Prompts: **{total_prompts}** "
+            f"({total_positive} should-trigger, {total_prompts - total_positive} near-miss should-not-trigger)",
             "- Catalog validation: **PASS** (every prompt targets an available skill; "
-            "no intentional unavailable fixtures)",
-            "- Runtime model rates: **blocked** (the complete 100-prompt run and balanced 40% held-out run "
+            "managed fixtures are intentional and documented)",
+            f"- Runtime model rates: **blocked** (the complete {total_prompts}-prompt run and balanced held-out run "
             "were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)",
             "",
             "## Runtime attempt",
             "",
-            "The prior Claude evaluator attempt covered the former 25-skill corpus: "
-            "100 prompts × 3 repetitions (300 attempts). "
-            "A deterministic balanced 40% held-out split (one positive and one near-miss per skill) "
-            "was also exercised: 50 prompts × 3 repetitions (150 attempts). Every attempt failed "
+            f"The runtime attempt targeted this {total_prompts}-prompt corpus: "
+            f"{total_prompts} prompts × 3 repetitions ({total_prompts * 3} attempts). "
+            "A deterministic balanced held-out split (one positive and one near-miss per skill) "
+            f"was also exercised: {len(data['skills']) * 2} prompts × 3 repetitions "
+            f"({len(data['skills']) * 6} attempts). Every attempt failed "
             "before model evaluation with `[Errno 2] No such file or directory: 'claude'`.",
             "",
             "Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 "
@@ -312,7 +392,7 @@ def main() -> None:
             "",
             "These are lexical review signals only, not claims that Claude would trigger. "
             "When the Claude CLI is available, rerun `run_eval.py` with three runs per prompt and this "
-            "balanced 40% held-out split before changing any description.",
+            "balanced held-out split before changing any description.",
             "",
             "## Per-skill runtime metrics",
             "",
