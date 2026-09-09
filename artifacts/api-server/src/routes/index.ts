@@ -211,7 +211,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("floor-operational", "scoped", "allowed", undefined, [
     "POST /completed-history", "POST /field-checks/observations",
-    "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
+    "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume", "POST /inventory/consume-day-start",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
     "POST /run-suggestions/follow-up", "POST /sync/operational-intents",
     "POST /sync/auto-track/claim", "PUT /sync/today", "POST /cycle-count-schedules/:id/mark-counted",

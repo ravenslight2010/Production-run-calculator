@@ -83,6 +83,18 @@ import {
   sortLotsForConsumption,
   type ConsumeLine,
 } from "./inventoryLogic";
+import {
+  buildMixPlan,
+  normalizeMix,
+  type Mix,
+  type MixScheduledRun,
+} from "@workspace/mixes";
+import {
+  computeMixComponentConsumptionLines,
+  computeDailySupplyConsumptionLines,
+} from "@workspace/inventory-math";
+import { mixesTable } from "@workspace/db";
+
 
 const router: IRouter = Router();
 
@@ -2163,5 +2175,134 @@ function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+
+// ── Feature B+E7: Daily mix component + supply consumption ─────────────────
+//
+// POST /inventory/consume-day-start
+//
+// Deducts fresh mix component ingredients (Feature B) and fixed daily supply
+// rates (Feature E7: tape/glue/ink) once per production day. Idempotent via
+// inventoryConsumedRunsTable with runId = "day-start:{date}". Called by the
+// client on first load after midnight (or manually by managers).
+//
+// Trust model: fully server-authorized. All amounts derived from:
+//   - day-state runs (form values → pizzas) via computeSummaryStats
+//   - server-persisted mixes (components, amountAlreadyMade) via buildMixPlan
+//   - fixed daily supply rates (tape=4, glue=0.286, ink=0.078)
+router.post(
+  "/inventory/consume-day-start",
+  requireCapability("manage-inventory"),
+  async (req, res): Promise<void> => {
+    const dateStr = (req.body && typeof req.body === "object"
+      ? (req.body as { date?: string }).date
+      : undefined) || todayStr();
+    const runId = `day-start:${dateStr}`;
+    const scope = currentScope();
+
+    // ── Idempotency gate ──────────────────────────────────────────────────
+    const [existingClaim] = await db
+      .select({ runId: inventoryConsumedRunsTable.runId })
+      .from(inventoryConsumedRunsTable)
+      .where(
+        and(
+          eq(inventoryConsumedRunsTable.runId, runId),
+          eq(inventoryConsumedRunsTable.scope, scope),
+        ),
+      )
+      .limit(1);
+    if (existingClaim) {
+      res.json({ applied: false, message: "Day-start already consumed for this date" });
+      return;
+    }
+
+    const lines: ConsumeLine[] = [];
+
+    // ── Feature B: Fresh mix components ────────────────────────────────────
+    // Build MixScheduledRun[] from all day-state runs matching `dateStr`.
+    const rows = await db
+      .select({ data: dailySyncTable.data })
+      .from(dailySyncTable)
+      .where(eq(dailySyncTable.scope, scope));
+    const scheduledRuns: MixScheduledRun[] = [];
+    for (const row of rows) {
+      const data = row.data as {
+        dayState?: { runs?: Array<{ id?: string; brand?: string; flavor?: string; actualCases?: number }> };
+        runValues?: Record<string, unknown>;
+      } | null;
+      const dayRuns = data?.dayState?.runs ?? [];
+      for (const run of dayRuns) {
+        if (!run?.id || run.brand === undefined) continue;
+        // Only runs whose scheduled date matches dateStr
+        const vals = data?.runValues?.[run.id];
+        if (!vals || typeof vals !== "object") continue;
+        const v = vals as Record<string, unknown>;
+        const casesNeeded = Number(v.casesNeeded) || 0;
+        const pizzasPerCase = Number(v.pizzasPerCase) || 0;
+        if (casesNeeded <= 0 || pizzasPerCase <= 0) continue;
+        scheduledRuns.push({
+          date: dateStr,
+          brand: String(run.brand ?? ""),
+          flavor: String(run.flavor ?? ""),
+          pizzas: casesNeeded * pizzasPerCase,
+          cases: casesNeeded,
+        });
+      }
+    }
+    if (scheduledRuns.length > 0) {
+      // Fetch mixes for scope
+      const mixRows = await db
+        .select()
+        .from(mixesTable)
+        .where(eq(mixesTable.scope, scope));
+      const mixes: Mix[] = mixRows
+        .map((r) => normalizeMix({ ...r, components: r.components }))
+        .filter((m): m is Mix => m !== null);
+      if (mixes.length > 0) {
+        const plan = buildMixPlan({ runs: scheduledRuns, mixes, today: dateStr });
+        for (const group of plan) {
+          for (const run of group.runs) {
+            for (const entry of run.mixes) {
+              const mixLines = computeMixComponentConsumptionLines(
+                entry.components,
+                entry.totalLbs,
+                entry.remainingLbs,
+              );
+              lines.push(...mixLines);
+            }
+          }
+          for (const entry of group.prepMixes) {
+            const mixLines = computeMixComponentConsumptionLines(
+              entry.components,
+              entry.totalLbs,
+              entry.remainingLbs,
+            );
+            lines.push(...mixLines);
+          }
+        }
+      }
+    }
+
+    // ── Feature E7: Daily supply rates ─────────────────────────────────────
+    lines.push(...computeDailySupplyConsumptionLines());
+
+    // ── Deduct ─────────────────────────────────────────────────────────────
+    if (lines.length === 0) {
+      await db
+        .insert(inventoryConsumedRunsTable)
+        .values({ runId, scope })
+        .onConflictDoNothing({
+          target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+        });
+      res.json({ applied: true, consumed: 0, message: "No mix components or supplies to deduct" });
+      return;
+    }
+    const result = await consumeRun(runId, lines);
+    if (result.applied) {
+      broadcast(headerSenderId(req), scope);
+    }
+    res.json({ applied: result.applied, consumed: result.consumed, lines: lines.length });
+  },
+);
 
 export default router;
