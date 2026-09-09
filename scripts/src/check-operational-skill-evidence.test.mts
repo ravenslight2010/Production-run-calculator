@@ -165,3 +165,42 @@ test("reports a missing document without exposing filesystem payloads", async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("keeps multiple missing-document failures free of filesystem details", async () => {
+  const fixturePayload = "MULTI_DOCUMENT_FIXTURE_PAYLOAD_MUST_NOT_LEAK";
+  const policyContent = "Never claim success by treating missing evidence as a pass.";
+  const root = await createFixture({
+    "replit.md": undefined,
+    ".agents/skills/production-go/SKILL.md": undefined,
+    ".agents/skills/release-checklist/SKILL.md":
+      `${validDocuments[".agents/skills/release-checklist/SKILL.md"]}\n${policyContent}\n${fixturePayload}\n`,
+  });
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      [
+        "Operational skill evidence check failed:",
+        "- replit.md: could not read the required policy document",
+        "- .agents/skills/production-go/SKILL.md: could not read the required policy document",
+        "",
+      ].join("\n"),
+    );
+
+    const reportedLines = result.stderr.trimEnd().split("\n").slice(1);
+    for (const line of reportedLines) {
+      assert.match(
+        line,
+        /^- (?:replit\.md|\.agents\/skills\/production-go\/SKILL\.md): could not read the required policy document$/,
+      );
+    }
+    assert.doesNotMatch(result.stderr, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
+    assert.doesNotMatch(result.stderr, new RegExp(fixturePayload));
+    assert.doesNotMatch(result.stderr, new RegExp(policyContent));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
