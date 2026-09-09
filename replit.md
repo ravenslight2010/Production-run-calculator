@@ -68,19 +68,50 @@
 
 ## Task generation and automation policy
 
-Generate one end-to-end task per user-visible outcome. Include investigation, implementation, integration and persistence impacts, regression coverage, and verification.
+### Universal task intake
 
-Do not stop at diagnosis or create a follow-up task for an in-scope defect. Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
+- Generate one end-to-end task per user-visible outcome. Include investigation, implementation, integration and persistence impacts, regression coverage, and verification.
+- Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
+- Use one task when the work has one outcome and shared ownership. Split work only when the outcomes have clean ownership and can be validated independently.
+- Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
 
-Automatically approve and start ordinary, bounded UI, test, and bug-fix tasks.
+### Failure closure
 
-Keep manual approval and final merge review for:
-- database schema changes and data heals;
-- authentication, authorization, sync, or security changes;
-- production, release, or destructive operations;
-- external integrations, secrets, or irreversible data changes.
+- Run every valid check for the changed surface, not only the check most likely to pass. Record all observed results as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
+- Fix every failure within the approved task scope before completion. Do not stop at diagnosis, silently defer an in-scope defect, or report a partial check as a complete check.
+- A genuinely out-of-scope failure must be de-duplicated against the task board and captured as a bounded Draft with an owner, evidence, and next action. Bring it into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk.
+- New follow-up tasks require a concrete failure, a meaningful deferred outcome, or a bounded discovery need. Do not create recursive or speculative “one more task” work.
+- Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
 
-When a task is approved, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence.
+### Safe decomposition and parallel work
+
+- Independent tasks may run in parallel only when they do not share mutable files, schema or data-heal boundaries, generated API contracts, release evidence, destructive fixtures, or conflicting ownership.
+- Add explicit dependencies when tasks share a surface, need a prior migration/heal, consume another task's output, or would otherwise race. A final validation task must depend on all repairs that affect its evidence.
+- Prefer a single end-to-end task over many implementation fragments. Parallelize only concrete blocker domains discovered by a failure inventory.
+- Never claim success by weakening assertions, skipping applicable tests, masking secrets, using unsafe destructive data, treating missing evidence as a pass, or relabeling a timeout as success.
+
+### Production and release branch
+
+- For production-readiness work, establish the complete release-scope and gate matrix first. Run independent gates as far as safely valid instead of stopping at the first unrelated failure.
+- Classify each result and create the smallest set of bounded repair tasks: product defect, test or fixture defect, environment/workflow problem, data or reconciliation issue, security/authorization issue, release-evidence problem, or missing evidence.
+- Repair tasks may run in parallel only under the safe-decomposition rules above. Keep production reconciliation, destructive release tests, and live data heals in separate trust lanes with explicit ownership.
+- One final evidence task must depend on all applicable repairs, rerun the standard and full checks from one clean revision, verify retained evidence, and issue exactly one `GO` or `NO-GO` decision. A GO task cannot finish with unresolved required evidence or blockers.
+
+### Approval, execution, and reporting
+
+- Automatically approve and start ordinary, bounded UI, test, and bug-fix tasks when the task workflow permits it.
+- Keep manual approval and final merge review for:
+  - database schema changes and data heals;
+  - authentication, authorization, sync, or security changes;
+  - production, release, or destructive operations;
+  - external integrations, secrets, or irreversible data changes.
+- When a task is approved, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence. Preserve actionable out-of-scope work without claiming it is complete.
+
+### Examples
+
+- **Normal feature:** implement the feature, run its unit/type/browser checks, repair in-scope failures, and draft one separate task for an unrelated test gap.
+- **Shared surface:** keep two changes serialized when both modify the same sync merge contract; do not assign them as parallel tasks merely because their user outcomes differ.
+- **Release checkpoint:** harvest a browser failure, source-data mismatch, and signing-key preflight failure as separate repair tasks when their ownership and files are independent, then gate the final evidence rerun on all three.
 
 # [Project name]
 

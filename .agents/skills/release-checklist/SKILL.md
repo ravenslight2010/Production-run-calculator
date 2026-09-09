@@ -36,6 +36,34 @@ recorded evidence.
   `spec-import-guard`, `data-heal-playbook`, and `release-checklist` are
   complementary, not replacements for these gates.
 
+## Failure inventory and task closure
+
+Run all applicable gates that remain valid and safe to run; do not stop at the
+first unrelated failure. A failed prerequisite may block a dependent gate, but
+independent gates should still produce evidence. Record each result explicitly
+as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
+
+For every non-pass result, record the smallest concrete blocker and classify it
+as a product defect, test or fixture defect, environment/workflow problem, data
+or reconciliation issue, security/authorization issue, release-evidence problem,
+or missing evidence. `BLOCKED`, `NOT REACHED`, and `MISSING` are unresolved
+until their required evidence is produced or a valid documented exception
+applies; a timeout is never an implicit pass.
+
+When task planning is requested, de-duplicate the blocker inventory against
+the task board and create bounded repair tasks by independent ownership. Tasks
+may run in parallel only when they do not share mutable files, schema or
+data-heal boundaries, generated contracts, release evidence, or destructive
+fixtures. Add dependencies for shared surfaces and for any repair that consumes
+another repair's output.
+
+Each repair task must rerun its focused checks and preserve the same safety
+boundaries. A final release-evidence task must depend on all applicable repairs,
+rerun the standard and full checks from one clean revision, validate retained
+evidence, and issue the final GO/NO-GO decision. Do not create speculative or
+recursive follow-ups; create another task only for a concrete newly observed
+failure or a deliberately deferred outcome.
+
 ## Required gates
 
 These gates are required for every release unless the affected package truly

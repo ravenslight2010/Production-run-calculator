@@ -90,6 +90,33 @@ If a workflow reports `DIDNT_OPEN_A_PORT`, a timeout, or a blank preview, read
 restart. A healthy local server does not prove the browser-facing workflow is
 healthy.
 
+## 2a. Failure closure and bounded repair fan-out
+
+For a production-readiness assessment, do not stop the investigation at the
+first unrelated failure. Establish the complete gate matrix, then run every
+gate that remains valid and safe to run. A prerequisite failure may block a
+dependent check, but it must not hide independent evidence.
+
+Record every result as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
+Classify each non-pass result as a product defect, test or fixture defect,
+environment/workflow problem, data or reconciliation issue,
+security/authorization issue, release-evidence problem, or missing evidence.
+Treat `BLOCKED`, `NOT REACHED`, and `MISSING` as unresolved until the required
+evidence exists or a valid, documented exception applies.
+
+When task planning is requested, create the smallest de-duplicated set of
+bounded repair tasks. Parallelize only independent domains with separate
+ownership and no shared mutable files, schema or data-heal boundary, generated
+contract, release evidence, or destructive fixture. Add dependencies whenever a
+repair consumes another repair's output or changes a shared surface.
+
+Each repair task must rerun its focused checks and report the remaining
+affected-surface evidence. Keep production reconciliation, destructive release
+tests, and live data heals in separate trust lanes. After repairs, one final
+evidence task must rerun the standard and full release checks from one clean
+revision and verify the retained records. Do not create an unbounded chain of
+speculative follow-ups.
+
 Stop once the evidence is sufficient for a decision. Do not launch speculative
 refactors, invent new release commands, or recursively create “one more task”
 work. If blocked, name the exact blocker, the evidence needed, and the owner
