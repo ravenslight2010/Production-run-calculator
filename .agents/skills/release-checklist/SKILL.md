@@ -51,13 +51,14 @@ until their required evidence is produced or a valid documented exception
 applies; a timeout is never an implicit pass.
 
 When task planning is requested, de-duplicate the blocker inventory against
-the task board and keep blockers that belong to the same release objective in
-one durable owning task. Use internal work breakdown or helpers for independent
-repair domains; do not create a project task for every failing gate, test,
-fixture, or report-format issue. Create a separate task only for a genuinely
-independent objective or an out-of-scope safety, security, data-integrity, or
-release blocker that cannot responsibly be absorbed, with independent
-acceptance criteria and an explicit reason.
+the task board and create bounded repair tasks only for genuinely independent
+objectives or out-of-scope safety, security, data-integrity, or release
+blockers that cannot responsibly be absorbed. Keep blockers that belong to the
+same release objective in one durable owning task and its failure ledger. Use
+internal work breakdown or helpers for same-objective repair domains; do not
+create a project task for every failing gate, test, fixture, or report-format
+issue. Any separate task must have independent acceptance criteria and an
+explicit reason.
 
 The owning task must rerun focused checks as repair domains close and preserve
 the same safety boundaries. That same durable release task must rerun the
