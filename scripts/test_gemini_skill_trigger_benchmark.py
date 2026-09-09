@@ -18,6 +18,7 @@ from gemini_skill_trigger_benchmark import (
     review_queue,
     validate_classification,
 )
+from skill_trigger_benchmark import PROMPTS, build
 
 
 def corpus():
@@ -41,7 +42,17 @@ class Fixture:
 
 
 class GeminiBenchmarkTests(unittest.TestCase):
-    def test_generator_covers_editable_skill_inventory_with_canonical_identities(self):
+    def test_generator_rejects_prompts_for_unavailable_skills(self):
+        with patch.dict(PROMPTS, {
+            "missing-skill": (["trigger"], ["near miss"]),
+        }):
+            with self.assertRaisesRegex(
+                SystemExit,
+                "Benchmark prompts reference unavailable skills",
+            ):
+                build()
+
+    def test_generator_covers_benchmarked_skill_inventory_with_canonical_identities(self):
         root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory() as directory:
             generated = Path(directory) / "benchmark.json"
@@ -62,11 +73,20 @@ class GeminiBenchmarkTests(unittest.TestCase):
             payload = json.loads(generated.read_text())
             expected = {
                 path.parent.name
-                for skill_root in (root / ".agents" / "skills", root / ".local" / "custom_skills")
+                for skill_root in (root / ".agents" / "skills",)
                 for path in skill_root.glob("*/SKILL.md")
             }
             actual = {skill["name"] for skill in payload["skills"]}
             self.assertEqual(actual, expected)
+            self.assertEqual(payload["catalog_validation"]["status"], "pass")
+            self.assertEqual(
+                payload["catalog_validation"]["available_roots"],
+                [".agents/skills", ".local/secondary_skills"],
+            )
+            self.assertEqual(
+                payload["catalog_validation"]["intentional_fixture_skills"],
+                [],
+            )
             self.assertTrue(all(skill["metadata_name"] == skill["name"] for skill in payload["skills"]))
             self.assertTrue(all(
                 skill["name"] == skill["name"].lower()
@@ -75,6 +95,24 @@ class GeminiBenchmarkTests(unittest.TestCase):
                 for skill in payload["skills"]
             ))
             self.assertIn(f"Skills: **{len(expected)}**", report.read_text())
+            self.assertIn("Catalog validation: **PASS**", report.read_text())
+
+    def test_checked_in_benchmark_only_references_available_skills(self):
+        root = Path(__file__).resolve().parents[1]
+        available = {
+            path.parent.name
+            for skill_root in (
+                root / ".agents" / "skills",
+                root / ".local" / "secondary_skills",
+            )
+            for path in skill_root.glob("*/SKILL.md")
+        }
+        payload = json.loads((root / "skill-trigger-benchmark.json").read_text())
+        benchmarked = {skill["name"] for skill in payload["skills"]}
+        self.assertEqual(benchmarked - available, set())
+        queue = json.loads((root / "gemini-skill-trigger-review-queue.json").read_text())
+        queued = {case["skill"] for case in queue["cases"]}
+        self.assertEqual(queued - benchmarked, set())
 
     def test_checked_in_benchmark_preserves_provider_boundaries(self):
         root = Path(__file__).resolve().parents[1]

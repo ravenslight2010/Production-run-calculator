@@ -21,7 +21,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL_ROOTS = (ROOT / ".agents" / "skills", ROOT / ".local" / "custom_skills")
+BENCHMARK_SKILL_ROOTS = (ROOT / ".agents" / "skills",)
+AVAILABLE_SKILL_ROOTS = (
+    ROOT / ".agents" / "skills",
+    ROOT / ".local" / "secondary_skills",
+)
+INTENTIONAL_FIXTURE_SKILLS: frozenset[str] = frozenset()
 
 # Four deliberately substantive prompts per skill: one clear and one casual
 # positive, plus two adjacent negative cases. The negatives share vocabulary
@@ -139,7 +144,7 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
 
 
 def skill_files() -> list[Path]:
-    return sorted(p for root in SKILL_ROOTS for p in root.glob("*/SKILL.md"))
+    return sorted(p for root in BENCHMARK_SKILL_ROOTS for p in root.glob("*/SKILL.md"))
 
 
 def frontmatter(path: Path) -> tuple[str, str]:
@@ -163,6 +168,14 @@ def canonical_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
+def available_skill_names() -> set[str]:
+    return {
+        canonical_name(frontmatter(path)[0])
+        for root in AVAILABLE_SKILL_ROOTS
+        for path in root.glob("*/SKILL.md")
+    }
+
+
 def tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z][a-z0-9-]{2,}", text.lower()) if t not in {
         "the", "and", "for", "this", "that", "with", "from", "when", "into",
@@ -171,6 +184,16 @@ def tokens(text: str) -> set[str]:
 
 
 def build() -> dict:
+    unavailable_prompts = sorted(
+        set(PROMPTS) - available_skill_names() - INTENTIONAL_FIXTURE_SKILLS
+    )
+    if unavailable_prompts:
+        raise SystemExit(
+            "Benchmark prompts reference unavailable skills: "
+            f"{unavailable_prompts}. Add the skill to an available catalog or "
+            "document it in INTENTIONAL_FIXTURE_SKILLS."
+        )
+
     files = skill_files()
     names = []
     skills = []
@@ -193,12 +216,22 @@ def build() -> dict:
                   for i, q in enumerate(no, 1)),
             ],
         })
-    missing = sorted(set(PROMPTS) - set(names))
+    missing = sorted(set(PROMPTS) - set(names) - INTENTIONAL_FIXTURE_SKILLS)
     if missing:
-        raise SystemExit(f"Benchmark prompts have no editable skill: {missing}")
+        raise SystemExit(f"Benchmark prompts have no benchmarked skill: {missing}")
     return {
         "benchmark": "editable-skills-trigger-2026-08",
         "method": "held-out, balanced, two positive and two near-miss negative prompts per skill",
+        "catalog_validation": {
+            "status": "pass",
+            "available_roots": [
+                str(root.relative_to(ROOT)) for root in AVAILABLE_SKILL_ROOTS
+            ],
+            "benchmarked_roots": [
+                str(root.relative_to(ROOT)) for root in BENCHMARK_SKILL_ROOTS
+            ],
+            "intentional_fixture_skills": sorted(INTENTIONAL_FIXTURE_SKILLS),
+        },
         "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
         "runtime_status": (
             "blocked: run_eval.py was exercised on 100 prompts with 3 repetitions "
@@ -258,6 +291,8 @@ def main() -> None:
             f"- Prompts: **{sum(len(s['evals']) for s in data['skills'])}** "
             f"({sum(sum(e['should_trigger'] for e in s['evals']) for s in data['skills'])} should-trigger, "
             f"{sum(sum(not e['should_trigger'] for e in s['evals']) for s in data['skills'])} near-miss should-not-trigger)",
+            "- Catalog validation: **PASS** (every prompt targets an available skill; "
+            "no intentional unavailable fixtures)",
             "- Runtime model rates: **blocked** (the complete 100-prompt run and balanced 40% held-out run "
             "were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)",
             "",

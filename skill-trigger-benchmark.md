@@ -1,7 +1,8 @@
 # Editable skills trigger benchmark
 
-- Skills: **28**
-- Prompts: **112** (56 should-trigger, 56 near-miss should-not-trigger)
+- Skills: **18**
+- Prompts: **72** (36 should-trigger, 36 near-miss should-not-trigger)
+- Catalog validation: **PASS** (every prompt targets an available skill; no intentional unavailable fixtures)
 - Runtime model rates: **blocked** (the complete 100-prompt run and balanced 40% held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
 
 ## Runtime attempt
@@ -38,18 +39,8 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 | `test-gap-triage` | N/A | N/A | N/A | N/A | none |
 | `verify-before-commit` | N/A | N/A | N/A | N/A | none |
 | `wrong-number-triage` | N/A | N/A | N/A | N/A | none |
-| `check-dependency-licenses` | N/A | N/A | N/A | N/A | none |
-| `handle-personal-and-sensitive-data` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
-| `instrument-observability-and-graceful-errors` | N/A | N/A | N/A | N/A | none |
-| `make-apps-resilient-to-abuse-and-overload` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
-| `make-ui-responsive-across-devices` | N/A | N/A | N/A | N/A | none |
-| `meet-an-accessibility-baseline` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
-| `review-before-shipping` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
-| `secure-ai-features-against-prompt-injection` | N/A | N/A | N/A | N/A | none |
-| `validate-and-encode-untrusted-input` | N/A | N/A | N/A | N/A | none |
-| `vet-dependencies-before-adding` | N/A | N/A | N/A | N/A | none |
 
 ## Interpretation
 
-The preflight surfaced 8 skills for review: `customer-import-audit`, `db-schema-change`, `production-go`, `sync-invariant-check`, `handle-personal-and-sensitive-data`, `make-apps-resilient-to-abuse-and-overload`, `meet-an-accessibility-baseline`, `review-before-shipping`.
+The preflight surfaced 4 skills for review: `customer-import-audit`, `db-schema-change`, `production-go`, `sync-invariant-check`.
 No skill description was changed: the runtime attempt produced no model-trigger evidence. The lexical flags remain review signals only and must not be converted into description edits until the held-out model run succeeds.
