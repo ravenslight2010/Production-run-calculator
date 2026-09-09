@@ -13,6 +13,13 @@
 import { normalizeMixes, type Mix } from "@workspace/mixes";
 import { inventoryClientId } from "./inventoryShared";
 import { captureIngredientNamesToCatalog } from "./ingredients";
+import { adoptMasterDataConflict } from "./masterData";
+
+export class StaleMixSnapshotError extends Error {
+  constructor(readonly canonicalItems: Mix[], readonly rejectedIds: string[]) {
+    super("The mix list changed before this save completed");
+  }
+}
 
 export async function fetchMixes(): Promise<Mix[]> {
   const res = await fetch("/api/mixes", {
@@ -32,8 +39,18 @@ export async function saveMixes(items: Mix[]): Promise<Mix[]> {
     },
     body: JSON.stringify({ items }),
   });
-  if (!res.ok) throw new Error(`Save mixes failed (${res.status})`);
-  const data = (await res.json()) as { items: unknown };
+  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown };
+  if (!res.ok) {
+    if (res.status === 409 && Array.isArray(data.items)) {
+      const canonicalItems = normalizeMixes(data.items);
+      const rejectedIds = Array.isArray(data.rejectedIds)
+        ? data.rejectedIds.filter((id): id is string => typeof id === "string")
+        : [];
+      adoptMasterDataConflict("mixes", canonicalItems);
+      throw new StaleMixSnapshotError(canonicalItems, rejectedIds);
+    }
+    throw new Error(`Save mixes failed (${res.status})`);
+  }
   // Fire-and-forget: any ingredient name newly typed into a mix row joins the
   // factory-wide catalog so it appears in every ingredient suggestion list.
   void captureIngredientNamesToCatalog(

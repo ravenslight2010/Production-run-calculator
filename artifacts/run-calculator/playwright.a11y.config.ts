@@ -1,13 +1,19 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  releaseBrowserBaseUrl,
+  releaseBrowserWebServers,
+} from "./playwright.release-servers";
 
-const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const baseURL = releaseBrowserBaseUrl(
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
 
 /**
  * Accessibility smoke tests deliberately have no globalSetup. They create and
  * clean up their own account and never delete live-day rows.
  */
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "accessibility-smoke.spec.ts",
   timeout: 60_000,

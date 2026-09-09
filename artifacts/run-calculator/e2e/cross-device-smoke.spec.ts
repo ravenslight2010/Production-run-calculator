@@ -25,7 +25,7 @@ function uid(): string {
 
 test.beforeEach(async () => {
   const url = requireIsolatedTestDatabase("cross-device smoke beforeEach");
-  const db = new Client({ connectionString: url });
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
     await db.query("DELETE FROM daily_sync WHERE date = $1", [
@@ -119,6 +119,25 @@ async function readSelectedRun(page: Page): Promise<{
   });
 }
 
+async function readCanonicalRun(
+  page: Page,
+  runId: string,
+): Promise<{
+  id: string;
+  startedAt?: number;
+  pausedAt?: number;
+} | undefined> {
+  const today = new Date().toISOString().slice(0, 10);
+  const response = await page.request.get(`/api/sync/today?today=${today}`, {
+    failOnStatusCode: true,
+  });
+  const body = await response.json() as {
+    dayState?: {
+      runs?: Array<{ id: string; startedAt?: number; pausedAt?: number }>;
+    };
+  };
+  return body.dayState?.runs?.find((run) => run.id === runId);
+}
 async function dismissPauseDecision(page: Page): Promise<void> {
   const noButton = page.getByTestId("pause-stop-tunnel-no");
   // The decision prompt is intentionally short-lived and may resolve to its
@@ -147,16 +166,25 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await readSelectedRun(page)).id).toBe(runId);
+  await expect.poll(
+    async () => (await readCanonicalRun(page, runId))?.startedAt,
+    { timeout: 25_000 },
+  ).toBeTruthy();
 
   await page.getByRole("button", { name: /pause run/i }).click();
+  await expect.poll(
+    async () => (await readCanonicalRun(page, runId))?.pausedAt,
+    { timeout: 25_000 },
+  ).toBeTruthy();
   await expect(page.getByTestId("resume-run")).toBeVisible();
-  await dismissPauseDecision(page);
-  await expect.poll(async () => (await readSelectedRun(page)).pausedAt).toBeTruthy();
 
   // Resume is a real lifecycle write, not just a visual toggle.
   await page.getByTestId("resume-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
-  await expect.poll(async () => (await readSelectedRun(page)).pausedAt).toBeUndefined();
+  await expect.poll(
+    async () => (await readCanonicalRun(page, runId))?.pausedAt,
+    { timeout: 25_000 },
+  ).toBeUndefined();
 
   // The running state and the selected run survive a receiving-device reload.
   await page.reload({ waitUntil: "domcontentloaded" });

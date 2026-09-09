@@ -78,6 +78,12 @@ The decision has five separate dimensions:
    focused API/client, bounded switch/reload, desktop + 390×844 responsive, and
    revision-bound evidence. Any missing item is NO-GO; a generic smoke pass or
    unit-only result is not a substitute.
+8. Keep production reconciliation and destructive release gates in separate
+   trust lanes. Generate source-library reconciliation evidence through a
+   read-only production query, bind it to the exact Git revision, report hash,
+   heal ID, repair boundary, and capture time, then import it into the
+   disposable release run. The disposable CI skip by itself remains NO-GO;
+   fixture or development evidence can never satisfy the production gate.
 
 If a workflow reports `DIDNT_OPEN_A_PORT`, a timeout, or a blank preview, read
 `.local/skills/debug-workflow-ports-issues` before attempting another

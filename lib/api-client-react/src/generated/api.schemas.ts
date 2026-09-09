@@ -3624,6 +3624,8 @@ export interface MixComponent {
 export interface Mix {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required for updates to existing rows */
+  updatedAt?: string;
   /** Display name of the mix */
   name: string;
   /** Product brand, matched case-insensitively against scheduled runs */
@@ -3730,6 +3732,8 @@ export interface CheeseComponent {
 export interface CheeseRecipe {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required for updates to existing rows */
+  updatedAt?: string;
   /** Display name of the cheese recipe */
   name: string;
   /** Customer this recipe belongs to (empty = any) */

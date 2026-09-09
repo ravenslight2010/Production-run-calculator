@@ -219,7 +219,8 @@ function poolFields(proposal: ReconciliationProposal): JsonRecord {
   if (proposal.table === "dough_recipes") fields.push("doughballVariants", "doughballWeightOz", "doughballsPerTray");
   if (proposal.table === "cheese_recipes") fields.push("brand", "flavors", "shredderSetting", "cellulose", "notes");
   if (proposal.table === "mixes") {
-    fields.push("brand", "flavor", "daysEarly", "batchSize");
+    // The heal initializes batchSize, but it becomes manager-owned afterward.
+    fields.push("brand", "flavor", "daysEarly");
     if (Object.prototype.hasOwnProperty.call(after, "notes")) fields.push("notes");
   }
   return Object.fromEntries(fields.filter((field) => Object.prototype.hasOwnProperty.call(after, field))

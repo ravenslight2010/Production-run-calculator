@@ -59,6 +59,9 @@ export interface Mix {
   id: string;
   // Optional persistence scope (live vs sandbox); carried through opaquely.
   scope?: string;
+  // Server persistence revision. It is required when updating an existing
+  // server row, but omitted for new client-generated ids.
+  updatedAt?: string;
   // Display name of the mix (e.g. "Bobo's Deluxe Veggie Mix").
   name: string;
   // The product this mix belongs to, matched case-insensitively against a
@@ -162,6 +165,11 @@ export function normalizeMix(input: unknown): Mix | null {
   };
   if (typeof raw.notes === "string" && raw.notes.trim()) mix.notes = raw.notes.trim();
   if (typeof raw.scope === "string" && raw.scope) mix.scope = raw.scope;
+  if (typeof raw.updatedAt === "string" && raw.updatedAt.trim()) {
+    mix.updatedAt = raw.updatedAt.trim();
+  } else if (raw.updatedAt instanceof Date && Number.isFinite(raw.updatedAt.getTime())) {
+    mix.updatedAt = raw.updatedAt.toISOString();
+  }
   if (raw.isPrep === true) mix.isPrep = true;
   return mix;
 }

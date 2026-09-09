@@ -18,6 +18,13 @@ import {
 } from "@workspace/cheese-recipes";
 import { inventoryClientId } from "./inventoryShared";
 import { captureIngredientNamesToCatalog } from "./ingredients";
+import { adoptMasterDataConflict } from "./masterData";
+
+export class StaleCheeseRecipeSnapshotError extends Error {
+  constructor(readonly canonicalItems: CheeseRecipe[], readonly rejectedIds: string[]) {
+    super("The cheese recipe list changed before this save completed");
+  }
+}
 
 export async function fetchCheeseRecipes(): Promise<CheeseRecipe[]> {
   const res = await fetch("/api/cheese-recipes", {
@@ -37,8 +44,18 @@ export async function saveCheeseRecipes(items: CheeseRecipe[]): Promise<CheeseRe
     },
     body: JSON.stringify({ items }),
   });
-  if (!res.ok) throw new Error(`Save cheese recipes failed (${res.status})`);
-  const data = (await res.json()) as { items: unknown };
+  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown };
+  if (!res.ok) {
+    if (res.status === 409 && Array.isArray(data.items)) {
+      const canonicalItems = normalizeCheeseRecipes(data.items);
+      const rejectedIds = Array.isArray(data.rejectedIds)
+        ? data.rejectedIds.filter((id): id is string => typeof id === "string")
+        : [];
+      adoptMasterDataConflict("cheeseRecipes", canonicalItems);
+      throw new StaleCheeseRecipeSnapshotError(canonicalItems, rejectedIds);
+    }
+    throw new Error(`Save cheese recipes failed (${res.status})`);
+  }
   // Fire-and-forget: newly typed component names join the factory-wide
   // ingredient catalog so every suggestion list sees them.
   void captureIngredientNamesToCatalog(

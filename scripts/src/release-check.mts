@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   access,
   appendFile,
@@ -15,6 +16,7 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  computeSourceLibraryEvidenceId,
   parseSourceLibraryEvidenceEnvironment,
   type SourceLibraryEvidenceEnvironment,
 } from "./verify-source-library-reconciliation.mts";
@@ -119,20 +121,43 @@ export const API_SHARD_WARNING_MS = 6 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
 export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 117 cases can exceed
+// reset or observe shared disposable live-day state. Its 159 cases can exceed
 // the API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
 // retries.
 const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
 const FULL_BROWSER_WARNING_MS = 40 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 117;
+const FULL_BROWSER_EXPECTED_CASES = 159;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
+const RELEASE_BROWSER_ENV = {
+  E2E_TEST_DB: "1",
+  E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+  RELEASE_BROWSER_LOCAL_SERVERS: "1",
+  PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18084",
+} as const;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const STATEFUL_RELEASE_LOCK_DIR =
   "/tmp/run-calculator-release-stateful-gates.lock";
 const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
 const fullRun = process.argv.includes("--full");
+
+async function statefulReleaseLockOwnerAlive(): Promise<boolean | undefined> {
+  const owner = await readFile(
+    resolve(STATEFUL_RELEASE_LOCK_DIR, "owner"),
+    "utf8",
+  ).catch(() => undefined);
+  const ownerPid = owner?.trim().match(/^(\d+)-\d+$/)?.[1];
+  if (!ownerPid) return undefined;
+  try {
+    process.kill(Number(ownerPid), 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+    return undefined;
+  }
+}
 
 async function acquireStatefulReleaseLock(): Promise<() => Promise<void>> {
   let announcedWait = false;
@@ -162,9 +187,13 @@ async function acquireStatefulReleaseLock(): Promise<() => Promise<void>> {
       const lock = await lstat(STATEFUL_RELEASE_LOCK_DIR).catch(
         () => undefined,
       );
+      const ownerAlive = await statefulReleaseLockOwnerAlive();
       if (
-        lock &&
-        Date.now() - lock.mtimeMs > STATEFUL_RELEASE_LOCK_STALE_MS
+        ownerAlive === false ||
+        (
+          lock &&
+          Date.now() - lock.mtimeMs > STATEFUL_RELEASE_LOCK_STALE_MS
+        )
       ) {
         await rm(STATEFUL_RELEASE_LOCK_DIR, { recursive: true, force: true });
         continue;
@@ -467,6 +496,10 @@ const sourceLibraryEnvironment = parseSourceLibraryEvidenceEnvironment(
     process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT ??
     (process.env.CI ? "release" : "development"),
 );
+const sourceLibraryEvidenceInput =
+  (cliOptionValue("--source-library-evidence") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT?.trim()) ||
+  undefined;
 export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   label: "source-library reconciliation verification",
   args: [
@@ -500,6 +533,28 @@ export const SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
+export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
+  label: SOURCE_LIBRARY_RECONCILIATION_STEP.label,
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "exec",
+    "tsx",
+    "./src/import-source-library-reconciliation-evidence.mts",
+    "--input",
+    sourceLibraryEvidenceInput ?? "",
+    "--report",
+    sourceLibraryReport,
+    "--heal-id",
+    sourceLibraryHealId,
+    "--from-date",
+    sourceLibraryFromDate,
+    "--output",
+    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+  ],
+  stage: "prerequisites",
+};
+
 /**
  * The reconciliation verifier proves a specific production repair, including
  * its historical rows. A newly-created CI database intentionally has none of
@@ -527,6 +582,12 @@ export function sourceLibraryReconciliationRequired(
 
 const requiresProductionSourceLibraryReconciliation =
   sourceLibraryReconciliationRequired();
+const importsProductionSourceLibraryReconciliation =
+  !requiresProductionSourceLibraryReconciliation &&
+  sourceLibraryEvidenceInput !== undefined;
+const hasProductionSourceLibraryReconciliation =
+  requiresProductionSourceLibraryReconciliation ||
+  importsProductionSourceLibraryReconciliation;
 
 const steps: ReleaseStep[] = [
   {
@@ -552,7 +613,9 @@ const steps: ReleaseStep[] = [
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   ...(requiresProductionSourceLibraryReconciliation
     ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
-    : [SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP]),
+    : importsProductionSourceLibraryReconciliation
+      ? [SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP]
+      : [SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP]),
   {
     label: "shell lint inventory",
     args: ["run", "check:shell-inventory"],
@@ -683,8 +746,7 @@ const steps: ReleaseStep[] = [
     label: "browser smoke tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:smoke"],
     env: {
-      E2E_TEST_DB: "1",
-      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      ...RELEASE_BROWSER_ENV,
     },
     stage: "browser-smoke",
     concurrencyLimit: 1,
@@ -693,8 +755,7 @@ const steps: ReleaseStep[] = [
     label: "browser accessibility tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
     env: {
-      E2E_TEST_DB: "1",
-      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      ...RELEASE_BROWSER_ENV,
     },
     stage: "browser-accessibility",
     concurrencyLimit: 1,
@@ -703,8 +764,7 @@ const steps: ReleaseStep[] = [
     label: "browser WebKit smoke",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
     env: {
-      E2E_TEST_DB: "1",
-      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
       RELEASE_BROWSER_ENVIRONMENT: process.env.CI
         ? "ci"
@@ -720,8 +780,7 @@ if (fullRun) {
     label: FULL_BROWSER_GATE_LABEL,
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e"],
     env: {
-      E2E_TEST_DB: "1",
-      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
     timeoutMs: FULL_BROWSER_TIMEOUT_MS,
@@ -826,6 +885,9 @@ function printHelp(): void {
   );
   console.log(
     "  pnpm run release:check:full -- --verify-evidence  Verify full retained evidence files",
+  );
+  console.log(
+    "  --source-library-evidence <path>  Import fresh revision-bound production reconciliation evidence into a disposable CI run",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -1012,8 +1074,15 @@ export async function verifyReleaseEvidence(
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
     );
+    const sourceLibraryReportBytes = await readFile(sourceLibraryReport);
     validateSourceLibraryReconciliationEvidence(sourceLibraryEvidence, {
       expectedEnvironment: expectedSourceLibraryEnvironment,
+      expectedRevision: revision,
+      expectedHealId: sourceLibraryHealId,
+      expectedFromDate: sourceLibraryFromDate,
+      expectedReportSha256: createHash("sha256")
+        .update(sourceLibraryReportBytes)
+        .digest("hex"),
     });
   }
   if (requiresWebKitEvidence) {
@@ -1131,7 +1200,15 @@ export function validateWebKitBrowserEvidence(
 
 export function validateSourceLibraryReconciliationEvidence(
   evidenceBytes: Uint8Array,
-  options: { expectedEnvironment?: SourceLibraryEvidenceEnvironment } = {},
+  options: {
+    expectedEnvironment?: SourceLibraryEvidenceEnvironment;
+    expectedRevision?: string;
+    expectedHealId?: string;
+    expectedFromDate?: string;
+    expectedReportSha256?: string;
+    maxAgeMs?: number;
+    now?: Date;
+  } = {},
 ): void {
   const MAX_EVIDENCE_BYTES = 64 * 1024;
   if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
@@ -1165,6 +1242,83 @@ export function validateSourceLibraryReconciliationEvidence(
   ) {
     throw new Error(
       "Source-library reconciliation evidence is missing a valid development/release environment.",
+    );
+  }
+  if (
+    typeof output.revision !== "string" ||
+    (options.expectedRevision !== undefined &&
+      output.revision !== options.expectedRevision)
+  ) {
+    throw new Error(
+      `Source-library reconciliation evidence revision is stale or missing${
+        options.expectedRevision ? ` (expected ${options.expectedRevision})` : ""
+      }.`,
+    );
+  }
+  const capturedAt =
+    typeof output.capturedAt === "string" ? Date.parse(output.capturedAt) : NaN;
+  if (!Number.isFinite(capturedAt)) {
+    throw new Error(
+      "Source-library reconciliation evidence capture time is missing or invalid.",
+    );
+  }
+  if (
+    options.maxAgeMs !== undefined &&
+    (capturedAt > (options.now ?? new Date()).getTime() + 5 * 60_000 ||
+      (options.now ?? new Date()).getTime() - capturedAt > options.maxAgeMs)
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence is stale or has a future capture time.",
+    );
+  }
+  if (
+    !/^[a-f0-9]{64}$/u.test(String(output.evidenceId ?? "")) ||
+    output.evidenceId !== computeSourceLibraryEvidenceId(output)
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence has an invalid bounded content digest.",
+    );
+  }
+  if (
+    typeof output.healId !== "string" ||
+    (options.expectedHealId !== undefined &&
+      output.healId !== options.expectedHealId)
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence targets the wrong heal identity.",
+    );
+  }
+  const repairBoundary = output.repairBoundary;
+  const fromDate =
+    repairBoundary &&
+    typeof repairBoundary === "object" &&
+    !Array.isArray(repairBoundary)
+      ? (repairBoundary as Record<string, unknown>).fromDate
+      : undefined;
+  if (
+    typeof fromDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(fromDate) ||
+    (options.expectedFromDate !== undefined &&
+      fromDate !== options.expectedFromDate)
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence targets the wrong repair boundary.",
+    );
+  }
+  const sourceReport = output.report;
+  const reportSha256 =
+    sourceReport &&
+    typeof sourceReport === "object" &&
+    !Array.isArray(sourceReport)
+      ? (sourceReport as Record<string, unknown>).sha256
+      : undefined;
+  if (
+    !/^[a-f0-9]{64}$/u.test(String(reportSha256 ?? "")) ||
+    (options.expectedReportSha256 !== undefined &&
+      reportSha256 !== options.expectedReportSha256)
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence targets the wrong source report.",
     );
   }
   if (
@@ -2027,7 +2181,7 @@ async function currentRevision(): Promise<string> {
   });
 }
 
-async function promoteSourceLibraryEvidence(): Promise<void> {
+async function promoteSourceLibraryEvidence(revision: string): Promise<void> {
   const pendingPath = resolve(
     rootDir,
     releaseEvidenceDir,
@@ -2039,6 +2193,17 @@ async function promoteSourceLibraryEvidence(): Promise<void> {
     SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   );
   await rename(pendingPath, retainedPath);
+  const [retainedEvidence, reportBytes] = await Promise.all([
+    readFile(retainedPath),
+    readFile(sourceLibraryReport),
+  ]);
+  validateSourceLibraryReconciliationEvidence(retainedEvidence, {
+    expectedEnvironment: sourceLibraryEnvironment,
+    expectedRevision: revision,
+    expectedHealId: sourceLibraryHealId,
+    expectedFromDate: sourceLibraryFromDate,
+    expectedReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
+  });
 }
 
 async function main(): Promise<void> {
@@ -2358,14 +2523,14 @@ async function main(): Promise<void> {
     results.length === steps.length &&
     results.every((result) => result.passed)
   ) {
-    const releaseDecision = requiresProductionSourceLibraryReconciliation
+    const releaseDecision = hasProductionSourceLibraryReconciliation
       ? "GO"
       : "NO-GO";
     try {
       if (steps.some(
         (step) => step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label,
       )) {
-        await promoteSourceLibraryEvidence();
+        await promoteSourceLibraryEvidence(revision);
       }
       const reportPath = await writeReleaseReport(results, {
         revision,
@@ -2396,7 +2561,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     console.log(
-      requiresProductionSourceLibraryReconciliation
+      hasProductionSourceLibraryReconciliation
         ? "\nRelease check passed. Ready for final publish review."
         : "\nDisposable CI gate test passed. Report remains NO-GO until production source-library reconciliation evidence is supplied.",
     );

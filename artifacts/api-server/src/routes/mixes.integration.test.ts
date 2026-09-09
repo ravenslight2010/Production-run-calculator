@@ -142,10 +142,20 @@ function managerHeaders(): Record<string, string> {
 }
 
 async function postMixes(items: Partial<Mix>[]): Promise<{ status: number; items: Mix[] }> {
+  const currentRows = await db
+    .select({ id: mixesTable.id, updatedAt: mixesTable.updatedAt })
+    .from(mixesTable)
+    .where(eq(mixesTable.scope, "live"));
+  const revisions = new Map(currentRows.map((row) => [row.id, row.updatedAt.toISOString()]));
+  const fencedItems = items.map((item) =>
+    item.updatedAt || !item.id || !revisions.has(item.id)
+      ? item
+      : { ...item, updatedAt: revisions.get(item.id) },
+  );
   const res = await fetch(`${baseUrl}/api/mixes`, {
     method: "POST",
     headers: managerHeaders(),
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items: fencedItems }),
   });
   const body = (await res.json()) as { items: Mix[] };
   return { status: res.status, items: body.items ?? [] };
@@ -264,6 +274,67 @@ describe("POST /api/mixes — perPizza DB round-trip", () => {
     const ranch = items.find((m) => m.id === "mix-b");
     expect(fajita?.components[0].perPizza).toBe(2.0);
     expect(ranch?.components[0].perPizza).toBe(1.5);
+  });
+});
+
+describe("POST /api/mixes — freshness fence", () => {
+  async function rawPost(items: Partial<Mix>[]) {
+    const res = await fetch(`${baseUrl}/api/mixes`, {
+      method: "POST",
+      headers: managerHeaders(),
+      body: JSON.stringify({ items }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("returns updatedAt and rejects stale and missing-revision updates", async () => {
+    const created = await postMixes([specDerivedMix({ id: "stale-mix" })]);
+    const revision = created.items.find((item) => item.id === "stale-mix")?.updatedAt;
+    expect(revision).toBeTruthy();
+    await postMixes([specDerivedMix({ id: "stale-mix", name: "Canonical Mix" })]);
+
+    const stale = await rawPost([
+      specDerivedMix({ id: "stale-mix", name: "Stale Mix", updatedAt: revision }),
+    ]);
+    expect(stale.status).toBe(409);
+    expect(stale.body.rejectedIds).toEqual(["stale-mix"]);
+
+    const missing = await rawPost([
+      specDerivedMix({ id: "stale-mix", name: "Missing Revision" }),
+    ]);
+    expect(missing.status).toBe(409);
+    expect(missing.body.rejectedIds).toEqual(["stale-mix"]);
+  });
+
+  it("rejects a mixed batch before either row changes", async () => {
+    const created = await postMixes([
+      specDerivedMix({ id: "mix-a", name: "Mix A" }),
+      specDerivedMix({ id: "mix-b", name: "Mix B" }),
+    ]);
+    await postMixes([specDerivedMix({ id: "mix-a", name: "Mix A canonical" })]);
+    await postMixes([specDerivedMix({ id: "mix-b", name: "Mix B canonical" })]);
+    const currentA = (await getMixes()).items.find((item) => item.id === "mix-a");
+    const oldB = created.items.find((item) => item.id === "mix-b");
+    const result = await rawPost([
+      specDerivedMix({ id: "mix-a", name: "Mix A attempted", updatedAt: currentA?.updatedAt }),
+      specDerivedMix({ id: "mix-b", name: "Mix B attempted", updatedAt: oldB?.updatedAt }),
+    ]);
+    expect(result.status).toBe(409);
+    const items = result.body.items as Mix[];
+    expect(items.find((item) => item.id === "mix-a")?.name).toBe("Mix A canonical");
+    expect(items.find((item) => item.id === "mix-b")?.name).toBe("Mix B canonical");
+  });
+
+  it("advances the server revision for rapid sequential edits", async () => {
+    const created = await postMixes([specDerivedMix({ id: "monotonic-mix" })]);
+    const first = created.items.find((item) => item.id === "monotonic-mix")!;
+    const updated = await postMixes([
+      specDerivedMix({ id: "monotonic-mix", name: "Updated", updatedAt: first.updatedAt }),
+    ]);
+    const second = updated.items.find((item) => item.id === "monotonic-mix")!;
+    expect(new Date(second.updatedAt!).getTime()).toBeGreaterThan(
+      new Date(first.updatedAt!).getTime(),
+    );
   });
 });
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -35,6 +36,51 @@ import {
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
+import {
+  computeSourceLibraryEvidenceId,
+  DEFAULT_FROM_DATE,
+  DEFAULT_HEAL_ID,
+  DEFAULT_REPORT,
+} from "./verify-source-library-reconciliation.mts";
+
+const sourceReportSha256 = createHash("sha256")
+  .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
+  .digest("hex");
+
+function sourceEvidence(overrides: Record<string, unknown> = {}) {
+  const evidence = {
+    verifier: "source-library-reconciliation",
+    environment: "development",
+    revision: "current-revision",
+    capturedAt: "2026-09-08T12:00:00.000Z",
+    healId: DEFAULT_HEAL_ID,
+    repairBoundary: { fromDate: DEFAULT_FROM_DATE },
+    report: {
+      sha256: sourceReportSha256,
+      formatVersion: 1,
+      automaticProposals: 68,
+      stubs: 3,
+    },
+    marker: {},
+    pools: {},
+    aliases: {},
+    profiles: {},
+    pendingRuns: {},
+    protectedHistory: { references: 0 },
+    stubs: {},
+    idempotencyFingerprint: {
+      algorithm: "sha256",
+      value: "b".repeat(64),
+    },
+    ok: true,
+    failures: [],
+    ...overrides,
+  };
+  return {
+    ...evidence,
+    evidenceId: computeSourceLibraryEvidenceId(evidence),
+  };
+}
 
 assert.equal(
   PRODUCTION_DEPENDENCY_AUDIT_STEP.timeoutMs,
@@ -79,30 +125,7 @@ async function fixture(
               }],
             })}\n`
         : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
-          ? `${JSON.stringify({
-              verifier: "source-library-reconciliation",
-              environment: "development",
-              repairBoundary: { fromDate: "2026-08-26" },
-              report: {
-                sha256: "a".repeat(64),
-                formatVersion: 1,
-                automaticProposals: 0,
-                stubs: 0,
-              },
-              marker: {},
-              pools: {},
-              aliases: {},
-              profiles: {},
-              pendingRuns: {},
-              protectedHistory: { references: 0 },
-              stubs: {},
-              idempotencyFingerprint: {
-                algorithm: "sha256",
-                value: "b".repeat(64),
-              },
-              ok: true,
-              failures: [],
-            })}\n`
+          ? `${JSON.stringify(sourceEvidence())}\n`
           : "fixture evidence\n",
     );
   }
@@ -410,6 +433,27 @@ async function run(): Promise<void> {
       expectedLabels: validLabels,
     }),
   );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence())),
+        { expectedRevision: "different-revision" },
+      ),
+    /revision is stale or missing/,
+    "source reconciliation evidence from another revision must not be accepted",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence())),
+        {
+          maxAgeMs: 60_000,
+          now: new Date("2026-09-08T12:02:00.000Z"),
+        },
+      ),
+    /evidence is stale/,
+    "stale source reconciliation evidence must not be imported",
+  );
   assert.doesNotThrow(() =>
     validateWebKitBrowserEvidence(
       Buffer.from(
@@ -454,14 +498,7 @@ async function run(): Promise<void> {
     validateSourceLibraryReconciliationEvidence(
       Buffer.from(
         JSON.stringify({
-          verifier: "source-library-reconciliation",
-          environment: "development",
-          idempotencyFingerprint: {
-            algorithm: "sha256",
-            value: "c".repeat(64),
-          },
-          ok: true,
-          failures: [],
+          ...sourceEvidence(),
         }),
       ),
     ),
@@ -471,14 +508,7 @@ async function run(): Promise<void> {
       validateSourceLibraryReconciliationEvidence(
         Buffer.from(
           JSON.stringify({
-            verifier: "source-library-reconciliation",
-            environment: "development",
-            idempotencyFingerprint: {
-              algorithm: "sha256",
-              value: "c".repeat(64),
-            },
-            ok: true,
-            failures: [],
+            ...sourceEvidence(),
           }),
         ),
         { expectedEnvironment: "release" },
@@ -490,16 +520,10 @@ async function run(): Promise<void> {
     () =>
       validateSourceLibraryReconciliationEvidence(
         Buffer.from(
-          JSON.stringify({
-            verifier: "source-library-reconciliation",
-            environment: "development",
-            idempotencyFingerprint: {
-              algorithm: "sha256",
-              value: "c".repeat(64),
-            },
+          JSON.stringify(sourceEvidence({
             ok: false,
             failures: [{ check: "pendingRuns", count: 2 }],
-          }),
+          })),
         ),
       ),
     /pendingRuns \(2\)/,
@@ -509,16 +533,10 @@ async function run(): Promise<void> {
     () =>
       validateSourceLibraryReconciliationEvidence(
         Buffer.from(
-          JSON.stringify({
-            verifier: "source-library-reconciliation",
-            environment: "development",
-            idempotencyFingerprint: {
-              algorithm: "sha256",
-              value: "c".repeat(64),
-            },
+          JSON.stringify(sourceEvidence({
             ok: false,
             failures: [{ check: "protectedStubs", count: 1 }],
-          }),
+          })),
         ),
       ),
     /protectedStubs \(1\)/,
@@ -882,32 +900,32 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 117",
-      "Enumerated cases: 117",
+      "Expected cases: 159",
+      "Enumerated cases: 159",
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 117",
+      "Not-run cases: 159",
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 117 | 0 | 0 | 0 | 0 | 117 | 0ms |",
+      "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
       "",
     ].join("\n");
     const invalidPassingBrowserReport = validBrowserReport
       .replace("Result: FAIL", "Result: PASS")
-      .replace("Completed cases: 0", "Completed cases: 117")
+      .replace("Completed cases: 0", "Completed cases: 159")
       .replace("Passed cases: 0", "Passed cases: 111")
       .replace("Failed cases: 0", "Failed cases: 1")
-      .replace("Not-run cases: 117", "Not-run cases: 0")
+      .replace("Not-run cases: 159", "Not-run cases: 0")
       .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
       .replace(
-        "| `e2e/example.spec.ts` | 117 | 0 | 0 | 0 | 0 | 117 | 0ms |",
-        "| `e2e/example.spec.ts` | 117 | 117 | 114 | 0 | 1 | 0 | 0ms |",
+        "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
+        "| `e2e/example.spec.ts` | 159 | 159 | 156 | 0 | 1 | 0 | 0ms |",
       );
     assert.throws(
       () => validateFullBrowserReport(invalidPassingBrowserReport, {

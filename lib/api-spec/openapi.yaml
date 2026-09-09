@@ -2327,6 +2327,10 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: >-
+            The request contains a missing or stale revision for an existing
+            row. The response includes rejectedIds and the authoritative items.
     delete:
       operationId: deleteMixes
       tags: [mixes]
@@ -2493,6 +2497,10 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: >-
+            The request contains a missing or stale revision for an existing
+            row. The response includes rejectedIds and the authoritative items.
     delete:
       operationId: deleteCheeseRecipes
       tags: [cheeseRecipes]
@@ -9120,6 +9128,10 @@ components:
         id:
           type: string
           description: Stable client-generated id
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server persistence revision; required for updates to existing rows
         name:
           type: string
           description: Display name of the mix
@@ -9320,6 +9332,10 @@ components:
         id:
           type: string
           description: Stable client-generated id
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server persistence revision; required for updates to existing rows
         name:
           type: string
           description: Display name of the cheese recipe

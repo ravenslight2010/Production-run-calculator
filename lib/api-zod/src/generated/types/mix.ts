@@ -13,6 +13,8 @@ import type { MixComponent } from './mixComponent';
 export interface Mix {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required for updates to existing rows */
+  updatedAt?: Date;
   /** Display name of the mix */
   name: string;
   /** Product brand, matched case-insensitively against scheduled runs */

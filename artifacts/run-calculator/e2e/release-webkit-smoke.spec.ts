@@ -98,6 +98,25 @@ async function selectedRun(page: Page): Promise<{
   });
 }
 
+async function canonicalRun(
+  page: Page,
+  runId: string,
+): Promise<{
+  id: string;
+  startedAt?: number;
+  pausedAt?: number;
+} | undefined> {
+  const response = await page.request.get(`/api/sync/today?today=${today()}`, {
+    failOnStatusCode: true,
+  });
+  const body = await response.json() as {
+    dayState?: {
+      runs?: Array<{ id: string; startedAt?: number; pausedAt?: number }>;
+    };
+  };
+  return body.dayState?.runs?.find((run) => run.id === runId);
+}
+
 test.beforeAll(async () => {
   requireIsolatedTestDatabase("WebKit release smoke");
 });
@@ -136,16 +155,28 @@ test("authenticates and preserves current-run start, pause, resume, and reload",
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await selectedRun(page)).id).toBe(runId);
+  await expect.poll(
+    async () => (await canonicalRun(page, runId))?.startedAt,
+    { timeout: 25_000 },
+  ).toBeTruthy();
 
   await page.getByRole("button", { name: /pause run/i }).click();
   const stopTunnelNo = page.getByTestId("pause-stop-tunnel-no");
-  if (await stopTunnelNo.isVisible().catch(() => false)) await stopTunnelNo.click();
+  if (await stopTunnelNo.isVisible().catch(() => false)) {
+    await stopTunnelNo.click({ timeout: 2_000 }).catch(() => undefined);
+  }
   await expect(page.getByTestId("resume-run")).toBeVisible();
-  await expect.poll(async () => (await selectedRun(page)).pausedAt).toBeTruthy();
+  await expect.poll(
+    async () => (await canonicalRun(page, runId))?.pausedAt,
+    { timeout: 25_000 },
+  ).toBeTruthy();
 
   await page.getByTestId("resume-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
-  await expect.poll(async () => (await selectedRun(page)).pausedAt).toBeUndefined();
+  await expect.poll(
+    async () => (await canonicalRun(page, runId))?.pausedAt,
+    { timeout: 25_000 },
+  ).toBeUndefined();
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await selectedRun(page)).id).toBe(runId);
@@ -197,6 +228,7 @@ test("manager can preview an authoritative operational report", async ({ page })
 
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+  await page.getByTestId("summary-report-details").locator("summary").click();
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
 

@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
@@ -132,6 +132,7 @@ beforeEach(async () => {
 
 type ApiRecipe = {
   id: string;
+  updatedAt?: string;
   name: string;
   brand: string;
   flavors: string[];
@@ -158,13 +159,23 @@ function recipe(id: string, name: string, extra?: Partial<ApiRecipe>): ApiRecipe
 }
 
 async function post(items: ApiRecipe[]): Promise<ApiRecipe[]> {
+  const currentRows = await db
+    .select({ id: cheeseRecipesTable.id, updatedAt: cheeseRecipesTable.updatedAt })
+    .from(cheeseRecipesTable)
+    .where(eq(cheeseRecipesTable.scope, "live"));
+  const revisions = new Map(currentRows.map((row) => [row.id, row.updatedAt.toISOString()]));
+  const fencedItems = items.map((item) =>
+    item.updatedAt || !revisions.has(item.id)
+      ? item
+      : { ...item, updatedAt: revisions.get(item.id) },
+  );
   const res = await fetch(`${baseUrl}/api/cheese-recipes`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${signToken(MANAGER)}`,
     },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items: fencedItems }),
   });
   expect(res.status).toBe(200);
   return ((await res.json()) as { items: ApiRecipe[] }).items;
@@ -219,6 +230,81 @@ describe("POST /cheese-recipes duplicate-name guard", () => {
     ]);
     const names = items.map((i) => i.name).sort();
     expect(names).toEqual(["Five Cheese Spice Blend", "Parmesan Blend"]);
+  });
+});
+
+describe("POST /cheese-recipes freshness fence", () => {
+  async function rawPost(items: ApiRecipe[]) {
+    const res = await fetch(`${baseUrl}/api/cheese-recipes`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signToken(MANAGER)}`,
+      },
+      body: JSON.stringify({ items }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("returns updatedAt and rejects a stale existing-row write without changing it", async () => {
+    const [created] = await post([recipe("stale", "Original")]);
+    expect(created.updatedAt).toBeTruthy();
+    await post([recipe("stale", "Canonical")]);
+
+    const result = await rawPost([
+      recipe("stale", "Stale overwrite", { updatedAt: created.updatedAt }),
+    ]);
+    expect(result.status).toBe(409);
+    expect(result.body.rejectedIds).toEqual(["stale"]);
+    const canonical = result.body.items as ApiRecipe[];
+    expect(canonical.find((item) => item.id === "stale")?.name).toBe("Canonical");
+  });
+
+  it("rejects a missing revision for an existing row", async () => {
+    await post([recipe("missing-revision", "Canonical")]);
+    const result = await rawPost([recipe("missing-revision", "Unsafe overwrite")]);
+    expect(result.status).toBe(409);
+    expect(result.body.rejectedIds).toEqual(["missing-revision"]);
+  });
+
+  it("accepts an equal revision as the compare-and-swap precondition", async () => {
+    const [created] = await post([recipe("equal", "Same")]);
+    const same = await rawPost([recipe("equal", "Same", { updatedAt: created.updatedAt })]);
+    expect(same.status).toBe(200);
+    const changed = await rawPost([
+      recipe("equal", "Changed", { updatedAt: created.updatedAt }),
+    ]);
+    expect(changed.status).toBe(200);
+  });
+
+  it("advances the server revision even when edits happen in one millisecond", async () => {
+    const [created] = await post([recipe("monotonic", "One")]);
+    const updated = await post([
+      recipe("monotonic", "Two", { updatedAt: created.updatedAt }),
+    ]);
+    expect(new Date(updated[0].updatedAt!).getTime()).toBeGreaterThan(
+      new Date(created.updatedAt!).getTime(),
+    );
+  });
+
+  it("rejects a mixed batch atomically", async () => {
+    const created = await post([recipe("fresh", "Fresh"), recipe("stale", "Old")]);
+    await post([recipe("fresh", "Fresh canonical")]);
+    await post([recipe("stale", "Old canonical")]);
+    const currentFresh = (await post([recipe("fresh", "Fresh newest")])).find(
+      (item) => item.id === "fresh",
+    );
+    const result = await rawPost([
+      recipe("fresh", "Fresh attempted", { updatedAt: currentFresh?.updatedAt }),
+      recipe("stale", "Stale attempted", { updatedAt: created.find((item) => item.id === "stale")?.updatedAt }),
+    ]);
+    expect(result.status).toBe(409);
+    expect((result.body.items as ApiRecipe[]).find((item) => item.id === "fresh")?.name).toBe(
+      "Fresh newest",
+    );
+    expect((result.body.items as ApiRecipe[]).find((item) => item.id === "stale")?.name).toBe(
+      "Old canonical",
+    );
   });
 });
 

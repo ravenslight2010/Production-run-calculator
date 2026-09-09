@@ -2825,6 +2825,7 @@ export const UpdateSupervisorPinResponse = zod.object({
 export const ListMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -2850,6 +2851,7 @@ export const ListMixesResponse = zod.object({
 export const SaveMixesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -2870,6 +2872,7 @@ export const SaveMixesBody = zod.object({
 export const SaveMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -2899,6 +2902,7 @@ export const DeleteMixesBody = zod.object({
 export const DeleteMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -3003,6 +3007,7 @@ export const MergeIngredientsResponse = zod.object({
 export const ListCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3027,6 +3032,7 @@ export const ListCheeseRecipesResponse = zod.object({
 export const SaveCheeseRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3046,6 +3052,7 @@ export const SaveCheeseRecipesBody = zod.object({
 export const SaveCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3074,6 +3081,7 @@ export const DeleteCheeseRecipesBody = zod.object({
 export const DeleteCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),

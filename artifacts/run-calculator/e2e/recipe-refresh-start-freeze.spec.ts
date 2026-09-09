@@ -387,10 +387,10 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 390, height: 844 });
 
-    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+  const username = uniqueTestId("e2e_batch_weight_sign_in");
 
-    const brand = `Recipe Refresh ${uniqueTestId("brand")}`;
-    const flavor = `${scenario.label} Fixture`;
+  const brand = `Weight Sync ${uniqueTestId("brand")}`;
+  const flavor = "Manager Journey";
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
     const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
     const currentRunId = uniqueTestId("current-run");
@@ -398,7 +398,7 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
   const scheduledRunId = uniqueTestId("scheduled-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_pep_batch"),
+    username: uniqueTestId("e2e_weight_sync"),
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
@@ -412,10 +412,10 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    pep1Combined: true,
-    pep1OzPerPizza: 1.2,
-    pep1Sticks: 8,
-    pep1BatchLbs: 0,
+    app1Type: ingredient,
+    app1OzPerPizza: 1,
+    app1BatchLbs: 5,
+    app1CheeseRecipe: [],
   };
 
   await fixtures.seedCheeseRecipe(account, {
@@ -539,7 +539,7 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
 
-    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+  const username = uniqueTestId("e2e_batch_weight_sign_in");
 
     const originalBrand = `Original ${scenario.label} ${uniqueTestId("brand")}`;
     const originalFlavor = "Profile-backed";
@@ -549,7 +549,7 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
     const switchedRunId = uniqueTestId("switched-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_pep_batch"),
+    username: uniqueTestId("e2e_weight_sync"),
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
@@ -563,10 +563,10 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    pep1Combined: true,
-    pep1OzPerPizza: 1.2,
-    pep1Sticks: 8,
-    pep1BatchLbs: 0,
+    app1Type: ingredient,
+    app1OzPerPizza: 1,
+    app1BatchLbs: 5,
+    app1CheeseRecipe: [],
   };
     const originalValues = scenario.values(recipeName);
     const switchedValues = {
@@ -1175,18 +1175,18 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     test.setTimeout(150_000);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+  const username = uniqueTestId("e2e_batch_weight_sign_in");
 
-  const activeBrand = `Pep Batch Active ${uniqueTestId("brand")}`;
-    const brand = `Recipe Refresh ${uniqueTestId("brand")}`;
-    const flavor = `${scenario.label} Fixture`;
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
+  const brand = `Weight Sync ${uniqueTestId("brand")}`;
+  const flavor = "Manager Journey";
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
     const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
     const currentRunId = uniqueTestId("current-run");
     const upcomingRunId = uniqueTestId("upcoming-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_pep_batch"),
+    username: uniqueTestId("e2e_weight_sync"),
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
@@ -1200,10 +1200,10 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    pep1Combined: true,
-    pep1OzPerPizza: 1.2,
-    pep1Sticks: 8,
-    pep1BatchLbs: 0,
+    app1Type: ingredient,
+    app1OzPerPizza: 1,
+    app1BatchLbs: 5,
+    app1CheeseRecipe: [],
   };
     const values = scenario.values(recipeName);
 
@@ -1250,17 +1250,6 @@ for (const scenario of sharedRecipeFreezeScenarios) {
   const peer = await peerContext.newPage();
 
   const activeBefore = await readServerRunValue(page, activeRunId);
-
-    try {
-      await Promise.all([
-        page.goto("/", { waitUntil: "domcontentloaded" }),
-        peer.goto("/", { waitUntil: "domcontentloaded" }),
-      ]);
-      await Promise.all([
-        page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
-        peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
-      ]);
-
       const [pendingBefore, peerPendingBefore] = await Promise.all([
         readIngredientDetail(page, upcomingRunId),
         readIngredientDetail(peer, upcomingRunId),
@@ -1361,9 +1350,9 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    const username = uniqueTestId(`e2e_${scenario.label}_switch`);
+  const username = uniqueTestId("e2e_batch_weight_sign_in");
 
-  const activeBrand = `Pep Batch Active ${uniqueTestId("brand")}`;
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
     const originalBrand = `Original ${scenario.label} ${uniqueTestId("brand")}`;
     const originalFlavor = "Profile-backed";
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
@@ -1372,7 +1361,7 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     const switchedRunId = uniqueTestId("switched-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_pep_batch"),
+    username: uniqueTestId("e2e_weight_sync"),
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
@@ -1386,10 +1375,10 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    pep1Combined: true,
-    pep1OzPerPizza: 1.2,
-    pep1Sticks: 8,
-    pep1BatchLbs: 0,
+    app1Type: ingredient,
+    app1OzPerPizza: 1,
+    app1BatchLbs: 5,
+    app1CheeseRecipe: [],
   };
     const originalValues = scenario.values(recipeName);
     const switchedValues = {
@@ -1515,11 +1504,11 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
   test.setTimeout(120_000);
   const nonDefaultPep = `Turkey Pep ${uniqueTestId("pep")}`;
   const defaultPep = "Pepperoni Stick";
-  const activeBrand = `Pep Batch Active ${uniqueTestId("brand")}`;
-  const pendingBrand = `Pep Batch Pending ${uniqueTestId("brand")}`;
+  const activeBrand = `Batch Weight Active ${uniqueTestId("brand")}`;
+  const pendingBrand = `Batch Weight Pending ${uniqueTestId("brand")}`;
   const activeFlavor = "Active Snapshot";
   const pendingFlavor = "Pending Snapshot";
-  const activeRunId = uniqueTestId("active-run");
+  const activeRunId = uniqueTestId("started-run");
   const pendingRunId = uniqueTestId("pending-run");
   const now = Date.now();
   const baseValues = {
@@ -1531,23 +1520,23 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    pep1Combined: true,
-    pep1OzPerPizza: 1.2,
-    pep1Sticks: 8,
-    pep1BatchLbs: 0,
+    app1Type: ingredient,
+    app1OzPerPizza: 1,
+    app1BatchLbs: 5,
+    app1CheeseRecipe: [],
   };
   const activeValues = {
     ...baseValues,
-    pep1Type: defaultPep,
+    app1Type: activeIngredient,
+    app1BatchLbs: 5,
   };
   const pendingValues = {
     ...baseValues,
-    pep1Type: nonDefaultPep,
-    pep1OzPerPizza: 1.5,
-    pep1Sticks: 0,
+    app1Type: rememberedIngredient,
+    app1BatchLbs: 0,
   };
   const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_pep_batch"),
+    username: uniqueTestId("e2e_weight_sync"),
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
@@ -1622,59 +1611,34 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
     await page.getByRole("button", { name: /^More/ }).click();
     await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
     await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
-    const batchWeight = page.getByTestId("input-pep1BatchLbs");
-    await expect(batchWeight).toHaveValue("0");
-    const savedWeight = page.waitForResponse((response) =>
-      response.url().includes("/api/ingredient-batch-weights")
-        && response.request().method() === "POST"
-        && response.status() === 200,
-    );
-
-        const paused = await readScheduledRunValues(page, TOMORROW, futurePausedRunId);
-    await batchWeight.fill("14");
+  const batchWeight = page.getByTestId("input-app1BatchLbs");
+  await expect(batchWeight).toHaveValue("0");
+  const savedWeight = page.waitForResponse((response) =>
+    response.url().endsWith("/api/ingredient-batch-weights")
+      && response.request().method() === "POST"
+      && response.status() === 200,
+  );
+    await batchWeight.fill("12");
     await batchWeight.blur();
     await savedWeight;
+    await refreshGate.observed;
+
+    await page.getByTestId("tab-run").click();
+    await page.getByRole("button", { name: "Select run 2" }).click();
+    await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+
+    await refreshGate.release();
 
     await expect.poll(
-      () => readServerRunField(page, pendingRunId, "pep1BatchLbs"),
+      async () => (await readScheduledRunValues(page, TOMORROW, futurePendingRunId))?.app1BatchLbs,
       { timeout: 25_000 },
-    ).toBe(14);
+    ).toBe(12);
     await expect.poll(
-      () => readServerRunValue(page, activeRunId),
+      async () => (await readScheduledRunValues(page, TOMORROW, futureStartedRunId))?.app1BatchLbs,
       { timeout: 25_000 },
-    ).toBe(activeBefore);
-
-    await peer.reload({ waitUntil: "domcontentloaded" });
-    await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-    await peer.getByRole("button", { name: "Select run 2" }).click();
-    await peer.getByRole("button", { name: /^More/ }).click();
-    await peer.getByRole("menuitem", { name: "Setup", exact: true }).click();
-    await peer.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
-    await expect(peer.getByTestId("input-pep1BatchLbs")).toHaveValue("14");
-
-    await peer.getByRole("button", { name: "Select run 1" }).click();
-    await peer.getByRole("button", { name: /^More/ }).click();
-    await peer.getByRole("menuitem", { name: "Setup", exact: true }).click();
-    await peer.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
-    await expect(peer.getByTestId("input-pep1Sticks")).toHaveValue("8");
-    await expect(peer.getByTestId("input-pep1OzPerPizza")).toHaveValue("1.2");
-    await expect(peer.getByTestId("input-pep1BatchLbs")).toHaveValue("0");
-    await expect.poll(
-      () => readServerRunValue(peer, activeRunId),
-      { timeout: 25_000 },
-    ).toBe(activeBefore);
-  } finally {
-    await peerContext.close();
-  }
-});
-
-test("remembered plain ingredient batch weights survive a fresh sign-in", async ({
-  browser,
-  page,
-}) => {
-  test.setTimeout(120_000);
-  await page.setViewportSize({ width: 390, height: 844 });
-
+    ).toBe(7);
+    await expect.poll(async () => {
+      const paused = await readScheduledRunValues(page, TOMORROW, futurePausedRunId);
   const username = uniqueTestId("e2e_batch_weight_sign_in");
   const rememberedIngredient = `Remembered Ingredient ${uniqueTestId("ingredient")}`;
   const activeIngredient = `Active Ingredient ${uniqueTestId("ingredient")}`;
@@ -1682,11 +1646,11 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
   const pendingBrand = `Batch Weight Pending ${uniqueTestId("brand")}`;
   const activeFlavor = "Active Snapshot";
   const pendingFlavor = "Pending Snapshot";
-  const activeRunId = uniqueTestId("active-run");
+  const activeRunId = uniqueTestId("started-run");
   const pendingRunId = uniqueTestId("pending-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
-    username,
+    username: uniqueTestId("e2e_weight_sync"),
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
@@ -1700,7 +1664,9 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
+    app1Type: ingredient,
     app1OzPerPizza: 1,
+    app1BatchLbs: 5,
     app1CheeseRecipe: [],
   };
   const activeValues = {

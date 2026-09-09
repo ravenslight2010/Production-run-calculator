@@ -152,3 +152,4 @@
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Browser peer startup ordering](browser-peer-startup-ordering.md) — assert snapshot no-ops before opening a peer; hydration may issue a legitimate background merge and change the canonical hash.
 - [Browser evidence assertions](browser-evidence-assertions.md) — assert visible labels and container text, not internal IDs or exact nodes with nested controls.
+- [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.

@@ -342,3 +342,13 @@ statuses for every gate. `GO` is invalid unless every applicable gate is
 `PASS`, operational warnings are answered, and accepted exceptions are either
 `none` or include an owner, next action, and expiry. A timeout is never a
 product pass or an accepted exception by implication.
+
+When the release suite needs a disposable database for destructive browser
+coverage, generate source-library reconciliation evidence separately from the
+read-only production database. Import it with
+`--source-library-evidence <path>` while the disposable CI guard and
+`RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION=1` are active.
+The importer must reject evidence that is not `release` environment, fresh,
+bound to the current full Git revision, and matched to the configured source
+report hash, heal ID, and repair boundary. The skip without an imported file
+must retain a NO-GO decision.

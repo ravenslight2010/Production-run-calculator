@@ -119,6 +119,14 @@ async function assertKeyboardTraversal(
 
   for (let index = 0; index < tabCount; index += 1) {
     await page.keyboard.press("Tab");
+    // Chromium may put the document body between the last control in the
+    // page and the first control in the next tab cycle. The body is not an
+    // actionable control and cannot provide a meaningful focus indicator, so
+    // advance past that browser focus sentinel before asserting the contract.
+    for (let sentinel = 0; sentinel < 2; sentinel += 1) {
+      if (!(await page.evaluate(() => document.activeElement === document.body))) break;
+      await page.keyboard.press("Tab");
+    }
     await page.evaluate(() => {
       (document.activeElement as HTMLElement | null)?.scrollIntoView({
         block: "nearest",
@@ -371,7 +379,9 @@ async function openSettings(page: Page): Promise<Locator> {
 async function dismissUnexpectedDialog(page: Page): Promise<void> {
   // The Replit preview banner is outside the app but can overlap the modal
   // close action in short tablet viewports.
-  await page.locator("#replit-dev-banner").evaluate((node) => node.remove()).catch(() => {});
+  await page.locator("#replit-dev-banner").evaluateAll((nodes) => {
+    for (const node of nodes) node.remove();
+  });
   const welcome = page.getByRole("dialog").last();
   const getStarted = welcome.getByRole("button", { name: "Get started", exact: true });
   await getStarted.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
