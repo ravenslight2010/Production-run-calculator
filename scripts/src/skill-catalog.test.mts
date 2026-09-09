@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -19,6 +20,37 @@ const roots: SkillRoot[] = [
   { id: "platform", relativePath: ".local/skills", classification: "managed" },
   { id: "secondary", relativePath: ".local/secondary_skills", classification: "managed" },
 ];
+const packageRoot = resolve(import.meta.dirname, "..");
+const checkerPath = join(packageRoot, "src/skill-catalog.mts");
+
+type CliResult = {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+};
+
+function runDefaultChecker(): Promise<CliResult> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn("pnpm", ["exec", "tsx", checkerPath], {
+      cwd: packageRoot,
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      resolveResult({ exitCode, stdout, stderr });
+    });
+  });
+}
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "skill-catalog-"));
@@ -274,6 +306,22 @@ test("CLI accepts an isolated fixture project root without provider credentials"
   const root = await fixture();
   await addSkill(root, ".agents/skills", "cli-skill");
   assert.equal(await main(["--project-root", root, "--json"]), 0);
+});
+
+test("CLI checks repository skill roots with its default project root", async () => {
+  const result = await runDefaultChecker();
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, "");
+  assert.match(
+    result.stdout,
+    /PASS \.agents\/skills\/brainstorming\/SKILL\.md \[editable\]/,
+  );
+  assert.match(
+    result.stdout,
+    /PASS \.local\/skills\/agent-inbox\/SKILL\.md \[managed\]/,
+  );
+  assert.match(result.stdout, /Summary:[^\n]*0 failure\(s\),/);
 });
 
 test("missing roots warn so platform-injected roots remain optional in CI", async () => {
