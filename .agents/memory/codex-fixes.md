@@ -475,3 +475,22 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Remaining (server wiring):**
 - Feature B: wire `computeMixComponentConsumptionLines` into a server endpoint for daily mix deduction
 - Feature E7: wire `computeDailySupplyConsumptionLines` into day-start consumption endpoint
+
+## 2026-09-09: Feature B2 — Mix overproduction (amountActualMade) + surplus carry + reminder card
+
+**Files changed:**
+- `lib/mixes/src/index.ts` — added `amountActualMade?: number` to Mix interface + normalizeMix
+- `lib/db/src/schema/mixes.ts` — added `amountActualMade` real column (additive, default 0, push-force-safe)
+- `lib/api-spec/openapi.yaml` + generated codegen — Mix + SavedMix schemas
+- `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx` — added optional "Made today" input
+- `artifacts/api-server/src/routes/inventory.ts` — day-start endpoint now uses actualMade > remainingLbs and auto-carries surplus to amountAlreadyMade
+- `artifacts/run-calculator/src/components/SurplusMixCard.tsx` — NEW warehouse reminder card for mixes with freezer stock
+- `artifacts/run-calculator/src/components/WarehouseTabContent.tsx` — wired SurplusMixCard
+
+**What was done:**
+1. B2 "Actual Made" field: mixer can enter actual lbs made; blank = assume plan
+2. When actual > fresh needed: overproduction deducted from inventory
+3. Surplus auto-carries to amountAlreadyMade for the next run
+4. SurplusMixCard shows "Mix in Freezer" with on-hand lbs in Warehouse tab
+
+**Tests:** mixes 88/88, inventory-math 74/74. API + web typecheck pass.
