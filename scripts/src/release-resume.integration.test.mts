@@ -14,6 +14,7 @@ type FixtureStep = {
   stage?: string;
   concurrencyLimit?: number;
   group?: string;
+  dependsOn?: readonly string[];
 };
 
 const rootDir = resolve(new URL("../../", import.meta.url).pathname);
@@ -32,12 +33,38 @@ const onboardingGuard = join(
   "onboarding-guard.mjs",
 );
 
-function runReleaseCheck(
+async function runReleaseCheck(
   evidenceDir: string,
   steps: FixtureStep[],
   args: string[] = [],
   envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
+  await writeFile(
+    join(evidenceDir, "report-key-rotation-preflight.json"),
+    `${JSON.stringify(
+      {
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable-ci",
+        revision: await getCurrentRevision(),
+        status: "pass",
+        canRotate: true,
+        activeKeyId: "fixture-key",
+        storedKeyIds: ["fixture-key"],
+        missingKeyIds: [],
+        failure: null,
+        remediation: null,
+        scan: {
+          limit: 100,
+          checkedDistinctKeyIds: 1,
+          truncated: false,
+          complete: true,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
   return new Promise((resolveRun, reject) => {
     const child = spawn("pnpm", ["exec", "tsx", releaseCheck, ...args], {
       cwd: rootDir,
@@ -602,6 +629,88 @@ async function runParallelStageScenario(): Promise<void> {
   }
 }
 
+async function runIndependentFailureFanoutScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-independent-failures-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-independent-failures-marker-"),
+  );
+  const independentMarker = join(markerDir, "independent");
+  const dependentMarker = join(markerDir, "dependent");
+  const lateIndependentMarker = join(markerDir, "late-independent");
+  const mark = [
+    "require('node:fs').writeFileSync(process.env.RELEASE_MARKER, 'ran');",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: "independent failing gate",
+      command: process.execPath,
+      args: ["-e", "process.exit(1)"],
+      stage: "fanout-prerequisites",
+      dependsOn: [],
+    },
+    {
+      label: "independent passing gate",
+      command: process.execPath,
+      args: ["-e", mark, "independent"],
+      env: { RELEASE_MARKER: independentMarker },
+      stage: "fanout-independent",
+      dependsOn: [],
+    },
+    {
+      label: "dependent gate",
+      command: process.execPath,
+      args: ["-e", mark, "dependent"],
+      env: { RELEASE_MARKER: dependentMarker },
+      stage: "fanout-dependent",
+      dependsOn: ["independent failing gate"],
+    },
+    {
+      label: "later independent gate",
+      command: process.execPath,
+      args: ["-e", mark, "late-independent"],
+      env: { RELEASE_MARKER: lateIndependentMarker },
+      stage: "fanout-later-independent",
+      dependsOn: [],
+    },
+  ];
+
+  try {
+    const result = await runReleaseCheck(evidenceDir, steps);
+    assert.equal(result.code, 1, result.output);
+    assert.match(
+      result.output,
+      /BLOCKED dependent gate; requires PASS from independent failing gate/,
+    );
+    assert.equal(await readFile(independentMarker, "utf8"), "ran");
+    assert.equal(await readFile(lateIndependentMarker, "utf8"), "ran");
+    await assert.rejects(
+      readFile(dependentMarker, "utf8"),
+      "a blocked dependent gate must not execute",
+    );
+    const report = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    assert.match(report, /\| independent failing gate \| FAIL \|/);
+    assert.match(report, /\| independent passing gate \| PASS \|/);
+    assert.match(report, /\| dependent gate \| BLOCKED \|/);
+    assert.match(
+      report,
+      /Blocked gates: dependent gate \(blocked by independent failing gate\)/,
+    );
+    assert.match(report, /Root blockers: independent failing gate \(FAIL\)/);
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release independent failure fan-out scenario passed (safe continuation and explicit blocking).",
+  );
+}
+
 async function getCurrentRevision(): Promise<string> {
   return new Promise((resolveRevision, reject) => {
     execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
@@ -755,7 +864,7 @@ async function run(): Promise<void> {
       results: Array<{ label: string; passed: boolean; status: string }>;
     };
     assert.equal(firstCheckpoint.mode, "standard");
-    assert.equal(firstCheckpoint.results.length, 2);
+    assert.equal(firstCheckpoint.results.length, 3);
     assert.deepEqual(
       firstCheckpoint.results.map(({ label, passed, status }) => [
         label,
@@ -765,10 +874,15 @@ async function run(): Promise<void> {
       [
         ["fixture gate one", true, "PASS"],
         ["fixture gate two", false, "INFRASTRUCTURE TIMEOUT"],
+        ["fixture gate three", false, "BLOCKED"],
       ],
-      "the interrupted run must checkpoint the failed gate, not omit it",
+      "the interrupted run must checkpoint the failed gate and its blocked dependent",
     );
-    assert.equal(await readFile(marker, "utf8"), "started\n");
+    assert.equal(
+      await readFile(marker, "utf8"),
+      "started\n",
+      interrupted.output,
+    );
     assert.equal(
       await readFile(join(evidenceDir, "release-check-report.md"), "utf8"),
       priorRetainedReport,
@@ -785,7 +899,7 @@ async function run(): Promise<void> {
     assert.match(checkpointReport, /^Report status: INCOMPLETE CHECKPOINT$/m);
     assert.match(
       checkpointReport,
-      /Gates not reached: fixture gate three \(NOT REACHED\)/,
+      /Blocked gates: fixture gate three \(blocked by fixture gate two\)/,
     );
     assert.match(
       checkpointReport,
@@ -943,8 +1057,9 @@ async function runParallelResumeScenario(): Promise<void> {
       [
         ["parallel passed gate", true, "PASS"],
         ["parallel retry gate", false, "INFRASTRUCTURE TIMEOUT"],
+        ["parallel resume barrier", false, "BLOCKED"],
       ],
-      "a partially completed parallel stage must checkpoint each child in step order",
+      "a partially completed parallel stage must checkpoint each child and blocked dependent in step order",
     );
     assert.equal(await readFile(passedMarker, "utf8"), "started\n");
 
@@ -1011,8 +1126,8 @@ async function runOnboardingGuardStopScenario(): Promise<void> {
     );
     assert.match(
       result.output,
-      /browser-guard has a failed gate; later stages were not started\./,
-      "the runner must stop after the onboarding guard stage",
+      /BLOCKED browser evidence gate; requires PASS from onboarding bypass guard/,
+      "the dependent browser evidence gate must be recorded as blocked",
     );
     assert.deepEqual(
       await readFile(
@@ -1034,8 +1149,13 @@ async function runOnboardingGuardStopScenario(): Promise<void> {
           passed: false,
           status: "FAIL",
         },
+        {
+          label: "browser evidence gate",
+          passed: false,
+          status: "BLOCKED",
+        },
       ],
-      "the runner must checkpoint the failed onboarding gate",
+      "the runner must checkpoint both the failed gate and its blocked dependent",
     );
     await assert.rejects(
       readFile(browserMarker, "utf8"),
@@ -1227,7 +1347,7 @@ async function runFullModeScenario(): Promise<void> {
       results: Array<{ label: string; passed: boolean; status: string }>;
     };
     assert.equal(firstCheckpoint.mode, "full");
-    assert.equal(firstCheckpoint.results.length, 2);
+    assert.equal(firstCheckpoint.results.length, 3);
     assert.deepEqual(
       firstCheckpoint.results.map(({ label, passed, status }) => [
         label,
@@ -1237,8 +1357,9 @@ async function runFullModeScenario(): Promise<void> {
       [
         ["fixture gate one", true, "PASS"],
         ["full browser E2E suite", false, "INFRASTRUCTURE TIMEOUT"],
+        ["fixture gate three", false, "BLOCKED"],
       ],
-      "full mode must checkpoint the interrupted browser gate as failed",
+      "full mode must checkpoint the interrupted browser gate and blocked dependent",
     );
     assert.equal(await readFile(marker, "utf8"), "started\n");
 
@@ -1420,6 +1541,7 @@ if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await run();
   await runOnboardingGuardStopScenario();
   await runParallelStageScenario();
+  await runIndependentFailureFanoutScenario();
   await runApiShardConcurrencyScenario();
   await runParallelResumeScenario();
   await runFullModeScenario();

@@ -41,6 +41,11 @@ export type ReleaseStep = {
   stage?: string;
   /** Optional per-stage limit, used to keep stateful browser work serial. */
   concurrencyLimit?: number;
+  /**
+   * Gate labels that must pass before this gate is valid to run. An explicit
+   * empty list means the gate is independent of earlier stages.
+   */
+  dependsOn?: readonly string[];
 };
 
 export function assertUniqueReleaseSteps(
@@ -57,7 +62,9 @@ export function assertUniqueReleaseSteps(
 
     const invocation = JSON.stringify([step.command ?? "pnpm", step.args]);
     if (invocations.has(invocation)) {
-      duplicateInvocations.add(`${step.command ?? "pnpm"} ${step.args.join(" ")}`);
+      duplicateInvocations.add(
+        `${step.command ?? "pnpm"} ${step.args.join(" ")}`,
+      );
     }
     invocations.add(invocation);
   }
@@ -70,7 +77,9 @@ export function assertUniqueReleaseSteps(
           ? [`Duplicate labels: ${[...duplicateLabels].join(", ")}`]
           : []),
         ...(duplicateInvocations.size > 0
-          ? [`Duplicate command invocations: ${[...duplicateInvocations].join(", ")}`]
+          ? [
+              `Duplicate command invocations: ${[...duplicateInvocations].join(", ")}`,
+            ]
           : []),
       ].join("\n"),
     );
@@ -82,12 +91,14 @@ export type StepStatus =
   | "FAIL"
   | "INFRASTRUCTURE TIMEOUT"
   | "INFRASTRUCTURE ERROR"
+  | "BLOCKED"
   | "NOT REACHED";
 
 export type ReleaseStepResult = {
   label: string;
   status: StepStatus;
   elapsedMs: number;
+  blockedBy?: readonly string[];
 };
 
 export type ReleaseStageTiming = {
@@ -195,10 +206,7 @@ async function acquireStatefulReleaseLock(): Promise<() => Promise<void>> {
       const ownerAlive = await statefulReleaseLockOwnerAlive();
       if (
         ownerAlive === false ||
-        (
-          lock &&
-          Date.now() - lock.mtimeMs > STATEFUL_RELEASE_LOCK_STALE_MS
-        )
+        (lock && Date.now() - lock.mtimeMs > STATEFUL_RELEASE_LOCK_STALE_MS)
       ) {
         await rm(STATEFUL_RELEASE_LOCK_DIR, { recursive: true, force: true });
         continue;
@@ -252,8 +260,7 @@ const webkitBrowserEvidencePath = resolve(
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
-const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE =
-  `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
+const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
@@ -293,7 +300,9 @@ type ApiReleaseScripts = Record<string, string | undefined>;
 const API_INTEGRATION_TEST_PATH_RE =
   /src\/[A-Za-z0-9_./-]+\.integration\.test\.ts/g;
 
-function referencedApiIntegrationTestPaths(command: string | undefined): Set<string> {
+function referencedApiIntegrationTestPaths(
+  command: string | undefined,
+): Set<string> {
   return new Set(command?.match(API_INTEGRATION_TEST_PATH_RE) ?? []);
 }
 
@@ -482,19 +491,19 @@ export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
-const sourceLibraryReport =
-  resolve(
-    rootDir,
-    cliOptionValue("--source-library-report") ??
-      process.env.SOURCE_LIBRARY_RECONCILIATION_REPORT ??
-      DEFAULT_REPORT,
-  );
+const sourceLibraryReport = resolve(
+  rootDir,
+  cliOptionValue("--source-library-report") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_REPORT ??
+    DEFAULT_REPORT,
+);
 const sourceLibraryHealId =
   cliOptionValue("--source-library-heal-id") ??
   process.env.SOURCE_LIBRARY_RECONCILIATION_HEAL_ID ??
   DEFAULT_HEAL_ID;
-const sourceLibraryHealDate =
-  sourceLibraryHealId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/u)?.[1];
+const sourceLibraryHealDate = sourceLibraryHealId.match(
+  /(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/u,
+)?.[1];
 const sourceLibraryFromDate =
   cliOptionValue("--source-library-from-date") ??
   process.env.SOURCE_LIBRARY_RECONCILIATION_FROM_DATE ??
@@ -510,7 +519,8 @@ export function resolveSourceLibraryEvidenceEnvironment(
   isCi: boolean,
 ): SourceLibraryEvidenceEnvironment {
   return parseSourceLibraryEvidenceEnvironment(
-    configuredEnvironment ?? (importsEvidence || isCi ? "release" : "development"),
+    configuredEnvironment ??
+      (importsEvidence || isCi ? "release" : "development"),
   );
 }
 const sourceLibraryEnvironment = resolveSourceLibraryEvidenceEnvironment(
@@ -529,7 +539,8 @@ export function resolveSourceLibraryReleaseRevision(
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
 ): string {
-  const revision = configuredRevision ??
+  const revision =
+    configuredRevision ??
     (environment === "development" ? releaseRevision : undefined);
   if (!revision) {
     throw new Error(
@@ -560,19 +571,18 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     "--environment",
     sourceLibraryEnvironment,
     "--output",
-    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+    resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+    ),
   ],
   stage: "prerequisites",
 };
 
 export const SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP: ReleaseStep = {
   label: "source-library reconciliation verifier fixture tests",
-  args: [
-    "--filter",
-    "@workspace/scripts",
-    "run",
-    "test:source-heal-verify",
-  ],
+  args: ["--filter", "@workspace/scripts", "run", "test:source-heal-verify"],
   stage: "prerequisites",
 };
 
@@ -593,7 +603,11 @@ export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
     "--from-date",
     sourceLibraryFromDate,
     "--output",
-    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+    resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+    ),
   ],
   stage: "prerequisites",
 };
@@ -608,7 +622,10 @@ export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
 export function sourceLibraryReconciliationRequired(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (environment.RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION !== "1") {
+  if (
+    environment.RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION !==
+    "1"
+  ) {
     return true;
   }
   if (
@@ -642,8 +659,8 @@ const steps: ReleaseStep[] = [
     ],
     env: {
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT:
-        process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
-        ?? (process.env.CI ? "disposable-ci" : "development"),
+        process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT ??
+        (process.env.CI ? "disposable-ci" : "development"),
       REPORT_KEY_ROTATION_PREFLIGHT_OUTPUT: resolve(
         rootDir,
         releaseEvidenceDir,
@@ -654,9 +671,9 @@ const steps: ReleaseStep[] = [
   },
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   ...(importsProductionSourceLibraryReconciliation
-      ? [SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP]
-      : requiresProductionSourceLibraryReconciliation
-        ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
+    ? [SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP]
+    : requiresProductionSourceLibraryReconciliation
+      ? [SOURCE_LIBRARY_RECONCILIATION_STEP]
       : [SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP]),
   {
     label: "shell lint inventory",
@@ -808,9 +825,7 @@ const steps: ReleaseStep[] = [
     env: {
       ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
-      RELEASE_BROWSER_ENVIRONMENT: process.env.CI
-        ? "ci"
-        : "development",
+      RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
     },
     stage: "browser-webkit",
     concurrencyLimit: 1,
@@ -832,21 +847,17 @@ if (fullRun) {
   });
 }
 
-export function releaseGateLabelsForMode(
-  mode: "standard" | "full",
-): string[] {
+export function releaseGateLabelsForMode(mode: "standard" | "full"): string[] {
   const labels = steps
-    .filter((step) =>
-      mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL
-    )
+    .filter((step) => mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL)
     .map((step) => step.label);
   // A verifier can be pointed at a full evidence directory without starting
   // this process with --full. Derive the contract from the report's mode, not
   // from the command that happened to launch verification.
   if (
-    mode === "full"
-    && process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined
-    && !labels.includes(FULL_BROWSER_GATE_LABEL)
+    mode === "full" &&
+    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined &&
+    !labels.includes(FULL_BROWSER_GATE_LABEL)
   ) {
     labels.push(FULL_BROWSER_GATE_LABEL);
   }
@@ -883,11 +894,101 @@ if (fixtureSteps !== undefined) {
   }
 }
 
+/**
+ * The production release stages are ordered for readable logs, but most
+ * release domains are valid to evaluate even when another domain fails.
+ * Dependencies are therefore explicit by gate label. Unknown fixture stages
+ * retain the historical previous-stage barrier so the resume integration
+ * fixture remains a useful compatibility check.
+ */
+const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
+  {
+    prerequisites: [],
+    "shared-output": [],
+    "consumer-typechecks": ["shared library typechecks"],
+    "clean-start": [],
+    "container-smoke": [],
+    "release-tests": [],
+    "browser-guard": [],
+    "browser-smoke": ["onboarding bypass guard"],
+    "browser-accessibility": ["onboarding bypass guard"],
+    "browser-webkit": ["onboarding bypass guard"],
+    "browser-full": ["onboarding bypass guard"],
+  };
+
 assertUniqueReleaseSteps(steps);
 
 export function releaseStepStage(step: ReleaseStep, index: number): string {
   return step.stage ?? `serial-${index}`;
 }
+
+export function releaseStepDependencies(
+  step: ReleaseStep,
+  index: number,
+  releaseSteps: readonly ReleaseStep[] = steps,
+): readonly string[] {
+  if (step.dependsOn !== undefined) {
+    return [...new Set(step.dependsOn)];
+  }
+  const stage = releaseStepStage(step, index);
+  const configured = RELEASE_STAGE_DEPENDENCIES[stage];
+  if (configured !== undefined) return configured;
+
+  const previousStage = [...releaseSteps.slice(0, index)]
+    .reverse()
+    .map((candidate, candidateIndex) =>
+      releaseStepStage(candidate, index - candidateIndex - 1),
+    )
+    .find((candidateStage) => candidateStage !== stage);
+  if (!previousStage) return [];
+  return releaseSteps
+    .slice(0, index)
+    .filter(
+      (candidate, candidateIndex) =>
+        releaseStepStage(candidate, candidateIndex) === previousStage,
+    )
+    .map((candidate) => candidate.label);
+}
+
+export function assertReleaseStepDependencies(
+  releaseSteps: readonly ReleaseStep[],
+): void {
+  const labels = new Set(releaseSteps.map((step) => step.label));
+  const dependencies = new Map(
+    releaseSteps.map((step, index) => [
+      step.label,
+      releaseStepDependencies(step, index, releaseSteps),
+    ]),
+  );
+  for (const step of releaseSteps) {
+    for (const dependency of dependencies.get(step.label) ?? []) {
+      if (!labels.has(dependency)) {
+        throw new Error(
+          `Release gate ${step.label} depends on unknown gate ${dependency}.`,
+        );
+      }
+      if (dependency === step.label) {
+        throw new Error(`Release gate ${step.label} cannot depend on itself.`);
+      }
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (label: string): void => {
+    if (visited.has(label)) return;
+    if (visiting.has(label)) {
+      throw new Error(`Release gate dependency cycle includes ${label}.`);
+    }
+    visiting.add(label);
+    for (const dependency of dependencies.get(label) ?? []) visit(dependency);
+    visiting.delete(label);
+    visited.add(label);
+  };
+  for (const step of releaseSteps) visit(step.label);
+}
+
+assertReleaseStepDependencies(steps);
 
 export function releaseConcurrencyLimit(
   step: ReleaseStep,
@@ -1032,10 +1133,7 @@ export async function verifyReleaseEvidence(
       );
     }
   }
-  if (
-    checkpointReport.trim() !== "" &&
-    !options.allowIncompleteCheckpoint
-  ) {
+  if (checkpointReport.trim() !== "" && !options.allowIncompleteCheckpoint) {
     throw new Error(
       [
         `Release check has an incomplete checkpoint at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence.`,
@@ -1053,7 +1151,10 @@ export async function verifyReleaseEvidence(
       "Release report mode is missing or invalid; regenerate the report or point the verifier at a retained standard/full evidence directory.",
     );
   }
-  if (options.expectedMode !== undefined && reportMode !== options.expectedMode) {
+  if (
+    options.expectedMode !== undefined &&
+    reportMode !== options.expectedMode
+  ) {
     throw new Error(
       [
         `Evidence directory contains a ${reportMode} report, but ${options.expectedMode} verification was requested.`,
@@ -1086,7 +1187,9 @@ export async function verifyReleaseEvidence(
       ? ["browser-smoke/webkit-result.json" as const]
       : []),
   ];
-  const missingEvidence = requiredEvidence.filter((file) => !files.includes(file));
+  const missingEvidence = requiredEvidence.filter(
+    (file) => !files.includes(file),
+  );
   if (missingEvidence.length > 0) {
     throw new Error(
       `Required release evidence is missing:\n${missingEvidence
@@ -1106,8 +1209,7 @@ export async function verifyReleaseEvidence(
         .join("\n")}`,
     );
   }
-  const revision =
-    options.currentRevision ?? (await currentRevision());
+  const revision = options.currentRevision ?? (await currentRevision());
   const reportKeyRotationEvidence = await readFile(
     resolve(evidenceRoot, REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE),
   );
@@ -1201,10 +1303,14 @@ export function validateReportKeyRotationEvidence(
     "remediation",
   ]);
   if (Object.keys(output).some((key) => !allowedKeys.has(key))) {
-    throw new Error("Report key rotation evidence contains unsupported or unsafe fields.");
+    throw new Error(
+      "Report key rotation evidence contains unsupported or unsafe fields.",
+    );
   }
   if (output.verifier !== REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER) {
-    throw new Error("Report key rotation evidence has an unsupported verifier.");
+    throw new Error(
+      "Report key rotation evidence has an unsupported verifier.",
+    );
   }
   if (typeof output.environment !== "string" || !output.environment.trim()) {
     throw new Error("Report key rotation evidence environment is missing.");
@@ -1237,7 +1343,9 @@ export function validateReportKeyRotationEvidence(
       (keyId) => typeof keyId !== "string" || !keyId.trim(),
     )
   ) {
-    throw new Error("Report key rotation evidence contains an invalid stored key ID.");
+    throw new Error(
+      "Report key rotation evidence contains an invalid stored key ID.",
+    );
   }
   const scan = output.scan;
   if (!scan || typeof scan !== "object" || Array.isArray(scan)) {
@@ -1251,7 +1359,9 @@ export function validateReportKeyRotationEvidence(
     "complete",
   ]);
   if (Object.keys(scanRecord).some((key) => !scanKeys.has(key))) {
-    throw new Error("Report key rotation evidence scan contains unsafe fields.");
+    throw new Error(
+      "Report key rotation evidence scan contains unsafe fields.",
+    );
   }
   if (
     scanRecord.limit !== REPORT_KEY_ROTATION_SCAN_LIMIT ||
@@ -1259,9 +1369,7 @@ export function validateReportKeyRotationEvidence(
     scanRecord.truncated !== false ||
     scanRecord.complete !== true
   ) {
-    throw new Error(
-      "Report key rotation evidence is incomplete or truncated.",
-    );
+    throw new Error("Report key rotation evidence is incomplete or truncated.");
   }
 }
 
@@ -1287,7 +1395,9 @@ export function validateWebKitBrowserEvidence(
   }
   const record = evidence as Record<string, unknown>;
   if (record.schemaVersion !== 1 || record.browser !== "webkit") {
-    throw new Error("WebKit browser evidence has an unsupported schema or browser.");
+    throw new Error(
+      "WebKit browser evidence has an unsupported schema or browser.",
+    );
   }
   if (
     typeof record.revision !== "string" ||
@@ -1309,10 +1419,14 @@ export function validateWebKitBrowserEvidence(
     throw new Error("WebKit browser evidence has an invalid result.");
   }
   if (options.requirePass && record.result !== "passed") {
-    throw new Error("WebKit browser evidence cannot support GO unless it passed.");
+    throw new Error(
+      "WebKit browser evidence cannot support GO unless it passed.",
+    );
   }
   if (!Array.isArray(record.cases) || record.cases.length === 0) {
-    throw new Error("WebKit browser evidence must enumerate at least one test case.");
+    throw new Error(
+      "WebKit browser evidence must enumerate at least one test case.",
+    );
   }
   const validStatuses = new Set([
     "passed",
@@ -1339,14 +1453,18 @@ export function validateWebKitBrowserEvidence(
       typeof item.status !== "string" ||
       !validStatuses.has(item.status)
     ) {
-      throw new Error("WebKit browser evidence contains an incomplete test case.");
+      throw new Error(
+        "WebKit browser evidence contains an incomplete test case.",
+      );
     }
     if (
       item.failureClassification !== undefined &&
       (typeof item.failureClassification !== "string" ||
         !validClassifications.has(item.failureClassification))
     ) {
-      throw new Error("WebKit browser evidence contains an invalid failure classification.");
+      throw new Error(
+        "WebKit browser evidence contains an invalid failure classification.",
+      );
     }
   }
 }
@@ -1377,7 +1495,11 @@ export function validateSourceLibraryReconciliationEvidence(
       `Source-library reconciliation evidence is not valid JSON: ${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.`,
     );
   }
-  if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence)) {
+  if (
+    evidence === null ||
+    typeof evidence !== "object" ||
+    Array.isArray(evidence)
+  ) {
     throw new Error(
       "Source-library reconciliation evidence must be a JSON object.",
     );
@@ -1407,7 +1529,9 @@ export function validateSourceLibraryReconciliationEvidence(
   ) {
     throw new Error(
       `Source-library reconciliation evidence revision is stale or missing${
-        options.expectedRevision ? ` (expected ${options.expectedRevision})` : ""
+        options.expectedRevision
+          ? ` (expected ${options.expectedRevision})`
+          : ""
       }.`,
     );
   }
@@ -1494,7 +1618,10 @@ export function validateSourceLibraryReconciliationEvidence(
               typeof failure === "object" &&
               !Array.isArray(failure),
           )
-          .map((failure) => `${String(failure.check ?? "unknown")} (${String(failure.count ?? "?")})`)
+          .map(
+            (failure) =>
+              `${String(failure.check ?? "unknown")} (${String(failure.count ?? "?")})`,
+          )
       : [];
     throw new Error(
       `Source-library reconciliation verification failed${
@@ -1513,7 +1640,9 @@ export function validateSourceLibraryReconciliationEvidence(
     typeof fingerprint !== "object" ||
     Array.isArray(fingerprint) ||
     (fingerprint as Record<string, unknown>).algorithm !== "sha256" ||
-    !/^[a-f0-9]{64}$/u.test(String((fingerprint as Record<string, unknown>).value ?? ""))
+    !/^[a-f0-9]{64}$/u.test(
+      String((fingerprint as Record<string, unknown>).value ?? ""),
+    )
   ) {
     throw new Error(
       "Source-library reconciliation evidence is missing its bounded idempotency fingerprint.",
@@ -1532,7 +1661,9 @@ export function validateFullBrowserReport(
     );
   }
 
-  const result = report.match(/^Result:\s*(PASS|FAIL|TIMEDOUT|INTERRUPTED)\s*$/m)?.[1];
+  const result = report.match(
+    /^Result:\s*(PASS|FAIL|TIMEDOUT|INTERRUPTED)\s*$/m,
+  )?.[1];
   const expectedCases = Number(
     report.match(/^Expected cases:\s*(\d+)\s*$/m)?.[1],
   );
@@ -1543,20 +1674,22 @@ export function validateFullBrowserReport(
     report.match(/^Completed cases:\s*(\d+)\s*$/m)?.[1],
   );
   const passedCases = Number(report.match(/^Passed cases:\s*(\d+)\s*$/m)?.[1]);
-  const skippedCases = Number(report.match(/^Skipped cases:\s*(\d+)\s*$/m)?.[1]);
+  const skippedCases = Number(
+    report.match(/^Skipped cases:\s*(\d+)\s*$/m)?.[1],
+  );
   const failedCases = Number(report.match(/^Failed cases:\s*(\d+)\s*$/m)?.[1]);
   const notRunCases = Number(report.match(/^Not-run cases:\s*(\d+)\s*$/m)?.[1]);
   const coverage = report.match(/^Coverage:\s*(COMPLETE|INCOMPLETE)\s*$/m)?.[1];
   const durationMs = Number(report.match(/^Duration:\s*(\d+)ms\s*$/m)?.[1]);
   if (
-    !result
-    || !Number.isInteger(expectedCases)
-    || !Number.isInteger(passedCases)
-    || !Number.isInteger(skippedCases)
-    || !Number.isInteger(failedCases)
-    || !Number.isInteger(notRunCases)
-    || !coverage
-    || !Number.isInteger(durationMs)
+    !result ||
+    !Number.isInteger(expectedCases) ||
+    !Number.isInteger(passedCases) ||
+    !Number.isInteger(skippedCases) ||
+    !Number.isInteger(failedCases) ||
+    !Number.isInteger(notRunCases) ||
+    !coverage ||
+    !Number.isInteger(durationMs)
   ) {
     throw new Error(
       "Full browser report is malformed: result, case counts, coverage, and duration are required.",
@@ -1594,7 +1727,9 @@ export function validateFullBrowserReport(
 
   const durationSection = report.split("## Per-file duration\n\n")[1];
   if (!durationSection) {
-    throw new Error("Full browser report is malformed: per-file durations are required.");
+    throw new Error(
+      "Full browser report is malformed: per-file durations are required.",
+    );
   }
   const rows = [
     ...durationSection.matchAll(
@@ -1610,7 +1745,9 @@ export function validateFullBrowserReport(
     durationMs: Number(match[8]),
   }));
   if (rows.length === 0) {
-    throw new Error("Full browser report is malformed: no per-file durations found.");
+    throw new Error(
+      "Full browser report is malformed: no per-file durations found.",
+    );
   }
   const totals = rows.reduce(
     (total, row) => ({
@@ -1644,7 +1781,9 @@ export function validateFullBrowserReport(
       totals.cases ||
     totals.durationMs < 0
   ) {
-    throw new Error("Full browser report per-file totals do not match its case counts.");
+    throw new Error(
+      "Full browser report per-file totals do not match its case counts.",
+    );
   }
 }
 
@@ -1712,11 +1851,13 @@ export function validateReleaseReport(
   if (!gateSection) {
     throw new Error("Release report is malformed: missing gate results.");
   }
-  const rows = [...gateSection.matchAll(/^\| (.+?) \| (PASS|FAIL|INFRASTRUCTURE TIMEOUT|INFRASTRUCTURE ERROR|NOT REACHED) \|/gm)]
-    .map((match) => ({ label: match[1], status: match[2] }));
+  const rows = [
+    ...gateSection.matchAll(
+      /^\| (.+?) \| (PASS|FAIL|INFRASTRUCTURE TIMEOUT|INFRASTRUCTURE ERROR|BLOCKED|NOT REACHED) \|/gm,
+    ),
+  ].map((match) => ({ label: match[1], status: match[2] }));
   const expectedLabels =
-    options.expectedLabels ??
-    releaseGateLabelsForMode(mode);
+    options.expectedLabels ?? releaseGateLabelsForMode(mode);
   const labels = new Set(rows.map((row) => row.label));
   const missing = expectedLabels.filter((label) => !labels.has(label));
   if (missing.length > 0) {
@@ -1742,12 +1883,20 @@ export function validateReleaseReport(
       );
     }
   }
+  const blocked = rows.filter((row) => row.status === "BLOCKED");
+  if (blocked.length > 0 && !/^Blocked gates:\s*(?!none\b).+$/m.test(report)) {
+    throw new Error(
+      "Release report must identify the failed dependencies for blocked gates.",
+    );
+  }
   if (
     !/^Environment:\s*.+$/m.test(report) ||
     !/^Commands:\s*.+$/m.test(report) ||
     !/^Evidence paths:\s*.+$/m.test(report) ||
     (options.expectedSourceLibraryEnvironment !== undefined &&
-      !/^Source-library evidence environment:\s*(development|release)\s*$/m.test(report))
+      !/^Source-library evidence environment:\s*(development|release)\s*$/m.test(
+        report,
+      ))
   ) {
     throw new Error(
       "Release report is malformed: environment, commands, and evidence paths are required.",
@@ -1777,11 +1926,19 @@ export function validateReleaseReport(
   }
   const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
   if (!exceptions) {
-    throw new Error("Release report is malformed: accepted exceptions are required.");
+    throw new Error(
+      "Release report is malformed: accepted exceptions are required.",
+    );
   }
   if (exceptions.toLowerCase() !== "none") {
-    for (const field of ["Exception owner:", "Exception next action:", "Exception expiry:"]) {
-      if (!new RegExp(`^${field.replace(":", "\\:")}\\s*.+$`, "m").test(report)) {
+    for (const field of [
+      "Exception owner:",
+      "Exception next action:",
+      "Exception expiry:",
+    ]) {
+      if (
+        !new RegExp(`^${field.replace(":", "\\:")}\\s*.+$`, "m").test(report)
+      ) {
         throw new Error(
           `Accepted exceptions must include a bounded owner, next action, and expiry (${field}).`,
         );
@@ -1831,9 +1988,7 @@ export function runStep(
     let warningTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
-    let forcedResult:
-      | { exitCode: number; status: StepStatus }
-      | undefined;
+    let forcedResult: { exitCode: number; status: StepStatus } | undefined;
     const killTree = (signal: NodeJS.Signals): void => {
       if (child.pid && process.platform !== "win32") {
         try {
@@ -1846,10 +2001,7 @@ export function runStep(
       }
       child.kill(signal);
     };
-    const stopTree = (
-      exitCode: number,
-      status: StepStatus,
-    ): void => {
+    const stopTree = (exitCode: number, status: StepStatus): void => {
       if (forcedResult) return;
       forcedResult = { exitCode, status };
       killTree("SIGTERM");
@@ -1984,8 +2136,14 @@ export function formatReleaseReport(
   const interrupted = orderedResults.filter((result) =>
     result.status.startsWith("INFRASTRUCTURE"),
   );
+  const blocked = orderedResults.filter(
+    (result) => result.status === "BLOCKED",
+  );
   const notReached = orderedResults.filter(
     (result) => result.status === "NOT REACHED",
+  );
+  const rootBlockers = orderedResults.filter(
+    (result) => result.status !== "PASS" && result.status !== "BLOCKED",
   );
   const cleanStartResult = orderedResults.find(
     (result) => result.label === "clean-start smoke",
@@ -1994,11 +2152,24 @@ export function formatReleaseReport(
     items.length === 0
       ? "none"
       : items.map((item) => `${item.label} (${item.status})`).join("; ");
+  const summarizeBlocked = (items: readonly ReleaseStepResult[]): string =>
+    items.length === 0
+      ? "none"
+      : items
+          .map(
+            (item) =>
+              `${item.label} (blocked by ${
+                item.blockedBy?.join(", ") || "an unresolved dependency"
+              })`,
+          )
+          .join("; ");
   const revision = metadata.revision ?? "unknown";
   const decision =
     metadata.decision ??
-    (results.length === steps.filter((step) => mode === "full" || !step.label.includes("full browser E2E")).length &&
-    results.every((result) => result.status === "PASS")
+    (results.length ===
+      steps.filter(
+        (step) => mode === "full" || !step.label.includes("full browser E2E"),
+      ).length && results.every((result) => result.status === "PASS")
       ? "GO"
       : "NO-GO");
   const timing = metadata.timing;
@@ -2066,7 +2237,10 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-api.log", "API startup log"),
     evidenceLink("clean-start/startup-web.log", "Web startup log"),
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
-    evidenceLink("browser-smoke/webkit-result.json", "WebKit browser smoke evidence"),
+    evidenceLink(
+      "browser-smoke/webkit-result.json",
+      "WebKit browser smoke evidence",
+    ),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     evidenceLink(
       SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
@@ -2076,15 +2250,9 @@ export function formatReleaseReport(
     "## Browser duration review",
     "",
     ...(metadata.browserDurationRegressions === undefined
-      ? [
-          "Not evaluated in this release mode.",
-          "",
-        ]
+      ? ["Not evaluated in this release mode.", ""]
       : metadata.browserDurationRegressions.length === 0
-        ? [
-            "No meaningful per-file duration regressions detected.",
-            "",
-          ]
+        ? ["No meaningful per-file duration regressions detected.", ""]
         : [
             "ALERT: meaningful per-file duration regressions detected:",
             ...metadata.browserDurationRegressions.map(
@@ -2107,6 +2275,8 @@ export function formatReleaseReport(
     `Failures or accepted exceptions: ${summarize(failed)}`,
     `Interrupted gates: ${summarize(interrupted)}`,
     `Not-reached gates: ${summarize(notReached)}`,
+    `Root blockers: ${summarize(rootBlockers)}`,
+    `Blocked gates: ${summarizeBlocked(blocked)}`,
     "Accepted exceptions: none",
     ...(isCheckpoint
       ? [
@@ -2150,11 +2320,7 @@ async function writeReleaseReport(
     metadata.reportKind === "checkpoint"
       ? RELEASE_CHECKPOINT_REPORT
       : "release-check-report.md";
-  const reportPath = resolve(
-    rootDir,
-    releaseEvidenceDir,
-    reportFile,
-  );
+  const reportPath = resolve(rootDir, releaseEvidenceDir, reportFile);
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
     file.startsWith("clean-start/"),
@@ -2213,11 +2379,12 @@ async function writeReleaseReport(
         resolve(rootDir, releaseEvidenceDir, "browser-full/FINAL-REPORT.md"),
         "utf8",
       );
-      const browserRevision = browserReport.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
+      const browserRevision = browserReport.match(
+        /^Revision:\s*(\S+)\s*$/m,
+      )?.[1];
       if (browserRevision === metadata.revision) {
-        browserDurationRegressions = parseBrowserDurationRegressions(
-          browserReport,
-        );
+        browserDurationRegressions =
+          parseBrowserDurationRegressions(browserReport);
       }
     } catch {
       // Full browser evidence validation below remains responsible for
@@ -2306,9 +2473,9 @@ async function readCheckpoint(
   sourceLibraryRevision: string,
 ): Promise<ReleaseCheckpoint | undefined> {
   try {
-    const checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as
-      | Partial<ReleaseCheckpoint>
-      | null;
+    const checkpoint = JSON.parse(
+      await readFile(checkpointPath, "utf8"),
+    ) as Partial<ReleaseCheckpoint> | null;
     if (checkpoint === null || typeof checkpoint !== "object") {
       throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
     }
@@ -2356,7 +2523,9 @@ async function currentRevision(): Promise<string> {
   });
 }
 
-async function promoteSourceLibraryEvidence(sourceLibraryRevision: string): Promise<void> {
+async function promoteSourceLibraryEvidence(
+  sourceLibraryRevision: string,
+): Promise<void> {
   const pendingPath = resolve(
     rootDir,
     releaseEvidenceDir,
@@ -2377,7 +2546,9 @@ async function promoteSourceLibraryEvidence(sourceLibraryRevision: string): Prom
     expectedRevision: sourceLibraryRevision,
     expectedHealId: sourceLibraryHealId,
     expectedFromDate: sourceLibraryFromDate,
-    expectedReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
+    expectedReportSha256: createHash("sha256")
+      .update(reportBytes)
+      .digest("hex"),
   });
 }
 
@@ -2440,10 +2611,7 @@ async function main(): Promise<void> {
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
   const checkpointPath = resolve(evidenceRoot, "release-check-state.json");
-  const checkpointReportPath = resolve(
-    evidenceRoot,
-    RELEASE_CHECKPOINT_REPORT,
-  );
+  const checkpointReportPath = resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT);
   const logPath = resolve(evidenceRoot, "release-check.log");
   await mkdir(evidenceRoot, { recursive: true });
   const resume = process.argv.includes("--resume");
@@ -2459,14 +2627,20 @@ async function main(): Promise<void> {
   if (resume) {
     let checkpoint: ReleaseCheckpoint | undefined;
     try {
-      checkpoint = await readCheckpoint(checkpointPath, revision, sourceLibraryRevision);
+      checkpoint = await readCheckpoint(
+        checkpointPath,
+        revision,
+        sourceLibraryRevision,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message.replace(/^Cannot resume release check:\s*/, ""));
       process.exit(1);
     }
     if (!checkpoint) {
-      console.error("No incomplete release checkpoint exists for this revision.");
+      console.error(
+        "No incomplete release checkpoint exists for this revision.",
+      );
       process.exit(1);
     }
     results = checkpoint.results.reduce(
@@ -2484,7 +2658,11 @@ async function main(): Promise<void> {
   } else {
     await rm(checkpointReportPath, { force: true });
     await rm(
-      resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+      resolve(
+        rootDir,
+        releaseEvidenceDir,
+        SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+      ),
       { force: true },
     );
     await writeFile(
@@ -2520,14 +2698,19 @@ async function main(): Promise<void> {
   const handleSignal = (signal: NodeJS.Signals): void => {
     if (interruptedBySignal) return;
     interruptedBySignal = true;
-    console.error(`\nRelease check interrupted by ${signal}; saving checkpoint.`);
+    console.error(
+      `\nRelease check interrupted by ${signal}; saving checkpoint.`,
+    );
     interruptionController.abort();
   };
   process.once("SIGINT", handleSignal);
   process.once("SIGTERM", handleSignal);
 
   try {
-    const stages = new Map<string, Array<{ step: ReleaseStep; index: number }>>();
+    const stages = new Map<
+      string,
+      Array<{ step: ReleaseStep; index: number }>
+    >();
     for (const [index, step] of steps.entries()) {
       const stage = releaseStepStage(step, index);
       const stageSteps = stages.get(stage) ?? [];
@@ -2540,11 +2723,65 @@ async function main(): Promise<void> {
       const completed = new Set(
         results.filter((result) => result.passed).map((result) => result.label),
       );
-      const pending = stageSteps.filter(({ step }) => !completed.has(step.label));
+      const pending = stageSteps.filter(
+        ({ step }) => !completed.has(step.label),
+      );
       if (pending.length === 0) continue;
 
+      const resultByLabel = new Map(
+        results.map((result) => [result.label, result]),
+      );
+      const runnable: Array<{ step: ReleaseStep; index: number }> = [];
+      for (const entry of pending) {
+        const dependencies = releaseStepDependencies(
+          entry.step,
+          entry.index,
+          steps,
+        );
+        const blockedBy = dependencies.filter(
+          (dependency) => resultByLabel.get(dependency)?.status !== "PASS",
+        );
+        if (blockedBy.length === 0) {
+          runnable.push(entry);
+          continue;
+        }
+        const blocked: ReleaseStepResult & { passed: boolean } = {
+          label: entry.step.label,
+          passed: false,
+          status: "BLOCKED",
+          blockedBy,
+          elapsedMs: 0,
+        };
+        results = upsertReleaseResult(results, blocked);
+        await persistCheckpoint();
+        console.error(
+          `BLOCKED ${entry.step.label}; requires PASS from ${blockedBy.join(", ")}`,
+        );
+      }
+      const runnableByLabel = new Set(runnable.map(({ step }) => step.label));
+      const blockedCount = pending.length - runnable.length;
+      if (blockedCount > 0) {
+        console.log(
+          `\nStage ${stage}: ${blockedCount} gate${
+            blockedCount === 1 ? "" : "s"
+          } blocked by failed dependencies.`,
+        );
+      }
+      const pendingRunnable = runnable.filter(({ step }) =>
+        runnableByLabel.has(step.label),
+      );
+      if (pendingRunnable.length === 0) {
+        await checkpointWrite;
+        stageTimings = upsertStageTiming(stageTimings, {
+          stage,
+          elapsedMs: 0,
+        });
+        await persistCheckpoint();
+        continue;
+      }
+
       if (
-        stageSteps.some(
+        pendingRunnable.some(
           ({ step }) =>
             step.label === "clean-start smoke" ||
             step.label.startsWith("browser "),
@@ -2555,33 +2792,31 @@ async function main(): Promise<void> {
       }
 
       const stageStartedAt = Date.now();
-      const stageHasApiShards = stageSteps.some(
+      const stageHasApiShards = pendingRunnable.some(
         ({ step }) => step.group === "api-test-shards",
       );
       const stageLimit = Math.min(
         concurrencyLimit,
-        ...stageSteps.map(
+        ...pendingRunnable.map(
           ({ step }) => step.concurrencyLimit ?? concurrencyLimit,
         ),
       );
       const apiLimit = Math.min(
         concurrencyLimit,
         RELEASE_CHECK_API_CONCURRENCY,
-        ...stageSteps
+        ...pendingRunnable
           .filter(({ step }) => step.group === "api-test-shards")
-          .map(({ step }) =>
-            releaseConcurrencyLimit(step, concurrencyLimit),
-          ),
+          .map(({ step }) => releaseConcurrencyLimit(step, concurrencyLimit)),
       );
       console.log(
-        `\nStage ${stage}: ${pending.length} gate${
-          pending.length === 1 ? "" : "s"
+        `\nStage ${stage}: ${pendingRunnable.length} gate${
+          pendingRunnable.length === 1 ? "" : "s"
         } (max ${stageLimit} concurrent${
           stageHasApiShards ? `; API/database max ${apiLimit}` : ""
         }).`,
       );
       const active = new Set<Promise<void>>();
-      const waiting = [...pending];
+      const waiting = [...pendingRunnable];
       const stageLogs = new Map<string, string>();
       let apiActive = 0;
       const launchAvailable = (): void => {
@@ -2589,8 +2824,7 @@ async function main(): Promise<void> {
         while (waiting.length > 0 && active.size < stageLimit) {
           const nextIndex = waiting.findIndex(
             ({ step }) =>
-              step.group !== "api-test-shards" ||
-              apiActive < apiLimit,
+              step.group !== "api-test-shards" || apiActive < apiLimit,
           );
           if (nextIndex === -1) return;
           const [{ step, index }] = waiting.splice(nextIndex, 1);
@@ -2610,7 +2844,10 @@ async function main(): Promise<void> {
                         ? { RELEASE_REVISION: revision }
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
-                          : { SOURCE_LIBRARY_RECONCILIATION_REVISION: sourceLibraryRevision }),
+                          : {
+                              SOURCE_LIBRARY_RECONCILIATION_REVISION:
+                                sourceLibraryRevision,
+                            }),
                     },
                   }
                 : step;
@@ -2690,15 +2927,6 @@ async function main(): Promise<void> {
         elapsedMs: Date.now() - stageStartedAt,
       });
       await persistCheckpoint();
-      const stageResults = results.filter(({ label }) =>
-        stageSteps.some(({ step }) => step.label === label),
-      );
-      if (stageResults.some((result) => !result.passed)) {
-        console.error(
-          `\n${stage} has a failed gate; later stages were not started.`,
-        );
-        break;
-      }
     }
   } finally {
     process.removeListener("SIGINT", handleSignal);
@@ -2734,9 +2962,11 @@ async function main(): Promise<void> {
       ? "GO"
       : "NO-GO";
     try {
-      if (steps.some(
-        (step) => step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label,
-      )) {
+      if (
+        steps.some(
+          (step) => step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label,
+        )
+      ) {
         await promoteSourceLibraryEvidence(sourceLibraryRevision);
       }
       const reportPath = await writeReleaseReport(results, {
@@ -2778,24 +3008,28 @@ async function main(): Promise<void> {
   }
 
   await rm(
-    resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE),
+    resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+    ),
     { force: true },
   );
   try {
     const checkpointReportPath = await writeReleaseReport(results, {
-        revision,
-        sourceLibraryRevision,
-        decision: "NO-GO",
-        expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
-        reportKind: "checkpoint",
-        timing: {
-          totalElapsedMs: stageTimings.reduce(
-            (total, stage) => total + stage.elapsedMs,
-            0,
-          ),
-          stages: stageTimings,
-        },
-      });
+      revision,
+      sourceLibraryRevision,
+      decision: "NO-GO",
+      expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+      reportKind: "checkpoint",
+      timing: {
+        totalElapsedMs: stageTimings.reduce(
+          (total, stage) => total + stage.elapsedMs,
+          0,
+        ),
+        stages: stageTimings,
+      },
+    });
     console.log(
       `\nRelease checkpoint (INCOMPLETE / NO-GO; not retained evidence): ${checkpointReportPath}`,
     );
