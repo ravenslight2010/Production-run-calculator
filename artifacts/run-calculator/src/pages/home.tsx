@@ -5457,7 +5457,6 @@ export default function Home() {
   // because counts intersect against the live list).
   const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
   const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
-  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
   const [pendingDuplicateReviewCount, setPendingDuplicateReviewCount] = useState(() => {
     try {
       return loadPendingDuplicateReview(localStorage);
@@ -5796,7 +5795,7 @@ export default function Home() {
   // rewritten by an ingredient merge. Die types are intentionally EXCLUDED —
   // they are a distinct physical-tooling list (not an ingredient-name pool) and
   // the `dieType` selection field is no longer rewritten by a merge. Used by the
-  // AI "Suggested merges" scan and the import auto-check, which look for
+  // AI "Suggested merges" scan, which looks for
   // duplicates ACROSS categories (an imported recipe ingredient can duplicate a
   // standalone one). Brands/flavors are excluded (they have their own merge path).
   const mergeFullUniverse = useMemo(
@@ -6138,20 +6137,17 @@ export default function Home() {
     setMergeError("");
   }
 
-  // Ask for duplicate-group suggestions: combines AI clustering with learned
+  // Ask for duplicate-group suggestions: combines an optional AI clustering
+  // pass with learned
   // "previously merged" aliases. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number | null> {
-    if (!fromImport) setMergeFromImport(false);
-    // The import-triggered auto-scan always lands on (and scans) the
-    // Ingredients tab — read from the closured `mergeFullUniverse` directly
-    // rather than `mergeSuggestScope`, since `setMergeCategory("ingredients")`
-    // in the caller effect hasn't re-rendered yet and the scope memo would
-    // still reflect whatever tab was active before.
-    const scope = fromImport
-      ? { category: "ingredient" as const, universe: mergeFullUniverse }
-      : mergeSuggestScope;
+  async function handleSuggestMerges(
+    forceRefresh = false,
+    useAi = false,
+  ): Promise<number | null> {
+    setMergeFromImport(false);
+    const scope = mergeSuggestScope;
     const request = mergeSuggestRequestRef.current;
     request.controller?.abort();
     const controller = new AbortController();
@@ -6170,7 +6166,7 @@ export default function Home() {
         // pairing names that mention DIFFERENT brands ("Lowes …" vs "Bashas …")
         // is dropped no matter what the AI said.
         brands,
-        { signal: controller.signal, forceRefresh },
+        { signal: controller.signal, forceRefresh, useAi },
       );
       if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return null;
        let visibleSuggestions = suggestions;
@@ -6207,7 +6203,7 @@ export default function Home() {
        }
        setMergeSuggestions(visibleSuggestions);
       setMergeSuggestSelected(new Set());
-      if (!usedAi && error) {
+      if (useAi && !usedAi && error) {
         setMergeSuggestError(
           `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
         );
@@ -6230,41 +6226,14 @@ export default function Home() {
     }
   }
 
-  // Suggestions are deliberately lazy: opening the merge review is the only
-  // automatic trigger. Imports must not start an expensive AI request behind
-  // the manager's back, and leaving the surface cancels any active request.
+  // Suggestions are explicit user actions. Opening the merge review and
+  // completing an import must never start a scan or spend provider budget.
+  // Leaving the surface still cancels an active request.
   useEffect(() => {
-    if (manageCategory === "merge") {
-       void handleSuggestMerges();
-    } else {
+    if (manageCategory !== "merge") {
       mergeSuggestRequestRef.current.controller?.abort();
     }
-    // The request snapshots the current merge scope when the surface opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manageCategory]);
-
-  // Recipe imports can introduce ingredient spellings that duplicate existing
-  // master data. Keep the success toast transient, but persist the review count
-  // so the Import tab still offers the existing non-destructive review later.
-  useEffect(() => {
-    if (mergeCheckRequest === 0) return;
-    persistPendingDuplicateReview(PENDING_DUPLICATE_REVIEW_SCAN);
-    setMergeCategory("ingredients");
-    setMergeFromImport(true);
-    void handleSuggestMerges(true).then((count) => {
-      if (count === null || count <= 0) return;
-      toast({
-        title: "Possible duplicate ingredients",
-        description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
-        action: (
-          <ToastAction altText="Review duplicates" onClick={openPendingDuplicateReview}>
-            Review
-          </ToastAction>
-        ),
-      });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCheckRequest]);
 
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
@@ -12580,9 +12549,8 @@ export default function Home() {
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
-      // Fire-and-forget: a bump runs the merge-check effect after the new lists
-      // have re-rendered. Never blocks or fails the already-committed import.
-      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
+      // Duplicate review remains an explicit action from the merge surface;
+      // imports never start a scan or spend provider budget in the background.
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
@@ -15215,7 +15183,7 @@ export default function Home() {
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated. Separate inventory products are preserved and follow their production ingredient link. This can't be undone."}
                     </p>
 
-                    {/* AI + learned-memory suggestions: each tab scans ONLY its own
+                    {/* Deterministic + optional AI suggestions: each tab scans ONLY its own
                         name pool (mergeSuggestScope.universe) — Ingredients scans
                         the full cross-category ingredient list, every recipe-name
                         tab scans just its own recipe names, and Brand/Flavor scans
@@ -15229,15 +15197,23 @@ export default function Home() {
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>
                             <p className="text-[11px] text-muted-foreground">
-                              Scans for look-alike names (spelling, word order) and previously-merged names; AI adds smarter matches when available.
+                              Start with look-alike and remembered matches. Managers and QC managers can optionally request an AI suggestion pass afterward.
                             </p>
                           </div>
                           <button
                             type="button"
                             disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
-                            onClick={() => handleSuggestMerges(false, true)}
+                            onClick={() => handleSuggestMerges(true, false)}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-                          >{mergeSuggestBusy ? "Scanning…" : "Scan for duplicates"}</button>
+                          >{mergeSuggestBusy ? "Scanning…" : "Scan deterministic matches"}</button>
+                          {canUseAiTools && mergeSuggestRan && (
+                            <button
+                              type="button"
+                              disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
+                              onClick={() => handleSuggestMerges(true, true)}
+                              className="px-3 py-1.5 rounded-md border border-primary/40 text-primary text-xs font-semibold hover:bg-primary/10 transition-colors disabled:opacity-50 whitespace-nowrap"
+                            >{mergeSuggestBusy ? "Working…" : "Get optional AI suggestions"}</button>
+                          )}
                         </div>
 
                         {mergeSuggestError && (

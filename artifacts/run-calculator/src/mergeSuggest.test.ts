@@ -382,6 +382,26 @@ describe("suggestMerges request lifecycle", () => {
     expect(aiCalls).toBe(2);
   });
 
+  it("can run the deterministic scan without contacting the AI route", async () => {
+    const result = await suggestMerges(
+      ["Pepperoni", "Peperoni"],
+      undefined,
+      undefined,
+      undefined,
+      { forceRefresh: true, useAi: false },
+    );
+
+    expect(result.usedAi).toBe(false);
+    expect(result.suggestions).toEqual([
+      {
+        target: "Pepperoni",
+        sources: ["Peperoni"],
+        reason: "Looks like the same item (spelling or word order)",
+      },
+    ]);
+    expect(aiCalls).toBe(0);
+  });
+
   it("propagates caller cancellation instead of converting it to a fallback", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

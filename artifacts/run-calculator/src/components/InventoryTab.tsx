@@ -421,7 +421,7 @@ export default function InventoryTab({
 
       {canUseAiTools && <ProductionSheetCard />}
 
-      {canUseAiTools && <WasteInsightCard />}
+      <WasteInsightCard />
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -2148,9 +2148,9 @@ function LabelVerifyCard() {
   );
 }
 
-// ── AI expiry & waste insight ────────────────────────────────────────────────
-// The server flags expired/expiring-soon stock and (when anything is at risk)
-// suggests a run order to consume it first. Advisory only — nothing is changed.
+// ── Deterministic expiry & waste insight ─────────────────────────────────────
+// The server flags expired/expiring-soon stock and returns a deterministic
+// use-first view. Nothing is changed.
 function WasteInsightCard() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -2192,7 +2192,7 @@ function WasteInsightCard() {
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Recycle className="w-4 h-4" /> Waste Insight
+            <Recycle className="w-4 h-4" /> Use-First Stock
           </CardTitle>
           <button
             type="button"
@@ -2207,8 +2207,8 @@ function WasteInsightCard() {
       {open && (
         <CardContent className="px-4 pb-4 space-y-3">
           <p className="text-xs text-muted-foreground">
-            Flag stock that's expired or expiring soon and get an AI suggestion for which runs to
-            prioritize so it gets used first. Advisory only — nothing is rescheduled.
+            Flag stock that's expired or expiring soon so the team can prioritize it manually.
+            This deterministic check is advisory only — nothing is rescheduled.
           </p>
           <Button
             size="sm"

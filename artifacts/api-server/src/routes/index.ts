@@ -138,6 +138,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/audit-logs/profile-name-link-cleanup", "/audit-logs",
   ]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
+  ...reads(["use-ai-tools"], "all", "scoped", ["/ai-corrections"]),
 ];
 
 /**

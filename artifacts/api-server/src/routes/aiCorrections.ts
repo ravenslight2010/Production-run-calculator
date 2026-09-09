@@ -39,7 +39,7 @@ async function listAll(): Promise<AiCorrectionWithId[]> {
   return rows.map(toApi);
 }
 
-router.get("/ai-corrections", async (req: Request, res: Response) => {
+router.get("/ai-corrections", requireCapability("use-ai-tools"), async (req: Request, res: Response) => {
   try {
     const corrections = await listAll();
     res.json({ corrections });

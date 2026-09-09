@@ -351,10 +351,12 @@ function mergeSuggestionCacheKey(
   names: string[],
   category?: MergeSuggestCategory,
   brand?: string,
+  useAi = true,
 ): string {
   return JSON.stringify([
     category ?? "ingredient",
     category === "flavor" ? brand?.trim().toLowerCase() ?? "" : "",
+    useAi ? "ai" : "deterministic",
     [...new Set(names.map((name) => name.trim().toLowerCase()).filter(Boolean))].sort(),
   ]);
 }
@@ -384,9 +386,10 @@ export async function suggestMerges(
   category?: MergeSuggestCategory,
   brand?: string,
   knownBrands?: string[],
-  options?: { signal?: AbortSignal; forceRefresh?: boolean },
+  options?: { signal?: AbortSignal; forceRefresh?: boolean; useAi?: boolean },
 ): Promise<MergeSuggestResult> {
-  const cacheKey = mergeSuggestionCacheKey(names, category, brand);
+  const useAi = options?.useAi !== false;
+  const cacheKey = mergeSuggestionCacheKey(names, category, brand, useAi);
   if (!options?.forceRefresh) {
     const cached = mergeSuggestionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.result;
@@ -418,6 +421,19 @@ export async function suggestMerges(
     suggestionsFromAliases(names, aliases),
     nearDupSuggestions(names),
   );
+  const deterministicResult = {
+    suggestions: dropCrossBrand(
+      filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
+    ),
+    usedAi: false,
+  };
+  if (!useAi) {
+    mergeSuggestionCache.set(cacheKey, {
+      expiresAt: Date.now() + MERGE_SUGGESTION_CACHE_TTL_MS,
+      result: deterministicResult,
+    });
+    return deterministicResult;
+  }
   try {
     const ai = await requestAiSuggestMerges(names, aliases, category, brand, options?.signal);
     // mergeSuggestionLists rebuilds group objects (dropping the reviewer verdict),
