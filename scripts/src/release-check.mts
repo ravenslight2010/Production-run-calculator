@@ -20,6 +20,10 @@ import {
   parseSourceLibraryEvidenceEnvironment,
   type SourceLibraryEvidenceEnvironment,
 } from "./verify-source-library-reconciliation.mts";
+import {
+  REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
+  REPORT_KEY_ROTATION_SCAN_LIMIT,
+} from "./report-key-rotation-preflight.mts";
 
 export type ReleaseStep = {
   label: string;
@@ -266,6 +270,10 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-state.json",
 ] as const;
 export const RELEASE_CHECKPOINT_REPORT = "release-check-checkpoint.md";
+const REPORT_KEY_ROTATION_PREFLIGHT_LABEL =
+  "operational report signing-key rotation preflight";
+const REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE =
+  "report-key-rotation-preflight.json";
 
 export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
   general: [
@@ -591,7 +599,7 @@ const hasProductionSourceLibraryReconciliation =
 
 const steps: ReleaseStep[] = [
   {
-    label: "operational report signing-key rotation preflight",
+    label: REPORT_KEY_ROTATION_PREFLIGHT_LABEL,
     args: [
       "--filter",
       "@workspace/scripts",
@@ -1027,6 +1035,7 @@ export async function verifyReleaseEvidence(
   );
   const requiresFullBrowserEvidence = evidenceMode === "full";
   const requiredEvidence = [
+    REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -1062,6 +1071,12 @@ export async function verifyReleaseEvidence(
   }
   const revision =
     options.currentRevision ?? (await currentRevision());
+  const reportKeyRotationEvidence = await readFile(
+    resolve(evidenceRoot, REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE),
+  );
+  validateReportKeyRotationEvidence(reportKeyRotationEvidence, {
+    currentRevision: revision,
+  });
   const expectedSourceLibraryEnvironment =
     options.expectedSourceLibraryEnvironment ?? sourceLibraryEnvironment;
   validateReleaseReport(report, {
@@ -1110,6 +1125,104 @@ export async function verifyReleaseEvidence(
       files.length === 1 ? "" : "s"
     }.`,
   );
+}
+
+export function validateReportKeyRotationEvidence(
+  evidenceBytes: Uint8Array,
+  options: { currentRevision: string },
+): void {
+  const MAX_EVIDENCE_BYTES = 64 * 1024;
+  if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
+    throw new Error(
+      `Report key rotation evidence exceeds the ${MAX_EVIDENCE_BYTES}-byte bound.`,
+    );
+  }
+  let evidence: unknown;
+  try {
+    evidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
+  } catch {
+    throw new Error("Report key rotation evidence is not valid JSON.");
+  }
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error("Report key rotation evidence must be a JSON object.");
+  }
+  const output = evidence as Record<string, unknown>;
+  const allowedKeys = new Set([
+    "verifier",
+    "environment",
+    "revision",
+    "status",
+    "canRotate",
+    "activeKeyId",
+    "storedKeyIds",
+    "missingKeyIds",
+    "scan",
+    "failure",
+    "remediation",
+  ]);
+  if (Object.keys(output).some((key) => !allowedKeys.has(key))) {
+    throw new Error("Report key rotation evidence contains unsupported or unsafe fields.");
+  }
+  if (output.verifier !== REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER) {
+    throw new Error("Report key rotation evidence has an unsupported verifier.");
+  }
+  if (typeof output.environment !== "string" || !output.environment.trim()) {
+    throw new Error("Report key rotation evidence environment is missing.");
+  }
+  if (
+    typeof output.revision !== "string" ||
+    output.revision !== options.currentRevision
+  ) {
+    throw new Error(
+      `Report key rotation evidence revision is stale or missing (expected ${options.currentRevision}).`,
+    );
+  }
+  if (
+    output.status !== "pass" ||
+    output.canRotate !== true ||
+    typeof output.activeKeyId !== "string" ||
+    !output.activeKeyId.trim() ||
+    !Array.isArray(output.storedKeyIds) ||
+    !Array.isArray(output.missingKeyIds) ||
+    output.missingKeyIds.length !== 0 ||
+    output.failure !== null ||
+    output.remediation !== null
+  ) {
+    throw new Error(
+      "Report key rotation evidence does not prove a healthy retained keyring.",
+    );
+  }
+  if (
+    output.storedKeyIds.some(
+      (keyId) => typeof keyId !== "string" || !keyId.trim(),
+    )
+  ) {
+    throw new Error("Report key rotation evidence contains an invalid stored key ID.");
+  }
+  const scan = output.scan;
+  if (!scan || typeof scan !== "object" || Array.isArray(scan)) {
+    throw new Error("Report key rotation evidence scan is missing.");
+  }
+  const scanRecord = scan as Record<string, unknown>;
+  const scanKeys = new Set([
+    "limit",
+    "checkedDistinctKeyIds",
+    "truncated",
+    "complete",
+  ]);
+  if (Object.keys(scanRecord).some((key) => !scanKeys.has(key))) {
+    throw new Error("Report key rotation evidence scan contains unsafe fields.");
+  }
+  if (
+    scanRecord.limit !== REPORT_KEY_ROTATION_SCAN_LIMIT ||
+    scanRecord.checkedDistinctKeyIds !== output.storedKeyIds.length ||
+    scanRecord.truncated !== false ||
+    scanRecord.complete !== true
+  ) {
+    throw new Error(
+      "Report key rotation evidence is incomplete or truncated.",
+    );
+  }
 }
 
 export function validateWebKitBrowserEvidence(
@@ -2401,10 +2514,16 @@ async function main(): Promise<void> {
           let task: Promise<void>;
           task = (async () => {
             const effectiveStep =
-              step.label === FULL_BROWSER_GATE_LABEL
+              step.label === FULL_BROWSER_GATE_LABEL ||
+              step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                 ? {
                     ...step,
-                    env: { ...step.env, RELEASE_REVISION: revision },
+                    env: {
+                      ...step.env,
+                      ...(step.label === FULL_BROWSER_GATE_LABEL
+                        ? { RELEASE_REVISION: revision }
+                        : { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }),
+                    },
                   }
                 : step;
             let result: ReleaseStepResult & { passed: boolean };

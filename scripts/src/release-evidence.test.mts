@@ -31,11 +31,13 @@ import {
   resolveReleaseEvidenceDir,
   sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
+  validateReportKeyRotationEvidence,
   validateReleaseReport,
   validateWebKitBrowserEvidence,
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
+import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
 import {
   computeSourceLibraryEvidenceId,
   DEFAULT_FROM_DATE,
@@ -124,6 +126,25 @@ async function fixture(
                 durationMs: 100,
               }],
             })}\n`
+        : file === "report-key-rotation-preflight.json"
+          ? `${JSON.stringify({
+              verifier: "report-key-rotation-preflight",
+              environment: "disposable release test",
+              revision: "current-revision",
+              status: "pass",
+              canRotate: true,
+              activeKeyId: "current",
+              storedKeyIds: ["current", "previous"],
+              missingKeyIds: [],
+              scan: {
+                limit: 100,
+                checkedDistinctKeyIds: 2,
+                truncated: false,
+                complete: true,
+              },
+              failure: null,
+              remediation: null,
+            })}\n`
         : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
           ? `${JSON.stringify(sourceEvidence())}\n`
           : "fixture evidence\n",
@@ -143,6 +164,22 @@ async function run(): Promise<void> {
   const releaseWorkflow = await readFile(
     new URL("../../.github/workflows/release-check.yml", import.meta.url),
     "utf8",
+  );
+  const configuredKeyrings = [...releaseWorkflow.matchAll(
+    /OPERATIONAL_REPORT_SIGNING_KEYS:\s*'([^']+)'/g,
+  )].map((match) => parseReportSigningKeyring(match[1]));
+  assert.equal(
+    configuredKeyrings.length,
+    2,
+    "standard and full disposable release jobs must both configure a report keyring",
+  );
+  assert.deepEqual(
+    configuredKeyrings,
+    [
+      { activeKeyId: "release-check-current", keyIds: ["release-check-current"] },
+      { activeKeyId: "release-check-current", keyIds: ["release-check-current"] },
+    ],
+    "disposable release keyrings must satisfy the same retained-key contract as production",
   );
   assert.equal(
     rootPackage.scripts?.["audit:prod:ci"],
@@ -802,6 +839,85 @@ async function run(): Promise<void> {
   const allowlistedFiles = [...RELEASE_EVIDENCE_ALLOWLIST];
   const root = await fixture(allowlistedFiles, validReport);
   try {
+    assert.doesNotThrow(
+      () =>
+        validateReportKeyRotationEvidence(
+          new TextEncoder().encode(JSON.stringify({
+            verifier: "report-key-rotation-preflight",
+            environment: "disposable release test",
+            revision: "current-revision",
+            status: "pass",
+            canRotate: true,
+            activeKeyId: "current",
+            storedKeyIds: ["current"],
+            missingKeyIds: [],
+            scan: {
+              limit: 100,
+              checkedDistinctKeyIds: 1,
+              truncated: false,
+              complete: true,
+            },
+            failure: null,
+            remediation: null,
+          })),
+          { currentRevision: "current-revision" },
+        ),
+      "a complete healthy key-rotation result should be accepted",
+    );
+    for (const invalidEvidence of [
+      JSON.stringify({
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable release test",
+        revision: "current-revision",
+        status: "blocked",
+        canRotate: false,
+        activeKeyId: null,
+        storedKeyIds: ["removed-historical"],
+        missingKeyIds: ["removed-historical"],
+        scan: { limit: 100, checkedDistinctKeyIds: 1, truncated: false, complete: true },
+        failure: "missing-retained-keys",
+        remediation: "Restore the retained signing key for proof key ID removed-historical.",
+      }),
+      "{malformed",
+      JSON.stringify({
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable release test",
+        revision: "current-revision",
+        status: "pass",
+        canRotate: true,
+        activeKeyId: "current",
+        storedKeyIds: ["current"],
+        missingKeyIds: [],
+        scan: { limit: 100, checkedDistinctKeyIds: 1, truncated: true, complete: false },
+        failure: null,
+        remediation: null,
+      }),
+      JSON.stringify({
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable release test",
+        revision: "current-revision",
+        status: "pass",
+        canRotate: true,
+        activeKeyId: "current",
+        storedKeyIds: [],
+        missingKeyIds: [],
+        scan: { limit: 100, checkedDistinctKeyIds: 0, truncated: false, complete: true },
+        failure: null,
+        remediation: null,
+        signingKey: "must-not-be-retained",
+      }),
+    ]) {
+      assert.throws(
+        () =>
+          validateReportKeyRotationEvidence(
+            new TextEncoder().encode(invalidEvidence),
+            { currentRevision: "current-revision" },
+          ),
+        /key rotation evidence|keyring|truncated|unsafe|valid JSON/,
+        "blocked, malformed, truncated, and secret-bearing evidence must fail closed",
+      );
+    }
+
     await assert.doesNotReject(
       verifyReleaseEvidence(root, {
         currentRevision: "current-revision",
