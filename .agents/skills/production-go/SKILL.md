@@ -104,18 +104,22 @@ security/authorization issue, release-evidence problem, or missing evidence.
 Treat `BLOCKED`, `NOT REACHED`, and `MISSING` as unresolved until the required
 evidence exists or a valid, documented exception applies.
 
-When task planning is requested, create the smallest de-duplicated set of
-bounded repair tasks. Parallelize only independent domains with separate
-ownership and no shared mutable files, schema or data-heal boundary, generated
-contract, release evidence, or destructive fixture. Add dependencies whenever a
-repair consumes another repair's output or changes a shared surface.
+When task planning is requested, keep all failures that belong to the same
+release objective in one durable task and its failure ledger. Use internal work
+breakdown or helpers to organize independent repair domains; do not create a
+project task for each failing gate, test, fixture, or stopped-run summary.
+Create a separate project task only for a genuinely independent objective or an
+out-of-scope safety, security, data-integrity, or release blocker that cannot
+responsibly be absorbed. Any separate task must have independent acceptance
+criteria, ownership, and a documented reason it cannot remain in the current
+objective.
 
-Each repair task must rerun its focused checks and report the remaining
-affected-surface evidence. Keep production reconciliation, destructive release
-tests, and live data heals in separate trust lanes. After repairs, one final
-evidence task must rerun the standard and full release checks from one clean
-revision and verify the retained records. Do not create an unbounded chain of
-speculative follow-ups.
+The owning task must rerun focused checks as each repair domain closes and report
+the remaining affected-surface evidence. Keep production reconciliation,
+destructive release tests, and live data heals in separate trust lanes. The same
+durable release task then reruns the standard and full release checks from one
+clean revision and verifies the retained records. Do not create an unbounded
+chain of speculative follow-ups.
 
 Stop once the evidence is sufficient for a decision. Do not launch speculative
 refactors, invent new release commands, or recursively create “one more task”

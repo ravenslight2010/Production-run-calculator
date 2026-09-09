@@ -51,18 +51,20 @@ until their required evidence is produced or a valid documented exception
 applies; a timeout is never an implicit pass.
 
 When task planning is requested, de-duplicate the blocker inventory against
-the task board and create bounded repair tasks by independent ownership. Tasks
-may run in parallel only when they do not share mutable files, schema or
-data-heal boundaries, generated contracts, release evidence, or destructive
-fixtures. Add dependencies for shared surfaces and for any repair that consumes
-another repair's output.
+the task board and keep blockers that belong to the same release objective in
+one durable owning task. Use internal work breakdown or helpers for independent
+repair domains; do not create a project task for every failing gate, test,
+fixture, or report-format issue. Create a separate task only for a genuinely
+independent objective or an out-of-scope safety, security, data-integrity, or
+release blocker that cannot responsibly be absorbed, with independent
+acceptance criteria and an explicit reason.
 
-Each repair task must rerun its focused checks and preserve the same safety
-boundaries. A final release-evidence task must depend on all applicable repairs,
-rerun the standard and full checks from one clean revision, validate retained
-evidence, and issue the final GO/NO-GO decision. Do not create speculative or
-recursive follow-ups; create another task only for a concrete newly observed
-failure or a deliberately deferred outcome.
+The owning task must rerun focused checks as repair domains close and preserve
+the same safety boundaries. That same durable release task must rerun the
+standard and full checks from one clean revision, validate retained evidence,
+and issue the final GO/NO-GO decision. Do not create speculative or recursive
+follow-ups; create another task only for a genuinely separate objective or a
+deliberately deferred outcome that cannot remain in the current objective.
 
 ## Required gates
 
