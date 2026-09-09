@@ -2745,10 +2745,9 @@ paths:
         capability (rejected with 403 otherwise): profiles are
         manager-configured setup data, and the only allowed write paths are
         explicit manager actions (Setup Profile editor, AI recommendation
-        acceptance) and spec imports/reimports. Requests containing any
-        forced item additionally require the `use-ai-tools` capability (the
-        same gate as the spec-import parse flow) and are rejected with 403
-        otherwise, before any write.
+        acceptance) and spec imports/reimports. Requests containing forced
+        items are also restricted to the `manage-profiles` capability and are
+        rejected with 403 otherwise, before any write.
       requestBody:
         required: true
         content:

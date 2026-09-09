@@ -64,7 +64,10 @@ import { MIX_SEED } from "./mixSeed";
 import {
   canonicalProfileKey,
   markProfileEdited,
+  markProfileForceEdited,
   markProfileDeleted,
+  flushProfileQueueStrict,
+  hasPendingProfileWrite,
 } from "./profileServerSync";
 import { localRunTemplates, replaceRunTemplates } from "./runTemplatesRepository";
 import {
@@ -907,7 +910,16 @@ export function profileWritesEnabled(): boolean {
   return profileWritesAllowed;
 }
 
-export function saveProfile(brand: string, flavor: string, values: FormValues): boolean {
+export type SaveProfileOptions = {
+  authoritative?: boolean;
+};
+
+export function saveProfile(
+  brand: string,
+  flavor: string,
+  values: FormValues,
+  options: SaveProfileOptions = {},
+): boolean {
   if (!profileWritesAllowed) return false;
   if (!brand && !flavor) return false;
   // Never persist a blank/default form as a brand+flavor profile. A profile only
@@ -982,8 +994,30 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   const remotelyDeleted = loadRemotelyDeletedProfiles();
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
-  markProfileEdited(key);
+  if (options.authoritative) markProfileForceEdited(key);
+  else markProfileEdited(key);
   return true;
+}
+
+/**
+ * Persist a deliberate manager edit and wait for the server to echo the exact
+ * submitted profile values. A failed acknowledgement leaves the persisted
+ * operation queued, so the editor can safely retry the same values.
+ */
+export async function saveProfileAndWaitForServer(
+  brand: string,
+  flavor: string,
+  values: FormValues,
+): Promise<"saved" | "unchanged"> {
+  const key = canonicalProfileKey(brand, flavor);
+  const changed = saveProfile(brand, flavor, values, { authoritative: true });
+  // If a previous attempt failed after writing the same local values, promote
+  // its pending plain operation to an authoritative manager write so Retry
+  // does not get mistaken for an unchanged form.
+  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key);
+  if (!changed && !hasPendingProfileWrite(key)) return "unchanged";
+  await flushProfileQueueStrict();
+  return "saved";
 }
 
 /**

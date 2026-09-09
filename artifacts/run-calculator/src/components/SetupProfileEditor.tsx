@@ -10,7 +10,7 @@ import {
   PACKAGING_TYPE_OPTIONS,
   LABEL_POSITION_OPTIONS,
 } from "../types";
-import { loadProfile, saveProfile } from "../storage";
+import { loadProfile, saveProfileAndWaitForServer } from "../storage";
 import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { brandTagLabels } from "@workspace/name-match";
@@ -328,6 +328,8 @@ export default function SetupProfileEditor({
   } | null>(null);
   const [autofillBusy, setAutofillBusy] = useState(false);
   const [autofillError, setAutofillError] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
   // Conflict fields the user has already resolved (picked a value or kept the
   // current one) — hidden from the pending-conflicts list. Keyed by field.
   const [resolvedConflicts, setResolvedConflicts] = useState<Set<string>>(new Set());
@@ -528,7 +530,7 @@ export default function SetupProfileEditor({
 
   const flavorOptions = brandFlavors[brand] ?? [];
 
-  function handleSave() {
+  async function handleSave() {
     if (!canManageProfiles) {
       toast({
         title: "Only managers can save profile changes",
@@ -544,9 +546,30 @@ export default function SetupProfileEditor({
       return;
     }
     const values = form.getValues();
-    saveProfile(b, f, values);
-    toast({ title: `Saved setup for ${b} — ${f}` });
-    onSaved?.(b, f);
+    setSaveBusy(true);
+    setSaveError("");
+    try {
+      const result = await saveProfileAndWaitForServer(b, f, values);
+      if (result === "unchanged") {
+        toast({ title: `No changes to save for ${b} — ${f}` });
+        return;
+      }
+      toast({ title: `Saved setup for ${b} — ${f}` });
+      onSaved?.(b, f);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The server did not acknowledge this setup.";
+      const retryMessage = /retry the save/i.test(message)
+        ? message
+        : "The setup could not be saved on the server. Check your connection and retry.";
+      setSaveError(retryMessage);
+      toast({
+        title: "Setup was not saved",
+        description: retryMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setSaveBusy(false);
+    }
   }
 
   /**
@@ -1486,11 +1509,16 @@ export default function SetupProfileEditor({
                 <X className="w-4 h-4 mr-1.5" /> Close
               </Button>
               {canManageProfiles && (
-                <Button type="button" onClick={handleSave} disabled={!brand.trim() || !flavor.trim()}>
+                <Button type="button" onClick={handleSave} disabled={!brand.trim() || !flavor.trim() || saveBusy}>
                   <Save className="w-4 h-4 mr-1.5" /> Save Setup
                 </Button>
               )}
             </div>
+            {saveError && (
+              <p className="text-xs text-destructive" role="alert" data-testid="setup-profile-save-error">
+                {saveError}
+              </p>
+            )}
             {!canManageProfiles && (
               <div
                 className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-right"

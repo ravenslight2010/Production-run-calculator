@@ -216,6 +216,9 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
       items: [profile({ updatedAt: 1000, values: { dieType: "12in" } })],
     });
     expect(res.status).toBe(200);
+    const response = (await res.json()) as { items: ApiProfile[] };
+    expect(response.items[0].values.dieType).toBe("Argus");
+    expect(response.items[0].updatedAt).toBe(2000);
     const items = await listAs(OPERATOR);
     expect(items).toHaveLength(1);
     expect(items[0].values.dieType).toBe("Argus");

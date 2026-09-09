@@ -982,4 +982,15 @@ describe("profile write acknowledgement failures", () => {
     await expect(flushProfileQueueStrict()).rejects.toThrow("not acknowledged");
     expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY, force: true })]);
   });
+
+  it("keeps an explicit save queued when the server echoes the key but keeps older canonical values", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "manager-edit" });
+    listItems = [serverItem(KEY, 9000, { doughRecipeName: "newer-server-copy" })];
+
+    markProfileForceEdited(KEY);
+    await expect(flushProfileQueueStrict()).rejects.toThrow(/canonical values differ/i);
+
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY, force: true })]);
+    expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined();
+  });
 });

@@ -457,15 +457,15 @@ router.post("/brand-profiles", requireCapability("manage-profiles"), async (req:
   // Forced (authoritative) writes bypass the LWW stamp guard, so they must
   // not be reachable by every signed-in user — otherwise `force: true` is a
   // client-controlled bypass of the very protection it exists alongside.
-  // Gate them on the same capability that gates the spec-import flow that
-  // issues them ("use-ai-tools", the AI parse endpoint's guard). Ordinary
-  // non-forced saves stay open to all staff (run-form autosaves). Checked
-  // BEFORE any write so a mixed batch never half-applies then 403s.
+  // The manager-only profile capability is the boundary for both the
+  // standalone Setup Profiles editor and other deliberate manager writes.
+  // Ordinary non-forced saves stay open to all staff (run-form autosaves).
+  // Checked BEFORE any write so a mixed batch never half-applies then 403s.
   if ([...byKey.values()].some((i) => i.force)) {
     try {
       const caps = req.userId ? await getUserCapabilities(req.userId) : [];
-      if (!caps.includes("use-ai-tools")) {
-        res.status(403).json({ error: "Missing capability: use-ai-tools" });
+      if (!caps.includes("manage-profiles")) {
+        res.status(403).json({ error: "Missing capability: manage-profiles" });
         return;
       }
     } catch (err) {
