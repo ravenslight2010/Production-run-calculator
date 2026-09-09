@@ -148,6 +148,25 @@ describe("Operations Insights compatibility aliases", () => {
     expect(legacyBody.aiGenerated).toBe(false);
     expect(legacyBody.aiStatus).toBe("deterministic");
   });
+
+  it("keeps deterministic schedule ordering available without a model call", async () => {
+    const stable = await post("/operations-insights/schedule-order", { runs: [], rules: [] });
+    expect(stable.status).toBe(200);
+    expect(mock.mainCalls).toBe(0);
+    await expect(stable.json()).resolves.toMatchObject({
+      order: [],
+      improved: false,
+    });
+
+    const legacy = await post("/ai/schedule-optimize", { runs: [], rules: [] });
+    expect(legacy.status).toBe(200);
+    expect(mock.mainCalls).toBe(0);
+    await expect(legacy.json()).resolves.toMatchObject({
+      order: [],
+      aiGenerated: false,
+      aiStatus: "deterministic",
+    });
+  });
 });
 
 // A response cut off mid-string, like the truncation seen from the real model.

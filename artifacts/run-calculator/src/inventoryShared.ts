@@ -1581,9 +1581,9 @@ export const requestAnomalies = (
 
 // Operations Insights schedule ordering. The suggested run order (allergen runs end-of-day,
 // similar brand/die grouped to cut changeovers, factory sequence rules honored)
-// is computed deterministically server-side; the AI only narrates it, and only
-// when a strictly better order exists. Advisory and read-only — the manager
-// applies it through the normal move path. Manager-gated.
+// is computed deterministically server-side. Advisory and read-only — the
+// manager applies it through the normal move path. It is available to all
+// signed-in staff because calculating an order never invokes a model.
 // Free-form (see @workspace/allergen): "none" means no allergen; any other
 // lower-cased token is a real allergen, including custom ones imported from a
 // spec sheet. Kept as a string so custom allergens reach the scheduler's

@@ -398,7 +398,6 @@ router.post(
 // through the normal move path.
 router.post(
   ["/operations-insights/schedule-order", "/ai/schedule-optimize"],
-  requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("operations-schedule-order"),
   async (req, res): Promise<void> => {
     const validation = validateScheduleBody(req.body);
