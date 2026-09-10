@@ -431,6 +431,7 @@ import {
   lookupBatchWeight,
   collectBatchWeightCandidates,
   collectBatchWeightCandidatesFromProfile,
+  filterStillCurrentBatchWeightEntries,
   executeBatchWeightPropagation,
   type BatchWeightCandidate,
   type IngredientBatchWeightRow,
@@ -4759,39 +4760,54 @@ export default function Home() {
   // acknowledgement boundary: only its canonical list is published to the
   // local cache and only acknowledged positive entries fan out to profiles and
   // pending/open runs. A failed write remains retryable on the next edit.
+  //
+  // The returned promise is also the completion boundary for callers that
+  // already have an acknowledged profile save. Without awaiting it, an older
+  // queued candidate can finish its POST and fan its stale value into the
+  // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
-    (entries: { name: string; lbs: number }[]): void => {
+    (entries: { name: string; lbs: number }[]): Promise<void> => {
       const changes = normalizeBatchWeightChanges(entries);
-      if (changes.length === 0) return;
+      if (changes.length === 0) return batchWeightSaveChainRef.current;
       for (const change of changes) {
         pendingBatchWeightChangesRef.current.set(change.name.toLowerCase(), change);
       }
-      batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
-        .then(async () => {
-          const submitted = [...pendingBatchWeightChangesRef.current.values()];
-          const canonical = await saveIngredientBatchWeights(submitted);
-          cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
-            ["ingredientBatchWeights"],
-            canonical,
-          );
-          for (const change of submitted) {
-            const current = pendingBatchWeightChangesRef.current.get(change.name.toLowerCase());
-            if (current?.lbs === change.lbs) {
-              pendingBatchWeightChangesRef.current.delete(change.name.toLowerCase());
-            }
+      const save = batchWeightSaveChainRef.current.then(async () => {
+        const submitted = [...pendingBatchWeightChangesRef.current.values()];
+        const canonical = await saveIngredientBatchWeights(submitted);
+        cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+          ["ingredientBatchWeights"],
+          canonical,
+        );
+        for (const change of submitted) {
+          const current = pendingBatchWeightChangesRef.current.get(change.name.toLowerCase());
+          if (current?.lbs === change.lbs) {
+            pendingBatchWeightChangesRef.current.delete(change.name.toLowerCase());
           }
-          const positive = submitted.filter((entry) => entry.lbs > 0);
-          if (positive.length > 0) await propagateBatchWeightUpdates(positive);
-        })
-        .catch((error) => {
-          toast({
-            title: "Batch weight was not saved",
-            description: error instanceof Error
-              ? error.message
-              : "The server did not acknowledge this weight. Try again.",
-            variant: "destructive",
-          });
+        }
+        // A newer edit may have been queued while this request was in
+        // flight. The old request was acknowledged, but its value is no
+        // longer current and must not overwrite the newer profile/run
+        // snapshot during propagation. The next queue turn owns that work.
+        const positive = filterStillCurrentBatchWeightEntries(
+          submitted,
+          pendingBatchWeightChangesRef.current,
+        ).filter((entry) => entry.lbs > 0);
+        if (positive.length > 0) await propagateBatchWeightUpdates(positive);
+      });
+      const completion = save.catch((error) => {
+        toast({
+          title: "Batch weight was not saved",
+          description: error instanceof Error
+            ? error.message
+            : "The server did not acknowledge this weight. Try again.",
+          variant: "destructive",
         });
+      });
+      // Keep the chain usable after a failed request while returning a
+      // promise callers can await for the complete POST + fan-out boundary.
+      batchWeightSaveChainRef.current = completion;
+      return completion;
     },
     [cycleCountQc, propagateBatchWeightUpdates],
   );
@@ -10082,7 +10098,7 @@ export default function Home() {
         learnedBatchWeightsRef.current,
         DEFAULT_PEP_TYPES,
       );
-      queueBatchWeightChanges(entries);
+      await queueBatchWeightChanges(entries);
     }
     // The profile is the source of truth for every run that hasn't started:
     // fan the fresh save out to today's pending runs and future scheduled days.

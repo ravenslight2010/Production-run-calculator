@@ -20,9 +20,10 @@ and auto-filled the next time the ingredient is picked on any device.
 - **Sauce branch: check recipe rows lbs>0, not row-array truthiness.** The
   server sauce map can return an EMPTY rows array — treating any array as
   "recipe-backed" silently skips ready-made barrel auto-fill.
-- **Serialize saves.** Debounced fire-and-forget POSTs race: an older slow
-  request can land after a newer one and regress the weight. Chain them on a
-  ref (`prev.then(save)`), so writes hit the server in entry order.
+- **Serialize saves and propagation.** Debounced fire-and-forget POSTs race:
+  an older slow request can land after a newer one and regress the weight.
+  Chain them on a ref (`prev.then(save)`), skip stale acknowledgements during
+  profile/run propagation, and let manager saves await the full queue boundary.
 - Gate the learn effect on the learned-list query having loaded, or every
   mount blind-resaves whatever the form already holds.
 - Applying on pick reads the learned map through a ref so the inline JSX

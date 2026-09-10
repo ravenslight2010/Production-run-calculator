@@ -101,6 +101,22 @@ export function lookupBatchWeight(
 // must never be learned.
 export type BatchWeightCandidate = { name: string; lbs: number };
 
+/**
+ * Keep only acknowledged entries that are still the latest queued value for
+ * their ingredient. An older request may receive a valid server response
+ * after a newer edit was queued; that older value must not be propagated into
+ * profiles or pending runs.
+ */
+export function filterStillCurrentBatchWeightEntries(
+  entries: BatchWeightCandidate[],
+  pending: Map<string, BatchWeightCandidate>,
+): BatchWeightCandidate[] {
+  return entries.filter((entry) => {
+    const current = pending.get(entry.name.trim().toLowerCase());
+    return current == null || current.lbs === entry.lbs;
+  });
+}
+
 /** Normalize one serialized batch-weight write. Zero is an explicit clear. */
 export function normalizeBatchWeightChanges(
   entries: IngredientBatchWeightRow[],

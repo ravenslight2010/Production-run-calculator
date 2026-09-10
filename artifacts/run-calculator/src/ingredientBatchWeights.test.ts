@@ -6,6 +6,7 @@ import {
   saveIngredientBatchWeights,
   collectBatchWeightCandidates,
   collectBatchWeightCandidatesFromProfile,
+  filterStillCurrentBatchWeightEntries,
   buildBatchWeightPropagationPlan,
   batchWeightPropagationToast,
   executeBatchWeightPropagation,
@@ -55,6 +56,27 @@ describe("normalizeBatchWeightChanges", () => {
     ])).toEqual([
       { name: "bacon", lbs: 32 },
       { name: "Sauce", lbs: 0 },
+    ]);
+  });
+});
+
+describe("filterStillCurrentBatchWeightEntries", () => {
+  it("drops an acknowledged value when a newer value is queued", () => {
+    const pending = new Map([
+      ["bacon", { name: "Bacon", lbs: 14 }],
+      ["ham", { name: "Ham", lbs: 8 }],
+    ]);
+
+    expect(filterStillCurrentBatchWeightEntries(
+      [
+        { name: "Bacon", lbs: 12 },
+        { name: "Ham", lbs: 8 },
+        { name: "Sausage", lbs: 10 },
+      ],
+      pending,
+    )).toEqual([
+      { name: "Ham", lbs: 8 },
+      { name: "Sausage", lbs: 10 },
     ]);
   });
 });
