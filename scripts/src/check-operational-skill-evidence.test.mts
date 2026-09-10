@@ -499,3 +499,77 @@ test("keeps multiple missing-document failures free of filesystem details", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("fails closed for a readable malformed policy document without exposing its bytes or path", async () => {
+  const fixturePayload = "MALFORMED_POLICY_PAYLOAD_MUST_NOT_LEAK";
+  const root = await createFixture();
+  const policyPath = join(root, "replit.md");
+  await writeFile(
+    policyPath,
+    Buffer.concat([
+      Buffer.from([0xff, 0xfe, 0x00, 0x1f]),
+      Buffer.from(`${fixturePayload}\n${root}/private-policy-data`),
+    ]),
+  );
+
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      [
+        "Operational skill evidence check failed:",
+        "- replit.md: missing scoped failure closure; keep task-scoped failures in the task and bring unrelated failures in only when they block validation or create a material risk",
+        "- replit.md: missing failure status vocabulary; record every validation result as PASS, FAIL, BLOCKED, NOT REACHED, or MISSING",
+        "- replit.md: missing de-duplicated out-of-scope handling; de-duplicate unrelated failures and capture a bounded Draft with evidence and a next action",
+        "- replit.md: missing fail-closed evidence; never treat missing evidence as a successful validation",
+        "- replit.md: missing long-running progress format; include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+        "- replit.md: missing release progress lanes; separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite",
+        "",
+      ].join("\n"),
+    );
+    assert.doesNotMatch(result.stderr, /Operational policy and skill evidence check passed/);
+    assert.doesNotMatch(result.stderr, new RegExp(fixturePayload));
+    assert.doesNotMatch(result.stderr, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reports only stable remediation details for readable unexpected policy content", async () => {
+  const fixturePayload = "UNEXPECTED_POLICY_PAYLOAD_MUST_NOT_LEAK";
+  const root = await createFixture({
+    "replit.md": [
+      "\u0000{\"policy\": [\"unterminated\"",
+      fixturePayload,
+      "unexpected field: /sensitive/policy/source",
+    ].join("\n"),
+  });
+
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      [
+        "Operational skill evidence check failed:",
+        "- replit.md: missing scoped failure closure; keep task-scoped failures in the task and bring unrelated failures in only when they block validation or create a material risk",
+        "- replit.md: missing failure status vocabulary; record every validation result as PASS, FAIL, BLOCKED, NOT REACHED, or MISSING",
+        "- replit.md: missing de-duplicated out-of-scope handling; de-duplicate unrelated failures and capture a bounded Draft with evidence and a next action",
+        "- replit.md: missing fail-closed evidence; never treat missing evidence as a successful validation",
+        "- replit.md: missing long-running progress format; include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+        "- replit.md: missing release progress lanes; separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite",
+        "",
+      ].join("\n"),
+    );
+    assert.doesNotMatch(result.stderr, /Operational policy and skill evidence check passed/);
+    assert.doesNotMatch(result.stderr, new RegExp(fixturePayload));
+    assert.doesNotMatch(result.stderr, /\/sensitive\/policy\/source/);
+    assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
