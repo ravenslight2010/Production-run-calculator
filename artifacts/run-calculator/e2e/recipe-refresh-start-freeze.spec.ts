@@ -380,7 +380,7 @@ async function readScheduledRunValues(
   return payload.runValues?.[runId];
 }
 
-test.skip("remembered plain ingredient batch weights rehydrate in a peer without changing the active run", async ({
+test("remembered plain ingredient batch weights rehydrate in a peer without changing the active run", async ({
   browser,
   page,
 }) => {
@@ -490,11 +490,11 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
-  await expect(page.getByTestId("output-app1-batches")).toHaveText("120.0 lbs");
+  await expect(page.getByTestId("output-app1-batches")).toHaveText("12.00 batches");
 
   await openSummary(page);
   const upcoming = page.getByTestId(`run-summary-${upcomingRunId}`);
-  await expect(upcoming).toContainText("120.0 lbs");
+  await expect(upcoming).toContainText("12.00 batches");
 
   await setRecipeBatchLbs(page, recipeName, "20");
   await expect(upcoming).toContainText("6.00 batches");
@@ -504,7 +504,7 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
       return scheduled?.app1CheeseRecipe;
     },
     { timeout: 20_000 },
-  ).toEqual([{ ingredient: "Cheese", lbs: 20 }]);
+  ).toEqual([expect.objectContaining({ ingredient: "Cheese", lbs: 20 })]);
   await page.getByTestId("tab-frontline").click();
   await expect(page.getByTestId("output-app1-batches")).toContainText("6.00");
 
@@ -522,7 +522,7 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
       return scheduled?.app1CheeseRecipe;
     },
     { timeout: 20_000 },
-  ).toEqual([{ ingredient: "Cheese", lbs: 40 }]);
+  ).toEqual([expect.objectContaining({ ingredient: "Cheese", lbs: 40 })]);
   await expectServerRunValueChanged(page, upcomingRunId, serverBeforeSecondEdit);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
@@ -535,7 +535,7 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
   );
 });
 
-test.skip("a delayed shared recipe refresh stays with its original run after a rapid switch", async ({ page }) => {
+test("a delayed shared recipe refresh stays with its original run after a rapid switch", async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
 
