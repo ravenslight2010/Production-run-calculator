@@ -112,6 +112,24 @@ The package command supplies the approved test-mode flags automatically. The
 Playwright config still fails closed unless the database identity is explicitly
 disposable, and the existing advisory lock plus fixture cleanup remain active.
 
+Check browser-spec syntax without starting Playwright or connecting to a
+database. With no path, the command checks every configured `e2e/*.spec.ts`
+file:
+
+```sh
+pnpm --filter @workspace/run-calculator run check:e2e:syntax
+```
+
+To check one spec, pass its path after `--`:
+
+```sh
+pnpm --filter @workspace/run-calculator run check:e2e:syntax -- \
+  e2e/recipe-refresh-start-freeze.spec.ts
+```
+
+Syntax failures keep the same concise `file:line:column` format used by the
+recipe-refresh preflight.
+
 Run the recurring cross-device smoke matrix before release checks. It is a
 small lifecycle signal, not a replacement for the focused wake, timer, mobile
 layout, or failed-write suites:

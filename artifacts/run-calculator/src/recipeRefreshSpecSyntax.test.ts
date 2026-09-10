@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { browserSpecSyntaxErrors } from "../e2e/validate-browser-spec-syntax";
+import {
+  browserSpecSyntaxErrors,
+  configuredBrowserSpecFiles,
+  validateBrowserSpecSyntaxSet,
+} from "../e2e/validate-browser-spec-syntax";
 
 const SPEC_FILE = path.resolve(
   __dirname,
@@ -21,5 +26,28 @@ describe("recipe-refresh browser spec syntax validation", () => {
         "recipe-refresh-start-freeze.spec.ts",
       ).some((error) => error.includes("'}' expected")),
     ).toBe(true);
+  });
+
+  it("discovers the configured browser-spec set", () => {
+    expect(
+      configuredBrowserSpecFiles().some(
+        (fileUrl) =>
+          fileURLToPath(fileUrl) === SPEC_FILE,
+      ),
+    ).toBe(true);
+  });
+
+  it("reports missing files with the existing concise error format", () => {
+    const missingFile = pathToFileURL(
+      path.join(__dirname, "../e2e/missing-browser-spec.spec.ts"),
+    );
+    expect(() =>
+      validateBrowserSpecSyntaxSet([
+        missingFile,
+      ]),
+    ).toThrow(
+      "Browser spec syntax validation failed before database setup:\n" +
+        "- unable to read missing-browser-spec.spec.ts.",
+    );
   });
 });
