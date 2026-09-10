@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -162,6 +162,41 @@ test("reports a missing document without exposing filesystem payloads", async ()
     );
     assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reports an unreadable document without exposing filesystem payloads", async () => {
+  const fixturePayload = "UNREADABLE_FIXTURE_PAYLOAD_MUST_NOT_LEAK";
+  const policyContent = "Never claim success by treating missing evidence as a pass.";
+  const root = await createFixture({
+    "replit.md": `${validDocuments["replit.md"]}\n${policyContent}\n${fixturePayload}\n`,
+  });
+  const unreadablePath = join(root, "replit.md");
+  await chmod(unreadablePath, 0o000);
+
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      [
+        "Operational skill evidence check failed:",
+        "- replit.md: could not read the required policy document",
+        "",
+      ].join("\n"),
+    );
+    assert.match(
+      result.stderr,
+      /^Operational skill evidence check failed:\n- replit\.md: could not read the required policy document\n$/,
+    );
+    assert.doesNotMatch(result.stderr, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
+    assert.doesNotMatch(result.stderr, new RegExp(fixturePayload));
+    assert.doesNotMatch(result.stderr, new RegExp(policyContent));
+  } finally {
+    await chmod(unreadablePath, 0o600);
     await rm(root, { recursive: true, force: true });
   }
 });
