@@ -391,10 +391,10 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
 
   const brand = `Weight Sync ${uniqueTestId("brand")}`;
   const flavor = "Manager Journey";
-    const recipeId = uniqueTestId(`${scenario.label}-recipe`);
-    const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
-    const currentRunId = uniqueTestId("current-run");
-    const upcomingRunId = uniqueTestId("upcoming-run");
+  const recipeId = uniqueTestId("cheese-recipe");
+  const recipeName = `Shared Cheese ${uniqueTestId("recipe")}`;
+  const currentRunId = uniqueTestId("current-run");
+  const upcomingRunId = uniqueTestId("upcoming-run");
   const scheduledRunId = uniqueTestId("scheduled-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
@@ -403,7 +403,7 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
 
-  const baseValues = {
+  const values = {
     casesNeeded: 100,
     pizzasPerCase: 1,
     casesPerSkid: 10,
@@ -412,20 +412,20 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    app1Type: ingredient,
-    app1OzPerPizza: 1,
-    app1BatchLbs: 5,
-    app1CheeseRecipe: [],
+    app1Type: "Cheese",
+    app1OzPerPizza: 16,
+    app1BatchLbs: 0,
+    app1CheeseRecipeName: recipeName,
+    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
   };
 
   await fixtures.seedCheeseRecipe(account, {
     id: recipeId,
     name: recipeName,
     brand,
-    components: [{ ingredient: "Cheese", lbs: 0 }],
+    components: [{ ingredient: "Cheese", lbs: 10 }],
   });
 
-    const values = scenario.values(recipeName);
   await fixtures.seedBrandProfile(account, {
     brand,
     flavor,
@@ -541,12 +541,12 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
 
   const username = uniqueTestId("e2e_batch_weight_sign_in");
 
-    const originalBrand = `Original ${scenario.label} ${uniqueTestId("brand")}`;
-    const originalFlavor = "Profile-backed";
-    const recipeId = uniqueTestId(`${scenario.label}-recipe`);
-    const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
-    const originalRunId = uniqueTestId("original-run");
-    const switchedRunId = uniqueTestId("switched-run");
+  const originalBrand = `Original Cheese ${uniqueTestId("brand")}`;
+  const originalFlavor = "Profile-backed";
+  const recipeId = uniqueTestId("cheese-recipe");
+  const recipeName = `Shared Cheese ${uniqueTestId("recipe")}`;
+  const originalRunId = uniqueTestId("original-run");
+  const switchedRunId = uniqueTestId("switched-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
     username: uniqueTestId("e2e_weight_sync"),
@@ -554,7 +554,7 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
 
-  const baseValues = {
+  const originalValues = {
     casesNeeded: 100,
     pizzasPerCase: 1,
     casesPerSkid: 10,
@@ -563,37 +563,32 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
     cycleSpeed: 1,
     speedAdjustment: 1,
     freezerTime: 0,
-    app1Type: ingredient,
-    app1OzPerPizza: 1,
-    app1BatchLbs: 5,
-    app1CheeseRecipe: [],
+    app1Type: "Cheese",
+    app1OzPerPizza: 16,
+    app1BatchLbs: 0,
+    app1CheeseRecipeName: recipeName,
+    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
   };
-    const originalValues = scenario.values(recipeName);
-    const switchedValues = {
-      ...originalValues,
-      ...(scenario.kind === "dough"
-        ? { doughRecipe: [{ ingredient: "Dough Flour", lbs: 7 }] }
-        : scenario.kind === "sauce"
-          ? { frontlineRecipe: [{ ingredient: "Sauce Tomatoes", lbs: 7 }] }
-          : {
-              app1OzPerPizza: 1.4,
-              app1CheeseRecipe: [
-                { ingredient: "Mix Ingredient A", lbs: 0.7 },
-                { ingredient: "Mix Ingredient B", lbs: 0.7 },
-              ],
-            }),
-    };
+  const switchedValues = {
+    ...originalValues,
+    app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 7 }],
+  };
 
-    await scenario.seed(fixtures, account, recipeName, recipeId, originalBrand, originalFlavor);
-    await fixtures.seedBrandProfile(account, {
-      brand: originalBrand,
-      flavor: originalFlavor,
-      values: originalValues,
-      updatedAt: now,
-    });
-    await fixtures.seedTodaySync({
+  await fixtures.seedCheeseRecipe(account, {
+    id: recipeId,
+    name: recipeName,
+    brand: originalBrand,
+    components: [{ ingredient: "Cheese", lbs: 10 }],
+  });
+  await fixtures.seedBrandProfile(account, {
+    brand: originalBrand,
+    flavor: originalFlavor,
+    values: originalValues,
+    updatedAt: now,
+  });
+  await fixtures.seedTodaySync({
       token: account.token,
-      senderId: `${scenario.label}-recipe-switch-${username}`,
+      senderId: `recipe-switch-${username}`,
       date: TODAY,
       payload: {
         dayState: {
@@ -630,7 +625,7 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
         },
         packagingProgress: {},
       },
-    });
+  });
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -638,9 +633,7 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
 
     const originalBefore = await readIngredientDetail(page, originalRunId);
     const switchedBefore = await readIngredientDetail(page, switchedRunId);
-    let refreshGate:
-      | { observed: Promise<void>; release: () => Promise<void> }
-      | undefined;
+  const refreshGate = await holdNextProfileRefresh(page);
 
   try {
     await setRecipeBatchLbs(page, recipeName, "20");
@@ -1430,7 +1423,7 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       if (scenario.kind === "mixes") {
         saveGate = await holdNextDelayedCompletion(page, "/api/mixes", "POST");
         edit = setMixPerPizza(page, recipeName, scenario.firstLbs, false);
-      } else {
+      } else if (scenario.kind === "dough" || scenario.kind === "sauce") {
         saveGate = await holdNextDelayedCompletion(
           page,
           `/api/${scenario.kind}-recipes`,
@@ -1443,6 +1436,8 @@ for (const scenario of sharedRecipeFreezeScenarios) {
           scenario.firstLbs,
           false,
         );
+      } else {
+        throw new Error(`Unsupported recipe kind: ${scenario.kind}`);
       }
       await saveGate.observed;
       refreshGate = await holdNextDelayedCompletion(page, "/api/brand-profiles", "POST");
