@@ -67,6 +67,39 @@ and issue the final GO/NO-GO decision. Do not create speculative or recursive
 follow-ups; create another task only for a genuinely separate objective or a
 deliberately deferred outcome that cannot remain in the current objective.
 
+### Progress updates for long-running release work
+
+If validation spans multiple cycles, keep one update in the owning task using
+this format:
+
+```text
+Current objective: <release outcome and assessed scope>
+Completed work: <closed gates or repairs and their PASS/FAIL status>
+Active blockers: <unresolved blocker, evidence, and owner for each>
+Next validation milestone: <next check or decision point; name its prerequisite>
+Owner: <person or team accountable for completion>
+```
+
+Use the update to show movement, not to close the task early. Keep in-scope
+failures in the owning task's failure inventory and do not create recursive
+follow-up tasks for discoveries, stopped runs, or individual gate failures.
+Create a separate task only for a genuinely independent objective or an
+out-of-scope safety, security, data-integrity, or release blocker that cannot
+responsibly remain in the current objective.
+
+Separate the progress inventory into two lanes:
+
+- **Independent evidence:** valid and safe gates that can continue; run each one
+  and record its actual result.
+- **Dependent checks:** gates waiting on a named prerequisite; record
+  `BLOCKED` or `NOT REACHED` with that prerequisite instead of treating the
+  check as passed.
+
+`FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` remain unresolved until the
+required evidence is produced or a valid documented exception applies. A
+progress update does not alter the release requirements or the final
+fail-closed decision.
+
 ## Required gates
 
 These gates are required for every release unless the affected package truly

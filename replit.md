@@ -84,6 +84,18 @@
 - Do not create recursive or speculative “one more task” work. A separate task must have independent acceptance criteria, an owner, and a documented reason it cannot remain in the current objective.
 - Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
 
+### Long-running task progress
+
+- When an approved task spans more than one investigation or validation cycle, post a progress update in the owning task instead of opening a task for each failure or discovery. Every update must show:
+  - **Current objective:** the user outcome this task still owns;
+  - **Completed work:** repairs and evidence that are complete, with their result status;
+  - **Active blockers:** each unresolved blocker, its evidence, and the owner responsible for the next action;
+  - **Next validation milestone:** the next concrete check or decision point, including its prerequisite when one exists; and
+  - **Owner:** the person or team accountable for moving the objective to completion.
+- Keep the update current as work progresses: move completed items out of the blocker list, preserve unresolved `FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` statuses, and do not describe a partial result as complete.
+- In-scope discoveries stay in the owning task's failure ledger and use the same owner and milestone. Do not create recursive follow-up tasks for them. Create another task only for a genuinely independent objective, a deliberately deferred outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain here.
+- For release work, list independent evidence work separately from checks that depend on it. Continue every independent check that is valid and safe; mark a dependent check `BLOCKED` or `NOT REACHED`, name the failed prerequisite, and keep it unresolved until its evidence exists. Progress reporting never changes the release gate or turns unresolved evidence into a pass.
+
 ### Safe decomposition and parallel work
 
 - Use internal work breakdown and parallel helpers for independent repair domains within one objective. Do not turn those internal work units into sibling project tasks unless they meet the separate-objective rule.

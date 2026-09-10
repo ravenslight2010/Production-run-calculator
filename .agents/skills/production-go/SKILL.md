@@ -120,6 +120,36 @@ durable release task then reruns the standard and full release checks from one
 clean revision and verifies the retained records. Do not create an unbounded
 chain of speculative follow-ups.
 
+### Progress updates for an open release objective
+
+When the release objective remains open across multiple investigation or
+validation cycles, update the same owning task with this compact status:
+
+```text
+Current objective: <release outcome and assessed scope>
+Completed work: <closed repair domains and evidence, each with PASS/FAIL>
+Active blockers: <unresolved blocker, evidence, and owner for each>
+Next validation milestone: <next check or decision point; name its prerequisite>
+Owner: <person or team accountable for completion>
+```
+
+Keep completed work, active blockers, and the next milestone current. In-scope
+discoveries remain in the owning task's failure ledger and do not create
+recursive follow-up tasks. Create a separate task only for a genuinely
+independent objective or an out-of-scope safety, security, data-integrity, or
+release blocker that cannot responsibly remain in this objective.
+
+Show release progress in two lanes:
+
+- **Independent evidence:** safe gates that can continue despite another failure;
+  run them and record their actual status.
+- **Dependent checks:** gates waiting on a named prerequisite; record them as
+  `BLOCKED` or `NOT REACHED` rather than implying a pass.
+
+`FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` remain unresolved in progress
+updates. The progress update is not a release decision and cannot change the
+required evidence, the final report, or the fail-closed `GO`/`NO-GO` boundary.
+
 Stop once the evidence is sufficient for a decision. Do not launch speculative
 refactors, invent new release commands, or recursively create “one more task”
 work. If blocked, name the exact blocker, the evidence needed, and the owner
