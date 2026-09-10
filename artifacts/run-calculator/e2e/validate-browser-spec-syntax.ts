@@ -72,6 +72,26 @@ export function validateBrowserSpecSyntax(fileUrl: URL): void {
   validateBrowserSpecSyntaxSet([fileUrl]);
 }
 
+export function validateBrowserSpecSyntaxDirectory(
+  directoryUrl: URL,
+  ignoredFileNames: readonly string[] = [],
+): void {
+  const ignored = new Set(ignoredFileNames);
+  const directoryPath = fileURLToPath(directoryUrl);
+  const specFileNames = readdirSync(directoryPath, { withFileTypes: true })
+    .filter((entry) =>
+      entry.isFile() &&
+      entry.name.endsWith(".spec.ts") &&
+      !ignored.has(entry.name)
+    )
+    .map((entry) => entry.name)
+    .sort();
+
+  for (const fileName of specFileNames) {
+    validateBrowserSpecSyntax(new URL(fileName, directoryUrl));
+  }
+}
+
 function runSyntaxValidationCommand(): void {
   const requestedFiles = process.argv.slice(2);
   if (requestedFiles[0] === "--") {

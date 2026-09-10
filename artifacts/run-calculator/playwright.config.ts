@@ -4,9 +4,18 @@ import {
   releaseBrowserBaseUrl,
   releaseBrowserWebServers,
 } from "./playwright.release-servers";
+import { validateBrowserSpecSyntaxDirectory } from "./e2e/validate-browser-spec-syntax";
 
 const baseURL = releaseBrowserBaseUrl(
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
+
+// The main suite's global setup deletes shared disposable-day data before
+// Playwright collects specs. Validate the complete suite first so malformed
+// TypeScript cannot be masked by that database setup.
+validateBrowserSpecSyntaxDirectory(
+  new URL("./e2e/", import.meta.url),
+  ["release-webkit-smoke.spec.ts"],
 );
 
 export default defineConfig({
