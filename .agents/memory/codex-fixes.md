@@ -450,3 +450,24 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 7. Ran `pnpm --filter @workspace/api-spec run codegen` to regenerate `OperationalRunView` types matching merged spec
 
 **Context**: This is the major Replit sync merge. Replit's branch is now the authoritative feature codebase; main's Step 7a/7b work is included via Replit's pre-squash merge of the feature branch. PR: https://github.com/ravenslight2010/Production-run-calculator/pull/39
+
+## 2026-09-10: Server-Side Calc Cache + SummaryStats Migration (feat/server-calc-cache-and-migration)
+
+**Files changed:**
+- `artifacts/api-server/src/routes/sync.ts` — server-side calc cache (1-second time bucket, 128-entry LRU), pre-computed `summaryStats` map in `computeServerLiveState`
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — `calc` useMemo adopts `operationalServerCalc` when online + confirmed (battery win)
+- `artifacts/run-calculator/src/pages/home.tsx` — `serverSummaryStatsRef` stores server-computed stats from sync payload; `persistedRunSummaryStats` uses server data when online, local fallback offline
+
+**What was done:**
+1. Server-side calc caching: `computeServerLiveState` now caches `serverCalc` results keyed by `snapshotId:timeBucket` (1-second resolution, 128-entry LRU). Avoids recomputing the same calculation on every sync request within the same second.
+2. Server-side summaryStats: `computeServerLiveState` pre-computes `summaryStats` map for all runs via `computeSummaryStats` and includes it in the sync payload. Client receives and stores in `serverSummaryStatsRef`.
+3. Client calc migration: `LiveRunContext` `calc` useMemo checks if online + `operationalServerCalc` is confirmed for current run. If yes, uses server calc directly (saves local recomputation every render tick). Offline: falls back to local `computeCalc`.
+4. Client summaryStats migration: `persistedRunSummaryStats` useMemo checks `serverSummaryStatsRef` when online. Uses server data for persisted runs, local `computeSummaryStats` for current run and offline fallback.
+
+**Design decisions:**
+- Server passes `[]` for `defaultPepTypes` which matches client's `DEFAULT_PEP_TYPES` (both are empty arrays)
+- Server summaryStats don't include substitutions (day-state dependent, server doesn't have access). Client uses them for persisted runs only; current run always computes locally
+- Server calc caching uses 1-second time bucket — time-dependent calculations (elapsed time, cases on line) recompute every second instead of every request
+- LRU cache max size 128 entries with oldest-first eviction
+
+**Tests:** inventory-math 69/69, live-calc 16/16, mixes 88/88 all pass. API + web typecheck pass.

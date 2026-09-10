@@ -229,7 +229,18 @@ export function LiveRunProvider({
   })();
 
   // ── Core production calc ─────────────────────────────────────────────────
+  // Server-authority calc: when online and a server-bound calc exists for the
+  // current run, adopt it instead of recomputing locally (battery win).
+  // Offline fallback: compute locally exactly as before.
   const calc = useMemo((): Calc => {
+    if (
+      operationalOnline &&
+      operationalServerCalc &&
+      operationalDisplayState === "confirmed" &&
+      currentRunId === currentRun?.id
+    ) {
+      return operationalServerCalc;
+    }
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
     const result = computeCalc({
       v,
@@ -243,7 +254,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab]);
+  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, operationalOnline, operationalServerCalc, operationalDisplayState, currentRunId]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
