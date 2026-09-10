@@ -253,6 +253,159 @@ for (const rule of releaseLaneRules) {
   });
 }
 
+const importAuditAndHealAnchors = [
+  {
+    name: "import audit safety section",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable: "## Safety and evidence rules",
+    label: "safety and evidence rules",
+    remediation: "restore the safety and evidence rules section",
+  },
+  {
+    name: "import audit checklist section",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable: "## Before/after checklist",
+    label: "before/after checklist",
+    remediation: "restore the before/after checklist section",
+  },
+  {
+    name: "import audit report section",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable: "## Standard audit report",
+    label: "standard audit report",
+    remediation: "restore the standard audit report section",
+  },
+  {
+    name: "import audit manager-value preservation field",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable: "Manager-value preservation:",
+    label: "manager-value preservation report field",
+    remediation: "restore the manager-value preservation report field",
+  },
+  {
+    name: "import audit production read-only rule",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable: "Never edit production data from this skill",
+    label: "production is read-only",
+    remediation: "keep production data read-only in this skill",
+  },
+  {
+    name: "import audit privacy rule",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable: "never paste credentials, workbook contents, or personal data into reports.",
+    label: "privacy restriction against sensitive report data",
+    remediation:
+      "keep credentials, workbook contents, and personal data out of reports",
+  },
+  {
+    name: "import audit data-heal handoff",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable:
+      "Return to **data-heal-playbook** when evidence shows incorrect data is already persisted.",
+    label: "data-heal complementary handoff",
+    remediation: "restore the data-heal handoff",
+  },
+  {
+    name: "import audit investigation handoff",
+    document: ".agents/skills/customer-import-audit/SKILL.md",
+    removable:
+      "Use **Import-bug-investigation** when there is a source-versus-landed mismatch.",
+    label: "import investigation complementary handoff",
+    remediation: "restore the import investigation handoff",
+  },
+  {
+    name: "data heal required plan section",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable: "## Required heal plan",
+    label: "required heal plan",
+    remediation: "restore the required heal plan section",
+  },
+  {
+    name: "data heal report section",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable: "## Standard heal report",
+    label: "standard heal report",
+    remediation: "restore the standard heal report section",
+  },
+  {
+    name: "data heal manager-value preservation rule",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable: "Check manager-value preservation before execution",
+    label: "manager-value preservation guidance",
+    remediation: "restore manager-value preservation guidance",
+  },
+  {
+    name: "data heal privacy rule",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable: "never log secrets, whole user objects, or unnecessary customer/user data.",
+    label: "privacy restriction against sensitive heal data",
+    remediation:
+      "keep secrets, whole user objects, and unnecessary customer data out of heal logs",
+  },
+  {
+    name: "data heal privacy report field",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable: "Privacy:",
+    label: "privacy report field",
+    remediation: "restore the privacy report field",
+  },
+  {
+    name: "data heal import audit handoff",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable:
+      "Return to **customer-import-audit** before/after landing report.",
+    label: "customer-import-audit complementary handoff",
+    remediation: "restore the customer-import-audit handoff",
+  },
+  {
+    name: "data heal investigation handoff",
+    document: ".agents/skills/data-heal-playbook/SKILL.md",
+    removable: "Use **import-bug-investigation** first.",
+    label: "import investigation complementary handoff",
+    remediation: "restore the import investigation handoff",
+  },
+] as const;
+
+for (const anchor of importAuditAndHealAnchors) {
+  test(`rejects a missing ${anchor.name} anchor without leaking fixture payload`, async () => {
+    const fixturePayload = `ANCHOR_FIXTURE_PAYLOAD_${anchor.name
+      .replaceAll(" ", "_")
+      .toUpperCase()} /tmp/private-fixture`;
+    const document = validDocuments[anchor.document];
+    assert.match(
+      document,
+      new RegExp(anchor.removable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+    const root = await createFixture({
+      [anchor.document]: `${document.replace(anchor.removable, "")}\n${fixturePayload}\n`,
+    });
+
+    try {
+      const result = await runChecker(root);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(
+        result.stderr,
+        [
+          "Operational skill evidence check failed:",
+          `- ${anchor.document}: missing ${anchor.label}; ${anchor.remediation}`,
+          "",
+        ].join("\n"),
+      );
+      assert.doesNotMatch(
+        result.stderr,
+        new RegExp(fixturePayload.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      );
+      assert.doesNotMatch(
+        result.stderr,
+        /\/tmp\/|\/home\/|operational-skill-evidence-/,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("reports a missing document without exposing filesystem payloads", async () => {
   const root = await createFixture({ "replit.md": undefined });
   try {
