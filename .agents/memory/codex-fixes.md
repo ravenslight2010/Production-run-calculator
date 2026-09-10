@@ -495,6 +495,7 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 
 **Tests:** mixes 88/88, inventory-math 74/74. API + web typecheck pass.
 
+
 AD
 ## 2026-09-10: Server-Side Calc Cache + SummaryStats Migration (feat/server-calc-cache-and-migration)
 
@@ -515,4 +516,5 @@ AD
 - Server calc caching uses 1-second time bucket — time-dependent calculations (elapsed time, cases on line) recompute every second instead of every request
 - LRU cache max size 128 entries with oldest-first eviction
 
-**Tests:** inventory-math 69/69, live-calc 16/16, mixes 88/88 all pass. API + web typecheck pass.a3cf228b5d
+**Tests:** inventory-math 69/69, live-calc 16/16, mixes 88/88 all pass. API + web typecheck pass.
+on
