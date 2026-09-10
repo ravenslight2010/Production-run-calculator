@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "browser": "webkit",
-  "revision": "92a3762d00b784528e7846d215bf0b556fd2d43a",
+  "revision": "59cdd87aa821b58802a754b42e1395f3d3c168a3",
   "environment": "development",
   "result": "passed",
-  "generatedAt": "2026-09-10T02:09:17.155Z",
+  "generatedAt": "2026-09-10T11:23:40.648Z",
   "caseCount": 3,
   "completedCount": 3,
   "failureCount": 0,
@@ -19,19 +19,19 @@
       "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
       "title": " › webkit › release-webkit-smoke.spec.ts › authenticates and preserves current-run start, pause, resume, and reload",
       "status": "passed",
-      "durationMs": 31694
+      "durationMs": 31874
     },
     {
       "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
       "title": " › webkit › release-webkit-smoke.spec.ts › recovers a failed sync pull after the browser reconnects",
       "status": "passed",
-      "durationMs": 13911
+      "durationMs": 16975
     },
     {
       "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
       "title": " › webkit › release-webkit-smoke.spec.ts › manager can preview an authoritative operational report",
       "status": "passed",
-      "durationMs": 14902
+      "durationMs": 26304
     }
   ]
 }
