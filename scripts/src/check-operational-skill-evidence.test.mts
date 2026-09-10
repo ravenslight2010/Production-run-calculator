@@ -15,18 +15,38 @@ const validDocuments: Record<string, string> = {
     "Record all observed results as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.",
     "otherwise de-duplicate it and capture a bounded Draft with evidence and a next action",
     "Never claim success by treating missing evidence as a pass.",
+    "Current objective: <release outcome and assessed scope>",
+    "Completed work: <closed repair domains and evidence, each with PASS/FAIL>",
+    "Active blockers: <unresolved blocker, evidence, and owner for each>",
+    "Next validation milestone: <next check or decision point; name its prerequisite>",
+    "Owner: <person or team accountable for completion>",
+    "For release work, list independent evidence work separately from checks that depend on it. Continue every independent check that is valid and safe; mark a dependent check `BLOCKED` or `NOT REACHED`, name the failed prerequisite, and keep it unresolved until its evidence exists.",
   ].join("\n"),
   ".agents/skills/production-go/SKILL.md": [
     "do not stop the investigation at the first unrelated failure because it must not hide independent evidence",
     "Record every result as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.",
     "create the smallest de-duplicated set of bounded repair tasks",
     "Treat `BLOCKED`, `NOT REACHED`, and `MISSING` as unresolved until the required evidence exists.",
+    "Current objective: <release outcome and assessed scope>",
+    "Completed work: <closed repair domains and evidence, each with PASS/FAIL>",
+    "Active blockers: <unresolved blocker, evidence, and owner for each>",
+    "Next validation milestone: <next check or decision point; name its prerequisite>",
+    "Owner: <person or team accountable for completion>",
+    "**Independent evidence:** safe gates that can continue despite another failure; run them and record their actual status.",
+    "**Dependent checks:** gates waiting on a named prerequisite; record them as `BLOCKED` or `NOT REACHED` with that prerequisite instead of implying a pass.",
   ].join("\n"),
   ".agents/skills/release-checklist/SKILL.md": [
     "Run all applicable gates that remain valid and safe to run; do not stop at the first unrelated failure because independent gates should still produce evidence.",
     "Record each result explicitly as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.",
     "de-duplicate the blocker inventory against the task board and create bounded repair tasks",
     "A failed command or missing evidence is a **no-go**.",
+    "Current objective: <release outcome and assessed scope>",
+    "Completed work: <closed gates or repairs and their PASS/FAIL status>",
+    "Active blockers: <unresolved blocker, evidence, and owner for each>",
+    "Next validation milestone: <next check or decision point; name its prerequisite>",
+    "Owner: <person or team accountable for completion>",
+    "**Independent evidence:** valid and safe gates that can continue; run each one and record its actual result.",
+    "**Dependent checks:** gates waiting on a named prerequisite; record `BLOCKED` or `NOT REACHED` with that prerequisite instead of treating the check as passed.",
   ].join("\n"),
   ".agents/skills/customer-import-audit/SKILL.md": [
     "## Safety and evidence rules",
@@ -136,11 +156,46 @@ test("reports only the relative document and remediation when a rule is missing"
         "- replit.md: missing failure status vocabulary; record every validation result as PASS, FAIL, BLOCKED, NOT REACHED, or MISSING",
         "- replit.md: missing de-duplicated out-of-scope handling; de-duplicate unrelated failures and capture a bounded Draft with evidence and a next action",
         "- replit.md: missing fail-closed evidence; never treat missing evidence as a successful validation",
+        "- replit.md: missing long-running progress format; include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+        "- replit.md: missing release progress lanes; separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite",
         "",
       ].join("\n"),
     );
     assert.doesNotMatch(result.stderr, new RegExp(secret));
     assert.doesNotMatch(result.stderr, /filesystem payload|\/tmp\/|\/home\//);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reports missing long-running progress guidance without exposing fixture details", async () => {
+  const secret = "PROGRESS_FIXTURE_SECRET_MUST_NOT_LEAK";
+  const progressLines = [
+    "Current objective: <release outcome and assessed scope>",
+    "Completed work: <closed repair domains and evidence, each with PASS/FAIL>",
+    "Active blockers: <unresolved blocker, evidence, and owner for each>",
+    "Next validation milestone: <next check or decision point; name its prerequisite>",
+    "Owner: <person or team accountable for completion>",
+  ].join("\n");
+  const root = await createFixture({
+    ".agents/skills/production-go/SKILL.md":
+      `${validDocuments[".agents/skills/production-go/SKILL.md"].replace(`${progressLines}\n`, "")}\n${secret}\n`,
+  });
+
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      [
+        "Operational skill evidence check failed:",
+        "- .agents/skills/production-go/SKILL.md: missing long-running progress format; include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+        "",
+      ].join("\n"),
+    );
+    assert.doesNotMatch(result.stderr, new RegExp(secret));
+    assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

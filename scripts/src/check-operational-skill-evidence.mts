@@ -7,6 +7,13 @@ type Requirement = {
   remediation: string;
 };
 
+const longRunningProgressPattern =
+  /Current objective:[\s\S]*?Completed work:[\s\S]*?Active blockers:[\s\S]*?Next validation milestone:[\s\S]*?Owner:/;
+const replitReleaseProgressLanesPattern =
+  /For release work, list independent evidence work separately from checks that depend on it\.[\s\S]*?mark a dependent check `BLOCKED` or `NOT REACHED`, name the failed prerequisite/;
+const skillReleaseProgressLanesPattern =
+  /\*\*Independent evidence:\*\*[\s\S]*?\*\*Dependent checks:\*\*[\s\S]*?(?:prerequisite[\s\S]*?(?:BLOCKED|NOT REACHED)|(?:BLOCKED|NOT REACHED)[\s\S]*?prerequisite)/i;
+
 const checks: Record<string, Requirement[]> = {
   "replit.md": [
     {
@@ -35,6 +42,18 @@ const checks: Record<string, Requirement[]> = {
       pattern:
         /Never claim success by[\s\S]*?treating missing evidence as a pass/,
       remediation: "never treat missing evidence as a successful validation",
+    },
+    {
+      label: "long-running progress format",
+      pattern: longRunningProgressPattern,
+      remediation:
+        "include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+    },
+    {
+      label: "release progress lanes",
+      pattern: replitReleaseProgressLanesPattern,
+      remediation:
+        "separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite",
     },
   ],
   ".agents/skills/production-go/SKILL.md": [
@@ -66,6 +85,18 @@ const checks: Record<string, Requirement[]> = {
       remediation:
         "keep BLOCKED, NOT REACHED, and MISSING unresolved until required evidence exists or a documented exception applies",
     },
+    {
+      label: "long-running progress format",
+      pattern: longRunningProgressPattern,
+      remediation:
+        "include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+    },
+    {
+      label: "release progress lanes",
+      pattern: skillReleaseProgressLanesPattern,
+      remediation:
+        "separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite",
+    },
   ],
   ".agents/skills/release-checklist/SKILL.md": [
     {
@@ -94,6 +125,18 @@ const checks: Record<string, Requirement[]> = {
       pattern: /A failed command or missing evidence is a\s+\*\*no-go\*\*/,
       remediation:
         "treat failed commands and missing evidence as no-go conditions",
+    },
+    {
+      label: "long-running progress format",
+      pattern: longRunningProgressPattern,
+      remediation:
+        "include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+    },
+    {
+      label: "release progress lanes",
+      pattern: skillReleaseProgressLanesPattern,
+      remediation:
+        "separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite",
     },
   ],
   ".agents/skills/customer-import-audit/SKILL.md": [
