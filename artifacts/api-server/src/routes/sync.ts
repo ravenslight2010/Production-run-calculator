@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { createHash, randomUUID } from "node:crypto";
+import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
 import {
   db,
   dailySyncTable,
@@ -224,6 +225,13 @@ export function buildAutoTrackSchedule(
   });
 }
 
+
+// ── Server-side calculation cache ────────────────────────────────────────────
+// Cache serverCalc results keyed by snapshot ID + time bucket (1-second resolution).
+// Avoids recomputing the same calculation on every sync request within the same second.
+const serverCalcCache = new Map<string, ServerCalcResult>();
+const CACHE_MAX_SIZE = 128;
+
 function computeServerLiveState(
   data: unknown,
   nowMs = Date.now(),
@@ -232,6 +240,7 @@ function computeServerLiveState(
   serverCalc: ServerCalcResult | null;
   autoTrackSchedule: AutoTrackSchedule | null;
   operationalProjection: OperationalProjection | null;
+  summaryStats: Record<string, SummaryStats>;
   serverTime: number;
   calculationRevision: number;
   snapshotId?: string;
@@ -239,9 +248,25 @@ function computeServerLiveState(
   const snapshotId = data == null ? undefined : syncSnapshotId(data);
   try {
     const payload = data as BroadcastPayload | null;
-    const serverCalc = payload?.dayState
-      ? computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs)
-      : null;
+    let serverCalc: ServerCalcResult | null = null;
+    if (payload?.dayState) {
+      // Bucket time to 1-second resolution for caching
+      const timeBucket = Math.floor(nowMs / 1000);
+      const cacheKey = snapshotId ? `${snapshotId}:${timeBucket}` : undefined;
+      if (cacheKey && serverCalcCache.has(cacheKey)) {
+        serverCalc = serverCalcCache.get(cacheKey)!;
+      } else {
+        serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs);
+        if (cacheKey && serverCalc) {
+          serverCalcCache.set(cacheKey, serverCalc);
+          // Evict old entries when cache is full
+          if (serverCalcCache.size > CACHE_MAX_SIZE) {
+            const firstKey = serverCalcCache.keys().next().value;
+            if (firstKey) serverCalcCache.delete(firstKey);
+          }
+        }
+      }
+    }
     const autoTrackSchedule = buildAutoTrackSchedule(payload, serverCalc, nowMs);
     const operationalProjection = payload && serverCalc && autoTrackSchedule
       ? buildOperationalProjection({
@@ -252,10 +277,25 @@ function computeServerLiveState(
           calculationRevision,
         })
       : null;
+    // Pre-compute summaryStats for all runs so the client can read them
+    // without recomputing locally (saves ~21 computeSummaryStats calls per render).
+    const summaryStatsMap: Record<string, SummaryStats> = {};
+    if (payload?.dayState?.runs && payload?.runValues) {
+      for (const run of payload.dayState.runs) {
+        const rid = run.id;
+        if (typeof rid !== "string") continue;
+        const vals = payload.runValues[rid] as unknown as SummaryStatsInput | undefined;
+        if (!vals || typeof vals !== "object") continue;
+        try {
+          summaryStatsMap[rid] = computeSummaryStats(vals, []);
+        } catch { /* skip malformed run */ }
+      }
+    }
     return {
       serverCalc,
       autoTrackSchedule,
       operationalProjection,
+      summaryStats: summaryStatsMap,
       serverTime: nowMs,
       calculationRevision,
       ...(snapshotId ? { snapshotId } : {}),
@@ -265,6 +305,7 @@ function computeServerLiveState(
       serverCalc: null,
       autoTrackSchedule: null,
       operationalProjection: null,
+      summaryStats: {} as Record<string, SummaryStats>,
       serverTime: nowMs,
       calculationRevision,
       ...(snapshotId ? { snapshotId } : {}),

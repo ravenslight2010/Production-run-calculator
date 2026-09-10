@@ -7694,6 +7694,8 @@ export default function Home() {
   // adopt these refs without changing today's client-owned ticking semantics.
   const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
   const [serverCalc, setServerCalc] = useState<Calc | null>(null);
+  // Server-computed summary stats keyed by run ID — used when online to avoid local recomputation.
+  const serverSummaryStatsRef = useRef<Record<string, unknown>>({});
   const serverProjectionRef = useRef<OperationalProjection | null>(null);
   const [serverProjection, setServerProjection] = useState<OperationalProjection | null>(null);
   const serverClockOffsetMsRef = useRef(0);
@@ -9063,6 +9065,7 @@ export default function Home() {
           serverCalc?: { runId: string; calc: Calc } | null;
           operationalProjection?: OperationalProjection | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
+          summaryStats?: Record<string, unknown>;
           serverTime?: number;
           canonicalRevision?: number;
           masterDataChanged?: boolean;
@@ -9089,6 +9092,10 @@ export default function Home() {
           setServerProjection(null);
           serverCalcReceiptRef.current = null;
           setServerCalcReceipt(null);
+        }
+        // Adopt server-computed summary stats when available (offline fallback: compute locally)
+        if (msg.summaryStats && typeof msg.summaryStats === "object") {
+          serverSummaryStatsRef.current = msg.summaryStats;
         }
         if (msg.initial) {
           // An initial frame is also the reconnect baseline: refresh every
@@ -14127,15 +14134,31 @@ export default function Home() {
   const needsInventorySnapshot = activeTab === "inventory";
   const needsSummarySnapshot = activeTab === "summary" || screenMode === "summary";
   const persistedRunSummaryStats = useMemo(
-    () => needsSummarySnapshot
-      ? buildRunSummarySnapshot(dayState.runs, persistedRunValues, computeSummaryStats)
-      : new Map(),
-    [needsSummarySnapshot, dayState.runs, persistedRunValues],
+    () => {
+      if (!needsSummarySnapshot) return new Map();
+      const summaries = new Map<string, ReturnType<typeof computeSummaryStats>>();
+      const serverSS = serverSummaryStatsRef.current;
+      const hasServer = isOnline && serverSS && typeof serverSS === "object" && Object.keys(serverSS).length > 0;
+      for (const run of dayState.runs) {
+        const runId = run.id;
+        const vals = persistedRunValues.get(runId);
+        if (!vals) continue;
+        // Use server-computed stats for persisted runs when available (offline fallback: compute locally)
+        if (hasServer && serverSS[runId] && typeof serverSS[runId] === "object") {
+          summaries.set(runId, serverSS[runId] as ReturnType<typeof computeSummaryStats>);
+        } else {
+          summaries.set(runId, computeSummaryStats(vals));
+        }
+      }
+      return summaries;
+    },
+    [needsSummarySnapshot, dayState.runs, persistedRunValues, isOnline],
   );
   const runSummaryStatsById = useMemo(
     () => {
       if (!needsSummarySnapshot) return new Map();
       const summaries = new Map(persistedRunSummaryStats);
+      // Current run always computes locally (form is being edited)
       if (currentRunId) summaries.set(currentRunId, computeSummaryStats(v));
       return summaries;
     },
