@@ -168,38 +168,90 @@ test("reports only the relative document and remediation when a rule is missing"
   }
 });
 
-test("reports missing long-running progress guidance without exposing fixture details", async () => {
-  const secret = "PROGRESS_FIXTURE_SECRET_MUST_NOT_LEAK";
-  const progressLines = [
-    "Current objective: <release outcome and assessed scope>",
-    "Completed work: <closed repair domains and evidence, each with PASS/FAIL>",
-    "Active blockers: <unresolved blocker, evidence, and owner for each>",
-    "Next validation milestone: <next check or decision point; name its prerequisite>",
-    "Owner: <person or team accountable for completion>",
-  ].join("\n");
-  const root = await createFixture({
-    ".agents/skills/production-go/SKILL.md":
-      `${validDocuments[".agents/skills/production-go/SKILL.md"].replace(`${progressLines}\n`, "")}\n${secret}\n`,
-  });
+const progressFields = [
+  "Current objective: <release outcome and assessed scope>",
+  "Completed work: <closed repair domains and evidence, each with PASS/FAIL>",
+  "Active blockers: <unresolved blocker, evidence, and owner for each>",
+  "Next validation milestone: <next check or decision point; name its prerequisite>",
+  "Owner: <person or team accountable for completion>",
+];
 
-  try {
-    const result = await runChecker(root);
-    assert.equal(result.exitCode, 1);
-    assert.equal(result.stdout, "");
-    assert.equal(
-      result.stderr,
-      [
-        "Operational skill evidence check failed:",
-        "- .agents/skills/production-go/SKILL.md: missing long-running progress format; include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
-        "",
-      ].join("\n"),
-    );
-    assert.doesNotMatch(result.stderr, new RegExp(secret));
-    assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
+for (const field of progressFields) {
+  test(`rejects a missing progress field: ${field.split(":")[0]}`, async () => {
+    const secret = `PROGRESS_FIXTURE_SECRET_${field.split(":")[0].replaceAll(" ", "_")}`;
+    const document = validDocuments[".agents/skills/production-go/SKILL.md"];
+    const root = await createFixture({
+      ".agents/skills/production-go/SKILL.md":
+        `${document.replace(field, "")}\n${secret}\n`,
+    });
+
+    try {
+      const result = await runChecker(root);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(
+        result.stderr,
+        [
+          "Operational skill evidence check failed:",
+          "- .agents/skills/production-go/SKILL.md: missing long-running progress format; include Current objective, Completed work, Active blockers, Next validation milestone, and Owner in long-running task updates",
+          "",
+        ].join("\n"),
+      );
+      assert.doesNotMatch(result.stderr, new RegExp(secret));
+      assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
+      assert.doesNotMatch(result.stderr, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+const releaseLaneRules = [
+  {
+    name: "independent evidence",
+    document: ".agents/skills/production-go/SKILL.md",
+    line: "**Independent evidence:** safe gates that can continue despite another failure; run them and record their actual status.",
+  },
+  {
+    name: "dependent checks",
+    document: ".agents/skills/production-go/SKILL.md",
+    line: "**Dependent checks:** gates waiting on a named prerequisite; record them as `BLOCKED` or `NOT REACHED` with that prerequisite instead of implying a pass.",
+  },
+  {
+    name: "independent release evidence",
+    document: "replit.md",
+    line: "For release work, list independent evidence work separately from checks that depend on it. Continue every independent check that is valid and safe; mark a dependent check `BLOCKED` or `NOT REACHED`, name the failed prerequisite, and keep it unresolved until its evidence exists.",
+  },
+];
+
+for (const rule of releaseLaneRules) {
+  test(`rejects a missing release lane rule: ${rule.name}`, async () => {
+    const secret = `LANE_FIXTURE_SECRET_${rule.name.replaceAll(" ", "_").toUpperCase()}`;
+    const document = validDocuments[rule.document];
+    const root = await createFixture({
+      [rule.document]: `${document.replace(rule.line, "")}\n${secret}\n`,
+    });
+
+    try {
+      const result = await runChecker(root);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(
+        result.stderr,
+        [
+          "Operational skill evidence check failed:",
+          `- ${rule.document}: missing release progress lanes; separate independent evidence from dependent checks and record dependent checks as BLOCKED or NOT REACHED with their prerequisite`,
+          "",
+        ].join("\n"),
+      );
+      assert.doesNotMatch(result.stderr, new RegExp(secret));
+      assert.doesNotMatch(result.stderr, /\/tmp\/|\/home\/|operational-skill-evidence-/);
+      assert.doesNotMatch(result.stderr, new RegExp(rule.line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("reports a missing document without exposing filesystem payloads", async () => {
   const root = await createFixture({ "replit.md": undefined });
