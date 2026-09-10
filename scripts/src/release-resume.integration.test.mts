@@ -4,6 +4,7 @@ import { mkdir, readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { releaseGateLabelsForMode } from "./release-check.mts";
 
 type FixtureStep = {
   label: string;
@@ -32,6 +33,10 @@ const onboardingGuard = join(
   "e2e",
   "onboarding-guard.mjs",
 );
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 async function runReleaseCheck(
   evidenceDir: string,
@@ -641,6 +646,94 @@ async function runStoppedSummaryScenario(): Promise<void> {
 
   console.log(
     "Stopped release summary contract passed (standard/full; blocker display, safe fallback, artifact link, upload-failure, and unresolved pre-checkpoint interruption).",
+  );
+
+  const productionGateLabels = releaseGateLabelsForMode("full");
+  const productionPunctuation = new Set(
+    productionGateLabels.flatMap((label) =>
+      [...label].filter((character) => !/[A-Za-z0-9 ]/.test(character)),
+    ),
+  );
+  const representativeLabels: string[] = [];
+  const coveredPunctuation = new Set<string>();
+  for (const label of productionGateLabels) {
+    const labelPunctuation = [...label].filter(
+      (character) => !/[A-Za-z0-9 ]/.test(character),
+    );
+    if (
+      labelPunctuation.some((character) => !coveredPunctuation.has(character))
+    ) {
+      representativeLabels.push(label);
+      for (const character of labelPunctuation) {
+        coveredPunctuation.add(character);
+      }
+    }
+  }
+  assert.deepEqual(
+    [...coveredPunctuation].sort(),
+    [...productionPunctuation].sort(),
+    "stopped-summary fixture must cover every punctuation character used by production gate labels",
+  );
+  assert.ok(
+    representativeLabels.length > 0,
+    "production release gate labels must provide a stopped-summary format fixture",
+  );
+  const fixtureRootBlockers = representativeLabels
+    .map((label) => `${label} (FAIL)`)
+    .join("; ");
+  const fixtureBlockedGates = `${representativeLabels[representativeLabels.length - 1]} (blocked by ${representativeLabels[0]})`;
+  assert.ok(
+    fixtureRootBlockers.length <= 2048 &&
+      fixtureBlockedGates.length <= 2048,
+    "stopped-summary format fixture must remain within the parser line-length bound",
+  );
+  {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), "release-summary-production-label-format-"),
+    );
+    const summaryPath = join(evidenceDir, "step-summary.md");
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        [
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+          "",
+          `Root blockers: ${fixtureRootBlockers}`,
+          `Blocked gates: ${fixtureBlockedGates}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        summaryPath,
+        "full",
+        "",
+      );
+      assert.equal(result.code, 0, result.output);
+      const summary = await readFile(summaryPath, "utf8");
+      assert.doesNotMatch(
+        summary,
+        /Blocker summary unresolved: checkpoint text is missing or malformed\./,
+        `valid production gate labels were rejected by the stopped-summary parser: ${representativeLabels.join(", ")}`,
+      );
+      assert.match(
+        summary,
+        new RegExp(`Root blockers: ${escapeRegExp(fixtureRootBlockers)}`),
+        "stopped summary must preserve the validated production blocker text",
+      );
+      assert.match(
+        summary,
+        new RegExp(`Blocked gates: ${escapeRegExp(fixtureBlockedGates)}`),
+        "stopped summary must preserve the validated blocked-gate text",
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log(
+    "Stopped release summary format contract passed (production label punctuation and safe blocker preservation).",
   );
 }
 
