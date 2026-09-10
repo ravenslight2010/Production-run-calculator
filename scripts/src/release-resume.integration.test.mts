@@ -103,6 +103,7 @@ function runStoppedSummary(
         CHECKPOINT_DIR: evidenceDir,
         CHECKPOINT_ARTIFACT_URL: artifactUrl,
         GITHUB_STEP_SUMMARY: summaryPath,
+        RELEASE_CHECK_OUTCOME: "failure",
         RELEASE_MODE: mode,
         RESUME_COMMAND:
           mode === "full"
@@ -568,8 +569,78 @@ async function runStoppedSummaryScenario(): Promise<void> {
     }
   }
 
+  for (const mode of ["standard", "full"] as const) {
+    const successfulEvidenceDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-success-without-checkpoint-`),
+    );
+    const successfulSummaryPath = join(
+      successfulEvidenceDir,
+      "step-summary.md",
+    );
+    try {
+      const result = await runStoppedSummary(
+        successfulEvidenceDir,
+        successfulSummaryPath,
+        mode,
+        "",
+        { RELEASE_CHECK_OUTCOME: "success" },
+      );
+      assert.equal(result.code, 0, result.output);
+      await assert.rejects(
+        readFile(successfulSummaryPath, "utf8"),
+        `${mode} success without a checkpoint must not add a stopped summary`,
+      );
+    } finally {
+      await rm(successfulEvidenceDir, { recursive: true, force: true });
+    }
+
+    for (const outcome of ["failure", "cancelled"] as const) {
+      const interruptedEvidenceDir = await mkdtemp(
+        join(
+          tmpdir(),
+          `release-summary-${mode}-${outcome}-without-checkpoint-`,
+        ),
+      );
+      const interruptedSummaryPath = join(
+        interruptedEvidenceDir,
+        "step-summary.md",
+      );
+      try {
+        const result = await runStoppedSummary(
+          interruptedEvidenceDir,
+          interruptedSummaryPath,
+          mode,
+          "",
+          { RELEASE_CHECK_OUTCOME: outcome },
+        );
+        assert.equal(result.code, 0, result.output);
+        const summary = await readFile(interruptedSummaryPath, "utf8");
+        assert.match(
+          summary,
+          /Checkpoint status unresolved: the release check ended before a checkpoint could be created\./,
+          `${mode}/${outcome} without a checkpoint must be visibly unresolved`,
+        );
+        assert.match(
+          summary,
+          /Resume the incomplete check with:/,
+          `${mode}/${outcome} unresolved summary must include recovery guidance`,
+        );
+        assert.doesNotMatch(
+          summary,
+          /Decision: GO$/,
+          `${mode}/${outcome} unresolved summary must not imply GO`,
+        );
+      } finally {
+        await rm(interruptedEvidenceDir, {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
+  }
+
   console.log(
-    "Stopped release summary contract passed (standard/full; blocker display, safe fallback, artifact link, and upload-failure).",
+    "Stopped release summary contract passed (standard/full; blocker display, safe fallback, artifact link, upload-failure, and unresolved pre-checkpoint interruption).",
   );
 }
 

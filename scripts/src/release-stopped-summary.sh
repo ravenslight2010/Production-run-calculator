@@ -3,10 +3,46 @@ set -euo pipefail
 
 : "${CHECKPOINT_DIR:?CHECKPOINT_DIR is required}"
 : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+: "${RELEASE_CHECK_OUTCOME:?RELEASE_CHECK_OUTCOME is required}"
 : "${RELEASE_MODE:?RELEASE_MODE is required}"
 
 checkpoint_report_path="$CHECKPOINT_DIR/release-check-checkpoint.md"
 if [[ ! -s "$checkpoint_report_path" ]]; then
+  if [[ "$RELEASE_CHECK_OUTCOME" != "success" ]]; then
+    case "$RELEASE_MODE" in
+      standard)
+        stopped_message="The release check stopped before all gates completed."
+        ;;
+      full)
+        stopped_message="The full release check stopped before all gates completed."
+        ;;
+      *)
+        echo "Unsupported release mode: $RELEASE_MODE" >&2
+        exit 2
+        ;;
+    esac
+
+    {
+      echo "## Release check stopped — NO-GO"
+      echo
+      echo "$stopped_message"
+      echo
+      echo "## Release blockers"
+      echo "Checkpoint status unresolved: the release check ended before a checkpoint could be created."
+      echo
+      echo "No stopped-check checkpoint artifact is available for this run."
+      echo
+      echo "Resume the incomplete check with:"
+      echo '```text'
+      echo "${RESUME_COMMAND:?RESUME_COMMAND is required}"
+      echo '```'
+      echo
+      echo "Or regenerate the retained report from a fresh run with:"
+      echo '```text'
+      echo "${REGENERATE_COMMAND:?REGENERATE_COMMAND is required}"
+      echo '```'
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
   exit 0
 fi
 
