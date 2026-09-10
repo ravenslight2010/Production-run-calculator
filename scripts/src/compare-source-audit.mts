@@ -66,7 +66,7 @@ type SourceComparisonReport = {
   rerun: string;
 };
 
-const ROOT = path.resolve(process.cwd(), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SOURCE_ROOT = path.join(ROOT, "attached_assets/source-library");
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const comparisonKey = (s: unknown) =>

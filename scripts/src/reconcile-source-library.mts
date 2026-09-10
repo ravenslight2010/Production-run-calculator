@@ -13,7 +13,7 @@ import { parsePremixWorkbook, premixToMix, type SheetGrid } from "@workspace/pre
 import { parseDoughWorkbook, parseSauceWorkbook } from "./compare-source-audit.mts";
 import { buildSourceLibraryManifest, type SourceLibraryManifest } from "./source-library-manifest.mts";
 
-const ROOT = path.resolve(process.cwd(), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SOURCE_ROOT = path.join(ROOT, "attached_assets/source-library");
 const sha = (value: Buffer | string) => crypto.createHash("sha256").update(value).digest("hex");
 const key = (value: unknown) => String(value ?? "").toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9]+/g, " ").trim();
