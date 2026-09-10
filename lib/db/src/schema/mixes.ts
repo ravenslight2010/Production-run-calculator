@@ -35,6 +35,11 @@ export const mixesTable = pgTable(
     daysEarly: integer("days_early").notNull().default(0),
     notes: text("notes").notNull().default(""),
     amountAlreadyMade: real("amount_already_made").notNull().default(0),
+    // Pounds actually made for the current make-day (Feature B2). Optional;
+    // null/0 = assume the plan's needed amount. Greater than needed means
+    // overproduction of mix (tracked as surplus); less means under-produced.
+    // ADDITIVE column: default 0, nullable-free, push-force-safe.
+    amountActualMade: real("amount_actual_made").notNull().default(0),
     components: jsonb("components").notNull().default([]).$type<MixComponentRow[]>(),
     isPrep: boolean("is_prep").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),

@@ -9,6 +9,7 @@ import {
   DEFAULT_VALUES,
   PACKAGING_TYPE_OPTIONS,
   LABEL_POSITION_OPTIONS,
+  CARTON_SIZE_OPTIONS,
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
 import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
@@ -1082,7 +1083,18 @@ export default function SetupProfileEditor({
                       const typeVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
                       const posVal = ((v.labelPosition as string) ?? "").trim().toLowerCase();
                       if (typeVal === "cartoned" || typeVal === "yes") {
-                        return <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />;
+                        return (
+                          <div className="space-y-2">
+                            <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />
+                            <FixedChipSelect
+                              label="Carton Size"
+                              options={CARTON_SIZE_OPTIONS}
+                              value={String((v.cartonSize as number) ?? 1)}
+                              onSelect={(val: string) => form.setValue("cartonSize", Number(val), { shouldDirty: true })}
+                              allowClear={false}
+                            />
+                          </div>
+                        );
                       }
                       if (typeVal === "labeled" && (posVal === "top" || posVal === "bottom")) {
                         return <NumField control={form.control} name="labelsPerRoll" label="Labels Per Roll" step="1" />;

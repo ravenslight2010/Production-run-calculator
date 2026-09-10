@@ -1,4 +1,4 @@
-# Inventory Auto-Deduction — Comprehensive Plan
+# Inventory Auto-Deduction — Comprehensive Plan (Updated 2026-09-09)
 
 ## The Core Problem
 Inventory consumption is a **single-point event** at run-end, computed from the **planned** `casesNeeded`. Multiple production activities that consume ingredients or packaging are not reflected in inventory. This causes inventory to drift from reality over time.
@@ -7,142 +7,219 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 
 ## A. Overproduction Inventory Deduction (Critical)
 
-**Already planned** in `docs/overproduction-surplus-plan.md`.
+**Status**: Not yet built
+**Owner**: Replit (working on AI right now)
 
-**What**: When actual production exceeds planned target, extra ingredients are consumed but not deducted.
-**Fix**: When surplus is confirmed (store-in-freezer or use-on-next-run), compute extra ingredient consumption for overproduced cases and deduct separately.
-**When**: At surplus confirmation moment.
-**Audit**: "Overproduction: {excess} cases → deducted {qty} {item} from inventory"
+**What**: When actual production exceeds the planned target, extra ingredients are consumed but not deducted.
+
+**When**: At surplus confirmation moment (end of run, manager confirms extra cases).
+
+**How it works**:
+1. Run ends with `casesCompleted` > `casesNeeded`
+2. Surplus panel appears: "You have X extra cases. Store in freezer?"
+3. Manager confirms surplus
+4. Server computes extra ingredient consumption for the overproduced cases:
+   ```
+   excessQty = actualQty × (casesCompleted - casesNeeded) / casesNeeded
+   ```
+   (Using the scaled proportion from Feature D — actual vs. planned.)
+5. Deducts the extra ingredients from inventory (onsite location lots only)
+6. Creates ledger entries: type "consume", note "Overproduction: {X} cases → deducted {qty} {item}"
+
+**Key invariant**: Surplus cases become a **freezer surplus asset** (not re-deducted when reused). The overproduction deduction is the only time those ingredients are charged.
 
 ---
 
-## B. Mix / Prep Mix Inventory Deduction (Critical)
+## B. Mix / Prep Mix Deduction (Critical)
 
-**Already planned** in idea backlog entry #1.
+**Status**: Not yet built
 
-**What**: When prep mixes are made, component ingredients are consumed but not deducted.
-**Fix**: When "Already Made" is entered or a new mix-made action fires, deduct component ingredients from inventory.
-**When**: At mix-made confirmation.
-**Audit**: "Prep mix made: {mix name} → deducted {qty} {ingredient} from inventory"
+**What**: When prep mixes are made, the component ingredients need to be accounted for. Also, leftover ("Already Made") mix needs to offset future deductions without double-charging.
 
-**Mix Surplus / Leftover**: Track remaining mix in freezer. Auto-allocate to next matching run. Reminder: "You have 15 lbs of Bobo's Veggie Mix in the freezer."
+**Two scenarios**:
+
+### B1. Already Made (pre-made mix from a prior run)
+
+"Already Made" = **offset** to the current run's fresh mix need. It is NOT a deduction trigger.
+
+```
+freshMixNeeded = plannedMixNeed - alreadyMade
+```
+
+The ingredients for "Already Made" were already deducted at the time the mix was originally made (overproduction of mix in a prior run — see B2). No new ingredient charge.
+
+**UI**: When "Already Made" is entered for a mix slot, the system adjusts the deduction to only cover `freshMixNeeded`. If `alreadyMade > plannedMixNeed`, `freshMixNeeded = 0` (no fresh mix made).
+
+### B2. Overproduction of Mix (made more than needed)
+
+Similar to Feature A but for mixes specifically.
+
+**When**: At run end, if the mixer reports "actual made" > "planned needed".
+
+**UI**: The mix plan has an optional "Actual Made" field per mix slot.
+- If left blank: assume actual = planned (no overproduction deduction)
+- If entered and > planned: deduct the extra ingredient amounts
+
+**Example**:
+- Run 1: need 100 lbs mix, made 120 lbs, 25 lbs leftover
+- Run 1 overproduction: 20 lbs extra → deduct ingredient proportions for 20 lbs
+- 25 lbs leftover → tracked as surplus mix asset in freezer
+- Run 2: "Already Made: 25 lbs" → fresh mix needed = 100 - 25 = 75 lbs → deduct for 75 lbs
+
+**Surplus mix tracking**: When leftover mix exists after a run, store it in the freezer as a surplus asset with a reminder: "You have 25 lbs of {mix name} in the freezer."
 
 ---
 
-## C. Freezer Pull — Fix Double-Counting (Medium)
+## C. Freezer Pull → Inventory Sync (Medium)
 
-**Problem**: When warehouse pulls items from the freezer for a run, the pull is tracked in the freezer surplus system but doesn't deduct from the main inventory lots. This means the same stock is counted twice — once in inventory and once in the freezer surplus.
+**Status**: Not yet built
 
-**Fix**: When a freezer surplus allocation is confirmed ("Use on Next Run" or manual pull):
-1. Deduct the allocated cases from the freezer location's inventory lots
-2. Create a ledger entry: type "consume", note "freezer pull for run {id}"
-3. The freezer surplus system already tracks the allocation — this just syncs inventory
+**Problem**: When warehouse pulls items from the freezer for a run, the pull is tracked in the freezer surplus system but doesn't move inventory lots. This causes double-counting — the same stock appears in both inventory and freezer surplus.
 
 **When**: At allocation confirmation in `FreezerSurplusPanel`.
-**API**: Extend `POST /api/freezer-surplus/allocate` to also call inventory draw-down.
+
+**How it works**:
+1. Manager confirms "Use on Next Run" in the freezer surplus panel
+2. Server deducts the allocated cases from the **freezer location's** inventory lots (not onsite)
+3. Creates ledger entry: type "transfer", note "freezer pull for run {id}"
+4. The freezer surplus system tracks the allocation — inventory just moves the lot location
+
+**Key invariant**: This is a **lot movement only**, not an ingredient deduction. The surplus cases were already paid for at overproduction time (Feature A). No ingredient charge happens here.
 
 ---
 
 ## D. Actual Cases Instead of Planned (Medium)
 
+**Status**: Not yet built
+
 **Problem**: `findExpectedConsumptionForRun` reads the planned `casesNeeded` from form values. When actual production differs, inventory is wrong.
 
-**Fix**: Use `casesCompleted` (actual) when available, fall back to `casesNeeded` (planned).
+**When**: At run end, during the `POST /inventory/consume` call.
 
-**Implementation**:
-1. When a run ends, the server has access to the run's `endedAt` timestamp and the day-state
-2. The day-state stores `runValues` which include the form values at run-end
-3. The form values include `casesCompleted` (written by auto-track or manual entry)
-4. Change `findExpectedConsumptionForRun` to:
-   - Read `casesCompleted` from the run's stored values
-   - If `casesCompleted > 0` AND `casesCompleted ≠ casesNeeded`:
-     - Scale all ingredient lines proportionally: `actual_qty = planned_qty × (casesCompleted / casesNeeded)`
-   - If `casesCompleted = 0` or missing: use planned (current behavior, backward-compatible)
-5. This makes run-end consumption match actual production, reducing the overproduction gap
+**How it works**:
+1. Read `casesCompleted` from the run's stored values
+2. If `casesCompleted > 0` AND `casesCompleted ≠ casesNeeded`:
+   - Compute scale factor: `scale = casesCompleted / casesNeeded`
+   - Apply to ALL consumption lines: `actualQty = plannedQty × scale`
+3. If `casesCompleted = 0` or missing: use planned values (backward-compatible)
 
-**Key safety**: The ratio scaling preserves ingredient proportions — if you made 10% more cases, you used 10% more of every ingredient.
-
-**Caveat**: If a run stops early and resumes, `casesCompleted` may be incomplete. The server should use the final `casesCompleted` at the time of `POST /inventory/consume`.
+**Scale applies to**: every ingredient and packaging line — dough, sauce, applicators, pepperoni, circles, shippers, cartons, labels, pallets, etc. No exceptions.
 
 ---
 
-## E. Non-Ingredient / Packaging Inventory Gaps
+## E. Full Packaging Consumption (Medium)
 
-### Gap E1-E3: Packaging Consumption Per Mode
-**Problem**: Only `cartoned` runs consume circles/shippers/cartons. `labeled` runs consume nothing. Grip sheets, slip sheets, and skid stacking are never tracked.
+**Status**: Not yet built
 
-**Fix**: Extend `computeRunLines` to handle all packaging modes:
+**Problem**: Only circles, shippers, and cartons are consumed from inventory. All other packaging items (slip sheets, grip sheets, labels, pallets, tape, glue, ink, shipper labels) are missing.
 
-| Mode | Circles | Shippers | Cartons | Top/Bottom Labels | Shipper Labels | Slip/Grip Sheets | Pallets | Tape/Glue/Ink |
-|------|---------|----------|---------|-------------------|---------------|-----------------|---------|--------------|
-| `cartoned` | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ |
-| `labeled` | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `n-a` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ |
+### E1. New Profile Field: Carton Size
 
-**Key insight**: Circles, shippers, grip/slip sheets, pallets, and tape/glue apply to BOTH cartoned and labeled runs — only cartons and labels are mode-specific. `n-a` still uses pallets and grip/slip sheets (physical stacking needs them).
+Add `cartonSize` to FormValues and the packaging profile:
+- "single" (default) = 1 pizza per carton
+- "double" = 2 pizzas per carton
+- "triple" = 3 pizzas per carton
 
-**Implementation**:
-- Move circles/shippers OUTSIDE the `cartoned` gate
-- Add label roll deduction for `labeled` runs
-- Add grip sheets, slip sheets, pallets, tape, glue, ink as universal packaging lines
+**Carton consumption** (revised):
+```
+cartonsPerSkid = casesPerSkid × cartonSize × cartonsPerCase
+casesOfCartons = ceil(totalPizzas / (cartonSize × cartonsPerCase))
+```
 
-### Gap E4: Full Packaging Inventory List
-**Problem**: The system only tracks 3 packaging items (circles, shippers, cartons). The real factory uses 13+ packaging items, most lot-tracked by QC.
+Key: `packaging:cartons:cases` (unchanged key, new quantity)
 
-**Complete packaging list** (what the factory actually uses):
+### E2. Slip Sheets
 
-| Item | Unit | How Computed | Currently Tracked |
-|------|------|-------------|-------------------|
-| **Circles** | circles | totalPizzas × circle size | ✓ cartoned only |
-| **Shippers** | shippers | totalCases × shipper type | ✓ cartoned only |
-| **Cartons** | cases | totalPizzas / cartonsPerCase | ✓ cartoned only |
-| **Slip sheets** | sheets | per skid layer | ✗ |
-| **Grip sheets** | sheets | per skid layer (based on gripSheets setting) | ✗ |
-| **Top labels** | rolls | totalPizzas / labelsPerRoll (top position) | ✗ |
-| **Bottom labels** | rolls | totalPizzas / labelsPerRoll (bottom position) | ✗ |
-| **Shipper labels** | rolls | totalCases / labelsPerShipper | ✗ |
-| **Pallets** | pallets | Math.ceil(casesNeeded / casesPerSkid) | ✗ |
-| **Tape** | rolls | per N skids or per run | ✗ |
-| **Glue** | lbs/oz | per run (labeling) | ✗ |
-| **Glue sticks** | sticks | per run (labeling) | ✗ |
-| **Ink** | cartridges | per run (labeling) | ✗ |
+- When `slipSheets = "yes"`: 1 slip sheet per layer
+- `layers = totalCases / casesPerLayer`
+- Key: `packaging:slip-sheets:count`
+- Unit: count
 
-**Fix**: Add all 13 items to `computeRunLines` with proper computation logic. Each gets a consumption key, category "packaging", and deducts from inventory at run-end.
+### E3. Grip Sheets
 
-**QC lot tracking tie-in**: Most of these packaging items get lot-tracked by QC. The lot tracking system (from QC department plan) connects here — when packaging is consumed from inventory, the lot number should be recorded. This creates the full chain: **QC lot entry → inventory deduction → run consumption → audit trail**.
+Per skid, based on `gripSheets` setting:
+- "none" = 0
+- "every other layer" = `ceil(layersPerSkkid / 2)` per skid
+  - `layersPerSkkid = casesPerSkkid / casesPerLayer`
+- "3rd and 5th" = exactly 2 per skid
+- Total = perSkkid × `ceil(totalCases / casesPerSkkid)`
 
-### Gap E5: Pallets / Skids
-**Problem**: `casesPerSkid` and `skidsCompleted` are tracked but pallets themselves are never consumed from inventory.
+Key: `packaging:grip-sheets:count`
+Unit: count
 
-**Fix**: 
+### E4. Labels
+
+- Depends on `labelPosition` and `labelsPerRoll`
+- If `labelPosition = "top"`: 1 label per pizza
+- If `labelPosition = "bottom"`: 1 label per pizza
+- If `labelPosition = "both"`: 2 labels per pizza (1 top + 1 bottom)
+- Rolls consumed = `totalPizzas × labelMultiplier / labelsPerRoll`
+  - `labelMultiplier = labelPosition === "both" ? 2 : 1`
+- Key: `packaging:labels:{position}` (position = top/bottom/both)
+- Unit: rolls
+
+### E5. Pallets
+
+- `pallets = ceil(totalCases / casesPerSkid)`
 - Key: `packaging:pallets:count`
-- Computed from: `Math.ceil(casesNeeded / casesPerSkid)` (or `skidsCompleted` for actual)
-- Deduct from inventory like other packaging
-- Lot-tracked by QC when pallets are staged
+- Unit: count
+
+### E6. Shipper Labels
+
+- 1 per case
+- `shipperLabels = totalCases`
+- Key: `packaging:shipper-labels:count`
+- Unit: count
+
+### E7. Daily Reset Supplies (Tape, Glue, Ink)
+
+Deducted at daily reset for that day's production runs (not per-run).
+
+| Item | Rate | Calculation | Key |
+|------|------|-------------|-----|
+| Tape | 4 per day | 4 | `packaging:tape:count` |
+| Glue/glue sticks | ~1 per 3.5 days | 1/3.5 ≈ 0.286 per day | `packaging:glue:count` |
+| Ink | ~1 per month | 1/(4.3 × 3) ≈ 0.078 per day | `packaging:ink:count` |
+
+**Trigger**: Daily reset function (`POST /reset-day`) or app load after midnight.
+**Scaling**: Rates are per production day. If multiple runs happen, these are consumed once per day (not per run).
+**Ink special case**: One pizza is dated without carton — but ink consumption is so small (0.078/day) that the per-day rate covers this without separate tracking.
+
+---
+
+## F. Daily Reset: Yesterday → Today
+
+**Status**: Already partially implemented
+
+**What happens at daily reset**:
+1. Yesterday's completed runs are archived (or saved for QC audit trail)
+2. Day-state resets for today
+3. Tape/glue/ink deducted from inventory for today's production day
+4. Surplus mix from yesterday shows as "Available in Freezer" reminder
+5. QC-related items preserved for audit (lot tracking, weights, etc.)
 
 ---
 
 ## Implementation Order
 
-### Phase 1: Fix Core Consumption (A + B + D)
-1. Use actual cases instead of planned in `findExpectedConsumptionForRun`
-2. Overproduction inventory deduction at surplus confirm
-3. Mix/prep mix inventory deduction at mix-made confirm
+### Phase 1: Core Consumption Fixes (A + D)
+1. Extend `findExpectedConsumptionForRun` to use actual cases (D)
+2. Add overproduction ingredient deduction at surplus confirmation (A)
 
-### Phase 2: Fix Double-Counting (C)
-4. Freezer pull → inventory deduction
+### Phase 2: Mix Deduction (B)
+3. Add "Already Made" offset logic to mix consumption
+4. Add optional "actual made" field to mix plan
+5. Track surplus mix in freezer with reminder
 
-### Phase 3: Fix Packaging Gaps (E)
-5. Labeled runs: deduct circles, shippers, labels
-6. Grip sheets consumption
-7. Skid stacking materials
-8. Film/wrap/tape (configurable supplies)
-9. Pallets consumption
+### Phase 3: Freezer Pull Sync (C)
+6. Extend freezer surplus allocation to deduct from freezer location inventory
+7. Validate no double-counting with overproduction deduction
 
-### Phase 4: Waste & Returns (from gap analysis)
-10. Waste/spoilage logging
-11. Stoppages mid-run waste
-12. Ingredient returns at run-end
+### Phase 4: Packaging Completion (E)
+8. Add `cartonSize` field to FormValues and profiles
+9. Add slip sheets, grip sheets, labels, pallets, shipper labels to `computeRunLines`
+10. Add tape/glue/ink daily reset deductions
+11. Update warehouse needs roll-up to show all packaging items
 
 ---
 
@@ -150,25 +227,23 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 
 | File | Change |
 |------|--------|
-| `lib/inventory-math/src/index.ts:278` | `computeRunLines` — extend for packaging modes |
-| `lib/inventory-math/src/index.ts:393` | `computeRunConsumptionLines` — wrapper |
+| `lib/inventory-math/src/index.ts:278` | `computeRunLines` — extend for full packaging |
+| `lib/inventory-math/src/index.ts:88` | `RunLinesInput` — add cartonSize, slipSheets, gripSheets, etc. |
 | `artifacts/api-server/src/routes/inventory.ts:1311` | `findExpectedConsumptionForRun` — use actual cases |
-| `artifacts/api-server/src/routes/inventory.ts:1560` | `POST /inventory/consume` — already has the draw-down |
+| `artifacts/api-server/src/routes/inventory.ts:1560` | `POST /inventory/consume` — extend for full packaging |
 | `artifacts/api-server/src/routes/inventoryLogic.ts` | `applyRunConsumption` — draw-down engine (reuse) |
-| `artifacts/run-calculator/src/freezerSurplus.ts` | Freezer surplus logic (extend for inventory sync) |
-| `lib/freezer-pull/src/surplus.ts` | Surplus math (extend) |
-| `artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx` | Surplus UI (add inventory deduction) |
-| `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx` | Already-made input (add inventory deduction) |
-| `artifacts/run-calculator/src/types.ts` | Form values (add slip sheets, tape, glue, ink, shipper labels) |
-| `artifacts/run-calculator/src/pages/home.tsx:1055` | `aggregatePackagingNeeds` — extend for full packaging list |
-| `artifacts/run-calculator/src/departments/QcDepartment.tsx` | QC lot tracking ties to packaging consumption |
+| `artifacts/run-calculator/src/types.ts` | FormValues — add cartonSize, slipSheets, gripSheets fields |
+| `artifacts/run-calculator/src/freezerSurplus.ts` | Freezer surplus logic — extend for inventory sync |
+| `lib/freezer-pull/src/surplus.ts` | Surplus math — extend for inventory sync |
+| `artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx` | Surplus UI — add inventory deduction |
+| `artifacts/run-calculator/src/warehouseGrouping.ts` | Warehouse needs — show all packaging items |
+| `artifacts/api-server/src/routes/reset-day.ts` | Daily reset — add tape/glue/ink deduction |
 
-## New Database Tables
-None — all changes extend existing tables and consumption logic.
+## New Database Fields
+- `cartonSize` in FormValues (single/double/triple) — schema-free (JSON payload in form values)
 
 ## API Changes
-- `POST /inventory/consume` — extend to accept actual cases + full packaging list
-- `POST /api/freezer-surplus/allocate` — add inventory deduction side-effect
-- New: `POST /inventory/consume-mix` — deduct mix ingredients
-- New: `POST /inventory/consume-overproduction` — deduct overproduction ingredients
-- Lot tracking integration: packaging deductions carry lot numbers from QC entries
+- `POST /inventory/consume` — accept actual cases, scale all lines proportionally
+- `POST /inventory/consume-overproduction` — deduct extra ingredients at surplus confirm
+- `POST /api/freezer-surplus/allocate` — add lot movement (not ingredient deduction)
+- Daily reset endpoint — deduct tape/glue/ink for the production day

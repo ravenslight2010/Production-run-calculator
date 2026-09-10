@@ -1464,6 +1464,8 @@ export interface SavedMix {
   daysEarly: number;
   notes?: string;
   amountAlreadyMade: number;
+  /** Pounds actually made for the current make-day (0 = assume needed) */
+  amountActualMade?: number;
   components: MixComponentSpec[];
   enabled: boolean;
   [key: string]: unknown;
@@ -3746,6 +3748,8 @@ export interface Mix {
   notes?: string;
   /** Pounds already made/on hand, subtracted from the total */
   amountAlreadyMade: number;
+  /** Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan's needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry). */
+  amountActualMade?: number;
   /** The ingredients that make up the mix */
   components: MixComponent[];
   enabled: boolean;

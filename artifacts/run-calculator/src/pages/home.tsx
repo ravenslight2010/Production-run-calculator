@@ -8828,7 +8828,26 @@ export default function Home() {
     })();
   }, []);
 
-  // ── Factory KV: startup fetch + write-through hook registration ──
+  // ── Feature B+E7: Day-start inventory consumption (once per mount) ─────
+  // Best-effort call to POST /inventory/consume-day-start on first load. The
+  // server is idempotent per date (runId = "day-start:{today}"), so subsequent
+  // calls within the same day return applied=false with zero side-effects.
+  // Managers-only gate on the server; non-managers get a harmless 403.
+  useEffect(() => {
+    (async () => {
+      try {
+        await fetch("/api/inventory/consume-day-start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: todayStr() }),
+        });
+      } catch {
+        /* best-effort — daily reset will retry next boot if needed */
+      }
+    })();
+  }, []);
+
+    // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
   // localStorage (for cached keys) and module state (for server-only keys:
   // stop reasons, packaging settings), then refresh React state.  After that,

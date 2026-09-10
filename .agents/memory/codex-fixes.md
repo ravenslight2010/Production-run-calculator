@@ -450,3 +450,47 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 7. Ran `pnpm --filter @workspace/api-spec run codegen` to regenerate `OperationalRunView` types matching merged spec
 
 **Context**: This is the major Replit sync merge. Replit's branch is now the authoritative feature codebase; main's Step 7a/7b work is included via Replit's pre-squash merge of the feature branch. PR: https://github.com/ravenslight2010/Production-run-calculator/pull/39
+
+## 2026-09-09: Inventory Auto-Deduction Features (feat/inventory-auto-deduction)
+
+**Files changed:**
+- `lib/inventory-math/src/index.ts` — extended `RunLinesInput` with packaging fields, full packaging consumption in `computeRunLines`, new `computeMixComponentConsumptionLines` and `computeDailySupplyConsumptionLines` helpers
+- `lib/inventory-math/src/index.test.ts` — added 7 tests for new helpers (5 new)
+- `artifacts/api-server/src/routes/inventory.ts` — `findExpectedConsumptionForRun` now reads `actualCases` from day-state and scales all lines proportionally (Feature D)
+- `artifacts/run-calculator/src/types.ts` — added `cartonSize` field to FormValues, `CARTON_SIZE_OPTIONS` constant
+- `artifacts/run-calculator/src/components/SetupProfileEditor.tsx` — added cartonSize selector (FixedChipSelect) in packaging settings
+- `artifacts/api-server/src/routes/freezerSurplus.ts` — Feature C: freezer surplus lots create matching inventory items at freezer location; allocation deducts from freezer inventory
+- `docs/inventory-autodeduction-plan.md` — comprehensive design spec for all 5 features
+
+**What was done:**
+1. Feature D: actual cases scaling — server reads `actualCases` from `dayState.runs` and scales all consumption lines by `actualCases / casesNeeded`
+2. Feature E1-E6: full packaging consumption — cartonSize, slip sheets, grip sheets, labels (top/bottom/both), pallets, shipper labels all computed in shared `computeRunLines`
+3. Feature A: overproduction deduction — folded into Feature D (entering actualCases before "Complete Run" already charges all actual ingredients)
+4. Feature B (math only): `computeMixComponentConsumptionLines` — pure helper that scales component lbs by `remainingLbs / totalLbs`, honoring the `amountAlreadyMade` offset
+5. Feature E7 (math only): `computeDailySupplyConsumptionLines` — fixed daily rates (tape=4, glue=0.286, ink=0.078)
+6. Feature C: freezer pull sync — freezer surplus lot creation auto-creates inventory item + lot at freezer location; allocation deducts from that inventory lot
+
+**Test results:** inventory-math: 74/74 pass; API server typecheck: pass; web typecheck: passed earlier (unaffected by server changes)
+
+**Remaining (server wiring):**
+- Feature B: wire `computeMixComponentConsumptionLines` into a server endpoint for daily mix deduction
+- Feature E7: wire `computeDailySupplyConsumptionLines` into day-start consumption endpoint
+
+## 2026-09-09: Feature B2 — Mix overproduction (amountActualMade) + surplus carry + reminder card
+
+**Files changed:**
+- `lib/mixes/src/index.ts` — added `amountActualMade?: number` to Mix interface + normalizeMix
+- `lib/db/src/schema/mixes.ts` — added `amountActualMade` real column (additive, default 0, push-force-safe)
+- `lib/api-spec/openapi.yaml` + generated codegen — Mix + SavedMix schemas
+- `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx` — added optional "Made today" input
+- `artifacts/api-server/src/routes/inventory.ts` — day-start endpoint now uses actualMade > remainingLbs and auto-carries surplus to amountAlreadyMade
+- `artifacts/run-calculator/src/components/SurplusMixCard.tsx` — NEW warehouse reminder card for mixes with freezer stock
+- `artifacts/run-calculator/src/components/WarehouseTabContent.tsx` — wired SurplusMixCard
+
+**What was done:**
+1. B2 "Actual Made" field: mixer can enter actual lbs made; blank = assume plan
+2. When actual > fresh needed: overproduction deducted from inventory
+3. Surplus auto-carries to amountAlreadyMade for the next run
+4. SurplusMixCard shows "Mix in Freezer" with on-hand lbs in Warehouse tab
+
+**Tests:** mixes 88/88, inventory-math 74/74. API + web typecheck pass.
