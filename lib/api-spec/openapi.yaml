@@ -6553,6 +6553,9 @@ components:
           type: string
         amountAlreadyMade:
           type: number
+        amountActualMade:
+          type: number
+          description: Pounds actually made for the current make-day (0 = assume needed)
         components:
           type: array
           items:
@@ -9334,6 +9337,12 @@ components:
         amountAlreadyMade:
           type: number
           description: Pounds already made/on hand, subtracted from the total
+        amountActualMade:
+          type: number
+          description: >-
+            Pounds actually made for the current make-day. Optional; when omitted
+            or 0, assumed equal to the plan's needed amount. Greater than needed
+            means overproduction of mix (deducted and tracked as surplus carry).
         components:
           type: array
           description: The ingredients that make up the mix

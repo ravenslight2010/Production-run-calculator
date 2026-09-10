@@ -123,6 +123,8 @@ export const formSchema = z.object({
   // Only meaningful when cartoned === "labeled": top / bottom / both.
   labelPosition: z.string().default(""),
   cartonsPerCase: z.coerce.number().min(0).default(0),
+  // Carton size: single=1, double=2, triple=3 pizzas per carton
+  cartonSize: z.coerce.number().min(1).max(3).default(1),
   // Only meaningful when cartoned === "labeled": labelsPerRoll for a single
   // top/bottom label position, the top/bottom pair when position is "both".
   labelsPerRoll: z.coerce.number().min(0).default(0),
@@ -262,6 +264,7 @@ export const DEFAULT_VALUES: FormValues = {
   cartoned: "cartoned",
   labelPosition: "",
   cartonsPerCase: 0,
+  cartonSize: 1,
   labelsPerRoll: 0,
   topLabelsPerRoll: 0,
   bottomLabelsPerRoll: 0,
@@ -305,6 +308,18 @@ export const LABEL_POSITION_OPTIONS = [
   { value: "bottom", label: "Bottom Label" },
   { value: "both", label: "Both" },
 ] as const;
+
+export const CARTON_SIZE_OPTIONS = [
+  { value: "1", label: "Single (1)" },
+  { value: "2", label: "Double (2)" },
+  { value: "3", label: "Triple (3)" },
+] as const;
+
+/** Display label for a stored cartonSize value ("Single (1)" when unset). */
+export function cartonSizeLabel(val: number | undefined): string {
+  const v = String(val ?? 1);
+  return CARTON_SIZE_OPTIONS.find((o) => o.value === v)?.label ?? "Single (1)";
+}
 
 /** Display label for a stored labelPosition value ("" when unset/unknown). */
 export function labelPositionLabel(val: string | undefined): string {

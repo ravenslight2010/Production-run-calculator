@@ -20,6 +20,8 @@ export interface SavedMix {
   daysEarly: number;
   notes?: string;
   amountAlreadyMade: number;
+  /** Pounds actually made for the current make-day (0 = assume needed) */
+  amountActualMade?: number;
   components: MixComponentSpec[];
   enabled: boolean;
   [key: string]: unknown;

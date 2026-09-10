@@ -25,6 +25,7 @@ import { WarehouseNeedsList, type NeedRow } from "./WarehouseNeedsList";
 import { FreezerSurplusPanel } from "./FreezerSurplusPanel";
 import ReorderCard from "./ReorderCard";
 import UseFirstCard from "./UseFirstCard";
+import SurplusMixCard from "./SurplusMixCard";
 
 export default memo(function WarehouseTabContent() {
   const {
@@ -199,6 +200,7 @@ export default memo(function WarehouseTabContent() {
                     runs carry no recipe rows, so resolve each via its profile ->
                     FormValues (same pattern as the freezer-pull / per-run blocks)
                     and feed them as the demand basis. Advisory only. */}
+                <SurplusMixCard />
                 <ReorderCard scheduledValsList={scheduledValues} />
                 {/* Use First: stock lots expiring within the configured window
                     (plus any already past), ordered first-expired-first-out, with

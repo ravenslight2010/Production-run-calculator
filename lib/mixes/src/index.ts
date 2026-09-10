@@ -77,6 +77,11 @@ export interface Mix {
   // Pounds already made/on hand, subtracted from the total before computing the
   // remaining pounds and batch count.
   amountAlreadyMade: number;
+  // Pounds ACTUALLY made for the current run/make-day (Feature B2). Optional;
+  // when omitted, assumed equal to the plan's needed amount. When entered and
+  // greater than needed, the extra is overproduction of mix (deducted + tracked
+  // as surplus). When entered and LESS than needed, less is deducted.
+  amountActualMade?: number;
   // The ingredients that make up the mix.
   components: MixComponent[];
   // Disabled mixes are kept (so toggling is easy) but never produce a plan entry.
@@ -143,6 +148,7 @@ export function normalizeMix(input: unknown): Mix | null {
   const batchSize = Math.max(0, coerceNum(raw.batchSize, 0));
   const daysEarly = Math.max(0, coerceInt(raw.daysEarly, DEFAULT_DAYS_EARLY));
   const amountAlreadyMade = Math.max(0, coerceNum(raw.amountAlreadyMade, 0));
+  const amountActualMade = Math.max(0, coerceNum(raw.amountActualMade, 0));
   const enabled = raw.enabled === undefined ? true : raw.enabled !== false;
   const components = Array.isArray(raw.components)
     ? raw.components
@@ -160,6 +166,9 @@ export function normalizeMix(input: unknown): Mix | null {
     components,
     enabled,
   };
+  if (amountActualMade > 0 || typeof raw.amountActualMade === "number") {
+    mix.amountActualMade = amountActualMade;
+  }
   if (typeof raw.notes === "string" && raw.notes.trim()) mix.notes = raw.notes.trim();
   if (typeof raw.scope === "string" && raw.scope) mix.scope = raw.scope;
   if (raw.isPrep === true) mix.isPrep = true;
