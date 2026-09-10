@@ -83,6 +83,18 @@ import {
   sortLotsForConsumption,
   type ConsumeLine,
 } from "./inventoryLogic";
+import {
+  buildMixPlan,
+  normalizeMix,
+  type Mix,
+  type MixScheduledRun,
+} from "@workspace/mixes";
+import {
+  computeMixComponentConsumptionLines,
+  computeDailySupplyConsumptionLines,
+} from "@workspace/inventory-math";
+import { mixesTable } from "@workspace/db";
+
 
 const router: IRouter = Router();
 
@@ -1318,11 +1330,12 @@ async function findExpectedConsumptionForRun(
     .where(eq(dailySyncTable.scope, scope));
   for (const row of rows) {
     const data = row.data as {
-      dayState?: { runs?: Array<{ id?: string }>; substitutions?: IngredientSubstitution[] };
+      dayState?: { runs?: Array<{ id?: string; actualCases?: number }>; substitutions?: IngredientSubstitution[] };
       runValues?: Record<string, unknown>;
     } | null;
     const runs = data?.dayState?.runs ?? [];
-    if (!runs.some((r) => r?.id === runId)) continue;
+    const matchedRun = runs.find((r) => r?.id === runId);
+    if (!matchedRun) continue;
     const vals = data?.runValues?.[runId];
     if (!vals || typeof vals !== "object") continue;
     const substitutions = data?.dayState?.substitutions ?? [];
@@ -1333,6 +1346,21 @@ async function findExpectedConsumptionForRun(
       effective as unknown as RunLinesInput,
       SERVER_DEFAULT_PEP_TYPES,
     );
+    // Feature D: scale all lines proportionally when actualCases is known.
+    // actualCases is entered by the manager after a run ends; when it differs
+    // from the planned casesNeeded, every ingredient and packaging line is
+    // scaled so inventory matches reality. Falls back to planned (no scaling)
+    // when actualCases is not set or equals casesNeeded.
+    const casesNeeded = Number((vals as Record<string, unknown>).casesNeeded) || 0;
+    const actualCases = matchedRun.actualCases;
+    if (actualCases != null && actualCases > 0 && casesNeeded > 0 && actualCases !== casesNeeded) {
+      const scale = actualCases / casesNeeded;
+      const scaled = expectedLines.map((l) => ({
+        itemKey: l.itemKey,
+        qty: Math.round(l.qty * scale * 1000) / 1000,
+      }));
+      return new Map(scaled.map((l) => [l.itemKey, l.qty]));
+    }
     return new Map(expectedLines.map((l) => [l.itemKey, l.qty]));
   }
   return null;
@@ -2147,5 +2175,163 @@ function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+
+// ── Feature B+E7: Daily mix component + supply consumption ─────────────────
+//
+// POST /inventory/consume-day-start
+//
+// Deducts fresh mix component ingredients (Feature B) and fixed daily supply
+// rates (Feature E7: tape/glue/ink) once per production day. Idempotent via
+// inventoryConsumedRunsTable with runId = "day-start:{date}". Called by the
+// client on first load after midnight (or manually by managers).
+//
+// Trust model: fully server-authorized. All amounts derived from:
+//   - day-state runs (form values → pizzas) via computeSummaryStats
+//   - server-persisted mixes (components, amountAlreadyMade) via buildMixPlan
+//   - fixed daily supply rates (tape=4, glue=0.286, ink=0.078)
+router.post(
+  "/inventory/consume-day-start",
+  requireCapability("manage-inventory"),
+  async (req, res): Promise<void> => {
+    const dateStr = (req.body && typeof req.body === "object"
+      ? (req.body as { date?: string }).date
+      : undefined) || todayStr();
+    const runId = `day-start:${dateStr}`;
+    const scope = currentScope();
+
+    // ── Idempotency gate ──────────────────────────────────────────────────
+    const [existingClaim] = await db
+      .select({ runId: inventoryConsumedRunsTable.runId })
+      .from(inventoryConsumedRunsTable)
+      .where(
+        and(
+          eq(inventoryConsumedRunsTable.runId, runId),
+          eq(inventoryConsumedRunsTable.scope, scope),
+        ),
+      )
+      .limit(1);
+    if (existingClaim) {
+      res.json({ applied: false, message: "Day-start already consumed for this date" });
+      return;
+    }
+
+    const lines: ConsumeLine[] = [];
+
+    // ── Feature B: Fresh mix components ────────────────────────────────────
+    // Build MixScheduledRun[] from all day-state runs matching `dateStr`.
+    const rows = await db
+      .select({ data: dailySyncTable.data })
+      .from(dailySyncTable)
+      .where(eq(dailySyncTable.scope, scope));
+    const scheduledRuns: MixScheduledRun[] = [];
+    for (const row of rows) {
+      const data = row.data as {
+        dayState?: { runs?: Array<{ id?: string; brand?: string; flavor?: string; actualCases?: number }> };
+        runValues?: Record<string, unknown>;
+      } | null;
+      const dayRuns = data?.dayState?.runs ?? [];
+      for (const run of dayRuns) {
+        if (!run?.id || run.brand === undefined) continue;
+        // Only runs whose scheduled date matches dateStr
+        const vals = data?.runValues?.[run.id];
+        if (!vals || typeof vals !== "object") continue;
+        const v = vals as Record<string, unknown>;
+        const casesNeeded = Number(v.casesNeeded) || 0;
+        const pizzasPerCase = Number(v.pizzasPerCase) || 0;
+        if (casesNeeded <= 0 || pizzasPerCase <= 0) continue;
+        scheduledRuns.push({
+          date: dateStr,
+          brand: String(run.brand ?? ""),
+          flavor: String(run.flavor ?? ""),
+          pizzas: casesNeeded * pizzasPerCase,
+          cases: casesNeeded,
+        });
+      }
+    }
+    if (scheduledRuns.length > 0) {
+      // Fetch mixes for scope
+      const mixRows = await db
+        .select()
+        .from(mixesTable)
+        .where(eq(mixesTable.scope, scope));
+      const mixes: Mix[] = mixRows
+        .map((r) => normalizeMix({ ...r, components: r.components }))
+        .filter((m): m is Mix => m !== null);
+      if (mixes.length > 0) {
+        // Build a lookup from mix.id to the DB mix row for amountActualMade + carry
+        const mixById = new Map<string, (typeof mixRows)[number]>();
+        for (const r of mixRows) mixById.set(r.id, r);
+        const plan = buildMixPlan({ runs: scheduledRuns, mixes, today: dateStr });
+        const mixesToUpdate: Array<{ id: string; amountAlreadyMade: number }> = [];
+        for (const group of plan) {
+          for (const run of group.runs) {
+            for (const entry of run.mixes) {
+              // Feature B2: if mixer entered amountActualMade, use it as the
+              // fresh production basis. If > remainingLbs, overproduction of mix
+              // is carried forward as amountAlreadyMade for the next run.
+              const dbMix = mixById.get(entry.mixId);
+              const actualMade = Number(dbMix?.amountActualMade) || 0;
+              const freshLbs = actualMade > 0
+                ? Math.max(entry.totalLbs, actualMade)
+                : entry.remainingLbs;
+              const mixLines = computeMixComponentConsumptionLines(
+                entry.components,
+                entry.totalLbs,
+                freshLbs,
+              );
+              lines.push(...mixLines);
+              // Surplus carry: if actual > fresh needed, excess → alreadyMade for next run
+              if (actualMade > 0 && entry.remainingLbs > 0) {
+                const surplus = Math.max(0, actualMade - entry.remainingLbs);
+                if (surplus > 0 && dbMix) {
+                  const newAlreadyMade = Math.round((entry.amountAlreadyMade + surplus) * 100) / 100;
+                  mixesToUpdate.push({ id: entry.mixId, amountAlreadyMade: newAlreadyMade });
+                }
+              }
+            }
+          }
+          for (const entry of group.prepMixes) {
+            const mixLines = computeMixComponentConsumptionLines(
+              entry.components,
+              entry.totalLbs,
+              entry.remainingLbs,
+            );
+            lines.push(...mixLines);
+          }
+        }
+        // Persist surplus carry-forwards (update amountAlreadyMade on each mix)
+        if (mixesToUpdate.length > 0) {
+          for (const upd of mixesToUpdate) {
+            await db
+              .update(mixesTable)
+              .set({ amountAlreadyMade: upd.amountAlreadyMade, updatedAt: new Date() })
+              .where(eq(mixesTable.id, upd.id));
+          }
+        }
+      }
+    }
+
+    // ── Feature E7: Daily supply rates ─────────────────────────────────────
+    lines.push(...computeDailySupplyConsumptionLines());
+
+    // ── Deduct ─────────────────────────────────────────────────────────────
+    if (lines.length === 0) {
+      await db
+        .insert(inventoryConsumedRunsTable)
+        .values({ runId, scope })
+        .onConflictDoNothing({
+          target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+        });
+      res.json({ applied: true, consumed: 0, message: "No mix components or supplies to deduct" });
+      return;
+    }
+    const result = await consumeRun(runId, lines);
+    if (result.applied) {
+      broadcast(headerSenderId(req), scope);
+    }
+    res.json({ applied: result.applied, consumed: result.consumed, lines: lines.length });
+  },
+);
 
 export default router;
