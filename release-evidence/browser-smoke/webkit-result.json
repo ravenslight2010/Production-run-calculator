@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "browser": "webkit",
-  "revision": "733fc60a64dc0d16f5b5de7804ba4b7a940a4b36",
+  "revision": "fdacb4d204ecc3abe81ab3466dc426ab09fa2125",
   "environment": "development",
   "result": "failed",
-  "generatedAt": "2026-09-11T02:54:21.379Z",
+  "generatedAt": "2026-09-11T19:02:44.304Z",
   "caseCount": 3,
   "completedCount": 3,
   "failureCount": 1,
@@ -19,19 +19,19 @@
       "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
       "title": " › webkit › release-webkit-smoke.spec.ts › authenticates and preserves current-run start, pause, resume, and reload",
       "status": "passed",
-      "durationMs": 27846
+      "durationMs": 28746
     },
     {
       "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
       "title": " › webkit › release-webkit-smoke.spec.ts › recovers a failed sync pull after the browser reconnects",
       "status": "passed",
-      "durationMs": 14126
+      "durationMs": 13982
     },
     {
       "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
       "title": " › webkit › release-webkit-smoke.spec.ts › manager can preview an authoritative operational report",
       "status": "failed",
-      "durationMs": 16331,
+      "durationMs": 17685,
       "failureClassification": "product",
       "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m200\u001b[39m\nReceived: \u001b[31m409\u001b[39m"
     }
