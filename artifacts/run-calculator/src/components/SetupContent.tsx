@@ -109,7 +109,6 @@ export default memo(function SetupContent() {
                     })}
                     brand={currentRun?.brand ?? ""}
                     flavor={currentRun?.flavor ?? ""}
-                    dieType={form.getValues("dieType") ?? ""}
                     canEdit={isSupervisor}
                     onCommit={commitMissingField}
                   />

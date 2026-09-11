@@ -16,7 +16,6 @@ COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
 COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
 COPY artifacts/run-calculator/package.json ./artifacts/run-calculator/package.json
 COPY lib/ai-memory/package.json ./lib/ai-memory/package.json
-COPY lib/ai-review/package.json ./lib/ai-review/package.json
 COPY lib/allergen/package.json ./lib/allergen/package.json
 COPY lib/anomaly/package.json ./lib/anomaly/package.json
 COPY lib/api-client-react/package.json ./lib/api-client-react/package.json

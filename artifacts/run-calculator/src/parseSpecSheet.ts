@@ -81,7 +81,6 @@ import type {
   ParsedRecipe,
   SpecImportAlias,
 } from "@workspace/spec-import";
-import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 import type { AiStatus } from "./aiStatus";
@@ -133,12 +132,9 @@ export type ParseSpecImagesResult = SuggestionResponseMetadata & {
   note?: string;
 };
 
-export type ReviewedProfile = ParsedProfile & { review?: ReviewVerdict };
-export type ReviewedRecipe = ParsedRecipe & { review?: ReviewVerdict };
-
 export type ParseSpecSheetResult = SuggestionResponseMetadata & Omit<ParsedSpecImport, "profiles" | "recipes"> & {
-  profiles: ReviewedProfile[];
-  recipes: ReviewedRecipe[];
+  profiles: ParsedProfile[];
+  recipes: ParsedRecipe[];
   generatedAt: number;
 };
 

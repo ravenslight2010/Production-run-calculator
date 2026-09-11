@@ -25,6 +25,7 @@ const testUsernames = new Set<string>();
 const FIXTURE = uniqueTestId("ai_outage");
 const BRAND = "Aldo's";
 const EXISTING_FLAVOR = "Classic";
+const SECOND_SCHEDULE_FLAVOR = "Schedule B";
 const SPEC_RECIPE = `Outage Dough ${FIXTURE}`;
 const SPEC_LABEL = `Outage spec ${FIXTURE}`;
 
@@ -193,11 +194,11 @@ test("keeps deterministic management workflows reviewable when enrichment is una
   await promoteToManager(username);
 
   await page.evaluate(
-    ({ brand, flavor, firstRunId, secondRunId }) => {
+    ({ brand, flavor, secondFlavor, firstRunId, secondRunId }) => {
       localStorage.setItem("run-calc-day", JSON.stringify({
         runs: [
           { id: firstRunId, brand, flavor, seeded: false },
-          { id: secondRunId, brand, flavor, seeded: false },
+          { id: secondRunId, brand, flavor: secondFlavor, seeded: false },
         ],
         currentIndex: 0,
         date: new Date().toISOString().slice(0, 10),
@@ -218,6 +219,7 @@ test("keeps deterministic management workflows reviewable when enrichment is una
     {
       brand: BRAND,
       flavor: EXISTING_FLAVOR,
+      secondFlavor: SECOND_SCHEDULE_FLAVOR,
       firstRunId: SCHEDULE_RUN_1,
       secondRunId: SCHEDULE_RUN_2,
     },
@@ -242,25 +244,25 @@ test("keeps deterministic management workflows reviewable when enrichment is una
   await expect(historyPanel).toBeVisible();
   await historyPanel.getByText(SPEC_LABEL, { exact: true }).click();
   await expect(historyPanel.getByText("Source → landed reconciliation", { exact: true })).toBeVisible();
-  await expect(historyPanel.getByText("One recipe needs review.", { exact: true })).toBeVisible();
+  await expect(historyPanel).toContainText("One recipe needs review.");
 
   await page.getByRole("button", { name: "Today", exact: true }).click();
   const summaryResult = page.getByTestId("summary-result");
   await expect(summaryResult).toContainText("24 cases made against 30 planned");
-  await expect(summaryResult.getByText("1/2", { exact: true })).toBeVisible();
-  await expect(summaryResult.getByText("80%", { exact: true })).toBeVisible();
-  await expect(summaryResult.getByText("24", { exact: true })).toBeVisible();
-  await expect(summaryResult.getByText("12m", { exact: true })).toBeVisible();
+  await expect(summaryResult).toContainText("1/2 runs finished");
+  await expect(summaryResult).toContainText("80% attainment");
+  await expect(summaryResult).toContainText("24 cases made");
+  await expect(summaryResult).toContainText("12m downtime");
   await page.getByTestId("button-anomaly-check").click();
   await expect(page.getByTestId("anomaly-item-0")).toContainText(
     "Downtime is above the recent baseline.",
   );
 
   await page.getByTestId("button-schedule-optimize").click();
-  await expect(page.getByTestId("schedule-order-0")).toContainText(SCHEDULE_RUN_2);
-  await expect(page.getByTestId("schedule-order-1")).toContainText(SCHEDULE_RUN_1);
+  await expect(page.getByTestId("schedule-order-0")).toContainText(`${BRAND} – ${SECOND_SCHEDULE_FLAVOR}`);
+  await expect(page.getByTestId("schedule-order-1")).toContainText(`${BRAND} – ${EXISTING_FLAVOR}`);
   await page.getByTestId("button-schedule-apply").click();
-  await expect(page.getByText("Run order updated", { exact: true })).toBeVisible();
+  await expect(page.getByText("Run order updated", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByText("Order restored", { exact: true })).toBeVisible();
 });

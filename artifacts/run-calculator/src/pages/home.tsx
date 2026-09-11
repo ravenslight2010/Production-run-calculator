@@ -426,9 +426,12 @@ import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
   saveIngredientBatchWeights,
+  normalizeBatchWeightChanges,
   buildBatchWeightMap,
   lookupBatchWeight,
   collectBatchWeightCandidates,
+  collectBatchWeightCandidatesFromProfile,
+  filterStillCurrentBatchWeightEntries,
   executeBatchWeightPropagation,
   type BatchWeightCandidate,
   type IngredientBatchWeightRow,
@@ -505,7 +508,6 @@ import {
   type MergeSuggestCategory,
 } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
-import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
@@ -4625,6 +4627,10 @@ export default function Home() {
   // Saves are chained so an older in-flight request can never land after (and
   // overwrite) a newer one — the server applies them in the order entered.
   const batchWeightSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  // Keep failed writes in memory so a later edit retries the failed entry
+  // instead of making a profile save look complete while its learned weight is
+  // silently lost.
+  const pendingBatchWeightChangesRef = useRef<Map<string, BatchWeightCandidate>>(new Map());
   // Called from the type dropdowns when an ingredient is picked: fills the
   // matching batch-lbs field with the remembered weight (if any). Reads the
   // ref so the inline JSX handlers never go stale.
@@ -4750,6 +4756,62 @@ export default function Home() {
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [form, canManageProfiles],
+  );
+
+  // All learned-weight writers use this queue. The server response is the
+  // acknowledgement boundary: only its canonical list is published to the
+  // local cache and only acknowledged positive entries fan out to profiles and
+  // pending/open runs. A failed write remains retryable on the next edit.
+  //
+  // The returned promise is also the completion boundary for callers that
+  // already have an acknowledged profile save. Without awaiting it, an older
+  // queued candidate can finish its POST and fan its stale value into the
+  // profile/run fan-out after the newer manager edit has already succeeded.
+  const queueBatchWeightChanges = useCallback(
+    (entries: { name: string; lbs: number }[]): Promise<void> => {
+      const changes = normalizeBatchWeightChanges(entries);
+      if (changes.length === 0) return batchWeightSaveChainRef.current;
+      for (const change of changes) {
+        pendingBatchWeightChangesRef.current.set(change.name.toLowerCase(), change);
+      }
+      const save = batchWeightSaveChainRef.current.then(async () => {
+        const submitted = [...pendingBatchWeightChangesRef.current.values()];
+        const canonical = await saveIngredientBatchWeights(submitted);
+        cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+          ["ingredientBatchWeights"],
+          canonical,
+        );
+        for (const change of submitted) {
+          const current = pendingBatchWeightChangesRef.current.get(change.name.toLowerCase());
+          if (current?.lbs === change.lbs) {
+            pendingBatchWeightChangesRef.current.delete(change.name.toLowerCase());
+          }
+        }
+        // A newer edit may have been queued while this request was in
+        // flight. The old request was acknowledged, but its value is no
+        // longer current and must not overwrite the newer profile/run
+        // snapshot during propagation. The next queue turn owns that work.
+        const positive = filterStillCurrentBatchWeightEntries(
+          submitted,
+          pendingBatchWeightChangesRef.current,
+        ).filter((entry) => entry.lbs > 0);
+        if (positive.length > 0) await propagateBatchWeightUpdates(positive);
+      });
+      const completion = save.catch((error) => {
+        toast({
+          title: "Batch weight was not saved",
+          description: error instanceof Error
+            ? error.message
+            : "The server did not acknowledge this weight. Try again.",
+          variant: "destructive",
+        });
+      });
+      // Keep the chain usable after a failed request while returning a
+      // promise callers can await for the complete POST + fan-out boundary.
+      batchWeightSaveChainRef.current = completion;
+      return completion;
+    },
+    [cycleCountQc, propagateBatchWeightUpdates],
   );
 
   // After a cheese recipe workbook import, fan the updated per-batch lbs into
@@ -5459,7 +5521,6 @@ export default function Home() {
   // because counts intersect against the live list).
   const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
   const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
-  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
   const [pendingDuplicateReviewCount, setPendingDuplicateReviewCount] = useState(() => {
     try {
       return loadPendingDuplicateReview(localStorage);
@@ -5798,7 +5859,7 @@ export default function Home() {
   // rewritten by an ingredient merge. Die types are intentionally EXCLUDED —
   // they are a distinct physical-tooling list (not an ingredient-name pool) and
   // the `dieType` selection field is no longer rewritten by a merge. Used by the
-  // AI "Suggested merges" scan and the import auto-check, which look for
+  // AI "Suggested merges" scan, which looks for
   // duplicates ACROSS categories (an imported recipe ingredient can duplicate a
   // standalone one). Brands/flavors are excluded (they have their own merge path).
   const mergeFullUniverse = useMemo(
@@ -6140,20 +6201,15 @@ export default function Home() {
     setMergeError("");
   }
 
-  // Ask for duplicate-group suggestions: combines AI clustering with learned
-  // "previously merged" aliases. Results are reviewed (never auto-applied);
+  // Ask for deterministic duplicate-group suggestions from learned aliases and
+  // conservative near-duplicate matching. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number | null> {
-    if (!fromImport) setMergeFromImport(false);
-    // The import-triggered auto-scan always lands on (and scans) the
-    // Ingredients tab — read from the closured `mergeFullUniverse` directly
-    // rather than `mergeSuggestScope`, since `setMergeCategory("ingredients")`
-    // in the caller effect hasn't re-rendered yet and the scope memo would
-    // still reflect whatever tab was active before.
-    const scope = fromImport
-      ? { category: "ingredient" as const, universe: mergeFullUniverse }
-      : mergeSuggestScope;
+  async function handleSuggestMerges(
+    forceRefresh = false,
+  ): Promise<number | null> {
+    setMergeFromImport(false);
+    const scope = mergeSuggestScope;
     const request = mergeSuggestRequestRef.current;
     request.controller?.abort();
     const controller = new AbortController();
@@ -6164,13 +6220,13 @@ export default function Home() {
     setMergeSuggestNote("");
     setMergeSuggestRan(true);
     try {
-      const { suggestions, usedAi, error } = await suggestMerges(
+      const { suggestions } = await suggestMerges(
         scope.universe,
         scope.category,
         scope.brand,
         // Known brands power the deterministic cross-brand guard: a suggestion
         // pairing names that mention DIFFERENT brands ("Lowes …" vs "Bashas …")
-        // is dropped no matter what the AI said.
+        // is dropped before it reaches the manager.
         brands,
         { signal: controller.signal, forceRefresh },
       );
@@ -6209,12 +6265,7 @@ export default function Home() {
        }
        setMergeSuggestions(visibleSuggestions);
       setMergeSuggestSelected(new Set());
-      if (!usedAi && error) {
-        setMergeSuggestError(
-          `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
-        );
-      }
-       if (usedAi && visibleSuggestions.length === 0) {
+        if (visibleSuggestions.length === 0) {
         setMergeSuggestNote("No duplicate groups found.");
       }
        return visibleSuggestions.length;
@@ -6232,41 +6283,14 @@ export default function Home() {
     }
   }
 
-  // Suggestions are deliberately lazy: opening the merge review is the only
-  // automatic trigger. Imports must not start an expensive AI request behind
-  // the manager's back, and leaving the surface cancels any active request.
+  // Suggestions are explicit user actions. Opening the merge review and
+  // completing an import must never start a scan or spend provider budget.
+  // Leaving the surface still cancels an active request.
   useEffect(() => {
-    if (manageCategory === "merge") {
-       void handleSuggestMerges();
-    } else {
+    if (manageCategory !== "merge") {
       mergeSuggestRequestRef.current.controller?.abort();
     }
-    // The request snapshots the current merge scope when the surface opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manageCategory]);
-
-  // Recipe imports can introduce ingredient spellings that duplicate existing
-  // master data. Keep the success toast transient, but persist the review count
-  // so the Import tab still offers the existing non-destructive review later.
-  useEffect(() => {
-    if (mergeCheckRequest === 0) return;
-    persistPendingDuplicateReview(PENDING_DUPLICATE_REVIEW_SCAN);
-    setMergeCategory("ingredients");
-    setMergeFromImport(true);
-    void handleSuggestMerges(true).then((count) => {
-      if (count === null || count <= 0) return;
-      toast({
-        title: "Possible duplicate ingredients",
-        description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
-        action: (
-          <ToastAction altText="Review duplicates" onClick={openPendingDuplicateReview}>
-            Review
-          </ToastAction>
-        ),
-      });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCheckRequest]);
 
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
@@ -10088,7 +10112,22 @@ export default function Home() {
   // profile writer must handle). Per-run inputs (cases needed, temp overrides)
   // and progress fields of a started run are kept: mergeProfileIntoOpenForm
   // only overlays profile-owned fields.
-  function handleSetupProfileSaved(brand: string, flavor: string) {
+  async function handleSetupProfileSaved(
+    brand: string,
+    flavor: string,
+    savedValues?: FormValues,
+  ) {
+    // SetupProfileEditor calls this only after saveProfileAndWaitForServer
+    // receives an exact server acknowledgement. Publish only the values from
+    // that acknowledged save, never a stale open-run form.
+    if (savedValues) {
+      const entries = collectBatchWeightCandidatesFromProfile(
+        savedValues as unknown as Record<string, unknown>,
+        learnedBatchWeightsRef.current,
+        DEFAULT_PEP_TYPES,
+      );
+      await queueBatchWeightChanges(entries);
+    }
     // The profile is the source of truth for every run that hasn't started:
     // fan the fresh save out to today's pending runs and future scheduled days.
     void propagateProfileToPendingRuns(brand, flavor);
@@ -11986,6 +12025,8 @@ export default function Home() {
   const premixImportGenRef = useRef(0);
   const cheeseImportGenRef = useRef(0);
   const specImportAbortRef = useRef<AbortController | null>(null);
+  const specImportBuffersRef = useRef<ArrayBuffer[]>([]);
+  const specImportSourceNamesRef = useRef<string[]>([]);
   const premixImportAbortRef = useRef<AbortController | null>(null);
   const cheeseImportAbortRef = useRef<AbortController | null>(null);
   const shippingImportGenRef = useRef(0);
@@ -12075,7 +12116,7 @@ export default function Home() {
     if (!canImportSpec) {
       toast({
         title: "Import access required",
-        description: "Spec imports require AI, profile, and inventory permissions.",
+        description: "Spec imports require profile and inventory permissions.",
         variant: "destructive",
       });
       return;
@@ -12106,6 +12147,11 @@ export default function Home() {
       for (const f of files) {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
+      // The multi-file preparation releases its input buffers. Keep a private
+      // copy only while this review is open for the explicit unresolved AI
+      // fallback; never persist the raw workbook bytes.
+      specImportBuffersRef.current = buffers.map((buffer) => buffer.slice(0));
+      specImportSourceNamesRef.current = files.map((file) => file.name);
       const prepared =
         buffers.length === 1
           ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
@@ -12152,8 +12198,84 @@ export default function Home() {
     }
   }
 
+  async function handleSpecAiFallback() {
+    const baseline = specImportPrepared;
+    const buffers = specImportBuffersRef.current;
+    if (!canUseAiTools || !baseline?.unresolved?.length || buffers.length === 0) return;
+    const gen = ++specImportGenRef.current;
+    specImportAbortRef.current?.abort();
+    const controller = new AbortController();
+    specImportAbortRef.current = controller;
+    setSpecImportLoading(true);
+    setSpecImportError(null);
+    try {
+      const workflow = await loadWorkbookWorkflow();
+      const aiPrepared =
+        buffers.length === 1
+          ? await workflow.specImport.prepareSpecImportWithAi(
+              buffers[0].slice(0),
+              specImportSourceNamesRef.current[0],
+              controller.signal,
+            )
+          : await workflow.specImport.prepareSpecImportMultiWithAi(
+              buffers.map((buffer) => buffer.slice(0)),
+              undefined,
+              specImportSourceNamesRef.current,
+              controller.signal,
+            );
+      if (gen !== specImportGenRef.current) return;
+      const profileKeys = new Set(
+        baseline.parsed.profiles.map((profile) => `${profile.brand}\u0000${profile.flavor}`.toLowerCase()),
+      );
+      const recipeKeys = new Set(
+        baseline.parsed.recipes.map((recipe) => `${recipe.kind}\u0000${recipe.name}`.toLowerCase()),
+      );
+      const merged = {
+        ...aiPrepared,
+        sourceNames: baseline.sourceNames,
+        parsed: {
+          ...aiPrepared.parsed,
+          profiles: [
+            ...baseline.parsed.profiles,
+            ...aiPrepared.parsed.profiles.filter((profile) => {
+              const key = `${profile.brand}\u0000${profile.flavor}`.toLowerCase();
+              return !profileKeys.has(key);
+            }),
+          ],
+          recipes: [
+            ...baseline.parsed.recipes,
+            ...aiPrepared.parsed.recipes.filter((recipe) => {
+              const key = `${recipe.kind}\u0000${recipe.name}`.toLowerCase();
+              return !recipeKeys.has(key);
+            }),
+          ],
+        },
+      };
+      setSpecImportPrepared(merged);
+      toast({
+        title: "Unresolved items interpreted",
+        description: "Review the additions below. Nothing was applied automatically.",
+      });
+    } catch (err) {
+      if (gen === specImportGenRef.current) {
+        setSpecImportError(err instanceof Error ? err.message : "Could not interpret the unresolved import items.");
+      }
+    } finally {
+      if (gen === specImportGenRef.current) setSpecImportLoading(false);
+    }
+  }
+
   async function handleSpecPhotoImport() {
-    if (!canImportSpec || specPhotoFiles.length === 0) return;
+    if (!canImportSpec || !canUseAiTools || specPhotoFiles.length === 0) {
+      if (specPhotoFiles.length > 0 && !canUseAiTools) {
+        toast({
+          title: "AI access required",
+          description: "Photo transcription is available only to users with AI tools access.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
     const files = specPhotoFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
     const gen = ++specImportGenRef.current;
     specImportAbortRef.current?.abort();
@@ -12211,7 +12333,7 @@ export default function Home() {
     if (!canImportSpec) {
       toast({
         title: "Import access required",
-        description: "Spec imports require AI, profile, and inventory permissions.",
+        description: "Spec imports require profile and inventory permissions.",
         variant: "destructive",
       });
       return;
@@ -12608,9 +12730,8 @@ export default function Home() {
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
-      // Fire-and-forget: a bump runs the merge-check effect after the new lists
-      // have re-rendered. Never blocks or fails the already-committed import.
-      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
+      // Duplicate review remains an explicit action from the merge surface;
+      // imports never start a scan or spend provider budget in the background.
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
@@ -13951,15 +14072,11 @@ export default function Home() {
     const candidates = JSON.parse(batchWeightCandidatesSig) as BatchWeightCandidate[];
     if (candidates.length === 0) return;
     const t = setTimeout(() => {
-      batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
-        .then(() => saveIngredientBatchWeights(candidates))
-        .then(() => propagateBatchWeightUpdates(candidates))
-        .then(() => cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
-        .catch(() => {}); // best-effort: never block the user's entry
+      queueBatchWeightChanges(candidates);
     }, 2000);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchWeightCandidatesSig]);
+  }, [batchWeightCandidatesSig, queueBatchWeightChanges]);
 
   // ── Next-run die type (for change warning) ────────────────────────────────
   const nextRunDieType = useMemo(() => {
@@ -15259,7 +15376,7 @@ export default function Home() {
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated. Separate inventory products are preserved and follow their production ingredient link. This can't be undone."}
                     </p>
 
-                    {/* AI + learned-memory suggestions: each tab scans ONLY its own
+                    {/* Deterministic + optional AI suggestions: each tab scans ONLY its own
                         name pool (mergeSuggestScope.universe) — Ingredients scans
                         the full cross-category ingredient list, every recipe-name
                         tab scans just its own recipe names, and Brand/Flavor scans
@@ -15273,15 +15390,15 @@ export default function Home() {
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>
                             <p className="text-[11px] text-muted-foreground">
-                              Scans for look-alike names (spelling, word order) and previously-merged names; AI adds smarter matches when available.
+                              Review look-alike and remembered matches before applying any merge.
                             </p>
                           </div>
                           <button
                             type="button"
                             disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
-                            onClick={() => handleSuggestMerges(false, true)}
+                            onClick={() => handleSuggestMerges(true)}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-                          >{mergeSuggestBusy ? "Scanning…" : "Scan for duplicates"}</button>
+                          >{mergeSuggestBusy ? "Scanning…" : "Scan deterministic matches"}</button>
                         </div>
 
                         {mergeSuggestError && (
@@ -15342,7 +15459,6 @@ export default function Home() {
                                   {s.reason && (
                                     <p className="text-[11px] text-muted-foreground">{s.reason}</p>
                                   )}
-                                  {s.review && <ReviewBadge review={s.review} />}
                                   <div className="flex items-center gap-2 pt-0.5">
                                     <button
                                       type="button"
@@ -15616,32 +15732,7 @@ export default function Home() {
                       items={weightItems}
                       learnedWeights={learnedBatchWeights}
                       onSave={(entries) => {
-                        const positive = entries.filter(e => e.lbs > 0);
-                        const cleared = entries.filter(e => e.lbs <= 0);
-                        // Cleared entries: remove from local cache immediately so
-                        // applyLearnedBatchLbs stops auto-filling that ingredient.
-                        // The server ignores zero/non-positive writes, so the
-                        // prior server row becomes stale — local removal is enough.
-                        if (cleared.length > 0) {
-                          const clearedKeys = new Set(
-                            cleared.map(e => (e.name ?? "").trim().toLowerCase()),
-                          );
-                          cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
-                            ["ingredientBatchWeights"],
-                            (prev) =>
-                              (prev ?? []).filter(
-                                r => !clearedKeys.has((r.name ?? "").trim().toLowerCase()),
-                              ),
-                          );
-                        }
-                        // Positive entries: POST to server, propagate to profiles, then refresh cache.
-                        if (positive.length > 0) {
-                          batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
-                            .then(() => saveIngredientBatchWeights(positive))
-                            .then(() => propagateBatchWeightUpdates(positive))
-                            .then(() => void cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
-                            .catch(() => {});
-                        }
+                        queueBatchWeightChanges(entries);
                       }}
                     />
                   );
@@ -15765,7 +15856,7 @@ export default function Home() {
                             )}
                             <button
                               type="button"
-                              disabled={specImportLoading}
+                              disabled={specImportLoading || !canUseAiTools}
                               onClick={() => void handleSpecPhotoImport()}
                               className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                             >
@@ -17120,6 +17211,8 @@ export default function Home() {
             }
             setShowSpecImport(false);
             setSpecImportPrepared(null);
+            specImportBuffersRef.current = [];
+            specImportSourceNamesRef.current = [];
             setSpecImportError(null);
             setSpecImportLoading(false);
             setSpecImportProgress(null);
@@ -17131,6 +17224,8 @@ export default function Home() {
               error: specImportError,
               prepared: specImportPrepared,
               applying: specImportApplying,
+              canUseAiTools,
+              onUseAiFallback: () => void handleSpecAiFallback(),
               existingRecipeNamesByKind: existingImportRecipeNames,
               onConfirm: handleSpecImportConfirm,
             }}

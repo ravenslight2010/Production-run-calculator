@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   adaptCanonicalOperationalSnapshot,
   dateRange,
+  operationalReleaseEvidence,
   validateOperationalReportBody,
 } from "./operationalReports";
 
@@ -16,6 +17,27 @@ const run = {
 };
 
 describe("operational report input contract", () => {
+  it("reports the controlled deployed revision before compatibility values", () => {
+    expect(operationalReleaseEvidence({
+      RELEASE_REVISION: "a".repeat(40),
+      REPLIT_GIT_COMMIT: "b".repeat(40),
+      GIT_COMMIT: "c".repeat(40),
+      npm_package_version: "1.2.3",
+      NODE_ENV: "production",
+    })).toEqual({
+      version: "1.2.3",
+      revision: "a".repeat(40),
+      environment: "production",
+    });
+  });
+
+  it("does not expose malformed revision metadata as release evidence", () => {
+    expect(operationalReleaseEvidence({
+      RELEASE_REVISION: "unknown",
+      REPLIT_GIT_COMMIT: "b".repeat(40),
+    }).revision).toBe("unknown");
+  });
+
   it("accepts a valid day report", () => {
     const result = validateOperationalReportBody({ scope: "day", date: "2026-09-04", runs: [run] });
     expect(result.ok).toBe(true);

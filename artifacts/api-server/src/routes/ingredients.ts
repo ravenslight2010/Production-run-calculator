@@ -1,6 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq, inArray } from "drizzle-orm";
-import { db, ingredientsTable, type IngredientRow } from "@workspace/db";
+import {
+  db,
+  ingredientBatchWeightsTable,
+  ingredientsTable,
+  type IngredientRow,
+} from "@workspace/db";
 import {
   SaveIngredientsBody,
   DeleteIngredientsBody,
@@ -18,6 +23,7 @@ import {
   ingredientMergePath,
   resolveIngredientMergeTarget,
 } from "../lib/ingredientMerge";
+import { planIngredientBatchWeightRepoint } from "../lib/ingredientBatchWeights";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
 
@@ -39,6 +45,45 @@ import { broadcastMasterDataChanged } from "./sync";
 // that's gone away can still resolve to a display name.
 
 const MAX_BATCH = 1000;
+
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function repointIngredientBatchWeights(
+  tx: DbTransaction,
+  scope: string,
+  targetName: string,
+  sourceNames: readonly string[],
+): Promise<void> {
+  const rows = await tx
+    .select()
+    .from(ingredientBatchWeightsTable)
+    .where(eq(ingredientBatchWeightsTable.scope, scope))
+    .for("update");
+  const plan = planIngredientBatchWeightRepoint(rows, targetName, sourceNames);
+  const updatedAt = new Date();
+
+  if (plan.winnerId !== null) {
+    await tx
+      .update(ingredientBatchWeightsTable)
+      .set({ name: targetName.trim(), updatedAt })
+      .where(
+        and(
+          eq(ingredientBatchWeightsTable.id, plan.winnerId),
+          eq(ingredientBatchWeightsTable.scope, scope),
+        ),
+      );
+  }
+  if (plan.deleteIds.length > 0) {
+    await tx
+      .delete(ingredientBatchWeightsTable)
+      .where(
+        and(
+          inArray(ingredientBatchWeightsTable.id, plan.deleteIds),
+          eq(ingredientBatchWeightsTable.scope, scope),
+        ),
+      );
+  }
+}
 
 function toApiItem(row: IngredientRow): Ingredient {
   return {
@@ -123,6 +168,10 @@ router.post(
           // active name owner instead of creating another selectable identity.
           const target = sameName ?? sameId;
           if (target) {
+            const renamed =
+              !sameName &&
+              sameId?.id === target.id &&
+              ingredientNameKey(target.name) !== ingredientNameKey(ingredient.name);
             const updatedAt = new Date();
             await tx
               .update(ingredientsTable)
@@ -146,6 +195,14 @@ router.post(
                   eq(ingredientsTable.scope, scope),
                 ),
               );
+            if (renamed) {
+              await repointIngredientBatchWeights(
+                tx,
+                scope,
+                ingredient.name,
+                [target.name],
+              );
+            }
             Object.assign(target, {
               name: sameName && sameName.id !== ingredient.id ? target.name : ingredient.name,
               categories: unionIngredientCategories(target.categories, ingredient.categories),
@@ -282,6 +339,12 @@ router.post(
           ...rowsToRepoint.map((row) => row.categories),
         );
         const updatedAt = new Date();
+        await repointIngredientBatchWeights(
+          tx,
+          scope,
+          canonicalTarget.name,
+          rowsToRepoint.map((row) => row.name),
+        );
 
         await tx
           .update(ingredientsTable)

@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
+import { and } from "drizzle-orm";
 import { db, ingredientBatchWeightsTable, type IngredientBatchWeight } from "@workspace/db";
 import { SaveIngredientBatchWeightsBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
@@ -26,7 +27,7 @@ type WeightRow = {
 };
 
 function weightKey(name: string): string {
-  return name.toLowerCase();
+  return name.trim().toLowerCase();
 }
 
 function toApiWeight(row: IngredientBatchWeight): WeightRow {
@@ -58,50 +59,78 @@ router.post("/ingredient-batch-weights", requireCapability("manage-inventory"), 
     return;
   }
 
-  // Normalize, bound, and drop degenerate entries up front. A zero/negative or
-  // absurd weight is never worth remembering.
+  // Normalize, bound, and drop degenerate entries up front. Zero is an
+  // explicit clear; negative or absurd weights are malformed and ignored.
   const incoming: WeightRow[] = [];
   for (const w of parsed.data.weights.slice(0, MAX_BATCH)) {
     const name = (w.name ?? "").trim().slice(0, MAX_NAME_LEN);
     const lbs = Number(w.lbs);
-    if (!name || !Number.isFinite(lbs) || lbs <= 0 || lbs > MAX_LBS) continue;
+    if (!name || !Number.isFinite(lbs) || lbs < 0 || lbs > MAX_LBS) continue;
     incoming.push({ name, lbs });
   }
 
   try {
     if (incoming.length > 0) {
-      const existing = await db
-        .select()
-        .from(ingredientBatchWeightsTable)
-        .where(eq(ingredientBatchWeightsTable.scope, currentScope()));
-      const byKey = new Map<string, IngredientBatchWeight>();
-      for (const row of existing) {
-        byKey.set(weightKey(row.name), row);
-      }
-
-      // Dedupe the incoming batch by identity key (last write wins).
-      const toApply = new Map<string, WeightRow>();
-      for (const w of incoming) {
-        toApply.set(weightKey(w.name), w);
-      }
-
-      const inserts: WeightRow[] = [];
-      for (const [key, w] of toApply) {
-        const prior = byKey.get(key);
-        if (!prior) {
-          inserts.push(w);
-        } else if (prior.lbs !== w.lbs) {
-          await db
-            .update(ingredientBatchWeightsTable)
-            .set({ lbs: w.lbs, updatedAt: new Date() })
-            .where(eq(ingredientBatchWeightsTable.id, prior.id));
+      const scope = currentScope();
+      await db.transaction(async (tx) => {
+        // Serialize same-scope updates so an older request cannot select the
+        // same row and overwrite a newer request after it commits.
+        const existing = await tx
+          .select()
+          .from(ingredientBatchWeightsTable)
+          .where(eq(ingredientBatchWeightsTable.scope, scope))
+          .for("update");
+        const byKey = new Map<string, IngredientBatchWeight[]>();
+        for (const row of existing) {
+          const rows = byKey.get(weightKey(row.name)) ?? [];
+          rows.push(row);
+          byKey.set(weightKey(row.name), rows);
         }
-      }
-      if (inserts.length > 0) {
-        await db
-          .insert(ingredientBatchWeightsTable)
-          .values(inserts.map((w) => ({ ...w, scope: currentScope() })));
-      }
+
+        // Dedupe the incoming batch by identity key (last write wins).
+        const toApply = new Map<string, WeightRow>();
+        for (const w of incoming) toApply.set(weightKey(w.name), w);
+
+        for (const [key, w] of toApply) {
+          const priorRows = byKey.get(key) ?? [];
+          if (w.lbs === 0) {
+            for (const row of priorRows) {
+              await tx
+                .delete(ingredientBatchWeightsTable)
+                .where(and(
+                  eq(ingredientBatchWeightsTable.id, row.id),
+                  eq(ingredientBatchWeightsTable.scope, scope),
+                ));
+            }
+            continue;
+          }
+
+          const prior = priorRows[0];
+          if (!prior) {
+            await tx
+              .insert(ingredientBatchWeightsTable)
+              .values({ ...w, scope });
+          } else {
+            await tx
+              .update(ingredientBatchWeightsTable)
+              .set({ lbs: w.lbs, updatedAt: new Date() })
+              .where(and(
+                eq(ingredientBatchWeightsTable.id, prior.id),
+                eq(ingredientBatchWeightsTable.scope, scope),
+              ));
+            // Clean up any legacy case-variant duplicates while this key is
+            // already locked, keeping the first row's original display name.
+            for (const duplicate of priorRows.slice(1)) {
+              await tx
+                .delete(ingredientBatchWeightsTable)
+                .where(and(
+                  eq(ingredientBatchWeightsTable.id, duplicate.id),
+                  eq(ingredientBatchWeightsTable.scope, scope),
+                ));
+            }
+          }
+        }
+      });
     }
 
     const weights = await listAll();

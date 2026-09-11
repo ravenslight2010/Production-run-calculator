@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   parseDoughRows,
   parseDoughWorkbook,
@@ -11,6 +14,8 @@ import {
 } from "./compare-source-audit.mts";
 
 type Row = unknown[];
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const tsx = path.join(repositoryRoot, "scripts/node_modules/.bin/tsx");
 
 const retained = (kind: "dough" | "sauce", name: string) =>
   path.resolve(
@@ -278,6 +283,37 @@ function testComparisonReportParsedFormulaFieldDriftFailsClearly() {
   );
 }
 
+function testRepositoryRootDefaultInputs() {
+  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "source-comparison-cli-"));
+  try {
+    const outputPath = path.join(outputRoot, "comparison.json");
+    const stdout = execFileSync(
+      tsx,
+      [path.join(repositoryRoot, "scripts/src/compare-source-audit.mts"), "--out", outputPath],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
+    assert.match(stdout, /^Wrote .+\.json\n\{\n/);
+
+    const generated = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    const checkedIn = JSON.parse(fs.readFileSync(
+      path.join(repositoryRoot, "attached_assets/source-library/audits/source-comparison-2026-08-26.json"),
+      "utf8",
+    ));
+    assert.equal(generated.format, checkedIn.format);
+    assert.equal(generated.formatVersion, checkedIn.formatVersion);
+    assert.deepEqual(generated.inputs, checkedIn.inputs);
+    assert.deepEqual(generated.workbookCounts, checkedIn.workbookCounts);
+    const findingCounts = (report: Record<string, any>) =>
+      Object.fromEntries(Object.entries(report.findings).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.length : -1,
+      ]));
+    assert.deepEqual(findingCounts(generated), findingCounts(checkedIn));
+  } finally {
+    fs.rmSync(outputRoot, { recursive: true, force: true });
+  }
+}
+
 testDoughNumericAnnotatedAndVariants();
 testDoughInstructionOnlyAmount();
 testSauceNumericAnnotatedAndMultiBatch();
@@ -291,4 +327,5 @@ testUnknownComparisonReportVersionFailsClosedForReaders();
 testComparisonReportFindingFieldDriftFailsClearly();
 testComparisonReportFindingBucketDriftFailsClearly();
 testComparisonReportParsedFormulaFieldDriftFailsClearly();
+testRepositoryRootDefaultInputs();
 console.log("Source audit parser fixture tests passed.");

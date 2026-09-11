@@ -13,6 +13,8 @@ import type { CheeseComponent } from './cheeseComponent';
 export interface CheeseRecipe {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required for updates to existing rows */
+  updatedAt?: Date;
   /** Display name of the cheese recipe */
   name: string;
   /** Customer this recipe belongs to (empty = any) */

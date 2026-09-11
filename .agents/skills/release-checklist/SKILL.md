@@ -36,6 +36,70 @@ recorded evidence.
   `spec-import-guard`, `data-heal-playbook`, and `release-checklist` are
   complementary, not replacements for these gates.
 
+## Failure inventory and task closure
+
+Run all applicable gates that remain valid and safe to run; do not stop at the
+first unrelated failure. A failed prerequisite may block a dependent gate, but
+independent gates should still produce evidence. Record each result explicitly
+as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
+
+For every non-pass result, record the smallest concrete blocker and classify it
+as a product defect, test or fixture defect, environment/workflow problem, data
+or reconciliation issue, security/authorization issue, release-evidence problem,
+or missing evidence. `BLOCKED`, `NOT REACHED`, and `MISSING` are unresolved
+until their required evidence is produced or a valid documented exception
+applies; a timeout is never an implicit pass.
+
+When task planning is requested, de-duplicate the blocker inventory against
+the task board and create bounded repair tasks only for genuinely independent
+objectives or out-of-scope safety, security, data-integrity, or release
+blockers that cannot responsibly be absorbed. Keep blockers that belong to the
+same release objective in one durable owning task and its failure ledger. Use
+internal work breakdown or helpers for same-objective repair domains; do not
+create a project task for every failing gate, test, fixture, or report-format
+issue. Any separate task must have independent acceptance criteria and an
+explicit reason.
+
+The owning task must rerun focused checks as repair domains close and preserve
+the same safety boundaries. That same durable release task must rerun the
+standard and full checks from one clean revision, validate retained evidence,
+and issue the final GO/NO-GO decision. Do not create speculative or recursive
+follow-ups; create another task only for a genuinely separate objective or a
+deliberately deferred outcome that cannot remain in the current objective.
+
+### Progress updates for long-running release work
+
+If validation spans multiple cycles, keep one update in the owning task using
+this format:
+
+```text
+Current objective: <release outcome and assessed scope>
+Completed work: <closed gates or repairs and their PASS/FAIL status>
+Active blockers: <unresolved blocker, evidence, and owner for each>
+Next validation milestone: <next check or decision point; name its prerequisite>
+Owner: <person or team accountable for completion>
+```
+
+Use the update to show movement, not to close the task early. Keep in-scope
+failures in the owning task's failure inventory and do not create recursive
+follow-up tasks for discoveries, stopped runs, or individual gate failures.
+Create a separate task only for a genuinely independent objective or an
+out-of-scope safety, security, data-integrity, or release blocker that cannot
+responsibly remain in the current objective.
+
+Separate the progress inventory into two lanes:
+
+- **Independent evidence:** valid and safe gates that can continue; run each one
+  and record its actual result.
+- **Dependent checks:** gates waiting on a named prerequisite; record
+  `BLOCKED` or `NOT REACHED` with that prerequisite instead of treating the
+  check as passed.
+
+`FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` remain unresolved until the
+required evidence is produced or a valid documented exception applies. A
+progress update does not alter the release requirements or the final
+fail-closed decision.
+
 ## Required gates
 
 These gates are required for every release unless the affected package truly
@@ -342,3 +406,13 @@ statuses for every gate. `GO` is invalid unless every applicable gate is
 `PASS`, operational warnings are answered, and accepted exceptions are either
 `none` or include an owner, next action, and expiry. A timeout is never a
 product pass or an accepted exception by implication.
+
+When the release suite needs a disposable database for destructive browser
+coverage, generate source-library reconciliation evidence separately from the
+read-only production database. Import it with
+`--source-library-evidence <path>` while the disposable CI guard and
+`RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION=1` are active.
+The importer must reject evidence that is not `release` environment, fresh,
+bound to the current full Git revision, and matched to the configured source
+report hash, heal ID, and repair boundary. The skip without an imported file
+must retain a NO-GO decision.

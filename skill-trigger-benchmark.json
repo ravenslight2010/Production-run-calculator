@@ -1,8 +1,54 @@
 {
-  "benchmark": "editable-skills-trigger-2026-08",
-  "method": "held-out, balanced, two positive and two near-miss negative prompts per skill",
+  "benchmark": "skills-trigger-2026-09",
+  "method": "held-out, balanced, two positive and two near-miss negative prompts per project-owned skill, plus a reviewed managed-skill fixture subset",
+  "catalog_validation": {
+    "status": "pass",
+    "available_roots": [
+      ".agents/skills",
+      ".local/secondary_skills"
+    ],
+    "benchmarked_roots": [
+      ".agents/skills"
+    ],
+    "intentional_fixture_skills": [
+      "ad-creative",
+      "deep-research",
+      "design-thinker",
+      "recipe-creator",
+      "seo-auditor"
+    ],
+    "coverage": {
+      "project_owned": [
+        "brainstorming",
+        "customer-import-audit",
+        "data-heal-playbook",
+        "db-schema-change",
+        "external-skill-import",
+        "import-bug-investigation",
+        "operational-browser-verification",
+        "production-go",
+        "release-checklist",
+        "rollback-recovery",
+        "schema-change-checklist",
+        "skill-creator",
+        "spec-import-guard",
+        "state-accuracy-check",
+        "sync-invariant-check",
+        "test-gap-triage",
+        "verify-before-commit",
+        "wrong-number-triage"
+      ],
+      "managed_curated": [
+        "ad-creative",
+        "deep-research",
+        "design-thinker",
+        "recipe-creator",
+        "seo-auditor"
+      ]
+    }
+  },
   "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
-  "runtime_status": "blocked: run_eval.py was exercised on 100 prompts with 3 repetitions and a balanced 40% held-out split, but the claude CLI is unavailable",
+  "runtime_status": "blocked: run_eval.py was exercised on 92 prompts with 3 repetitions and a balanced held-out split, but the claude CLI is unavailable",
   "runtime_metrics": [
     {
       "skill": "brainstorming",
@@ -149,7 +195,7 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
-      "skill": "check-dependency-licenses",
+      "skill": "ad-creative",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -157,7 +203,7 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
-      "skill": "handle-personal-and-sensitive-data",
+      "skill": "deep-research",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -165,7 +211,7 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
-      "skill": "instrument-observability-and-graceful-errors",
+      "skill": "design-thinker",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -173,7 +219,7 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
-      "skill": "make-apps-resilient-to-abuse-and-overload",
+      "skill": "recipe-creator",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -181,47 +227,7 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
-      "skill": "make-ui-responsive-across-devices",
-      "precision": null,
-      "recall": null,
-      "false_positive_rate": null,
-      "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
-    },
-    {
-      "skill": "meet-an-accessibility-baseline",
-      "precision": null,
-      "recall": null,
-      "false_positive_rate": null,
-      "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
-    },
-    {
-      "skill": "review-before-shipping",
-      "precision": null,
-      "recall": null,
-      "false_positive_rate": null,
-      "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
-    },
-    {
-      "skill": "secure-ai-features-against-prompt-injection",
-      "precision": null,
-      "recall": null,
-      "false_positive_rate": null,
-      "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
-    },
-    {
-      "skill": "validate-and-encode-untrusted-input",
-      "precision": null,
-      "recall": null,
-      "false_positive_rate": null,
-      "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
-    },
-    {
-      "skill": "vet-dependencies-before-adding",
+      "skill": "seo-auditor",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -233,6 +239,8 @@
     {
       "name": "brainstorming",
       "metadata_name": "brainstorming",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/brainstorming/SKILL.md",
       "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
       "evals": [
@@ -261,6 +269,8 @@
     {
       "name": "customer-import-audit",
       "metadata_name": "customer-import-audit",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/customer-import-audit/SKILL.md",
       "description": "Audit after importing a new customer's spec workbook. Use when the user imports a new brand/customer and wants confirmation everything landed right, or reports something off after a new-customer import.",
       "evals": [
@@ -289,6 +299,8 @@
     {
       "name": "data-heal-playbook",
       "metadata_name": "data-heal-playbook",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/data-heal-playbook/SKILL.md",
       "description": "Fix bugs that poisoned stored data (profiles, pools, day-state). Use whenever a bug fix alone is not enough because wrong values are already saved in the database \u2014 e.g. an import wrote a wrong number into many profiles. Covers checking for poisoned data, writing a one-time server heal, and verifying it.",
       "evals": [
@@ -317,6 +329,8 @@
     {
       "name": "db-schema-change",
       "metadata_name": "db-schema-change",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/db-schema-change/SKILL.md",
       "description": "Compatibility router for any Postgres schema change under lib/db/src/schema/*. Use whenever modifying, adding, or removing a Drizzle table/column, or when a migration/db push is needed. For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.",
       "evals": [
@@ -345,6 +359,8 @@
     {
       "name": "external-skill-import",
       "metadata_name": "external-skill-import",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/external-skill-import/SKILL.md",
       "description": "Review externally sourced agent skills from uploaded archives or GitHub before installation. Use whenever a user wants to import, install, copy, adapt, or assess a third-party skill bundle; inventory first, check safety, provenance, licensing, ownership, duplicates, and local compatibility, then recommend accept, adapt, defer, or reject before writing files.",
       "evals": [
@@ -373,6 +389,8 @@
     {
       "name": "import-bug-investigation",
       "metadata_name": "import-bug-investigation",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/import-bug-investigation/SKILL.md",
       "description": "Diagnose spec/premix/cheese/shipping Excel import bugs. Use when the user says an import got something wrong, mislinked, misnamed, duplicated, or skipped data. Standard drill for tracing what the parse saw vs what landed in profiles/pools.",
       "evals": [
@@ -401,6 +419,8 @@
     {
       "name": "operational-browser-verification",
       "metadata_name": "operational-browser-verification",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/operational-browser-verification/SKILL.md",
       "description": "Verify manager-facing operational workflows in a real browser, including authorization, scoped navigation, queue actions, import-review reopening, sync diagnostics, reload persistence, and startup health. Use when a request needs user-journey evidence that unit, API, integration, visual, or accessibility checks cannot provide.",
       "evals": [
@@ -429,6 +449,8 @@
     {
       "name": "production-go",
       "metadata_name": "production-go",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/production-go/SKILL.md",
       "description": "Decide whether this application is production-ready and give a bounded GO/NO-GO release status. Use whenever the user asks if the app is production-ready, ready to publish, safe to ship, ready to go live, or asks for release status\u2014even if they do not use the words GO or NO-GO. Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.",
       "evals": [
@@ -457,6 +479,8 @@
     {
       "name": "release-checklist",
       "metadata_name": "release-checklist",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/release-checklist/SKILL.md",
       "description": "Pre-publish verification for this app. Use before suggesting a deploy/publish, or when the user asks to publish. Runs the right tests, typechecks, workflow restarts, and reminds what data heals will apply live.",
       "evals": [
@@ -485,6 +509,8 @@
     {
       "name": "rollback-recovery",
       "metadata_name": "rollback-recovery",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/rollback-recovery/SKILL.md",
       "description": "Safely recover missing or regressed behavior after a rollback, checkpoint comparison, rebase, or partial restore. Use whenever the user mentions a checkpoint, rollback, restore, recovery, parity audit, missing post-merge behavior, or divergent historical implementation. Preserve a named baseline, run the repository recovery audit, restore incrementally, and require evidence before declaring recovery complete; never replace the current branch wholesale.",
       "evals": [
@@ -513,6 +539,8 @@
     {
       "name": "schema-change-checklist",
       "metadata_name": "schema-change-checklist",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/schema-change-checklist/SKILL.md",
       "description": "Use this skill whenever you are adding a new column or field to an existing database table \u2014",
       "evals": [
@@ -541,6 +569,8 @@
     {
       "name": "skill-creator",
       "metadata_name": "skill-creator",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/skill-creator/SKILL.md",
       "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
       "evals": [
@@ -569,6 +599,8 @@
     {
       "name": "spec-import-guard",
       "metadata_name": "spec-import-guard",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/spec-import-guard/SKILL.md",
       "description": "Run this checklist whenever you touch the spec import pipeline \u2014 AI parse prompts (buildParseSpecSheetPrompt, aiParseSpecSheet.ts), parse/sanitize logic (lib/spec-import, @workspace/spec-import), the alias system (sanitizeSpecAliases, collectSpecAliases, canonicalize, specImportAliases.ts), corpus harness (lib/corpus-harness), chunk/merge logic (splitGridsForPrompt, mergeParsedSpecImports), import link passes (linkParsed, linkSpecImportNamedRecipesToExisting), or spec export (lib/spec-export).",
       "evals": [
@@ -597,6 +629,8 @@
     {
       "name": "state-accuracy-check",
       "metadata_name": "state-accuracy-check",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/state-accuracy-check/SKILL.md",
       "description": "Verify that timers, counters, and live state remain accurate and consistent",
       "evals": [
@@ -625,6 +659,8 @@
     {
       "name": "sync-invariant-check",
       "metadata_name": "sync-invariant-check",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/sync-invariant-check/SKILL.md",
       "description": "Pre-ship checklist for sync-related code changes. Trigger when an agent",
       "evals": [
@@ -653,6 +689,8 @@
     {
       "name": "test-gap-triage",
       "metadata_name": "test-gap-triage",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/test-gap-triage/SKILL.md",
       "description": "Turn a bug report, feature request, or \u201cwhere should this test go?\u201d question into a bounded regression strategy. Use before proposing new coverage or a test task; classify the source-of-truth layer, check existing tasks, and route to the smallest effective test and specialist safety skills.",
       "evals": [
@@ -681,6 +719,8 @@
     {
       "name": "verify-before-commit",
       "metadata_name": "verify-before-commit",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/verify-before-commit/SKILL.md",
       "description": "Verify changes before committing or pushing, and on any change to the repo. Use whenever about to commit, push, or claim a \"green build\" / \"tests pass\" / \"ready to deploy\" for this app. Encodes the local verification discipline for this repo: git status always clean before commit, locked dependency overrides kept in sync, typecheck (not build) because this machine is ARM, rely on CI for the real test gate, and check .agents/memory before touching unfamiliar areas.",
       "evals": [
@@ -709,6 +749,8 @@
     {
       "name": "wrong-number-triage",
       "metadata_name": "wrong-number-triage",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
       "path": ".agents/skills/wrong-number-triage/SKILL.md",
       "description": "Trace where a wrong number on screen comes from. Use when the user reports a specific wrong value (\"it says 5.7 but should be 8.25\", \"wrong yield\", \"wrong batch count\") anywhere in the web app.",
       "evals": [
@@ -735,281 +777,151 @@
       ]
     },
     {
-      "name": "check-dependency-licenses",
-      "metadata_name": "check-dependency-licenses",
-      "path": ".local/custom_skills/check-dependency-licenses/SKILL.md",
-      "description": "Use this skill when adding dependencies or before releasing, or when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance.",
+      "name": "ad-creative",
+      "metadata_name": "ad-creative",
+      "ownership": "managed",
+      "coverage": "curated-managed",
+      "path": ".local/secondary_skills/ad-creative/SKILL.md",
+      "description": "Design static ad creatives for social media and display advertising campaigns.",
       "evals": [
         {
-          "id": "check-dependency-licenses-trigger-1",
-          "query": "Before release, audit every production dependency for license policy violations and document any blocked package.",
+          "id": "ad-creative-trigger-1",
+          "query": "Create three static Instagram and LinkedIn ads for our product, with copy, a CTA, and square and portrait variants.",
           "should_trigger": true
         },
         {
-          "id": "check-dependency-licenses-trigger-2",
-          "query": "Check the npm dependency tree for license compliance, including transitive packages, before we ship.",
+          "id": "ad-creative-trigger-2",
+          "query": "Refresh our display banner campaign into several A/B-tested visual ad concepts using the brand assets I uploaded.",
           "should_trigger": true
         },
         {
-          "id": "check-dependency-licenses-near-miss-1",
-          "query": "Add a new package and verify it is genuine before installing it.",
+          "id": "ad-creative-near-miss-1",
+          "query": "Write five organic Instagram posts for our launch; do not make paid ads or banner assets.",
           "should_trigger": false
         },
         {
-          "id": "check-dependency-licenses-near-miss-2",
-          "query": "Scan the application for SQL injection and XSS vulnerabilities.",
+          "id": "ad-creative-near-miss-2",
+          "query": "Plan a 30-second animated video ad with scenes, transitions, and motion.",
           "should_trigger": false
         }
       ]
     },
     {
-      "name": "handle-personal-and-sensitive-data",
-      "metadata_name": "handle-personal-and-sensitive-data",
-      "path": ".local/custom_skills/handle-personal-and-sensitive-data/SKILL.md",
-      "description": "Use when building anything that collects, stores, logs, or transmits user data \u2014 sign-up, profiles, payments, uploads, analytics, logging \u2014 or when the user mentions PII, GDPR, CCPA, HIPAA, PCI, or privacy.",
+      "name": "deep-research",
+      "metadata_name": "deep-research",
+      "ownership": "managed",
+      "coverage": "curated-managed",
+      "path": ".local/secondary_skills/deep-research/SKILL.md",
+      "description": "Conduct thorough, multi-source research with structured reports and source scoring.",
       "evals": [
         {
-          "id": "handle-personal-and-sensitive-data-trigger-1",
-          "query": "This feature processes customer addresses and private account details; design the data flow with minimization, access controls, and retention limits.",
+          "id": "deep-research-trigger-1",
+          "query": "Do a multi-source deep dive on the 2026 cold-chain packaging market, score source credibility, and deliver a cited report.",
           "should_trigger": true
         },
         {
-          "id": "handle-personal-and-sensitive-data-trigger-2",
-          "query": "Review how we collect and store personal information and sensitive data, and prevent it leaking into logs or analytics.",
+          "id": "deep-research-trigger-2",
+          "query": "Research whether we should enter this market, triangulate current evidence, and synthesize an evidence-backed briefing with citations.",
           "should_trigger": true
         },
         {
-          "id": "handle-personal-and-sensitive-data-near-miss-1",
-          "query": "Validate a public URL parameter against an allow-list.",
+          "id": "deep-research-near-miss-1",
+          "query": "Look up the current price of one API and give me the answer.",
           "should_trigger": false
         },
         {
-          "id": "handle-personal-and-sensitive-data-near-miss-2",
-          "query": "Add a password reset flow using the existing authentication system.",
+          "id": "deep-research-near-miss-2",
+          "query": "Analyze this CSV I uploaded and summarize its trends in a chart.",
           "should_trigger": false
         }
       ]
     },
     {
-      "name": "instrument-observability-and-graceful-errors",
-      "metadata_name": "instrument-observability-and-graceful-errors",
-      "path": ".local/custom_skills/instrument-observability-and-graceful-errors/SKILL.md",
-      "description": "Use when building backend services, APIs, scheduled jobs, or anything going to production \u2014 to add structured logging, health checks, and graceful error handling so the app is debuggable in production without leaking internals to users.",
+      "name": "design-thinker",
+      "metadata_name": "design-thinker",
+      "ownership": "managed",
+      "coverage": "curated-managed",
+      "path": ".local/secondary_skills/design-thinker/SKILL.md",
+      "description": "Apply design thinking to validate ideas, define audiences, and prioritize directions.",
       "evals": [
         {
-          "id": "instrument-observability-and-graceful-errors-trigger-1",
-          "query": "Add bounded structured events, correlation IDs, useful timing, and safe user-facing errors to this production workflow.",
+          "id": "design-thinker-trigger-1",
+          "query": "We are unsure which customer problem to solve; define the audience, reframe the problem, explore options, and prioritize a direction.",
           "should_trigger": true
         },
         {
-          "id": "instrument-observability-and-graceful-errors-trigger-2",
-          "query": "Instrument this API so failures are observable without logging request payloads or secrets, and degrade gracefully.",
+          "id": "design-thinker-trigger-2",
+          "query": "Before investing in this idea, run a structured human-centered validation exercise and narrow us to one concept.",
           "should_trigger": true
         },
         {
-          "id": "instrument-observability-and-graceful-errors-near-miss-1",
-          "query": "Add authentication and role checks to the endpoint.",
+          "id": "design-thinker-near-miss-1",
+          "query": "The bug and solution are already clear; implement the ticket without exploring alternatives.",
           "should_trigger": false
         },
         {
-          "id": "instrument-observability-and-graceful-errors-near-miss-2",
-          "query": "Add SQL parameterization and HTML escaping for form input.",
+          "id": "design-thinker-near-miss-2",
+          "query": "Audit the finished page's colors, spacing, and responsive layout.",
           "should_trigger": false
         }
       ]
     },
     {
-      "name": "make-apps-resilient-to-abuse-and-overload",
-      "metadata_name": "make-apps-resilient-to-abuse-and-overload",
-      "path": ".local/custom_skills/make-apps-resilient-to-abuse-and-overload/SKILL.md",
-      "description": "Use when building public endpoints, APIs, auth/login routes, forms, file uploads, search, or any endpoint that calls a paid service (AI, email, SMS) \u2014 to add rate limiting, timeouts, and quotas that prevent abuse, runaway cost, and denial of service.",
+      "name": "recipe-creator",
+      "metadata_name": "recipe-creator",
+      "ownership": "managed",
+      "coverage": "curated-managed",
+      "path": ".local/secondary_skills/recipe-creator/SKILL.md",
+      "description": "Create recipes, suggest meals from ingredients, and handle dietary substitutions.",
       "evals": [
         {
-          "id": "make-apps-resilient-to-abuse-and-overload-trigger-1",
-          "query": "A public endpoint can be spammed and expensive requests can exhaust the service; add rate limits, quotas, timeouts, and overload behavior.",
+          "id": "recipe-creator-trigger-1",
+          "query": "Create a structured recipe for vegan mushroom ramen with ingredients, steps, nutrition, timers, and serving scaling.",
           "should_trigger": true
         },
         {
-          "id": "make-apps-resilient-to-abuse-and-overload-trigger-2",
-          "query": "Make this app resilient to abuse and traffic spikes without exposing whether protected records exist.",
+          "id": "recipe-creator-trigger-2",
+          "query": "Turn my grandmother's notes into a complete cookable recipe and save it to my recipe collection.",
           "should_trigger": true
         },
         {
-          "id": "make-apps-resilient-to-abuse-and-overload-near-miss-1",
-          "query": "Add a responsive tablet layout for the dashboard.",
+          "id": "recipe-creator-near-miss-1",
+          "query": "Make a weekly high-protein meal plan with calorie targets and a grocery list.",
           "should_trigger": false
         },
         {
-          "id": "make-apps-resilient-to-abuse-and-overload-near-miss-2",
-          "query": "Review personal-data retention and privacy controls.",
+          "id": "recipe-creator-near-miss-2",
+          "query": "Build the React page that displays my recipe collection; do not create or edit recipe data.",
           "should_trigger": false
         }
       ]
     },
     {
-      "name": "make-ui-responsive-across-devices",
-      "metadata_name": "make-ui-responsive-across-devices",
-      "path": ".local/custom_skills/make-ui-responsive-across-devices/SKILL.md",
-      "description": "Use when building or changing any web UI that real people will use on different screens \u2014 pages, dashboards, forms, marketing sites, customer-facing apps \u2014 so the layout works on phone, tablet, and desktop, not just the preview width.",
+      "name": "seo-auditor",
+      "metadata_name": "seo-auditor",
+      "ownership": "managed",
+      "coverage": "curated-managed",
+      "path": ".local/secondary_skills/seo-auditor/SKILL.md",
+      "description": "Audit websites for SEO issues and optimize content for search engine visibility.",
       "evals": [
         {
-          "id": "make-ui-responsive-across-devices-trigger-1",
-          "query": "The dashboard works at desktop width but breaks on phones and tablets; make the real UI usable across screen sizes.",
+          "id": "seo-auditor-trigger-1",
+          "query": "Audit my website for crawlability, technical SEO, metadata, and actionable improvements to search visibility.",
           "should_trigger": true
         },
         {
-          "id": "make-ui-responsive-across-devices-trigger-2",
-          "query": "Build this customer-facing form so it is responsive on mobile, tablet, and desktop rather than only the preview width.",
+          "id": "seo-auditor-trigger-2",
+          "query": "Review these pages for SEO issues and recommend better titles, descriptions, and target keywords.",
           "should_trigger": true
         },
         {
-          "id": "make-ui-responsive-across-devices-near-miss-1",
-          "query": "Make the API tolerate traffic spikes and abusive callers.",
+          "id": "seo-auditor-near-miss-1",
+          "query": "Create a paid advertising campaign with display banners and social ad variants.",
           "should_trigger": false
         },
         {
-          "id": "make-ui-responsive-across-devices-near-miss-2",
-          "query": "Run an accessibility audit for keyboard navigation and screen readers.",
-          "should_trigger": false
-        }
-      ]
-    },
-    {
-      "name": "meet-an-accessibility-baseline",
-      "metadata_name": "meet-an-accessibility-baseline",
-      "path": ".local/custom_skills/meet-an-accessibility-baseline/SKILL.md",
-      "description": "Use this skill when building or changing any user-facing UI \u2014 pages, forms, navigation, modals, components \u2014 especially for customer-facing or public apps. Ensures the app meets basic WCAG accessibility so it doesn't exclude users or fail an audit.",
-      "evals": [
-        {
-          "id": "meet-an-accessibility-baseline-trigger-1",
-          "query": "Audit this app for keyboard access, labels, focus management, contrast, and screen-reader semantics, then fix the blockers.",
-          "should_trigger": true
-        },
-        {
-          "id": "meet-an-accessibility-baseline-trigger-2",
-          "query": "Before shipping the new dialog, establish an accessibility baseline and verify it across representative viewports.",
-          "should_trigger": true
-        },
-        {
-          "id": "meet-an-accessibility-baseline-near-miss-1",
-          "query": "Make the layout responsive across phone and desktop widths.",
-          "should_trigger": false
-        },
-        {
-          "id": "meet-an-accessibility-baseline-near-miss-2",
-          "query": "Benchmark whether a skill description triggers for realistic prompts.",
-          "should_trigger": false
-        }
-      ]
-    },
-    {
-      "name": "review-before-shipping",
-      "metadata_name": "review-before-shipping",
-      "path": ".local/custom_skills/review-before-shipping/SKILL.md",
-      "description": "Use this skill before committing, opening a pull request, merging, deploying, or publishing, or when the user says the app is \"done\", \"ready to ship\", or \"ready to go live\".",
-      "evals": [
-        {
-          "id": "review-before-shipping-trigger-1",
-          "query": "Review this completed change before release for security, authorization, data safety, tests, and deploy readiness.",
-          "should_trigger": true
-        },
-        {
-          "id": "review-before-shipping-trigger-2",
-          "query": "Do a final risk-based shipping review and report blockers, evidence, and explicit exceptions.",
-          "should_trigger": true
-        },
-        {
-          "id": "review-before-shipping-near-miss-1",
-          "query": "Run only the pre-publish release checklist and its configured commands.",
-          "should_trigger": false
-        },
-        {
-          "id": "review-before-shipping-near-miss-2",
-          "query": "Design the feature architecture before any implementation begins.",
-          "should_trigger": false
-        }
-      ]
-    },
-    {
-      "name": "secure-ai-features-against-prompt-injection",
-      "metadata_name": "secure-ai-features-against-prompt-injection",
-      "path": ".local/custom_skills/secure-ai-features-against-prompt-injection/SKILL.md",
-      "description": "Use when building any feature that sends user input or external content (web pages, files, emails, documents) to an LLM \u2014 chatbots, AI assistants, summarizers, RAG, or agents that can call tools or take actions. Defends against prompt injection and excessive agency.",
-      "evals": [
-        {
-          "id": "secure-ai-features-against-prompt-injection-trigger-1",
-          "query": "Build an AI assistant that summarizes uploaded documents and can call tools; defend against prompt injection and excessive agency.",
-          "should_trigger": true
-        },
-        {
-          "id": "secure-ai-features-against-prompt-injection-trigger-2",
-          "query": "User text and web pages will be sent to an LLM\u2014secure the feature against instruction hijacking and unauthorized actions.",
-          "should_trigger": true
-        },
-        {
-          "id": "secure-ai-features-against-prompt-injection-near-miss-1",
-          "query": "Validate ordinary form fields and encode them for HTML output; no LLM is involved.",
-          "should_trigger": false
-        },
-        {
-          "id": "secure-ai-features-against-prompt-injection-near-miss-2",
-          "query": "Add a conventional password login with no AI or external content.",
-          "should_trigger": false
-        }
-      ]
-    },
-    {
-      "name": "validate-and-encode-untrusted-input",
-      "metadata_name": "validate-and-encode-untrusted-input",
-      "path": ".local/custom_skills/validate-and-encode-untrusted-input/SKILL.md",
-      "description": "Use whenever the app accepts input from any source the server doesn't control \u2014 form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output \u2014 to prevent SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation, parameterized/safe APIs, and contextual output encoding.",
-      "evals": [
-        {
-          "id": "validate-and-encode-untrusted-input-trigger-1",
-          "query": "This endpoint accepts JSON, path parameters, uploads, and webhook data; add allow-list validation, safe queries, and contextual output encoding.",
-          "should_trigger": true
-        },
-        {
-          "id": "validate-and-encode-untrusted-input-trigger-2",
-          "query": "Harden the API against SQL injection, XSS, and SSRF from user input and third-party responses.",
-          "should_trigger": true
-        },
-        {
-          "id": "validate-and-encode-untrusted-input-near-miss-1",
-          "query": "Design defenses for prompt injection in an LLM agent.",
-          "should_trigger": false
-        },
-        {
-          "id": "validate-and-encode-untrusted-input-near-miss-2",
-          "query": "Audit how customer PII is retained and who can access it.",
-          "should_trigger": false
-        }
-      ]
-    },
-    {
-      "name": "vet-dependencies-before-adding",
-      "metadata_name": "vet-dependencies-before-adding",
-      "path": ".local/custom_skills/vet-dependencies-before-adding/SKILL.md",
-      "description": "Use this skill when adding, upgrading, or installing any third-party package or library (npm, pip, etc.), or when the user asks to add a dependency.",
-      "evals": [
-        {
-          "id": "vet-dependencies-before-adding-trigger-1",
-          "query": "I want to install a new npm package for spreadsheet parsing; verify the registry package, provenance, typosquat risk, and compatibility first.",
-          "should_trigger": true
-        },
-        {
-          "id": "vet-dependencies-before-adding-trigger-2",
-          "query": "Before adding or upgrading this pip dependency, vet that it is genuine and safe rather than blindly editing the manifest.",
-          "should_trigger": true
-        },
-        {
-          "id": "vet-dependencies-before-adding-near-miss-1",
-          "query": "Audit the license of packages already in the production dependency tree.",
-          "should_trigger": false
-        },
-        {
-          "id": "vet-dependencies-before-adding-near-miss-2",
-          "query": "Fix a parser bug in an existing dependency-free module.",
+          "id": "seo-auditor-near-miss-2",
+          "query": "Compare two competitors' pricing and positioning without auditing their search visibility.",
           "should_trigger": false
         }
       ]
@@ -1269,24 +1181,24 @@
       "status": "no lexical flag"
     },
     {
-      "name": "check-dependency-licenses",
+      "name": "ad-creative",
       "positive_overlap": [
-        2,
-        3
+        1,
+        1
       ],
       "negative_overlap": [
-        1,
+        0,
         0
       ],
-      "under_trigger_signal": 0,
+      "under_trigger_signal": 2,
       "over_trigger_signal": 0,
-      "status": "no lexical flag"
+      "status": "review"
     },
     {
-      "name": "handle-personal-and-sensitive-data",
+      "name": "deep-research",
       "positive_overlap": [
-        1,
-        3
+        2,
+        1
       ],
       "negative_overlap": [
         0,
@@ -1297,27 +1209,13 @@
       "status": "review"
     },
     {
-      "name": "instrument-observability-and-graceful-errors",
+      "name": "design-thinker",
       "positive_overlap": [
-        3,
-        2
-      ],
-      "negative_overlap": [
         2,
-        1
-      ],
-      "under_trigger_signal": 0,
-      "over_trigger_signal": 0,
-      "status": "no lexical flag"
-    },
-    {
-      "name": "make-apps-resilient-to-abuse-and-overload",
-      "positive_overlap": [
-        7,
-        1
+        0
       ],
       "negative_overlap": [
-        1,
+        0,
         0
       ],
       "under_trigger_signal": 1,
@@ -1325,84 +1223,28 @@
       "status": "review"
     },
     {
-      "name": "make-ui-responsive-across-devices",
+      "name": "recipe-creator",
+      "positive_overlap": [
+        2,
+        0
+      ],
+      "negative_overlap": [
+        0,
+        1
+      ],
+      "under_trigger_signal": 1,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "seo-auditor",
       "positive_overlap": [
         4,
-        5
-      ],
-      "negative_overlap": [
-        0,
-        0
-      ],
-      "under_trigger_signal": 0,
-      "over_trigger_signal": 0,
-      "status": "no lexical flag"
-    },
-    {
-      "name": "meet-an-accessibility-baseline",
-      "positive_overlap": [
-        1,
-        1
-      ],
-      "negative_overlap": [
-        0,
-        0
-      ],
-      "under_trigger_signal": 2,
-      "over_trigger_signal": 0,
-      "status": "review"
-    },
-    {
-      "name": "review-before-shipping",
-      "positive_overlap": [
-        1,
-        0
-      ],
-      "negative_overlap": [
-        0,
-        1
-      ],
-      "under_trigger_signal": 2,
-      "over_trigger_signal": 0,
-      "status": "review"
-    },
-    {
-      "name": "secure-ai-features-against-prompt-injection",
-      "positive_overlap": [
-        9,
-        6
-      ],
-      "negative_overlap": [
-        1,
         2
       ],
-      "under_trigger_signal": 0,
-      "over_trigger_signal": 0,
-      "status": "no lexical flag"
-    },
-    {
-      "name": "validate-and-encode-untrusted-input",
-      "positive_overlap": [
-        10,
-        8
-      ],
       "negative_overlap": [
-        2,
-        0
-      ],
-      "under_trigger_signal": 0,
-      "over_trigger_signal": 0,
-      "status": "no lexical flag"
-    },
-    {
-      "name": "vet-dependencies-before-adding",
-      "positive_overlap": [
-        2,
-        4
-      ],
-      "negative_overlap": [
-        1,
-        0
+        0,
+        2
       ],
       "under_trigger_signal": 0,
       "over_trigger_signal": 0,

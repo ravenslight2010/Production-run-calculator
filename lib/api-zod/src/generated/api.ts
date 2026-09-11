@@ -1731,47 +1731,6 @@ export const OperationsScheduleOrderingResponse = zod.object({
 
 
 /**
- * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
- * @summary Suggest values for blank run-setup fields (AI); read-only
- */
-export const AiFillMissingBody = zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "dieType": zod.string().optional().describe('Die\/size of the run, if known'),
-  "context": zod.array(zod.object({
-  "key": zod.string(),
-  "label": zod.string(),
-  "value": zod.string()
-}).describe('A field already filled in, given to the model for grounding.')).optional().describe('Fields already known, for grounding the suggestions'),
-  "fields": zod.array(zod.object({
-  "key": zod.string().describe('Stable field key (matches the run-settings field name)'),
-  "label": zod.string().describe('Human-readable field label'),
-  "category": zod.enum(['identity', 'line', 'packaging', 'sauce', 'applicator', 'pepperoni', 'dough']),
-  "kind": zod.enum(['number', 'text', 'select']),
-  "options": zod.array(zod.string()).optional().describe('Allowed values when kind is \"select\"')
-}).describe('One still-blank run-setup field the model should suggest a value for.')).describe('The blank fields needing a suggested value')
-})
-
-export const AiFillMissingResponse = zod.object({
-  "suggestions": zod.array(zod.object({
-  "key": zod.string().describe('The field key this suggestion is for (echoes a requested key)'),
-  "value": zod.string().describe('Suggested value, as a string (numbers\/selects coerced client-side)'),
-  "rationale": zod.string().describe('Short plain-language reason for the suggested value'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
-})),
-  "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when no suggestions could be made'),
-  "decision": zod.enum(['suggestion']),
-  "aiGenerated": zod.boolean().optional(),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
-})
-
-
-/**
  * Given the saved brands and their flavors plus a list of imported brand/flavor names that did NOT exactly match, returns the best saved match for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the Excel import dialog and the user can still override. Falls back silently to the client's fuzzy matching when unavailable.
  * @summary Match imported brand/flavor names to saved ones (AI); read-only
  */
@@ -1797,45 +1756,25 @@ export const AiMatchImportBody = zod.object({
 export const AiMatchImportResponse = zod.object({
   "brandMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported brand name (echoes an unmatchedBrands entry)'),
-  "match": zod.string().describe('The saved brand it best matches (always one of brands)'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+  "match": zod.string().describe('The saved brand it best matches (always one of brands)')
 })),
   "flavorMatches": zod.array(zod.object({
   "brand": zod.string().describe('The saved brand the flavor belongs to'),
   "candidate": zod.string().describe('The imported flavor name (echoes an unmatchedFlavors entry)'),
-  "match": zod.string().describe('The saved flavor it best matches (always within that brand)'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+  "match": zod.string().describe('The saved flavor it best matches (always within that brand)')
 })),
   "ingredientMatches": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']).describe('The recipe kind whose ingredient pool the match belongs to'),
   "candidate": zod.string().describe('The imported ingredient name (echoes an unmatchedIngredients entry)'),
-  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)')
 })).optional().describe('Confident matches for imported recipe ingredient names. Optional.'),
   "appTypeMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
-  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)')
 })).optional().describe('Confident matches for imported applicator\/topping type names. Optional.'),
   "pepTypeMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
-  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)')
 })).optional().describe('Confident matches for imported pepperoni type names. Optional.'),
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
@@ -1860,11 +1799,7 @@ export const AiMatchPremixResponse = zod.object({
   "matches": zod.array(zod.object({
   "name": zod.string().describe('The imported premix name (echoes an unmatchedNames entry)'),
   "brand": zod.string().describe('The saved brand it best matches (always one of brands)'),
-  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits')
 })),
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
@@ -1934,11 +1869,7 @@ export const AiParseSpecSheetResponse = zod.object({
   "sticks": zod.number(),
   "ozPerPizza": zod.number(),
   "batchLbs": zod.number().optional().describe('Batch size in lbs one made pepperoni batch weighs, when the sheet states it. Optional.')
-})),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+}))
 })),
   "recipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1956,11 +1887,7 @@ export const AiParseSpecSheetResponse = zod.object({
   "rows": zod.array(zod.object({
   "ingredient": zod.string(),
   "lbs": zod.number()
-})),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+}))
 })),
   "note": zod.string().optional(),
   "warnings": zod.array(zod.object({
@@ -1972,39 +1899,6 @@ export const AiParseSpecSheetResponse = zod.object({
   "decision": zod.enum(['suggestion']),
   "aiGenerated": zod.boolean().optional(),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
-})
-
-
-/**
- * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
- * @summary Suggest groups of duplicate ingredient names to merge (AI)
- */
-export const AiSuggestMergesBody = zod.object({
-  "names": zod.array(zod.string()).describe('The full pool of mergeable ingredient\/die names to cluster'),
-  "aliases": zod.array(zod.object({
-  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
-  "canonicalName": zod.string().describe('The canonical name it was folded into')
-}).describe('A learned mapping from a merged-away name to the kept name.')).optional().describe('Learned merge aliases to ground the suggestions'),
-  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
-  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand `names` was scoped to — used only to tailor the AI prompt\'s wording.')
-})
-
-export const AiSuggestMergesResponse = zod.object({
-  "suggestions": zod.array(zod.object({
-  "target": zod.string().describe('The recommended canonical name to keep'),
-  "sources": zod.array(zod.string()).describe('The duplicate names to merge into the target'),
-  "reason": zod.string().optional().describe('Optional short rationale for the suggested grouping'),
-  "review": zod.object({
-  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
-  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
-}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
-})),
-  "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
-  "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
-  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
-  "note": zod.string().optional().describe('Optional brief overall comment from the model'),
-  "decision": zod.enum(['suggestion']),
   "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
@@ -2931,6 +2825,7 @@ export const UpdateSupervisorPinResponse = zod.object({
 export const ListMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -2957,6 +2852,7 @@ export const ListMixesResponse = zod.object({
 export const SaveMixesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -2978,6 +2874,7 @@ export const SaveMixesBody = zod.object({
 export const SaveMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -3008,6 +2905,7 @@ export const DeleteMixesBody = zod.object({
 export const DeleteMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the mix'),
   "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
   "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
@@ -3113,6 +3011,7 @@ export const MergeIngredientsResponse = zod.object({
 export const ListCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3137,6 +3036,7 @@ export const ListCheeseRecipesResponse = zod.object({
 export const SaveCheeseRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3156,6 +3056,7 @@ export const SaveCheeseRecipesBody = zod.object({
 export const SaveCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3184,6 +3085,7 @@ export const DeleteCheeseRecipesBody = zod.object({
 export const DeleteCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required for updates to existing rows'),
   "name": zod.string().describe('Display name of the cheese recipe'),
   "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
   "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
@@ -3208,6 +3110,7 @@ export const DeleteCheeseRecipesResponse = zod.object({
 export const ListDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3239,6 +3142,7 @@ export const ListDoughRecipesResponse = zod.object({
 export const SaveDoughRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3265,6 +3169,7 @@ export const SaveDoughRecipesBody = zod.object({
 export const SaveDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3300,6 +3205,7 @@ export const DeleteDoughRecipesBody = zod.object({
 export const DeleteDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3331,6 +3237,7 @@ export const DeleteDoughRecipesResponse = zod.object({
 export const ListSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3362,6 +3269,7 @@ export const ListSauceRecipesResponse = zod.object({
 export const SaveSauceRecipesBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3388,6 +3296,7 @@ export const SaveSauceRecipesBody = zod.object({
 export const SaveSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3423,6 +3332,7 @@ export const DeleteSauceRecipesBody = zod.object({
 export const DeleteSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
+  "updatedAt": zod.coerce.date().optional().describe('Server persistence revision; required when updating an existing row'),
   "name": zod.string().describe('Display name of the recipe'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
@@ -3464,7 +3374,7 @@ export const ListBrandProfilesResponse = zod.object({
 
 
 /**
- * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing any forced item additionally require the `use-ai-tools` capability (the same gate as the spec-import parse flow) and are rejected with 403 otherwise, before any write.
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing forced items are also restricted to the `manage-profiles` capability and are rejected with 403 otherwise, before any write.
  * @summary Create or update brand+flavor setup profiles (stamp-guarded)
  */
 export const SaveBrandProfilesBody = zod.object({
@@ -4899,8 +4809,8 @@ export const ListIngredientBatchWeightsResponse = zod.object({
 
 
 /**
- * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing entries are updated; new ones are inserted. Available to any signed-in user.
- * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing positive entries are updated; new positive entries are inserted. An entry with lbs set to zero removes the learned value and stops future auto-fill. Available to any signed-in user.
+ * @summary Save or clear learned ingredient batch weights (case-insensitive)
  */
 export const SaveIngredientBatchWeightsBody = zod.object({
   "weights": zod.array(zod.object({

@@ -3,24 +3,20 @@
 // The pure detection + proposal logic lives in the shared @workspace/fill-missing
 // lib (one source of truth for web + mobile, replit.md parity rule). This module
 // re-exports that logic and adds the only web-specific parts: how the known
-// sources are read (loadProfile + SPEC_PROFILES) and how the read-only
-// /ai/fill-missing fetch is authenticated.
+// sources are read (loadProfile + SPEC_PROFILES) and how learned values are
+// persisted.
 //
 // This module NEVER writes anything. The UI commits confirmed values through the
 // existing update paths; there is no auto-apply.
 
 import type {
-  FillMissingInput,
-  FillMissingResult,
-  FillMissingSuggestion,
   KnownLookup,
   LearnedValueRow,
 } from "@workspace/fill-missing";
 import { pickLearnedForProduct } from "@workspace/fill-missing";
-import type { ReviewVerdict } from "@workspace/ai-review";
 import { SPEC_PROFILES } from "./specSeed";
 import { loadProfile } from "./storage";
-import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
+import { inventoryClientId } from "./inventoryShared";
 
 export * from "@workspace/fill-missing";
 
@@ -53,51 +49,6 @@ export async function saveFillMissingValues(values: LearnedValueRow[]): Promise<
   });
   if (!res.ok) throw new Error(`Save fill-missing values failed (${res.status})`);
 }
-
-// The server attaches a reviewer-AI verdict to each suggestion (advisory). The
-// shared lib type doesn't carry it, so widen the result here for the UI.
-export type ReviewedFillMissingSuggestion = FillMissingSuggestion & { review?: ReviewVerdict };
-export type ReviewedFillMissingResult = Omit<FillMissingResult, "suggestions"> & {
-  suggestions: ReviewedFillMissingSuggestion[];
-  decision: "suggestion";
-  aiGenerated?: boolean;
-  aiStatus?: "deterministic" | "enriched" | "unavailable";
-  modelStatus?: "completed" | "provider-unavailable" | "rate-limited" | "malformed";
-};
-
-export async function requestFillMissing(
-  input: FillMissingInput,
-): Promise<ReviewedFillMissingResult> {
-  const res = await fetch("/api/ai/fill-missing", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": inventoryClientId(),
-    },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const retryAfterRaw = res.headers.get("Retry-After");
-    const retryAfterSec =
-      retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
-    let serverMessage: string | null = null;
-    try {
-      const body = (await res.json()) as { error?: unknown };
-      if (body && typeof body.error === "string") serverMessage = body.error;
-    } catch {
-      // non-JSON error body; ignore
-    }
-    throw new InventoryApiError(
-      res.status,
-      `Fill-missing request failed (${res.status})`,
-      retryAfterSec,
-      serverMessage,
-    );
-  }
-  return (await res.json()) as ReviewedFillMissingResult;
-}
-
-export const fillMissingErrorMessage = photoErrorMessage;
 
 // ── Web known-source lookup ──────────────────────────────────────────────────
 // Builds a KnownLookup from this run's learned values (server-persisted) + saved

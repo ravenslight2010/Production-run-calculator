@@ -25,7 +25,7 @@ type CostLimitRun = {
 
 function runCostLimit(
   middleware: ReturnType<typeof costLimitMiddleware>,
-  path = "/api/ai/fill-missing",
+  path = "/api/ai/match-import",
 ): Promise<CostLimitRun> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = {};
@@ -85,7 +85,7 @@ describe("costLimitMiddleware", () => {
     });
 
     const normal = await runCostLimit(middleware);
-    const count = await runCostLimit(middleware, "/api/ai/fill-missing");
+    const count = await runCostLimit(middleware, "/api/ai/match-import");
     const anotherNormal = await runCostLimit(middleware);
 
     expect(normal.next).toHaveBeenCalledOnce();
@@ -118,7 +118,7 @@ describe("costLimitMiddleware", () => {
     });
 
     const normal = await runCostLimit(middleware);
-    const count = await runCostLimit(middleware, "/api/ai/fill-missing");
+    const count = await runCostLimit(middleware, "/api/ai/match-import");
     const blocked = await runCostLimit(middleware, "/api/ai/match-import");
 
     expect(normal.headers).toMatchObject({

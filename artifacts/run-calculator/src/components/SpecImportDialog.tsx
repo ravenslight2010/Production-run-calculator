@@ -33,7 +33,6 @@ import {
   specImportRecipeDisplayKind,
   type SpecImportDisplayKind,
 } from "@/storage";
-import ReviewBadge from "./ReviewBadge";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 
 type Props = {
@@ -45,6 +44,8 @@ type Props = {
   error: string | null;
   prepared: SpecImportPrepared | null;
   applying: boolean;
+  canUseAiTools: boolean;
+  onUseAiFallback: () => void;
   /**
    * Existing recipe names, per display kind, the "use my existing recipe" picker
    * can offer. Cheese and mix are server-backed factory master-data (and dough /
@@ -408,6 +409,8 @@ export default function SpecImportDialog({
   error,
   prepared,
   applying,
+  canUseAiTools,
+  onUseAiFallback,
   existingRecipeNamesByKind,
   onConfirm,
 }: Props) {
@@ -1281,21 +1284,6 @@ export default function SpecImportDialog({
                 </p>
               )}
 
-              {step === 2 && prepared.flagged.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-muted-foreground">
-                    A second AI check flagged {prepared.flagged.length} item
-                    {prepared.flagged.length === 1 ? "" : "s"} to double-check before applying:
-                  </p>
-                  {prepared.flagged.map((f, i) => (
-                    <div key={i} className="space-y-0.5">
-                      <p className="text-xs font-medium text-foreground">{f.label}</p>
-                      <ReviewBadge review={f.review} />
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {step === 2 && discrepancies.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-muted-foreground">
@@ -1368,6 +1356,16 @@ export default function SpecImportDialog({
                     <span className="text-sm font-medium">Note from the parser</span>
                   </div>
                   <p className="mt-1 text-sm text-amber-700">{prepared.note}</p>
+                  {prepared.unresolved?.length && canUseAiTools ? (
+                    <button
+                      type="button"
+                      onClick={onUseAiFallback}
+                      disabled={loading || applying}
+                      className="mt-3 rounded-md bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                    >
+                      Use AI for {prepared.unresolved.length} unresolved item{prepared.unresolved.length === 1 ? "" : "s"}
+                    </button>
+                  ) : null}
                 </div>
               )}
 

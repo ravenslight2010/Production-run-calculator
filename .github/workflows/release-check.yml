@@ -75,6 +75,7 @@ jobs:
         run: pnpm --filter @workspace/db run push-force
 
       - name: Run release gates once and retain standard evidence
+        id: run-standard-release-check
         run: pnpm run release:check
 
       - name: Verify release evidence allowlist
@@ -103,6 +104,7 @@ jobs:
           RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          RELEASE_CHECK_OUTCOME: ${{ steps.run-standard-release-check.outcome }}
           RELEASE_MODE: standard
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check -- --resume
@@ -174,6 +176,7 @@ jobs:
         run: pnpm --filter @workspace/db run push-force
 
       - name: Run release gates once and retain full evidence
+        id: run-full-release-check
         run: pnpm run release:check:full
 
       - name: Verify full release evidence allowlist
@@ -202,6 +205,7 @@ jobs:
           RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          RELEASE_CHECK_OUTCOME: ${{ steps.run-full-release-check.outcome }}
           RELEASE_MODE: full
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check:full -- --resume

@@ -21,7 +21,15 @@ function run(): void {
     keyIds: [current, previous],
   });
   assert.equal(parseReportSigningKeyring(undefined), null);
+  assert.equal(parseReportSigningKeyring(""), null);
   assert.equal(parseReportSigningKeyring("{malformed"), null);
+  assert.equal(
+    parseReportSigningKeyring(JSON.stringify({
+      activeKeyId: "missing",
+      keys: { [current]: "c".repeat(32) },
+    })),
+    null,
+  );
   assert.equal(
     parseReportSigningKeyring(JSON.stringify({
       activeKeyId: current,
@@ -57,6 +65,7 @@ function run(): void {
   assert.equal(unavailable.failure, "keyring-unavailable");
   assert.equal(unavailable.activeKeyId, null);
   assert.match(unavailable.remediation ?? "", /valid OPERATIONAL_REPORT_SIGNING_KEYS/);
+  assert.ok(!JSON.stringify(unavailable).includes("c".repeat(32)));
 
   const truncated = evaluateReportKeyRotationPreflight({
     keyring,
@@ -66,6 +75,7 @@ function run(): void {
   assert.equal(truncated.failure, "audit-truncated");
   assert.equal(truncated.scan.complete, false);
   assert.equal(truncated.canRotate, false);
+  assert.match(truncated.remediation ?? "", /bounded audit/);
 
   const diagnostics = JSON.stringify(missing);
   assert.ok(!diagnostics.includes("c".repeat(32)));

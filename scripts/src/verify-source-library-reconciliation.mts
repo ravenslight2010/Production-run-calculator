@@ -7,13 +7,14 @@
  * Output is JSON only so the result can be retained by release automation.
  */
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
-export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v1";
+export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v2";
 export const DEFAULT_FROM_DATE = "2026-08-26";
 export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;
 export type SourceLibraryEvidenceEnvironment = (typeof SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS)[number];
@@ -150,7 +151,9 @@ function ownedFields(proposal: Proposal): Record<string, unknown> {
   if (proposal.table === "dough_recipes") fields.push("doughballVariants", "doughballWeightOz", "doughballsPerTray");
   if (proposal.table === "cheese_recipes") fields.push("brand", "flavors", "shredderSetting", "cellulose", "notes");
   if (proposal.table === "mixes") {
-    fields.push("brand", "flavor", "daysEarly", "batchSize");
+    // The heal initializes batchSize, but managers may legitimately edit it
+    // afterward. Post-heal verification owns only immutable source fields.
+    fields.push("brand", "flavor", "daysEarly");
     // An omitted notes field means the heal must preserve the manager's note.
     if (Object.prototype.hasOwnProperty.call(after, "notes")) fields.push("notes");
   }
@@ -194,7 +197,13 @@ function buildMappings(report: Report): Mapping[] {
     const canonical = proposal.action === "link-source-identity"
       ? String(proposal.before.name)
       : String(proposal.after.name ?? proposal.before.name);
-    mappings.push({ old: String(proposal.after.sourceName ?? proposal.before.name), canonical, table: proposal.table });
+    const old = String(proposal.after.sourceName ?? proposal.before.name);
+    // Component-only replacements intentionally retain their recipe identity.
+    // Treating old === canonical as a rename makes every legitimate profile and
+    // pending-run reference look stale even though no repoint was required.
+    if (normalizedName(old) !== normalizedName(canonical)) {
+      mappings.push({ old, canonical, table: proposal.table });
+    }
   }
   for (const raw of report.findings.allZeroStubs) {
     const stub = raw as Stub;
@@ -483,6 +492,10 @@ function markerCheck(marker: Record<string, unknown> | undefined, report: Report
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
   environment: SourceLibraryEvidenceEnvironment;
+  revision: string;
+  capturedAt: string;
+  evidenceId: string;
+  healId: string;
   repairBoundary: { fromDate: string };
   report: { sha256: string; formatVersion: number; automaticProposals: number; stubs: number };
   marker: ReturnType<typeof markerCheck>;
@@ -497,6 +510,14 @@ export type VerificationOutput = {
   failures: Array<{ check: string; count: number }>;
 };
 
+export function computeSourceLibraryEvidenceId(
+  evidence: Record<string, unknown>,
+): string {
+  const bounded = { ...evidence };
+  delete bounded.evidenceId;
+  return sha256(stable(bounded));
+}
+
 export async function verifySourceLibraryReconciliation(
   report: Report,
   reportBytes: Buffer,
@@ -504,6 +525,7 @@ export async function verifySourceLibraryReconciliation(
   query: ReadOnlyQuery,
   fromDate = DEFAULT_FROM_DATE,
   environment: SourceLibraryEvidenceEnvironment = "development",
+  revision = "development-unbound",
 ): Promise<VerificationOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(TABLES.map((table) => [
@@ -552,9 +574,14 @@ export async function verifySourceLibraryReconciliation(
     stubs: stubState.counts,
     stubObservations: stubState.observations,
   };
-  return {
+  const capturedAt = new Date().toISOString();
+  const fingerprint = sha256(stable(fingerprintInput));
+  const output: Omit<VerificationOutput, "evidenceId"> = {
     verifier: "source-library-reconciliation",
     environment,
+    revision,
+    capturedAt,
+    healId,
     repairBoundary: { fromDate },
     report: {
       sha256: sha256(reportBytes),
@@ -569,9 +596,13 @@ export async function verifySourceLibraryReconciliation(
     pendingRuns: pendingSummary,
     protectedHistory: { references: protectedReferences.length },
     stubs: stubState.counts,
-    idempotencyFingerprint: { algorithm: "sha256", value: sha256(stable(fingerprintInput)) },
+    idempotencyFingerprint: { algorithm: "sha256", value: fingerprint },
     ok: failures.length === 0,
     failures,
+  };
+  return {
+    ...output,
+    evidenceId: computeSourceLibraryEvidenceId(output),
   };
 }
 
@@ -598,6 +629,30 @@ function dateFromHealId(healId: string) {
   return match?.[1];
 }
 
+function currentRevision(): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }).trim();
+}
+
+export function resolveSourceLibraryRevision(
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredRevision: string | undefined,
+): string {
+  const revision = configuredRevision?.trim() ||
+    (environment === "development" ? currentRevision() : undefined);
+  if (!revision) {
+    throw new Error(
+      "Missing --revision for release evidence; pass the exact deployed 40-character Git commit SHA",
+    );
+  }
+  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+    throw new Error("Invalid --revision; expected the full 40-character Git commit SHA");
+  }
+  return revision;
+}
+
 async function main() {
   const reportArgument = argument("--report");
   const reportPath = reportArgument
@@ -615,6 +670,10 @@ async function main() {
     );
   }
   const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
+  const revision = resolveSourceLibraryRevision(
+    environment,
+    argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION),
+  );
   const outputPath = outputPathArgument();
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);
@@ -633,6 +692,7 @@ async function main() {
       },
       fromDate,
       environment,
+      revision,
     );
     await client.query("ROLLBACK");
     await writeOutput(outputPath, output);

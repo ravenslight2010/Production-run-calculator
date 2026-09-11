@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   detectAnomalies,
   yieldPct,
-  buildAnomalyPromptBlock,
   MIN_BASELINE_SAMPLES,
   type AnomalyRun,
 } from "./index";
@@ -31,7 +30,6 @@ describe("yieldPct", () => {
     expect(yieldPct(run({ brand: "A", casesPlanned: 0 }))).toBeNull();
   });
 });
-
 describe("detectAnomalies — baseline gating", () => {
   it("flags nothing without enough baseline samples", () => {
     const res = detectAnomalies({
@@ -140,7 +138,6 @@ describe("detectAnomalies — ordering & empty", () => {
       history: baseline("A", 5),
     });
     expect(res.anomalies).toHaveLength(0);
-    expect(buildAnomalyPromptBlock(res)).toContain("No anomalies");
   });
 
   it("handles empty input", () => {
@@ -150,15 +147,4 @@ describe("detectAnomalies — ordering & empty", () => {
     expect(res.baselineRuns).toBe(0);
   });
 });
-
-describe("buildAnomalyPromptBlock", () => {
-  it("lists flagged anomalies", () => {
-    const res = detectAnomalies({
-      today: [run({ brand: "A", downtimeMinutes: 60 })],
-      history: baseline("A", 4, { downtimeMinutes: 5 }),
-    });
-    const block = buildAnomalyPromptBlock(res);
-    expect(block).toContain("downtime");
-    expect(block).toContain("baseline");
-  });
-});
+export {};

@@ -4,8 +4,6 @@ import { exactMatch, fuzzyMatch, mergeImportRuns, collectImportAliases, type Imp
 import { requestMatchImport } from "@/matchImport";
 import { fetchImportAliases, saveImportAliases } from "@/importAliases";
 import { saveAiCorrections } from "@/aiCorrections";
-import type { ReviewVerdict } from "@workspace/ai-review";
-import ReviewBadge from "./ReviewBadge";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import AiStatusNotice from "./AiStatusNotice";
 import type { AiStatus } from "../aiStatus";
@@ -60,11 +58,6 @@ export default function ExcelImportDialog({
   // dialog still works without them via the Levenshtein fuzzy chips).
   const [aiBrandMatch, setAiBrandMatch] = useState<Record<string, string>>({});
   const [aiFlavorMatch, setAiFlavorMatch] = useState<Record<string, string>>({});
-  // Reviewer-AI verdicts for the AI-suggested matches (advisory; keyed like the
-  // match maps). Shown next to a row when the user's current choice is the AI
-  // value the reviewer flagged.
-  const [aiBrandReview, setAiBrandReview] = useState<Record<string, ReviewVerdict>>({});
-  const [aiFlavorReview, setAiFlavorReview] = useState<Record<string, ReviewVerdict>>({});
   const [aiLoading, setAiLoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   // Candidate keys already sent to the AI, so the brand->flavor cascade does not
@@ -126,14 +119,12 @@ export default function ExcelImportDialog({
     });
   }, [result, brandChoice, brandFlavors, resolveBrandName]);
 
-  // Reset AI state whenever a new file is parsed.
+  // Reset match state whenever a new file is parsed.
   useEffect(() => {
     aiRequestedBrands.current = new Set();
     aiRequestedFlavors.current = new Set();
     setAiBrandMatch({});
     setAiFlavorMatch({});
-    setAiBrandReview({});
-    setAiFlavorReview({});
     setAiLoading(false);
   }, [result]);
 
@@ -229,24 +220,12 @@ export default function ExcelImportDialog({
             for (const m of r.brandMatches) next[m.candidate.toLowerCase()] = m.match;
             return next;
           });
-          setAiBrandReview((p) => {
-            const next = { ...p };
-            for (const m of r.brandMatches) if (m.review) next[m.candidate.toLowerCase()] = m.review;
-            return next;
-          });
         }
         if (r.flavorMatches.length) {
           setAiFlavorMatch((p) => {
             const next = { ...p };
             for (const m of r.flavorMatches) {
               next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.match;
-            }
-            return next;
-          });
-          setAiFlavorReview((p) => {
-            const next = { ...p };
-            for (const m of r.flavorMatches) {
-              if (m.review) next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.review;
             }
             return next;
           });
@@ -639,9 +618,6 @@ export default function ExcelImportDialog({
                           ))}
                         </select>
                       )}
-                      {aiBrandReview[key] && cur === aiBrandMatch[key] && (
-                        <ReviewBadge review={aiBrandReview[key]} className="mt-2" />
-                      )}
                     </div>
                   );
                 })}
@@ -712,9 +688,6 @@ export default function ExcelImportDialog({
                             </option>
                           ))}
                         </select>
-                      )}
-                      {aiFlavorReview[f.key] && cur === aiFlavorMatch[f.key] && (
-                        <ReviewBadge review={aiFlavorReview[f.key]} className="mt-2" />
                       )}
                     </div>
                   );

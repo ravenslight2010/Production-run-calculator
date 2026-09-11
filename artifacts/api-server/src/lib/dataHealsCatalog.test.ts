@@ -15,7 +15,10 @@ import {
   CRB_DOUGH_LUCIA_VARIANT_CUSTOMERS_V2_REPAIR_ID,
   healCrbLuciaVariantCustomers,
 } from "./repairs/mixDoughRepairs";
-import { SOURCE_LIBRARY_RECONCILIATION_HEAL_ID } from "./sourceLibraryReconciliationHeal";
+import {
+  SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+  SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
+} from "./sourceLibraryReconciliationHeal";
 
 describe("historical automatic repair registration", () => {
   it("preserves the released order and excludes manager commands from startup", () => {
@@ -47,6 +50,7 @@ describe("historical automatic repair registration", () => {
       "fresh-device-run-contamination-v1",
       "incident-resolved-workflow-reconciliation-v1",
       "source-library-reconciliation-2026-08-26-v1",
+      "source-library-reconciliation-2026-08-26-v2",
     ]);
     expect(repairs.every((repair) => repair.mode === "automatic" && !repair.managerAllowed)).toBe(true);
     expect(repairs.every((repair) =>
@@ -69,8 +73,12 @@ describe("historical automatic repair registration", () => {
     expect(checkedIn).toBe(renderReleasedRepairFingerprintManifest(repairs));
     expect(REPAIR_FINGERPRINT_SOURCE_CONTRACTS[SOURCE_LIBRARY_RECONCILIATION_HEAL_ID])
       .toBeUndefined();
+    expect(REPAIR_FINGERPRINT_SOURCE_CONTRACTS[SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID])
+      .toBeUndefined();
     expect(repairs
-      .filter((candidate) => candidate.id !== SOURCE_LIBRARY_RECONCILIATION_HEAL_ID)
+      .filter((candidate) =>
+        candidate.id !== SOURCE_LIBRARY_RECONCILIATION_HEAL_ID &&
+        candidate.id !== SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID)
       .every((candidate) => REPAIR_FINGERPRINT_SOURCE_CONTRACTS[candidate.id] !== undefined))
       .toBe(true);
 

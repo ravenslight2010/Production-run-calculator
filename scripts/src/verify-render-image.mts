@@ -247,6 +247,26 @@ async function main(): Promise<void> {
   );
   await waitForDatabase(databasePort);
 
+  const disposableDatabaseUrl =
+    `postgres://${databaseUser}:${databasePassword}@127.0.0.1:${databasePort}/${databaseName}`;
+  docker(
+    [
+      "run",
+      "--rm",
+      "--network",
+      "host",
+      "--env",
+      `DATABASE_URL=${disposableDatabaseUrl}`,
+      "--entrypoint",
+      "sh",
+      imageTag,
+      "-c",
+      "cd /app/migration && ./node_modules/.bin/drizzle-kit push --force --config ./drizzle.config.ts",
+    ],
+    "inherit",
+  );
+  console.log("PASS Render image: bundled migration applies to fresh Postgres");
+
   docker(
     [
       "run",
@@ -260,7 +280,7 @@ async function main(): Promise<void> {
       "--env",
       `PORT=${apiPort}`,
       "--env",
-      `DATABASE_URL=postgres://${databaseUser}:${databasePassword}@127.0.0.1:${databasePort}/${databaseName}`,
+      `DATABASE_URL=${disposableDatabaseUrl}`,
       // The health endpoint reports dependency readiness. This sentinel only
       // enables that check; it is not a real credential or a production value.
       "--env",

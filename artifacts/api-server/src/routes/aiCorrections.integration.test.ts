@@ -322,11 +322,22 @@ describe("retired AI data retention", () => {
 });
 
 describe("GET, POST, and DELETE /ai-corrections — capability gating", () => {
-  it("allows any authenticated operator to read corrections", async () => {
+  it("rejects an operator read so correction memory stays behind use-ai-tools", async () => {
     const operator = await freshOperator();
 
     const res = await fetch(`${baseUrl}/api/ai-corrections`, {
       headers: { authorization: `Bearer ${signToken(operator)}` },
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Missing capability: use-ai-tools" });
+  });
+
+  it("allows a manager with use-ai-tools to read corrections", async () => {
+    const manager = await freshManager();
+
+    const res = await fetch(`${baseUrl}/api/ai-corrections`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
     });
 
     expect(res.status).toBe(200);
@@ -342,7 +353,6 @@ describe("GET, POST, and DELETE /ai-corrections — capability gating", () => {
 
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "Missing capability: manage-staff" });
-    expect(await listCorrections(operator)).toEqual([]);
   });
 
   it("allows a manager to write and returns the corrections payload", async () => {

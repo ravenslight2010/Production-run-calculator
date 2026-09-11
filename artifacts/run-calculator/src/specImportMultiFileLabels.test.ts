@@ -87,7 +87,7 @@ vi.mock("./aiCorrections", () => ({
   saveAiCorrections: async () => {},
 }));
 
-import { prepareSpecImportMulti } from "./specImport";
+import { prepareSpecImportMultiWithAi } from "./specImport";
 
 // ---------------------------------------------------------------------------
 // Workbook builders. The "broken" workbook is all-blank: readWorkbookGrids
@@ -115,7 +115,7 @@ const brokenBuffer = () => workbookBuffer([[""]], "Empty");
 
 describe("web prepareSpecImportMulti — warning labels name the right file", () => {
   it("prefixes truncated/overflow warnings and the skip note with the real filenames", async () => {
-    const prepared = await prepareSpecImportMulti(
+    const prepared = await prepareSpecImportMultiWithAi(
       [truncatedBuffer(), overflowBuffer(), brokenBuffer()],
       undefined,
       ["Alpha.xlsx", "Beta.xlsx", "Broken.xlsx"],
@@ -136,7 +136,7 @@ describe("web prepareSpecImportMulti — warning labels name the right file", ()
   });
 
   it("keeps each warning tied to its OWN file (labels are not cross-assigned)", async () => {
-    const prepared = await prepareSpecImportMulti(
+    const prepared = await prepareSpecImportMultiWithAi(
       [truncatedBuffer(), overflowBuffer()],
       undefined,
       ["First.xlsx", "Second.xlsx"],
@@ -152,7 +152,7 @@ describe("web prepareSpecImportMulti — warning labels name the right file", ()
   });
 
   it("falls back to positional File N labels when no names are passed", async () => {
-    const prepared = await prepareSpecImportMulti([
+    const prepared = await prepareSpecImportMultiWithAi([
       truncatedBuffer(),
       overflowBuffer(),
       brokenBuffer(),
@@ -165,7 +165,7 @@ describe("web prepareSpecImportMulti — warning labels name the right file", ()
   });
 
   it("blank/whitespace-only names also fall back to File N (per-file, not all-or-nothing)", async () => {
-    const prepared = await prepareSpecImportMulti(
+    const prepared = await prepareSpecImportMultiWithAi(
       [truncatedBuffer(), overflowBuffer()],
       undefined,
       ["  ", "Named.xlsx"],

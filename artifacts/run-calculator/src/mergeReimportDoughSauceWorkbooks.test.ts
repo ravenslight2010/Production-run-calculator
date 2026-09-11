@@ -229,7 +229,7 @@ afterAll(() => {
   globalThis.fetch = realFetch;
 });
 
-import { prepareSpecImportMulti, type SpecImportPrepared } from "./specImport";
+import { prepareSpecImportMultiWithAi, type SpecImportPrepared } from "./specImport";
 import { buildRecipeNameChangeAliases } from "./specImportAliases";
 import { addNamedRecipesToServerIfAbsent } from "./namedRecipes";
 import { namedRecipeFromDraft } from "@workspace/named-recipes";
@@ -253,7 +253,7 @@ const SAUCE_FILES = [
 ].map((n) => resolve(LIB, "sauce", n));
 
 function importOnce(paths: string[]): Promise<SpecImportPrepared> {
-  return prepareSpecImportMulti(
+  return prepareSpecImportMultiWithAi(
     paths.map(readAsArrayBuffer),
     undefined,
     paths.map((p) => p.split("/").pop()!),

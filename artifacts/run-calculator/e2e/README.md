@@ -112,6 +112,24 @@ The package command supplies the approved test-mode flags automatically. The
 Playwright config still fails closed unless the database identity is explicitly
 disposable, and the existing advisory lock plus fixture cleanup remain active.
 
+Check browser-spec syntax without starting Playwright or connecting to a
+database. With no path, the command checks every configured `e2e/*.spec.ts`
+file:
+
+```sh
+pnpm --filter @workspace/run-calculator run check:e2e:syntax
+```
+
+To check one spec, pass its path after `--`:
+
+```sh
+pnpm --filter @workspace/run-calculator run check:e2e:syntax -- \
+  e2e/recipe-refresh-start-freeze.spec.ts
+```
+
+Syntax failures keep the same concise `file:line:column` format used by the
+recipe-refresh preflight.
+
 Run the recurring cross-device smoke matrix before release checks. It is a
 small lifecycle signal, not a replacement for the focused wake, timer, mobile
 layout, or failed-write suites:
@@ -166,7 +184,7 @@ rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
-The main config enumerates 117 cases and retains
+The main config enumerates 159 cases and retains
 `release-evidence/browser-full/FINAL-REPORT.md` after a real full-suite run.
 The report includes the revision, completion counts, total duration, and
 per-file test-result durations. Discovery (`--list`) and focused runs do not

@@ -19,9 +19,30 @@ import { broadcastMasterDataChanged } from "./sync";
 
 const MAX_BATCH = 500;
 
+class RecipeRevisionConflict extends Error {
+  constructor(readonly rejectedIds: string[]) {
+    super("Recipe snapshot is stale");
+  }
+}
+
+function comparable(item: CheeseRecipe): string {
+  return JSON.stringify({
+    id: item.id,
+    name: item.name,
+    brand: item.brand,
+    flavors: item.flavors,
+    shredderSetting: item.shredderSetting,
+    cellulose: item.cellulose,
+    notes: item.notes,
+    components: item.components,
+    enabled: item.enabled,
+  });
+}
+
 function toApiItem(row: CheeseRecipeRow): CheeseRecipe {
   return {
     id: row.id,
+    updatedAt: row.updatedAt.toISOString(),
     name: row.name,
     brand: row.brand,
     flavors: row.flavors ?? [],
@@ -47,6 +68,10 @@ function toDbValues(item: CheeseRecipe) {
     enabled: item.enabled,
     updatedAt: new Date(),
   };
+}
+
+function nextRevision(previous?: Date): Date {
+  return new Date(Math.max(Date.now(), (previous?.getTime() ?? 0) + 1));
 }
 
 async function listAll(): Promise<CheeseRecipe[]> {
@@ -103,9 +128,10 @@ router.post(
           sql`SELECT pg_advisory_xact_lock(hashtext(${"cheese-recipes:" + currentScope()}))`,
         );
         const existingRows = await tx
-          .select({ id: cheeseRecipesTable.id, name: cheeseRecipesTable.name })
+          .select()
           .from(cheeseRecipesTable)
-          .where(eq(cheeseRecipesTable.scope, currentScope()));
+          .where(eq(cheeseRecipesTable.scope, currentScope()))
+          .for("update");
         const existingIds = new Set(existingRows.map((r) => r.id));
         const takenNames = new Set(
           existingRows.map((r) => r.name.trim().toLowerCase()),
@@ -117,30 +143,64 @@ router.post(
           else takenNames.add(nameKey);
         }
 
+        const existingById = new Map(existingRows.map((row) => [row.id, row]));
+        const rejectedIds: string[] = [];
+        for (const [id, recipe] of byId) {
+          const existing = existingById.get(id);
+          if (!existing) continue;
+          const incomingRevision = recipe.updatedAt ? new Date(recipe.updatedAt) : null;
+          const storedRevision = existing.updatedAt.getTime();
+          if (
+            !incomingRevision ||
+            !Number.isFinite(incomingRevision.getTime()) ||
+            incomingRevision.getTime() < storedRevision
+          ) {
+            rejectedIds.push(id);
+          }
+        }
+        if (rejectedIds.length > 0) throw new RecipeRevisionConflict(rejectedIds);
+
         for (const recipe of byId.values()) {
+          const existing = existingById.get(recipe.id);
           const values = toDbValues(recipe);
+          values.updatedAt = nextRevision(existing?.updatedAt);
+          if (!existing) {
+            await tx.insert(cheeseRecipesTable).values(values);
+            continue;
+          }
+          if (
+            recipe.updatedAt &&
+            new Date(recipe.updatedAt).getTime() === existing.updatedAt.getTime() &&
+            comparable({
+              ...recipe,
+              cellulose: recipe.cellulose || existing.cellulose,
+            }) === comparable(toApiItem(existing))
+          ) {
+            continue;
+          }
           await tx
-            .insert(cheeseRecipesTable)
-            .values(values)
-            .onConflictDoUpdate({
-              target: [cheeseRecipesTable.id, cheeseRecipesTable.scope],
-              set: {
-                name: values.name,
-                brand: values.brand,
-                flavors: values.flavors,
-                shredderSetting: values.shredderSetting,
-                // Cellulose (anti-caking agent) is never on spec sheets but is
-                // present in recipes — a manager's stored value must never be
-                // wiped by a code path that writes blank cellulose (e.g. spec
-                // import creates new recipes with cellulose: ""). Only update
-                // when the incoming value is non-blank.
-                cellulose: sql`CASE WHEN ${values.cellulose} != '' THEN ${values.cellulose} ELSE ${cheeseRecipesTable.cellulose} END`,
-                notes: values.notes,
-                components: values.components,
-                enabled: values.enabled,
-                updatedAt: values.updatedAt,
-              },
-            });
+            .update(cheeseRecipesTable)
+            .set({
+              name: values.name,
+              brand: values.brand,
+              flavors: values.flavors,
+              shredderSetting: values.shredderSetting,
+              // Cellulose is never wiped by a blank import value.
+              cellulose:
+                values.cellulose !== ""
+                  ? values.cellulose
+                  : existing.cellulose,
+              notes: values.notes,
+              components: values.components,
+              enabled: values.enabled,
+              updatedAt: values.updatedAt,
+            })
+            .where(
+              and(
+                eq(cheeseRecipesTable.id, recipe.id),
+                eq(cheeseRecipesTable.scope, currentScope()),
+              ),
+            );
         }
       });
       invalidateMasterDataBootstrapCache();
@@ -148,6 +208,14 @@ router.post(
       const items = await listAll();
       res.json({ items });
     } catch (err) {
+      if (err instanceof RecipeRevisionConflict) {
+        res.status(409).json({
+          error: "STALE_RECIPE_SNAPSHOT",
+          rejectedIds: err.rejectedIds,
+          items: await listAll(),
+        });
+        return;
+      }
       req.log.error({ err }, "failed to save cheese recipes");
       res.status(500).json({ error: "Failed to save cheese recipes" });
     }

@@ -38,6 +38,9 @@ export interface NamedRecipe {
   id: string;
   // Optional persistence scope (live vs sandbox); carried through opaquely.
   scope?: string;
+  // Server persistence revision. It is required when updating an existing
+  // server row, but omitted for new client-generated ids.
+  updatedAt?: string;
   // Display name of the recipe (e.g. "12in NY Dough", "Marinara Sauce").
   name: string;
   // Free-form notes.
@@ -167,6 +170,11 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
     brand,
     flavors: brand ? normalizeNamedRecipeFlavors(raw.flavors) : [],
   };
+  if (typeof raw.updatedAt === "string" && raw.updatedAt.trim()) {
+    recipe.updatedAt = raw.updatedAt.trim();
+  } else if (raw.updatedAt instanceof Date && Number.isFinite(raw.updatedAt.getTime())) {
+    recipe.updatedAt = raw.updatedAt.toISOString();
+  }
   const ballOz = coerceNum(raw.doughballWeightOz, 0);
   if (ballOz > 0) recipe.doughballWeightOz = ballOz;
   const perTray = Math.round(coerceNum(raw.doughballsPerTray, 0));

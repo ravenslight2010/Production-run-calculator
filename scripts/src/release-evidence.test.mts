@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -17,6 +18,8 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  resolveSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryReleaseRevision,
   assertUniqueReleaseSteps,
   PRODUCTION_AUDIT_TIMEOUT_MS,
   PRODUCTION_AUDIT_WARNING_MS,
@@ -30,11 +33,58 @@ import {
   resolveReleaseEvidenceDir,
   sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
+  validateReportKeyRotationEvidence,
   validateReleaseReport,
   validateWebKitBrowserEvidence,
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
+import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
+import {
+  computeSourceLibraryEvidenceId,
+  DEFAULT_FROM_DATE,
+  DEFAULT_HEAL_ID,
+  DEFAULT_REPORT,
+} from "./verify-source-library-reconciliation.mts";
+
+const sourceReportSha256 = createHash("sha256")
+  .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
+  .digest("hex");
+
+function sourceEvidence(overrides: Record<string, unknown> = {}) {
+  const evidence = {
+    verifier: "source-library-reconciliation",
+    environment: "development",
+    revision: "current-revision",
+    capturedAt: "2026-09-08T12:00:00.000Z",
+    healId: DEFAULT_HEAL_ID,
+    repairBoundary: { fromDate: DEFAULT_FROM_DATE },
+    report: {
+      sha256: sourceReportSha256,
+      formatVersion: 1,
+      automaticProposals: 68,
+      stubs: 3,
+    },
+    marker: {},
+    pools: {},
+    aliases: {},
+    profiles: {},
+    pendingRuns: {},
+    protectedHistory: { references: 0 },
+    stubs: {},
+    idempotencyFingerprint: {
+      algorithm: "sha256",
+      value: "b".repeat(64),
+    },
+    ok: true,
+    failures: [],
+    ...overrides,
+  };
+  return {
+    ...evidence,
+    evidenceId: computeSourceLibraryEvidenceId(evidence),
+  };
+}
 
 assert.equal(
   PRODUCTION_DEPENDENCY_AUDIT_STEP.timeoutMs,
@@ -78,31 +128,27 @@ async function fixture(
                 durationMs: 100,
               }],
             })}\n`
-        : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
+        : file === "report-key-rotation-preflight.json"
           ? `${JSON.stringify({
-              verifier: "source-library-reconciliation",
-              environment: "development",
-              repairBoundary: { fromDate: "2026-08-26" },
-              report: {
-                sha256: "a".repeat(64),
-                formatVersion: 1,
-                automaticProposals: 0,
-                stubs: 0,
+              verifier: "report-key-rotation-preflight",
+              environment: "disposable release test",
+              revision: "current-revision",
+              status: "pass",
+              canRotate: true,
+              activeKeyId: "current",
+              storedKeyIds: ["current", "previous"],
+              missingKeyIds: [],
+              scan: {
+                limit: 100,
+                checkedDistinctKeyIds: 2,
+                truncated: false,
+                complete: true,
               },
-              marker: {},
-              pools: {},
-              aliases: {},
-              profiles: {},
-              pendingRuns: {},
-              protectedHistory: { references: 0 },
-              stubs: {},
-              idempotencyFingerprint: {
-                algorithm: "sha256",
-                value: "b".repeat(64),
-              },
-              ok: true,
-              failures: [],
+              failure: null,
+              remediation: null,
             })}\n`
+        : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
+          ? `${JSON.stringify(sourceEvidence())}\n`
           : "fixture evidence\n",
     );
   }
@@ -120,6 +166,44 @@ async function run(): Promise<void> {
   const releaseWorkflow = await readFile(
     new URL("../../.github/workflows/release-check.yml", import.meta.url),
     "utf8",
+  );
+  const configuredKeyrings = [...releaseWorkflow.matchAll(
+    /OPERATIONAL_REPORT_SIGNING_KEYS:\s*'([^']+)'/g,
+  )].map((match) => parseReportSigningKeyring(match[1]));
+  assert.equal(
+    configuredKeyrings.length,
+    2,
+    "standard and full disposable release jobs must both configure a report keyring",
+  );
+  assert.equal(
+    resolveSourceLibraryEvidenceEnvironment(undefined, true, false),
+    "release",
+    "imported production evidence must default to the release environment",
+  );
+  assert.equal(
+    resolveSourceLibraryEvidenceEnvironment(undefined, false, false),
+    "development",
+    "a local live verifier must keep its explicit development identity",
+  );
+  assert.equal(
+    resolveSourceLibraryReleaseRevision(
+      "a".repeat(40),
+      "release",
+      "b".repeat(40),
+    ),
+    "b".repeat(40),
+  );
+  assert.throws(
+    () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
+    /requires --source-library-revision/,
+  );
+  assert.deepEqual(
+    configuredKeyrings,
+    [
+      { activeKeyId: "release-check-current", keyIds: ["release-check-current"] },
+      { activeKeyId: "release-check-current", keyIds: ["release-check-current"] },
+    ],
+    "disposable release keyrings must satisfy the same retained-key contract as production",
   );
   assert.equal(
     rootPackage.scripts?.["audit:prod:ci"],
@@ -410,6 +494,35 @@ async function run(): Promise<void> {
       expectedLabels: validLabels,
     }),
   );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence())),
+        { expectedRevision: "different-revision" },
+      ),
+    /revision is stale or missing/,
+    "source reconciliation evidence from another revision must not be accepted",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({ revision: "unknown" }))),
+      ),
+    /revision is stale or missing/,
+    "unbound source reconciliation evidence must not be accepted",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence())),
+        {
+          maxAgeMs: 60_000,
+          now: new Date("2026-09-08T12:02:00.000Z"),
+        },
+      ),
+    /evidence is stale/,
+    "stale source reconciliation evidence must not be imported",
+  );
   assert.doesNotThrow(() =>
     validateWebKitBrowserEvidence(
       Buffer.from(
@@ -454,14 +567,7 @@ async function run(): Promise<void> {
     validateSourceLibraryReconciliationEvidence(
       Buffer.from(
         JSON.stringify({
-          verifier: "source-library-reconciliation",
-          environment: "development",
-          idempotencyFingerprint: {
-            algorithm: "sha256",
-            value: "c".repeat(64),
-          },
-          ok: true,
-          failures: [],
+          ...sourceEvidence(),
         }),
       ),
     ),
@@ -471,14 +577,7 @@ async function run(): Promise<void> {
       validateSourceLibraryReconciliationEvidence(
         Buffer.from(
           JSON.stringify({
-            verifier: "source-library-reconciliation",
-            environment: "development",
-            idempotencyFingerprint: {
-              algorithm: "sha256",
-              value: "c".repeat(64),
-            },
-            ok: true,
-            failures: [],
+            ...sourceEvidence(),
           }),
         ),
         { expectedEnvironment: "release" },
@@ -490,16 +589,10 @@ async function run(): Promise<void> {
     () =>
       validateSourceLibraryReconciliationEvidence(
         Buffer.from(
-          JSON.stringify({
-            verifier: "source-library-reconciliation",
-            environment: "development",
-            idempotencyFingerprint: {
-              algorithm: "sha256",
-              value: "c".repeat(64),
-            },
+          JSON.stringify(sourceEvidence({
             ok: false,
             failures: [{ check: "pendingRuns", count: 2 }],
-          }),
+          })),
         ),
       ),
     /pendingRuns \(2\)/,
@@ -509,16 +602,10 @@ async function run(): Promise<void> {
     () =>
       validateSourceLibraryReconciliationEvidence(
         Buffer.from(
-          JSON.stringify({
-            verifier: "source-library-reconciliation",
-            environment: "development",
-            idempotencyFingerprint: {
-              algorithm: "sha256",
-              value: "c".repeat(64),
-            },
+          JSON.stringify(sourceEvidence({
             ok: false,
             failures: [{ check: "protectedStubs", count: 1 }],
-          }),
+          })),
         ),
       ),
     /protectedStubs \(1\)/,
@@ -784,6 +871,85 @@ async function run(): Promise<void> {
   const allowlistedFiles = [...RELEASE_EVIDENCE_ALLOWLIST];
   const root = await fixture(allowlistedFiles, validReport);
   try {
+    assert.doesNotThrow(
+      () =>
+        validateReportKeyRotationEvidence(
+          new TextEncoder().encode(JSON.stringify({
+            verifier: "report-key-rotation-preflight",
+            environment: "disposable release test",
+            revision: "current-revision",
+            status: "pass",
+            canRotate: true,
+            activeKeyId: "current",
+            storedKeyIds: ["current"],
+            missingKeyIds: [],
+            scan: {
+              limit: 100,
+              checkedDistinctKeyIds: 1,
+              truncated: false,
+              complete: true,
+            },
+            failure: null,
+            remediation: null,
+          })),
+          { currentRevision: "current-revision" },
+        ),
+      "a complete healthy key-rotation result should be accepted",
+    );
+    for (const invalidEvidence of [
+      JSON.stringify({
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable release test",
+        revision: "current-revision",
+        status: "blocked",
+        canRotate: false,
+        activeKeyId: null,
+        storedKeyIds: ["removed-historical"],
+        missingKeyIds: ["removed-historical"],
+        scan: { limit: 100, checkedDistinctKeyIds: 1, truncated: false, complete: true },
+        failure: "missing-retained-keys",
+        remediation: "Restore the retained signing key for proof key ID removed-historical.",
+      }),
+      "{malformed",
+      JSON.stringify({
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable release test",
+        revision: "current-revision",
+        status: "pass",
+        canRotate: true,
+        activeKeyId: "current",
+        storedKeyIds: ["current"],
+        missingKeyIds: [],
+        scan: { limit: 100, checkedDistinctKeyIds: 1, truncated: true, complete: false },
+        failure: null,
+        remediation: null,
+      }),
+      JSON.stringify({
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable release test",
+        revision: "current-revision",
+        status: "pass",
+        canRotate: true,
+        activeKeyId: "current",
+        storedKeyIds: [],
+        missingKeyIds: [],
+        scan: { limit: 100, checkedDistinctKeyIds: 0, truncated: false, complete: true },
+        failure: null,
+        remediation: null,
+        signingKey: "must-not-be-retained",
+      }),
+    ]) {
+      assert.throws(
+        () =>
+          validateReportKeyRotationEvidence(
+            new TextEncoder().encode(invalidEvidence),
+            { currentRevision: "current-revision" },
+          ),
+        /key rotation evidence|keyring|truncated|unsafe|valid JSON/,
+        "blocked, malformed, truncated, and secret-bearing evidence must fail closed",
+      );
+    }
+
     await assert.doesNotReject(
       verifyReleaseEvidence(root, {
         currentRevision: "current-revision",
@@ -882,32 +1048,32 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 117",
-      "Enumerated cases: 117",
+      "Expected cases: 159",
+      "Enumerated cases: 159",
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 117",
+      "Not-run cases: 159",
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 117 | 0 | 0 | 0 | 0 | 117 | 0ms |",
+      "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
       "",
     ].join("\n");
     const invalidPassingBrowserReport = validBrowserReport
       .replace("Result: FAIL", "Result: PASS")
-      .replace("Completed cases: 0", "Completed cases: 117")
+      .replace("Completed cases: 0", "Completed cases: 159")
       .replace("Passed cases: 0", "Passed cases: 111")
       .replace("Failed cases: 0", "Failed cases: 1")
-      .replace("Not-run cases: 117", "Not-run cases: 0")
+      .replace("Not-run cases: 159", "Not-run cases: 0")
       .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
       .replace(
-        "| `e2e/example.spec.ts` | 117 | 0 | 0 | 0 | 0 | 117 | 0ms |",
-        "| `e2e/example.spec.ts` | 117 | 117 | 114 | 0 | 1 | 0 | 0ms |",
+        "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
+        "| `e2e/example.spec.ts` | 159 | 159 | 156 | 0 | 1 | 0 | 0ms |",
       );
     assert.throws(
       () => validateFullBrowserReport(invalidPassingBrowserReport, {

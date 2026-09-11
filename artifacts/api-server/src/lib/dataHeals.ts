@@ -91,6 +91,7 @@ export const AUTOMATIC_DATA_HEAL_IDS = Object.freeze([
   "fresh-device-run-contamination-v1",
   "incident-resolved-workflow-reconciliation-v1",
   "source-library-reconciliation-2026-08-26-v1",
+  "source-library-reconciliation-2026-08-26-v2",
 ] as const);
 
 const modules = [
@@ -164,3 +165,5 @@ export const runAug19SavedSpecProfileRepair = () => runById("aug19-saved-spec-pr
 export const runAug19SavedSpecProfileRepairV2 = () => runById("aug19-saved-spec-profile-repair-v2");
 export const runSourceLibraryReconciliationHeal = () =>
   runById("source-library-reconciliation-2026-08-26-v1");
+export const runSourceLibraryReconciliationHealV2 = () =>
+  runById("source-library-reconciliation-2026-08-26-v2");

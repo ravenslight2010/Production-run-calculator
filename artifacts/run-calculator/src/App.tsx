@@ -12,6 +12,7 @@ import {
 } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { registerMasterDataQueryClient } from "./masterData";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastAction } from "@/components/ui/toast";
@@ -38,6 +39,7 @@ import {
 } from "./updateReloadSafety";
 
 const queryClient = new QueryClient();
+registerMasterDataQueryClient(queryClient);
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;

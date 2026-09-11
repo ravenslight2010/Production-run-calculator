@@ -30,7 +30,7 @@
 - **API server:** `artifacts/api-server` (Express 5). Routes in `src/routes/*` (~70 files; AI endpoints prefixed `ai*`). Server validates with Zod schemas from `@workspace/api-zod` and never uses `console.log` (use `req.log` / the singleton `logger`).
 - **API contract (source of truth):** `lib/api-spec/openapi.yaml`. Run `pnpm --filter @workspace/api-spec run codegen` to regenerate React Query hooks (`@workspace/api-client-react`) and Zod schemas (`@workspace/api-zod`). Do NOT edit generated files or the OpenAPI `info.title` (it controls generated filenames).
 - **DB schema (source of truth):** `lib/db/src/schema/*` (Drizzle), barrelled via `lib/db/src/schema/index.ts`. Push with `pnpm --filter @workspace/db run push`.
-- **Shared pure logic:** `lib/*` — e.g. `inventory-math`, `fill-missing`, `recipe-apply`, `spec-import`, `production-rules`, `allergen`, `voice-commands`, `merge-suggest`, `ai-memory`, `ai-review`, `onboarding`, `cheese-recipes`, `cheese-import`. The web app keeps only thin platform glue and tests import the libraries directly.
+- **Shared pure logic:** `lib/*` — e.g. `inventory-math`, `fill-missing`, `recipe-apply`, `spec-import`, `production-rules`, `allergen`, `voice-commands`, `merge-suggest`, `ai-memory`, `onboarding`, `cheese-recipes`, `cheese-import`. The web app keeps only thin platform glue and tests import the libraries directly.
 - **Cheese recipes** are server-backed factory-wide master-data (own `cheese_recipes` table, managed like Mixes but deliberately NOT routed through Mixes — cheese components are per-BATCH lbs, mixes are per-pizza oz). Managers manage them under Manage Lists → Cheese Recipes and import "Cheese Mix Recipe Specs" workbooks (deterministic, no AI). Run applicator "Cheese" cards are pick-only and hydrate rows read-only from the pool. See `.agents/memory/cheese-server-master-data.md`.
 
 ## Architecture decisions
@@ -49,7 +49,7 @@
 
 ## User preferences
 
-- **Fix all errors immediately.** Any TypeScript, test, or build error encountered during any task — whether directly related to the current work or not — must be fixed before moving on. Do not let errors accumulate.
+- **Fix task-scoped errors immediately.** Any TypeScript, test, or build error within the approved task scope must be fixed before moving on. Bring an unrelated error into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk; otherwise de-duplicate it and capture a bounded Draft with evidence and a next action. Do not silently lose errors.
 - **Web-only product:** The maintained application is `artifacts/run-calculator`, and it must remain usable in responsive desktop, phone, and tablet browsers.
 - **Automatically preserve future improvements:** When a distinct, actionable feature, upgrade, technical-debt item, or meaningful test gap is discussed but deferred, search the project task board for overlap and create a Draft task immediately if none exists. A Draft records the idea only; never accept, assign, or start it automatically. If the idea matters but is too vague to scope honestly, create a bounded discovery or decision Draft instead of inventing requirements. Do not create tasks for casual speculation, temporary conversation details, secrets, personal information, or ideas already covered by an existing task.
 
@@ -68,19 +68,63 @@
 
 ## Task generation and automation policy
 
-Generate one end-to-end task per user-visible outcome. Include investigation, implementation, integration and persistence impacts, regression coverage, and verification.
+### Universal task intake
 
-Do not stop at diagnosis or create a follow-up task for an in-scope defect. Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
+- Generate one durable task per work objective. Include investigation, implementation, integration and persistence impacts, regression coverage, verification, and all in-scope repair work in that task. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
+- Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
+- Use one task when the work has one objective and shared ownership. Split work only when the outcomes are genuinely independent, have separate acceptance criteria, and cannot responsibly be closed under the same objective.
+- Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
 
-Automatically approve and start ordinary, bounded UI, test, and bug-fix tasks.
+### Failure closure
 
-Keep manual approval and final merge review for:
-- database schema changes and data heals;
-- authentication, authorization, sync, or security changes;
-- production, release, or destructive operations;
-- external integrations, secrets, or irreversible data changes.
+- Run every valid check for the changed surface, not only the check most likely to pass. Record all observed results as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
+- Fix every failure within the approved task scope before completion. Do not stop at diagnosis, silently defer an in-scope defect, or report a partial check as a complete check.
+- A genuinely out-of-scope failure must be de-duplicated against the task board and captured as a bounded Draft with an owner, evidence, and next action. Bring it into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk.
+- Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion. A new project task requires a genuinely independent objective, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly be absorbed.
+- Do not create recursive or speculative “one more task” work. A separate task must have independent acceptance criteria, an owner, and a documented reason it cannot remain in the current objective.
+- Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
 
-When a task is approved, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence.
+### Long-running task progress
+
+- When an approved task spans more than one investigation or validation cycle, post a progress update in the owning task instead of opening a task for each failure or discovery. Every update must show:
+  - **Current objective:** the user outcome this task still owns;
+  - **Completed work:** repairs and evidence that are complete, with their result status;
+  - **Active blockers:** each unresolved blocker, its evidence, and the owner responsible for the next action;
+  - **Next validation milestone:** the next concrete check or decision point, including its prerequisite when one exists; and
+  - **Owner:** the person or team accountable for moving the objective to completion.
+- Keep the update current as work progresses: move completed items out of the blocker list, preserve unresolved `FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` statuses, and do not describe a partial result as complete.
+- In-scope discoveries stay in the owning task's failure ledger and use the same owner and milestone. Do not create recursive follow-up tasks for them. Create another task only for a genuinely independent objective, a deliberately deferred outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain here.
+- For release work, list independent evidence work separately from checks that depend on it. Continue every independent check that is valid and safe; mark a dependent check `BLOCKED` or `NOT REACHED`, name the failed prerequisite, and keep it unresolved until its evidence exists. Progress reporting never changes the release gate or turns unresolved evidence into a pass.
+
+### Safe decomposition and parallel work
+
+- Use internal work breakdown and parallel helpers for independent repair domains within one objective. Do not turn those internal work units into sibling project tasks unless they meet the separate-objective rule.
+- For genuinely separate project tasks, add explicit dependencies when they share a surface, need a prior migration/heal, consume another task's output, or would otherwise race. Avoid creating project-task dependencies just to organize in-scope work.
+- Prefer one durable end-to-end task over many implementation fragments. Parallelize only concrete work that can be safely owned and validated without expanding the objective boundary.
+- Never claim success by weakening assertions, skipping applicable tests, masking secrets, using unsafe destructive data, treating missing evidence as a pass, or relabeling a timeout as success.
+
+### Production and release branch
+
+- For production-readiness work, establish the complete release-scope and gate matrix first. Run independent gates as far as safely valid instead of stopping at the first unrelated failure, and keep every result in the owning release objective's blocker ledger.
+- Classify each result as product defect, test or fixture defect, environment/workflow problem, data or reconciliation issue, security/authorization issue, release-evidence problem, or missing evidence. Repair all domains that belong to the release objective under the same durable task using internal work breakdown.
+- Keep production reconciliation, destructive release tests, and live data heals in separate trust lanes with explicit ownership. Create a separate project task only when the work is a genuinely independent objective or cannot safely be absorbed.
+- The owning release task performs the final standard/full evidence rerun from one clean revision, verifies retained evidence, and issues exactly one `GO` or `NO-GO` decision. A GO task cannot finish with unresolved required evidence or blockers.
+
+### Approval, execution, and reporting
+
+- Automatically approve and start ordinary, bounded UI, test, and bug-fix tasks when the task workflow permits it.
+- Keep manual approval and final merge review for:
+  - database schema changes and data heals;
+  - authentication, authorization, sync, or security changes;
+  - production, release, or destructive operations;
+  - external integrations, secrets, or irreversible data changes.
+- When a task is approved, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence. Preserve actionable out-of-scope work without claiming it is complete.
+
+### Examples
+
+- **Normal feature:** implement the feature, run its unit/type/browser checks, repair newly discovered in-scope failures, and complete one task with the full verification record.
+- **Shared surface:** keep all changes needed for one sync objective in one task; use internal sequencing when they touch the same contract instead of creating a task per failing test.
+- **Release checkpoint:** harvest browser, source-data, and signing-key failures into one release objective, repair them through internal work breakdown, and finish with one final evidence decision.
 
 # [Project name]
 

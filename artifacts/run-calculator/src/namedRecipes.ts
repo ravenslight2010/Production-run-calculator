@@ -31,8 +31,19 @@ import {
 } from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
 import { captureIngredientNamesToCatalog } from "./ingredients";
+import { adoptMasterDataConflict } from "./masterData";
 
 export type NamedRecipeKind = "dough" | "sauce";
+
+export class StaleNamedRecipeSnapshotError extends Error {
+  constructor(
+    readonly kind: NamedRecipeKind,
+    readonly canonicalItems: NamedRecipe[],
+    readonly rejectedIds: string[],
+  ) {
+    super(`The ${kind} recipe list changed before this save completed`);
+  }
+}
 
 function endpointFor(kind: NamedRecipeKind): string {
   return kind === "dough" ? "/api/dough-recipes" : "/api/sauce-recipes";
@@ -61,8 +72,25 @@ export async function saveNamedRecipes(
     },
     body: JSON.stringify({ items }),
   });
-  if (!res.ok) throw new Error(`Save ${kind} recipes failed (${res.status})`);
-  const data = (await res.json()) as { items: unknown };
+  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown };
+  if (!res.ok) {
+    if (res.status === 409 && Array.isArray(data.items)) {
+      const canonicalItems = normalizeNamedRecipes(data.items);
+      const rejectedIds = Array.isArray(data.rejectedIds)
+        ? data.rejectedIds.filter((id): id is string => typeof id === "string")
+        : [];
+      adoptMasterDataConflict(
+        kind === "dough" ? "doughRecipes" : "sauceRecipes",
+        canonicalItems,
+      );
+      throw new StaleNamedRecipeSnapshotError(
+        kind,
+        canonicalItems,
+        rejectedIds,
+      );
+    }
+    throw new Error(`Save ${kind} recipes failed (${res.status})`);
+  }
   // Fire-and-forget: newly typed component names join the factory-wide
   // ingredient catalog so every suggestion list sees them.
   void captureIngredientNamesToCatalog(

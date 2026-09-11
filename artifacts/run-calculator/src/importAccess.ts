@@ -13,9 +13,9 @@ export function getImportAccess(capabilities: ReadonlySet<string>): ImportAccess
   const canManageProfiles = capabilities.has("manage-profiles");
   const canManageInventory = capabilities.has("manage-inventory");
   return {
-    // Parsing spends an AI request; commit rewrites profiles and recipe pools.
-    canImportSpec:
-      capabilities.has("use-ai-tools") && canManageProfiles && canManageInventory,
+    // Deterministic parsing is available without AI. The commit still rewrites
+    // both profiles and recipe pools, so both write capabilities are required.
+    canImportSpec: canManageProfiles && canManageInventory,
     // Both workbooks commit inventory master data (recipes/mixes/freezer pulls).
     canImportPremixOrCheese: canManageInventory,
     // These guides only rewrite saved setup profile values.

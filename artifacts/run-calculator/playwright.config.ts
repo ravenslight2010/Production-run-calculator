@@ -1,10 +1,25 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
+import {
+  releaseBrowserBaseUrl,
+  releaseBrowserWebServers,
+} from "./playwright.release-servers";
+import { validateBrowserSpecSyntaxDirectory } from "./e2e/validate-browser-spec-syntax";
 
-const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const baseURL = releaseBrowserBaseUrl(
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
+
+// The main suite's global setup deletes shared disposable-day data before
+// Playwright collects specs. Validate the complete suite first so malformed
+// TypeScript cannot be masked by that database setup.
+validateBrowserSpecSyntaxDirectory(
+  new URL("./e2e/", import.meta.url),
+  ["release-webkit-smoke.spec.ts"],
+);
 
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,

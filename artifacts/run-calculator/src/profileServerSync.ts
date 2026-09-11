@@ -271,6 +271,22 @@ function splitKey(key: string): { brand: string; flavor: string } {
   return { brand: key.slice(0, idx), flavor: key.slice(idx + 2) };
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function profileValuesMatch(a: ApiProfile, b: ApiProfile): boolean {
+  return canonicalJson(a.values) === canonicalJson(b.values)
+    && canonicalJson(a.crustValues) === canonicalJson(b.crustValues);
+}
+
 async function apiList(): Promise<ApiProfile[]> {
   const cacheGeneration = getProfileCacheGeneration();
   if (apiListInFlight?.generation === cacheGeneration) return apiListInFlight.promise;
@@ -342,17 +358,30 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
     } catch {
       throw new Error("Save brand profiles was not acknowledged by the server");
     }
-    for (const item of data.items ?? []) {
+    if (!data || !Array.isArray(data.items)) {
+      throw new Error("Save brand profiles was not acknowledged by the server");
+    }
+    const canonicalByKey = new Map(data.items.map((item) => [item?.key, item]));
+    for (const item of data.items) {
       if (item && typeof item.key === "string" && typeof item.updatedAt === "number") {
         serverStamps.set(item.key, item.updatedAt);
       }
     }
-    // The endpoint's response is the acknowledgement boundary. Do not remove a
-    // queued profile merely because HTTP succeeded: a truncated/malformed body
-    // would otherwise leave a re-import appearing successful only on this device.
-    const unacknowledged = part.find((item) => !serverStamps.has(item.key));
-    if (unacknowledged) {
-      throw new Error(`Save brand profile "${unacknowledged.key}" was not acknowledged by the server`);
+    // The endpoint's response is the acknowledgement boundary. A stamp/key
+    // echo alone is not enough: a stamp-guarded server may have kept an older
+    // canonical row while still returning HTTP 200 and the full profile list.
+    // Treat that as a conflict so explicit saves stay visible and queued.
+    for (const submitted of part) {
+      const canonical = canonicalByKey.get(submitted.key);
+      if (
+        !canonical
+        || typeof canonical.updatedAt !== "number"
+        || !profileValuesMatch(submitted, canonical)
+      ) {
+        throw new Error(
+          `Save brand profile "${submitted.key}" was not acknowledged by the server; canonical values differ, retry the save`,
+        );
+      }
     }
   }
   return serverStamps;
@@ -405,11 +434,15 @@ export function flushProfileQueue(): Promise<void> {
   return flushInFlight;
 }
 
+export function hasPendingProfileWrite(key: string): boolean {
+  return readQueue().some((op) => op.t === "up" && op.key === key);
+}
+
 /**
- * Import-specific acknowledgement boundary. Unlike ordinary background saves,
+ * Explicit-save acknowledgement boundary. Unlike ordinary background saves,
  * this rejects unless every pending profile write completed with a valid server
- * echo. The queue is intentionally retained on failure so retrying the import
- * (or a later background flush) can finish the exact same forced write.
+ * echo containing the submitted values. The queue is intentionally retained on
+ * failure so the same manager edit can be retried.
  */
 export async function flushProfileQueueStrict(): Promise<void> {
   // A background kick can enqueue a follow-up flush while the flight we just

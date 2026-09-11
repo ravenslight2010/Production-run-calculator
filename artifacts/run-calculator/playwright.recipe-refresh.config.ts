@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
 import { requireDedicatedTestDatabase } from "./e2e/isolation";
+import { validateBrowserSpecSyntax } from "./e2e/validate-browser-spec-syntax";
 
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ??
@@ -12,6 +13,9 @@ const baseURL =
 // Its command supplies the approved test-mode flags, but those flags are not
 // enough on their own: the database name must explicitly identify a disposable
 // target so a developer cannot accidentally point this suite at a shared DB.
+validateBrowserSpecSyntax(
+  new URL("./e2e/recipe-refresh-start-freeze.spec.ts", import.meta.url),
+);
 requireDedicatedTestDatabase("recipe-refresh Playwright setup");
 
 export default defineConfig({

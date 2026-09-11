@@ -5,13 +5,13 @@ import userEvent from "@testing-library/user-event";
 
 const mocks = vi.hoisted(() => ({
   loadProfile: vi.fn(),
-  saveProfile: vi.fn(),
+  saveProfileAndWaitForServer: vi.fn(),
   toast: vi.fn(),
 }));
 
 vi.mock("../storage", () => ({
   loadProfile: mocks.loadProfile,
-  saveProfile: mocks.saveProfile,
+  saveProfileAndWaitForServer: mocks.saveProfileAndWaitForServer,
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
@@ -112,7 +112,7 @@ function editorProps(canManageProfiles: boolean) {
 afterEach(() => {
   cleanup();
   mocks.loadProfile.mockReset();
-  mocks.saveProfile.mockReset();
+  mocks.saveProfileAndWaitForServer.mockReset();
   mocks.toast.mockReset();
 });
 
@@ -126,20 +126,51 @@ describe("SetupProfileEditor capability gate", () => {
     expect(screen.getByTestId("setup-profile-read-only")).toBeTruthy();
     expect(screen.getByText(/read-only setup profile/i)).toBeTruthy();
     expect(screen.getByText(/requires profile management access/i)).toBeTruthy();
-    expect(mocks.saveProfile).not.toHaveBeenCalled();
+    expect(mocks.saveProfileAndWaitForServer).not.toHaveBeenCalled();
   });
 
   it("saves setup changes for users with manage-profiles", async () => {
     mocks.loadProfile.mockReturnValue(null);
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
     const user = userEvent.setup();
 
     render(<SetupProfileEditor {...editorProps(true)} />);
     await user.click(screen.getByRole("button", { name: "Save Setup" }));
 
-    expect(mocks.saveProfile).toHaveBeenCalledWith(
+    expect(mocks.saveProfileAndWaitForServer).toHaveBeenCalledWith(
       "Northstar",
       "Pepperoni",
       expect.objectContaining({ pep1Combined: true }),
+    );
+  });
+
+  it("keeps the editor open and does not fan out when the server rejects the save", async () => {
+    mocks.loadProfile.mockReturnValue(null);
+    mocks.saveProfileAndWaitForServer.mockRejectedValue(new Error("Save brand profile was not acknowledged"));
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} onSaved={onSaved} />);
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+
+    const error = await screen.findByTestId("setup-profile-save-error");
+    expect(error.textContent).toMatch(/could not be saved|not acknowledged/i);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(noop).not.toHaveBeenCalled();
+  });
+
+  it("reports an unchanged setup without propagating it", async () => {
+    mocks.loadProfile.mockReturnValue(null);
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("unchanged");
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} onSaved={onSaved} />);
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "No changes to save for Northstar — Pepperoni" }),
     );
   });
 });

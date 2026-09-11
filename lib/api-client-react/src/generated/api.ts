@@ -69,8 +69,6 @@ import type {
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
   FieldChecksReport,
-  FillMissingInput,
-  FillMissingResult,
   FillMissingValueList,
   FinalizedOperationalReport,
   FinalizedOperationalReportSummary,
@@ -216,8 +214,6 @@ import type {
   StaffMember,
   StaffRoleUpdate,
   SubmitOperationalIntentParams,
-  SuggestMergesInput,
-  SuggestMergesResult,
   SummaryInput,
   SummaryResult,
   SupervisorPin,
@@ -4439,85 +4435,6 @@ export const useOperationsScheduleOrdering = <TError = ErrorType<void>,
       return useMutation(getOperationsScheduleOrderingMutationOptions(options));
     }
 
-export const getAiFillMissingUrl = () => {
-
-
-
-
-  return `/api/ai/fill-missing`
-}
-
-/**
- * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
- * @summary Suggest values for blank run-setup fields (AI); read-only
- */
-export const aiFillMissing = async (fillMissingInput: FillMissingInput, options?: Parameters<typeof customFetch>[1]): Promise<FillMissingResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<FillMissingResult>(getAiFillMissingUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(fillMissingInput)
-  }
-);}
-
-
-
-
-
-export const getAiFillMissingMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,AiFillMissingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,AiFillMissingMutationVariables, TContext> => {
-
-const mutationKey = ['aiFillMissing'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiFillMissing>>, AiFillMissingMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiFillMissing(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiFillMissingMutationResult = NonNullable<Awaited<ReturnType<typeof aiFillMissing>>>
-    export type AiFillMissingMutationBody = BodyType<FillMissingInput>
-    export type AiFillMissingMutationError = ErrorType<void>
-    export type AiFillMissingMutationVariables = {data: BodyType<FillMissingInput>}
-
-    /**
- * @summary Suggest values for blank run-setup fields (AI); read-only
- */
-export const useAiFillMissing = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,AiFillMissingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiFillMissing>>,
-        TError,
-        AiFillMissingMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiFillMissingMutationOptions(options));
-    }
-
 export const getAiMatchImportUrl = () => {
 
 
@@ -4753,85 +4670,6 @@ export const useAiParseSpecSheet = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiParseSpecSheetMutationOptions(options));
-    }
-
-export const getAiSuggestMergesUrl = () => {
-
-
-
-
-  return `/api/ai/suggest-merges`
-}
-
-/**
- * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
- * @summary Suggest groups of duplicate ingredient names to merge (AI)
- */
-export const aiSuggestMerges = async (suggestMergesInput: SuggestMergesInput, options?: Parameters<typeof customFetch>[1]): Promise<SuggestMergesResult> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-return customFetch<SuggestMergesResult>(getAiSuggestMergesUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(suggestMergesInput)
-  }
-);}
-
-
-
-
-
-export const getAiSuggestMergesMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,AiSuggestMergesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,AiSuggestMergesMutationVariables, TContext> => {
-
-const mutationKey = ['aiSuggestMerges'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSuggestMerges>>, AiSuggestMergesMutationVariables> = (props) => {
-          const {data} = props ?? {};
-
-          return  aiSuggestMerges(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AiSuggestMergesMutationResult = NonNullable<Awaited<ReturnType<typeof aiSuggestMerges>>>
-    export type AiSuggestMergesMutationBody = BodyType<SuggestMergesInput>
-    export type AiSuggestMergesMutationError = ErrorType<void>
-    export type AiSuggestMergesMutationVariables = {data: BodyType<SuggestMergesInput>}
-
-    /**
- * @summary Suggest groups of duplicate ingredient names to merge (AI)
- */
-export const useAiSuggestMerges = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,AiSuggestMergesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof aiSuggestMerges>>,
-        TError,
-        AiSuggestMergesMutationVariables,
-        TContext
-      > => {
-      return useMutation(getAiSuggestMergesMutationOptions(options));
     }
 
 export const getListMergeAliasesUrl = (params?: ListMergeAliasesParams,) => {
@@ -8946,7 +8784,7 @@ export const getSaveBrandProfilesUrl = () => {
 }
 
 /**
- * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing any forced item additionally require the `use-ai-tools` capability (the same gate as the spec-import parse flow) and are rejected with 403 otherwise, before any write.
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing forced items are also restricted to the `manage-profiles` capability and are rejected with 403 otherwise, before any write.
  * @summary Create or update brand+flavor setup profiles (stamp-guarded)
  */
 export const saveBrandProfiles = async (saveBrandProfilesInput: SaveBrandProfilesInput, options?: Parameters<typeof customFetch>[1]): Promise<BrandProfileList> => {
@@ -12272,8 +12110,8 @@ export const getSaveIngredientBatchWeightsUrl = () => {
 }
 
 /**
- * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing entries are updated; new ones are inserted. Available to any signed-in user.
- * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing positive entries are updated; new positive entries are inserted. An entry with lbs set to zero removes the learned value and stops future auto-fill. Available to any signed-in user.
+ * @summary Save or clear learned ingredient batch weights (case-insensitive)
  */
 export const saveIngredientBatchWeights = async (saveIngredientBatchWeightsInput: SaveIngredientBatchWeightsInput, options?: Parameters<typeof customFetch>[1]): Promise<IngredientBatchWeightList> => {
 
@@ -12329,7 +12167,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveIngredientBatchWeightsMutationVariables = {data: BodyType<SaveIngredientBatchWeightsInput>}
 
     /**
- * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ * @summary Save or clear learned ingredient batch weights (case-insensitive)
  */
 export const useSaveIngredientBatchWeights = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveIngredientBatchWeights>>, TError,SaveIngredientBatchWeightsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

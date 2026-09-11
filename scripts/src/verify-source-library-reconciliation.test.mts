@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   ownedFields,
   parseReport,
+  resolveSourceLibraryRevision,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
@@ -38,6 +39,20 @@ assert.ok(mixWithNotes);
 assert.ok(mixWithoutNotes);
 assert.ok(Object.prototype.hasOwnProperty.call(ownedFields(mixWithNotes as any), "notes"));
 assert.ok(!Object.prototype.hasOwnProperty.call(ownedFields(mixWithoutNotes as any), "notes"));
+assert.ok(!Object.prototype.hasOwnProperty.call(ownedFields(mixWithNotes as any), "batchSize"));
+assert.ok(!Object.prototype.hasOwnProperty.call(ownedFields(mixWithoutNotes as any), "batchSize"));
+assert.equal(
+  resolveSourceLibraryRevision("release", "a".repeat(40)),
+  "a".repeat(40),
+);
+assert.throws(
+  () => resolveSourceLibraryRevision("release", undefined),
+  /exact deployed 40-character Git commit SHA/,
+);
+assert.throws(
+  () => resolveSourceLibraryRevision("release", "unknown"),
+  /full 40-character Git commit SHA/,
+);
 
 const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
 for (const proposal of report.proposals) {
@@ -54,6 +69,12 @@ const stubs = report.findings.allZeroStubs as Array<Record<string, unknown>>;
 const pendingCanonical = String(stubs[0].canonicalName);
 const protectedStub = String(stubs[1].name);
 const historicalStub = String(stubs[2].name);
+const identityReplacement = report.proposals.find((proposal) =>
+  proposal.action === "replace-components-from-approved-source"
+) as Record<string, unknown>;
+const identityReplacementName = String(
+  (identityReplacement.before as Record<string, unknown>).name,
+);
 const dailyRunReferences: Array<Record<string, unknown>> = [
   {
     date: "2026-08-26",
@@ -89,7 +110,14 @@ const query = async (text: string, values?: readonly unknown[]) => {
       }],
     };
   }
-  if (text.includes("FROM brand_profiles")) return { rows: [] };
+  if (text.includes("FROM brand_profiles")) {
+    return {
+      rows: [{
+        key: "identity-replacement-reference",
+        v_app1CheeseRecipeName: identityReplacementName,
+      }],
+    };
+  }
   if (text.includes("FROM daily_sync")) return { rows: dailyRunReferences };
   if (text.includes("FROM spec_import_aliases")) {
     const expected = (values?.[0] as string[]) ?? [];
@@ -149,6 +177,7 @@ assert.equal(output.ok, true);
 assert.equal(output.pools.exactMatches, 68);
 assert.equal(output.aliases.expected, 25);
 assert.equal(output.aliases.exactMatches, 25);
+assert.equal(output.profiles.inspected, 0);
 assert.equal(output.pendingRuns.stale, 0);
 assert.equal(output.pendingRuns.inspected, 1);
 assert.equal(output.pendingRuns.canonical, 1);
@@ -160,6 +189,32 @@ assert.equal(output.stubs.unexpectedlyRemaining, 0);
 assert.doesNotMatch(JSON.stringify(output), /basha|pepperoni|bbq chicken/i);
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
+
+const mutableMixRow = rowsByTable.get("mixes")!.find((row) =>
+  row.id === (mixWithNotes.before as Record<string, unknown>).id);
+assert.ok(mutableMixRow);
+mutableMixRow.batchSize = 12345;
+const batchSizeDriftOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+);
+assert.equal(batchSizeDriftOutput.ok, true);
+assert.equal(batchSizeDriftOutput.pools.mismatches, 0);
+
+const sourceComponents = mutableMixRow.components;
+mutableMixRow.components = [{ ingredient: "component drift", perPizza: 1 }];
+const componentDriftOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+);
+assert.equal(componentDriftOutput.ok, false);
+assert.equal(componentDriftOutput.pools.mismatches, 1);
+assert.deepEqual(componentDriftOutput.failures, [{ check: "pools", count: 1 }]);
+mutableMixRow.components = sourceComponents;
 
 dailyRunReferences[0].value = String(stubs[0].name);
 const stalePendingOutput = await verifySourceLibraryReconciliation(
@@ -390,8 +445,11 @@ function runVerifierCli(
 function assertBoundedCliEvidence(value: Record<string, unknown>) {
   assert.deepEqual(Object.keys(value).sort(), [
     "aliases",
+    "capturedAt",
     "environment",
+    "evidenceId",
     "failures",
+    "healId",
     "idempotencyFingerprint",
     "marker",
     "ok",
@@ -401,6 +459,7 @@ function assertBoundedCliEvidence(value: Record<string, unknown>) {
     "protectedHistory",
     "repairBoundary",
     "report",
+    "revision",
     "stubs",
     "verifier",
   ]);

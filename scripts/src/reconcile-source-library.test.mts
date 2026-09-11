@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { reconcileSnapshot } from "./reconcile-source-library.mts";
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const tsx = path.join(repositoryRoot, "scripts/node_modules/.bin/tsx");
 
 const manifest: any = {
   sha256: "manifest", retained: [], excludedOlderDuplicates: [],
@@ -44,4 +50,39 @@ for (const stub of zeroStubs) {
   assert.ok(stub.canonicalName, `expected canonical name for ${stub.id}`);
   assert.equal(stub.deletionCandidate, "blocked-until-reference-repoint-and-history-preservation-checks");
 }
+
+function testRepositoryRootDefaultInputs() {
+  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "source-reconciliation-cli-"));
+  try {
+    const outputPath = path.join(outputRoot, "reconciliation.json");
+    const stdout = execFileSync(
+      tsx,
+      [path.join(repositoryRoot, "scripts/src/reconcile-source-library.mts"), "--out", outputPath],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
+    assert.match(stdout, /^Wrote .+\.json\n$/);
+
+    const generated = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    const checkedIn = JSON.parse(fs.readFileSync(
+      path.join(repositoryRoot, "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json"),
+      "utf8",
+    ));
+    assert.equal(generated.format, checkedIn.format);
+    assert.equal(generated.formatVersion, checkedIn.formatVersion);
+    assert.deepEqual(generated.snapshot, checkedIn.snapshot);
+    assert.deepEqual(generated.manifest, checkedIn.manifest);
+    assert.equal(generated.proposals.length, checkedIn.proposals.length);
+    const findingCounts = (report: Record<string, any>) =>
+      Object.fromEntries(Object.entries(report.findings).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.length : -1,
+      ]));
+    assert.deepEqual(findingCounts(generated), findingCounts(checkedIn));
+    assert.ok(fs.existsSync(outputPath.replace(/\.json$/u, ".md")));
+  } finally {
+    fs.rmSync(outputRoot, { recursive: true, force: true });
+  }
+}
+
+testRepositoryRootDefaultInputs();
 console.log("Source library reconciliation tests passed.");

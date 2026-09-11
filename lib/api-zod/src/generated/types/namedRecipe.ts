@@ -14,6 +14,8 @@ import type { NamedRecipeComponent } from './namedRecipeComponent';
 export interface NamedRecipe {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required when updating an existing row */
+  updatedAt?: Date;
   /** Display name of the recipe */
   name: string;
   /** Optional free-form notes */

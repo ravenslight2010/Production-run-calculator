@@ -1,12 +1,8 @@
-// AI-assisted ingredient merge suggestions — web platform glue.
+// Deterministic ingredient merge suggestions — web platform glue.
 //
-// Two cooperating pieces (mirroring the spec-import AI + learned-memory pattern):
-//   - The read-only POST /ai/suggest-merges endpoint clusters the app's
-//     mergeable names into groups of duplicates with a recommended canonical
-//     name to keep.
-//   - Learned merge aliases (GET/POST /merge-aliases) remember every confirmed
-//     merge so the same duplicates resurface next time — fed to the AI and used
-//     to seed "previously merged" suggestions even without an AI call.
+// Learned merge aliases (GET/POST /merge-aliases) remember every confirmed merge,
+// while the local near-duplicate scan finds conservative look-alikes. Both paths
+// remain suggestions only; the manager explicitly reviews every merge.
 //
 // All pure logic lives in @workspace/merge-suggest; this module only sequences
 // network calls. Mirrors the mobile glue in
@@ -25,14 +21,12 @@ import {
   type DeniedMerge,
   type MergeSuggestCategory,
 } from "@workspace/merge-suggest";
-import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type { MergeAlias, MergeSuggestion, DeniedMerge, MergeSuggestCategory };
 
-/** A merge suggestion plus its (optional) reviewer-AI verdict. */
-export type ReviewedMergeSuggestion = MergeSuggestion & { review?: ReviewVerdict };
+export type ReviewedMergeSuggestion = MergeSuggestion;
 
 export type PendingDuplicateReview = {
   groupKey: string;
@@ -297,51 +291,8 @@ export async function deleteMergedAwayNames(names: string[]): Promise<void> {
   if (!res.ok) throw new Error(`Delete merged-away failed (${res.status})`);
 }
 
-async function requestAiSuggestMerges(
-  names: string[],
-  aliases: MergeAlias[],
-  category?: MergeSuggestCategory,
-  brand?: string,
-  signal?: AbortSignal,
-): Promise<ReviewedMergeSuggestion[]> {
-  // Bounded wait so a cold-starting deployment can't hang the post-import
-  // merge scan forever; suggestMerges falls back to look-alike/remembered
-  // groups on any failure.
-  const res = await fetchWithTimeout(
-    "/api/ai/suggest-merges",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-client-id": inventoryClientId(),
-      },
-      signal,
-      body: JSON.stringify({
-        names,
-        aliases,
-        ...(category ? { category } : {}),
-        ...(category === "flavor" && brand ? { brand } : {}),
-      }),
-    },
-    25_000,
-  );
-  if (!res.ok) {
-    let detail = "";
-    try {
-      detail = ((await res.json()) as { error?: string }).error ?? "";
-    } catch {}
-    throw new Error(detail || `Suggest-merges request failed (${res.status})`);
-  }
-  const data = (await res.json()) as { suggestions?: ReviewedMergeSuggestion[] };
-  return data.suggestions ?? [];
-}
-
 export type MergeSuggestResult = {
   suggestions: ReviewedMergeSuggestion[];
-  /** True when the AI call succeeded; false when only remembered groups show. */
-  usedAi: boolean;
-  /** Set when the AI call failed (the remembered groups are still returned). */
-  error?: string;
 };
 
 const MERGE_SUGGESTION_CACHE_TTL_MS = 5 * 60_000;
@@ -374,10 +325,8 @@ export function isCurrentMergeSuggestionRequest(
 }
 
 /**
- * Fetch learned aliases, ask the AI to cluster duplicates, and fold the AI
- * groups together with remembered (alias-derived) ones. If the AI call fails
- * (not a manager, rate-limited, offline) the remembered suggestions are still
- * returned so the feature degrades gracefully. Never throws.
+ * Fetch learned aliases and fold them together with the local near-duplicate
+ * scan. Never auto-applies a suggestion and never calls a model.
  */
 export async function suggestMerges(
   names: string[],
@@ -403,8 +352,7 @@ export async function suggestMerges(
   } catch {
     aliases = [];
   }
-  // Denied (ignored) pairs are dropped from whatever suggestions we end up
-  // showing — AI or remembered-only — so an ignored pair never comes back.
+  // Denied (ignored) pairs are dropped so an ignored pair never comes back.
   let denied: DeniedMerge[] = [];
   try {
     denied = await fetchDeniedMerges(category, brand, options?.signal);
@@ -412,43 +360,19 @@ export async function suggestMerges(
     denied = [];
   }
   // Deterministic look-alike scan (word-order + single-typo near-dups) runs
-  // locally with no AI call, so obvious duplicates surface even offline or for
-  // users without the AI capability. Folded under remembered groups by target.
+  // locally, so obvious duplicates surface offline and without AI access.
   const baseline = mergeSuggestionLists(
     suggestionsFromAliases(names, aliases),
     nearDupSuggestions(names),
   );
-  try {
-    const ai = await requestAiSuggestMerges(names, aliases, category, brand, options?.signal);
-    // mergeSuggestionLists rebuilds group objects (dropping the reviewer verdict),
-    // so re-attach each AI group's verdict to the merged result by target name.
-    const reviewByTarget = new Map<string, ReviewVerdict>();
-    for (const s of ai) {
-      if (s.review) reviewByTarget.set(s.target.trim().toLowerCase(), s.review);
-    }
-    const merged = mergeSuggestionLists(baseline, ai).map((s) => {
-      const review = reviewByTarget.get(s.target.trim().toLowerCase());
-      return review ? { ...s, review } : s;
-    });
-    // Conflicting-descriptor guard (e.g. "cured" vs "natural" are different
-    // products): stripped from every shown suggestion, AI or baseline.
-    const result = {
-      suggestions: dropCrossBrand(
-        filterConflictingSuggestions(filterDeniedSuggestions(merged, denied)),
-      ),
-      usedAi: true,
-    };
-    mergeSuggestionCache.set(cacheKey, { expiresAt: Date.now() + MERGE_SUGGESTION_CACHE_TTL_MS, result });
-    return result;
-  } catch (e) {
-    if (options?.signal?.aborted) throw e;
-    const result = {
-      suggestions: dropCrossBrand(
-        filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
-      ),
-      usedAi: false,
-      error: e instanceof Error ? e.message : "AI suggestions unavailable",
-    };
-    return result;
-  }
+  const deterministicResult = {
+    suggestions: dropCrossBrand(
+      filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
+    ),
+  };
+  mergeSuggestionCache.set(cacheKey, {
+    expiresAt: Date.now() + MERGE_SUGGESTION_CACHE_TTL_MS,
+    result: deterministicResult,
+  });
+  return deterministicResult;
 }

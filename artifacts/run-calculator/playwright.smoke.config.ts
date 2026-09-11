@@ -1,7 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  releaseBrowserBaseUrl,
+  releaseBrowserWebServers,
+} from "./playwright.release-servers";
 
-const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const baseURL = releaseBrowserBaseUrl(
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
 
 /**
  * The smoke matrix is isolated from the main destructive suite. Its spec
@@ -9,6 +14,7 @@ const baseURL =
  * before each project run.
  */
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "cross-device-smoke.spec.ts",
   timeout: 60_000,

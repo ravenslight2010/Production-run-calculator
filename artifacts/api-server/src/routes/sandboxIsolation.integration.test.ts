@@ -63,10 +63,12 @@ let clearSessionBoundaryCache: () => void;
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
+let originalFacilityTimeZone: string | undefined;
 let server: Server;
 let baseUrl: string;
 
-const LIVE_MANAGER = "live-manager-1";
+const LIVE_MANAGER = "sandbox-isolation-live-manager";
+const LIVE_MANAGER_USERNAME = "sandbox-isolation-live-manager";
 let sandboxUserId: string;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -77,6 +79,11 @@ function todayStr(): string {
 }
 
 beforeAll(async () => {
+  originalFacilityTimeZone = process.env.FACILITY_TIME_ZONE;
+  // The sync route uses the client date while the session fence reads the
+  // facility-local date. Pin both to the same calendar in this disposable
+  // fixture so the boundary assertion cannot depend on the host timezone.
+  process.env.FACILITY_TIME_ZONE = "UTC";
   originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
 
@@ -156,11 +163,17 @@ beforeAll(async () => {
   if (!sandboxUser) throw new Error("sandbox user was not seeded");
   sandboxUserId = sandboxUser.id;
 
-  await db.insert(usersTable).values({ id: LIVE_MANAGER, username: "live-manager", passwordHash: "x" });
+  await db.insert(usersTable).values({
+    id: LIVE_MANAGER,
+    username: LIVE_MANAGER_USERNAME,
+    passwordHash: "x",
+  });
   await db.insert(userRolesTable).values({ userId: LIVE_MANAGER, role: "manager" });
 }, 60_000);
 
 afterAll(async () => {
+  clearSessionBoundaryCache?.();
+  clearUserValidityCache?.();
   if (server) {
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -173,16 +186,21 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
+  if (originalFacilityTimeZone === undefined) delete process.env.FACILITY_TIME_ZONE;
+  else process.env.FACILITY_TIME_ZONE = originalFacilityTimeZone;
 }, 60_000);
 
 beforeEach(async () => {
-  clearUserValidityCache();
-  clearSessionBoundaryCache();
   // Wipe only the scoped DATA tables; the users / roles / role-catalog rows are
   // seeded once in beforeAll and must survive so the identity caches stay valid.
   await db.execute(
     sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${brandProfilesTable}, ${mergedAwayTable}, ${dailySyncTable} RESTART IDENTITY CASCADE`,
   );
+  // Clear after the disposable fixture is reset. This makes the first request
+  // of every case read the boundary for the freshly truncated database rather
+  // than a value cached by the preceding case.
+  clearUserValidityCache();
+  clearSessionBoundaryCache();
 });
 
 // One authenticated request. A fresh HMAC token is minted per call (iat = now),
@@ -206,7 +224,12 @@ async function req(
 // ── Per-scope write helpers (all go through the real auth-gated HTTP path) ────
 
 async function putDayState(userId: string, payload: unknown): Promise<void> {
-  const res = await req(userId, "PUT", "/api/sync/today", { senderId: "test", payload });
+  const res = await req(
+    userId,
+    "PUT",
+    `/api/sync/today?today=${todayStr()}`,
+    { senderId: "test", payload },
+  );
   expect(res.status).toBe(200);
 }
 

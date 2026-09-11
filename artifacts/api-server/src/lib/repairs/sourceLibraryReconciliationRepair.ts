@@ -12,6 +12,7 @@ import {
   loadSourceLibraryReconciliationPlan,
   SOURCE_LIBRARY_RECONCILIATION_FROM_DATE,
   SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+  SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
 } from "../sourceLibraryReconciliationHeal";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
 
@@ -35,22 +36,7 @@ const reconciliationZeroComponents = (components: unknown) =>
     });
   });
 
-export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransaction> = Object.freeze({
-  id: SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
-  owner: "source-library-reconciliation",
-  dependencies: ["incident-resolved-workflow-reconciliation-v1"],
-  eligibility: "Live rows whose audited id and name still match the approved 2026-08-26 source-library reconciliation plan.",
-  mode: "automatic",
-  executionMode: "runner-transactional",
-  resultOwnership: "runner-marker",
-  managerAllowed: false,
-  safety: {
-    affectedScope: "Live approved dough, sauce, cheese, and mix rows; live profiles; and unstarted live runs dated 2026-08-26 or later.",
-    excludedScope: "Rows whose audited id/name guard is stale, non-live rows, completed runs, historical run values, and still-referenced cheese stubs.",
-    rollback: "The runner marker retains the bounded result; reversing a replacement, alias, repoint, or deletion requires an explicit reviewed repair.",
-    evidence: "The checked-in audited plan is hash-validated before mutation, and each target is guarded by its reviewed id and name.",
-  },
-  async execute(tx) {
+const executeSourceLibraryReconciliation = async (tx: RepairTransaction) => {
     // Parsing is read-only and fails closed if the checked-in evidence was
     // accidentally altered. The plan itself contains no database data and no
     // full records are logged.
@@ -246,7 +232,49 @@ export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransacti
       deletedStubs++;
     }
     return { replacements: replaced, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs };
-  },
+};
+
+const reconciliationSafety = {
+  affectedScope: "Live approved dough, sauce, cheese, and mix rows; live profiles; and unstarted live runs dated 2026-08-26 or later.",
+  excludedScope: "Rows whose audited id/name guard is stale, non-live rows, completed runs, historical run values, and still-referenced cheese stubs.",
+  rollback: "The runner marker retains the bounded result; reversing a replacement, alias, repoint, or deletion requires an explicit reviewed repair.",
+  evidence: "The checked-in audited plan is hash-validated before mutation, and each target is guarded by its reviewed id and name.",
+} as const;
+
+const reconciliationEligibility =
+  "Live rows whose audited id and name still match the approved 2026-08-26 source-library reconciliation plan.";
+
+export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransaction> = Object.freeze({
+  id: SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+  owner: "source-library-reconciliation",
+  dependencies: ["incident-resolved-workflow-reconciliation-v1"],
+  eligibility: reconciliationEligibility,
+  mode: "automatic",
+  executionMode: "runner-transactional",
+  resultOwnership: "runner-marker",
+  managerAllowed: false,
+  safety: reconciliationSafety,
+  execute: executeSourceLibraryReconciliation,
+  validateResult: (result) => ["replacements", "aliasesInserted", "repointedProfiles", "repointedRuns", "deletedStubs"]
+    .every((key) => Number.isInteger(result[key]) && Number(result[key]) >= 0),
+});
+
+/**
+ * Fresh, marker-distinct rerun of the same independently fingerprinted plan.
+ * The registry places this after v1, so a normal startup first observes the
+ * historical marker and then claims v2 atomically before touching rows.
+ */
+export const sourceLibraryReconciliationRerunRepair: RepairDefinition<RepairTransaction> = Object.freeze({
+  id: SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
+  owner: "source-library-reconciliation-rerun",
+  dependencies: [SOURCE_LIBRARY_RECONCILIATION_HEAL_ID],
+  eligibility: reconciliationEligibility,
+  mode: "automatic",
+  executionMode: "runner-transactional",
+  resultOwnership: "runner-marker",
+  managerAllowed: false,
+  safety: reconciliationSafety,
+  execute: executeSourceLibraryReconciliation,
   validateResult: (result) => ["replacements", "aliasesInserted", "repointedProfiles", "repointedRuns", "deletedStubs"]
     .every((key) => Number.isInteger(result[key]) && Number(result[key]) >= 0),
 });

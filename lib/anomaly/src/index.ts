@@ -19,7 +19,6 @@ export interface AnomalyRun {
   downtimeMinutes: number;
   stoppageCount: number;
 }
-
 export interface AnomalyInput {
   // Today's finished runs to check.
   today: AnomalyRun[];
@@ -209,18 +208,4 @@ export function detectAnomalies(input: AnomalyInput): AnomalyResult {
 
   return { anomalies, checkedRuns: today.length, baselineRuns: history.length };
 }
-
-// Compact prompt block describing the flagged anomalies for the AI narrator.
-// Only called when there is at least one anomaly.
-export function buildAnomalyPromptBlock(result: AnomalyResult): string {
-  if (result.anomalies.length === 0) return "No anomalies detected.";
-  const lines = result.anomalies.map(
-    (a) =>
-      `- [${a.severity}] ${a.metric}: ${a.description} (baseline from ${a.baselineSamples} past runs)`,
-  );
-  return (
-    `Flagged ${result.anomalies.length} anomaly(ies) across ${result.checkedRuns} run(s) today, ` +
-    `baseline drawn from ${result.baselineRuns} past runs:\n` +
-    lines.join("\n")
-  );
-}
+export {};

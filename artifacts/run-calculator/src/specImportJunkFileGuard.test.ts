@@ -87,7 +87,7 @@ vi.mock("./aiCorrections", () => ({
   saveAiCorrections: async () => {},
 }));
 
-import { prepareSpecImport, prepareSpecImportMulti } from "./specImport";
+import { prepareSpecImport, prepareSpecImportMulti, prepareSpecImportMultiWithAi } from "./specImport";
 
 // ---------------------------------------------------------------------------
 // Buffers. The junk ones are exactly what a wrong-type pick produces: the
@@ -179,7 +179,7 @@ beforeEach(() => {
 
 describe("web multi-file import — junk files are skipped BEFORE the AI call", () => {
   it("surfaces the skip note with the junk filenames and never calls the AI on them", async () => {
-    const prepared = await prepareSpecImportMulti(
+    const prepared = await prepareSpecImportMultiWithAi(
       [randomBinaryBuffer(), goodBuffer(), fakePdfBuffer()],
       undefined,
       ["notes.bin", "Good.xlsx", "renamed.pdf"],

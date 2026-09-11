@@ -3,10 +3,81 @@ set -euo pipefail
 
 : "${CHECKPOINT_DIR:?CHECKPOINT_DIR is required}"
 : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+: "${RELEASE_CHECK_OUTCOME:?RELEASE_CHECK_OUTCOME is required}"
 : "${RELEASE_MODE:?RELEASE_MODE is required}"
 
-if [[ ! -s "$CHECKPOINT_DIR/release-check-checkpoint.md" ]]; then
+checkpoint_report_path="$CHECKPOINT_DIR/release-check-checkpoint.md"
+if [[ ! -s "$checkpoint_report_path" ]]; then
+  if [[ "$RELEASE_CHECK_OUTCOME" != "success" ]]; then
+    case "$RELEASE_MODE" in
+      standard)
+        stopped_message="The release check stopped before all gates completed."
+        ;;
+      full)
+        stopped_message="The full release check stopped before all gates completed."
+        ;;
+      *)
+        echo "Unsupported release mode: $RELEASE_MODE" >&2
+        exit 2
+        ;;
+    esac
+
+    {
+      echo "## Release check stopped — NO-GO"
+      echo
+      echo "$stopped_message"
+      echo
+      echo "## Release blockers"
+      echo "Checkpoint status unresolved: the release check ended before a checkpoint could be created."
+      echo
+      echo "No stopped-check checkpoint artifact is available for this run."
+      echo
+      echo "Resume the incomplete check with:"
+      echo '```text'
+      echo "${RESUME_COMMAND:?RESUME_COMMAND is required}"
+      echo '```'
+      echo
+      echo "Or regenerate the retained report from a fresh run with:"
+      echo '```text'
+      echo "${REGENERATE_COMMAND:?REGENERATE_COMMAND is required}"
+      echo '```'
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
   exit 0
+fi
+
+checkpoint_blocker_summary=""
+checkpoint_blocker_summary_available=0
+if checkpoint_blocker_summary="$(
+  awk '
+    BEGIN {
+      max_line_length = 2048
+      invalid = 0
+    }
+    /^Root blockers: / {
+      if (root != "" || length($0) > max_line_length || $0 !~ /^Root blockers: (none|[[:alnum:]][[:alnum:] .,;()\/:+-]*)$/) {
+        invalid = 1
+      } else {
+        root = $0
+      }
+      next
+    }
+    /^Blocked gates: / {
+      if (blocked != "" || length($0) > max_line_length || $0 !~ /^Blocked gates: (none|[[:alnum:]][[:alnum:] .,;()\/:+-]*)$/) {
+        invalid = 1
+      } else {
+        blocked = $0
+      }
+      next
+    }
+    END {
+      if (invalid || root == "" || blocked == "") exit 1
+      print root
+      print blocked
+    }
+  ' "$checkpoint_report_path"
+)"; then
+  checkpoint_blocker_summary_available=1
 fi
 
 is_fork_pull_request() {
@@ -102,6 +173,13 @@ esac
   echo "## Release check stopped — NO-GO"
   echo
   echo "$stopped_message"
+  echo
+  echo "## Release blockers"
+  if [[ "$checkpoint_blocker_summary_available" -eq 1 ]]; then
+    echo "$checkpoint_blocker_summary"
+  else
+    echo "Blocker summary unresolved: checkpoint text is missing or malformed."
+  fi
   echo
   if [[ "$artifact_link_verification_status" -eq 0 && -n "${CHECKPOINT_ARTIFACT_URL:-}" ]]; then
     echo "[Download the stopped-check checkpoint artifact]($CHECKPOINT_ARTIFACT_URL)"

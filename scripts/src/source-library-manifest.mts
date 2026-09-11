@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(process.cwd(), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SOURCE_ROOT = path.join(ROOT, "attached_assets/source-library");
 const KINDS = ["specs", "dough", "sauce", "cheese", "premix"] as const;
 type Kind = (typeof KINDS)[number];

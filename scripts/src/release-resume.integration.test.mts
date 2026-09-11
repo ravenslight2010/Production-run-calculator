@@ -4,6 +4,7 @@ import { mkdir, readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { releaseGateLabelsForMode } from "./release-check.mts";
 
 type FixtureStep = {
   label: string;
@@ -14,6 +15,7 @@ type FixtureStep = {
   stage?: string;
   concurrencyLimit?: number;
   group?: string;
+  dependsOn?: readonly string[];
 };
 
 const rootDir = resolve(new URL("../../", import.meta.url).pathname);
@@ -32,12 +34,42 @@ const onboardingGuard = join(
   "onboarding-guard.mjs",
 );
 
-function runReleaseCheck(
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function runReleaseCheck(
   evidenceDir: string,
   steps: FixtureStep[],
   args: string[] = [],
   envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
+  await writeFile(
+    join(evidenceDir, "report-key-rotation-preflight.json"),
+    `${JSON.stringify(
+      {
+        verifier: "report-key-rotation-preflight",
+        environment: "disposable-ci",
+        revision: await getCurrentRevision(),
+        status: "pass",
+        canRotate: true,
+        activeKeyId: "fixture-key",
+        storedKeyIds: ["fixture-key"],
+        missingKeyIds: [],
+        failure: null,
+        remediation: null,
+        scan: {
+          limit: 100,
+          checkedDistinctKeyIds: 1,
+          truncated: false,
+          complete: true,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
   return new Promise((resolveRun, reject) => {
     const child = spawn("pnpm", ["exec", "tsx", releaseCheck, ...args], {
       cwd: rootDir,
@@ -76,6 +108,7 @@ function runStoppedSummary(
         CHECKPOINT_DIR: evidenceDir,
         CHECKPOINT_ARTIFACT_URL: artifactUrl,
         GITHUB_STEP_SUMMARY: summaryPath,
+        RELEASE_CHECK_OUTCOME: "failure",
         RELEASE_MODE: mode,
         RESUME_COMMAND:
           mode === "full"
@@ -415,7 +448,13 @@ async function runStoppedSummaryScenario(): Promise<void> {
       try {
         await writeFile(
           join(evidenceDir, "release-check-checkpoint.md"),
-          "# Release Check Checkpoint — INCOMPLETE / NO-GO\n",
+          [
+            "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+            "",
+            "Root blockers: fixture gate one (FAIL)",
+            "Blocked gates: fixture gate two (blocked by fixture gate one)",
+            "",
+          ].join("\n"),
           "utf8",
         );
         const result = await runStoppedSummary(
@@ -448,6 +487,10 @@ async function runStoppedSummaryScenario(): Promise<void> {
           mode === "full"
             ? "The full release check stopped before all gates completed."
             : "The release check stopped before all gates completed.",
+          "",
+          "## Release blockers",
+          "Root blockers: fixture gate one (FAIL)",
+          "Blocked gates: fixture gate two (blocked by fixture gate one)",
           "",
           artifactLine,
           "",
@@ -494,8 +537,203 @@ async function runStoppedSummaryScenario(): Promise<void> {
     }
   }
 
+  for (const checkpointText of [
+    "not a release checkpoint\n",
+    "Root blockers: [untrusted payload](https://example.test)\n",
+  ]) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), "release-summary-malformed-checkpoint-"),
+    );
+    const summaryPath = join(evidenceDir, "step-summary.md");
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        checkpointText,
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        summaryPath,
+        "standard",
+        "",
+      );
+      assert.equal(result.code, 0, result.output);
+      const summary = await readFile(summaryPath, "utf8");
+      assert.match(
+        summary,
+        /Blocker summary unresolved: checkpoint text is missing or malformed\./,
+        "malformed checkpoint text must remain an explicit unresolved condition",
+      );
+      assert.doesNotMatch(
+        summary,
+        /untrusted payload|https:\/\/example\.test/,
+        "malformed checkpoint text must not be copied into the job summary",
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
+  for (const mode of ["standard", "full"] as const) {
+    const successfulEvidenceDir = await mkdtemp(
+      join(tmpdir(), `release-summary-${mode}-success-without-checkpoint-`),
+    );
+    const successfulSummaryPath = join(
+      successfulEvidenceDir,
+      "step-summary.md",
+    );
+    try {
+      const result = await runStoppedSummary(
+        successfulEvidenceDir,
+        successfulSummaryPath,
+        mode,
+        "",
+        { RELEASE_CHECK_OUTCOME: "success" },
+      );
+      assert.equal(result.code, 0, result.output);
+      await assert.rejects(
+        readFile(successfulSummaryPath, "utf8"),
+        `${mode} success without a checkpoint must not add a stopped summary`,
+      );
+    } finally {
+      await rm(successfulEvidenceDir, { recursive: true, force: true });
+    }
+
+    for (const outcome of ["failure", "cancelled"] as const) {
+      const interruptedEvidenceDir = await mkdtemp(
+        join(
+          tmpdir(),
+          `release-summary-${mode}-${outcome}-without-checkpoint-`,
+        ),
+      );
+      const interruptedSummaryPath = join(
+        interruptedEvidenceDir,
+        "step-summary.md",
+      );
+      try {
+        const result = await runStoppedSummary(
+          interruptedEvidenceDir,
+          interruptedSummaryPath,
+          mode,
+          "",
+          { RELEASE_CHECK_OUTCOME: outcome },
+        );
+        assert.equal(result.code, 0, result.output);
+        const summary = await readFile(interruptedSummaryPath, "utf8");
+        assert.match(
+          summary,
+          /Checkpoint status unresolved: the release check ended before a checkpoint could be created\./,
+          `${mode}/${outcome} without a checkpoint must be visibly unresolved`,
+        );
+        assert.match(
+          summary,
+          /Resume the incomplete check with:/,
+          `${mode}/${outcome} unresolved summary must include recovery guidance`,
+        );
+        assert.doesNotMatch(
+          summary,
+          /Decision: GO$/,
+          `${mode}/${outcome} unresolved summary must not imply GO`,
+        );
+      } finally {
+        await rm(interruptedEvidenceDir, {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
+  }
+
   console.log(
-    "Stopped release summary contract passed (standard/full; artifact link and upload-failure; non-retained verification only).",
+    "Stopped release summary contract passed (standard/full; blocker display, safe fallback, artifact link, upload-failure, and unresolved pre-checkpoint interruption).",
+  );
+
+  const productionGateLabels = releaseGateLabelsForMode("full");
+  const productionPunctuation = new Set(
+    productionGateLabels.flatMap((label) =>
+      [...label].filter((character) => !/[A-Za-z0-9 ]/.test(character)),
+    ),
+  );
+  const representativeLabels: string[] = [];
+  const coveredPunctuation = new Set<string>();
+  for (const label of productionGateLabels) {
+    const labelPunctuation = [...label].filter(
+      (character) => !/[A-Za-z0-9 ]/.test(character),
+    );
+    if (
+      labelPunctuation.some((character) => !coveredPunctuation.has(character))
+    ) {
+      representativeLabels.push(label);
+      for (const character of labelPunctuation) {
+        coveredPunctuation.add(character);
+      }
+    }
+  }
+  assert.deepEqual(
+    [...coveredPunctuation].sort(),
+    [...productionPunctuation].sort(),
+    "stopped-summary fixture must cover every punctuation character used by production gate labels",
+  );
+  assert.ok(
+    representativeLabels.length > 0,
+    "production release gate labels must provide a stopped-summary format fixture",
+  );
+  const fixtureRootBlockers = representativeLabels
+    .map((label) => `${label} (FAIL)`)
+    .join("; ");
+  const fixtureBlockedGates = `${representativeLabels[representativeLabels.length - 1]} (blocked by ${representativeLabels[0]})`;
+  assert.ok(
+    fixtureRootBlockers.length <= 2048 &&
+      fixtureBlockedGates.length <= 2048,
+    "stopped-summary format fixture must remain within the parser line-length bound",
+  );
+  {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), "release-summary-production-label-format-"),
+    );
+    const summaryPath = join(evidenceDir, "step-summary.md");
+    try {
+      await writeFile(
+        join(evidenceDir, "release-check-checkpoint.md"),
+        [
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+          "",
+          `Root blockers: ${fixtureRootBlockers}`,
+          `Blocked gates: ${fixtureBlockedGates}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const result = await runStoppedSummary(
+        evidenceDir,
+        summaryPath,
+        "full",
+        "",
+      );
+      assert.equal(result.code, 0, result.output);
+      const summary = await readFile(summaryPath, "utf8");
+      assert.doesNotMatch(
+        summary,
+        /Blocker summary unresolved: checkpoint text is missing or malformed\./,
+        `valid production gate labels were rejected by the stopped-summary parser: ${representativeLabels.join(", ")}`,
+      );
+      assert.match(
+        summary,
+        new RegExp(`Root blockers: ${escapeRegExp(fixtureRootBlockers)}`),
+        "stopped summary must preserve the validated production blocker text",
+      );
+      assert.match(
+        summary,
+        new RegExp(`Blocked gates: ${escapeRegExp(fixtureBlockedGates)}`),
+        "stopped summary must preserve the validated blocked-gate text",
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log(
+    "Stopped release summary format contract passed (production label punctuation and safe blocker preservation).",
   );
 }
 
@@ -600,6 +838,88 @@ async function runParallelStageScenario(): Promise<void> {
     await rm(evidenceDir, { recursive: true, force: true });
     await rm(markerDir, { recursive: true, force: true });
   }
+}
+
+async function runIndependentFailureFanoutScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-independent-failures-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-independent-failures-marker-"),
+  );
+  const independentMarker = join(markerDir, "independent");
+  const dependentMarker = join(markerDir, "dependent");
+  const lateIndependentMarker = join(markerDir, "late-independent");
+  const mark = [
+    "require('node:fs').writeFileSync(process.env.RELEASE_MARKER, 'ran');",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: "independent failing gate",
+      command: process.execPath,
+      args: ["-e", "process.exit(1)"],
+      stage: "fanout-prerequisites",
+      dependsOn: [],
+    },
+    {
+      label: "independent passing gate",
+      command: process.execPath,
+      args: ["-e", mark, "independent"],
+      env: { RELEASE_MARKER: independentMarker },
+      stage: "fanout-independent",
+      dependsOn: [],
+    },
+    {
+      label: "dependent gate",
+      command: process.execPath,
+      args: ["-e", mark, "dependent"],
+      env: { RELEASE_MARKER: dependentMarker },
+      stage: "fanout-dependent",
+      dependsOn: ["independent failing gate"],
+    },
+    {
+      label: "later independent gate",
+      command: process.execPath,
+      args: ["-e", mark, "late-independent"],
+      env: { RELEASE_MARKER: lateIndependentMarker },
+      stage: "fanout-later-independent",
+      dependsOn: [],
+    },
+  ];
+
+  try {
+    const result = await runReleaseCheck(evidenceDir, steps);
+    assert.equal(result.code, 1, result.output);
+    assert.match(
+      result.output,
+      /BLOCKED dependent gate; requires PASS from independent failing gate/,
+    );
+    assert.equal(await readFile(independentMarker, "utf8"), "ran");
+    assert.equal(await readFile(lateIndependentMarker, "utf8"), "ran");
+    await assert.rejects(
+      readFile(dependentMarker, "utf8"),
+      "a blocked dependent gate must not execute",
+    );
+    const report = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    assert.match(report, /\| independent failing gate \| FAIL \|/);
+    assert.match(report, /\| independent passing gate \| PASS \|/);
+    assert.match(report, /\| dependent gate \| BLOCKED \|/);
+    assert.match(
+      report,
+      /Blocked gates: dependent gate \(blocked by independent failing gate\)/,
+    );
+    assert.match(report, /Root blockers: independent failing gate \(FAIL\)/);
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release independent failure fan-out scenario passed (safe continuation and explicit blocking).",
+  );
 }
 
 async function getCurrentRevision(): Promise<string> {
@@ -755,7 +1075,7 @@ async function run(): Promise<void> {
       results: Array<{ label: string; passed: boolean; status: string }>;
     };
     assert.equal(firstCheckpoint.mode, "standard");
-    assert.equal(firstCheckpoint.results.length, 2);
+    assert.equal(firstCheckpoint.results.length, 3);
     assert.deepEqual(
       firstCheckpoint.results.map(({ label, passed, status }) => [
         label,
@@ -765,10 +1085,15 @@ async function run(): Promise<void> {
       [
         ["fixture gate one", true, "PASS"],
         ["fixture gate two", false, "INFRASTRUCTURE TIMEOUT"],
+        ["fixture gate three", false, "BLOCKED"],
       ],
-      "the interrupted run must checkpoint the failed gate, not omit it",
+      "the interrupted run must checkpoint the failed gate and its blocked dependent",
     );
-    assert.equal(await readFile(marker, "utf8"), "started\n");
+    assert.equal(
+      await readFile(marker, "utf8"),
+      "started\n",
+      interrupted.output,
+    );
     assert.equal(
       await readFile(join(evidenceDir, "release-check-report.md"), "utf8"),
       priorRetainedReport,
@@ -785,7 +1110,7 @@ async function run(): Promise<void> {
     assert.match(checkpointReport, /^Report status: INCOMPLETE CHECKPOINT$/m);
     assert.match(
       checkpointReport,
-      /Gates not reached: fixture gate three \(NOT REACHED\)/,
+      /Blocked gates: fixture gate three \(blocked by fixture gate two\)/,
     );
     assert.match(
       checkpointReport,
@@ -943,8 +1268,9 @@ async function runParallelResumeScenario(): Promise<void> {
       [
         ["parallel passed gate", true, "PASS"],
         ["parallel retry gate", false, "INFRASTRUCTURE TIMEOUT"],
+        ["parallel resume barrier", false, "BLOCKED"],
       ],
-      "a partially completed parallel stage must checkpoint each child in step order",
+      "a partially completed parallel stage must checkpoint each child and blocked dependent in step order",
     );
     assert.equal(await readFile(passedMarker, "utf8"), "started\n");
 
@@ -1011,8 +1337,8 @@ async function runOnboardingGuardStopScenario(): Promise<void> {
     );
     assert.match(
       result.output,
-      /browser-guard has a failed gate; later stages were not started\./,
-      "the runner must stop after the onboarding guard stage",
+      /BLOCKED browser evidence gate; requires PASS from onboarding bypass guard/,
+      "the dependent browser evidence gate must be recorded as blocked",
     );
     assert.deepEqual(
       await readFile(
@@ -1034,8 +1360,13 @@ async function runOnboardingGuardStopScenario(): Promise<void> {
           passed: false,
           status: "FAIL",
         },
+        {
+          label: "browser evidence gate",
+          passed: false,
+          status: "BLOCKED",
+        },
       ],
-      "the runner must checkpoint the failed onboarding gate",
+      "the runner must checkpoint both the failed gate and its blocked dependent",
     );
     await assert.rejects(
       readFile(browserMarker, "utf8"),
@@ -1131,10 +1462,10 @@ async function runFullModeScenario(): Promise<void> {
     "",
     `Revision: ${revision}`,
     "Result: PASS",
-    "Expected cases: 117",
-    "Enumerated cases: 117",
-    "Completed cases: 117",
-    "Passed cases: 117",
+    "Expected cases: 159",
+    "Enumerated cases: 159",
+    "Completed cases: 159",
+    "Passed cases: 159",
     "Skipped cases: 0",
     "Failed cases: 0",
     "Not-run cases: 0",
@@ -1144,7 +1475,7 @@ async function runFullModeScenario(): Promise<void> {
     "",
     "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    "| `e2e/example.spec.ts` | 117 | 117 | 117 | 0 | 0 | 0 | 1ms |",
+    "| `e2e/example.spec.ts` | 159 | 159 | 159 | 0 | 0 | 0 | 1ms |",
     "",
   ].join("\n");
   const fullBrowserScript = [
@@ -1227,7 +1558,7 @@ async function runFullModeScenario(): Promise<void> {
       results: Array<{ label: string; passed: boolean; status: string }>;
     };
     assert.equal(firstCheckpoint.mode, "full");
-    assert.equal(firstCheckpoint.results.length, 2);
+    assert.equal(firstCheckpoint.results.length, 3);
     assert.deepEqual(
       firstCheckpoint.results.map(({ label, passed, status }) => [
         label,
@@ -1237,8 +1568,9 @@ async function runFullModeScenario(): Promise<void> {
       [
         ["fixture gate one", true, "PASS"],
         ["full browser E2E suite", false, "INFRASTRUCTURE TIMEOUT"],
+        ["fixture gate three", false, "BLOCKED"],
       ],
-      "full mode must checkpoint the interrupted browser gate as failed",
+      "full mode must checkpoint the interrupted browser gate and blocked dependent",
     );
     assert.equal(await readFile(marker, "utf8"), "started\n");
 
@@ -1420,6 +1752,7 @@ if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await run();
   await runOnboardingGuardStopScenario();
   await runParallelStageScenario();
+  await runIndependentFailureFanoutScenario();
   await runApiShardConcurrencyScenario();
   await runParallelResumeScenario();
   await runFullModeScenario();

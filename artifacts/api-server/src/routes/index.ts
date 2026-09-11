@@ -138,6 +138,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/audit-logs/profile-name-link-cleanup", "/audit-logs",
   ]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
+  ...reads(["use-ai-tools"], "all", "scoped", ["/ai-corrections"]),
 ];
 
 /**
@@ -219,6 +220,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /operations-insights/mix-reconciliation", "POST /ai/mix-reconcile",
     "POST /operations-insights/recap", "POST /ai/summary",
     "POST /operations-insights/anomalies", "POST /ai/anomalies",
+    "POST /operations-insights/schedule-order", "POST /ai/schedule-optimize",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", ["POST /run-suggestions/update"]),
   ...writes("capability-gated", "scoped", "allowed", "manage-profiles", [
@@ -275,9 +277,8 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
-    "POST /ai/fill-missing", "POST /ai/match-import", "POST /ai/parse-spec-sheet", "POST /ai/parse-spec-images",
-    "POST /ai/match-premix", "POST /ai/suggest-merges",
-    "POST /operations-insights/schedule-order", "POST /ai/schedule-optimize",
+    "POST /ai/match-import", "POST /ai/parse-spec-sheet", "POST /ai/parse-spec-images",
+    "POST /ai/match-premix",
   ]),
   // This route retains its intentional signed-in contribution policy; its
   // handler enforces per-domain write rules and capability requirements before

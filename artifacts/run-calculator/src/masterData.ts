@@ -44,6 +44,18 @@ let inFlight: Promise<MasterDataBootstrap> | null = null;
 let masterDataEtag: string | null = null;
 let lastLoadedBootstrap: MasterDataBootstrap | null = null;
 let masterDataTransportGeneration = 0;
+let registeredQueryClient: QueryClient | null = null;
+
+export function registerMasterDataQueryClient(queryClient: QueryClient): void {
+  registeredQueryClient = queryClient;
+}
+
+export function adoptMasterDataConflict<K extends MasterDataSlice>(
+  slice: K,
+  value: MasterDataBootstrap[K],
+): void {
+  if (registeredQueryClient) setMasterDataSlice(registeredQueryClient, slice, value);
+}
 
 export function resetMasterDataTransportCache(): void {
   masterDataTransportGeneration += 1;

@@ -56,6 +56,9 @@ export interface CheeseRecipe {
   id: string;
   // Optional persistence scope (live vs sandbox); carried through opaquely.
   scope?: string;
+  // Server persistence revision. It is required when updating an existing
+  // server row, but omitted for new client-generated ids.
+  updatedAt?: string;
   // Display name of the cheese mix (e.g. "Whole Mozz Cheese Mix").
   name: string;
   // The customer this recipe belongs to (the spec-sheet tab). Empty = any.
@@ -184,6 +187,11 @@ export function normalizeCheeseRecipe(input: unknown): CheeseRecipe | null {
     enabled,
   };
   if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
+  if (typeof raw.updatedAt === "string" && raw.updatedAt.trim()) {
+    recipe.updatedAt = raw.updatedAt.trim();
+  } else if (raw.updatedAt instanceof Date && Number.isFinite(raw.updatedAt.getTime())) {
+    recipe.updatedAt = raw.updatedAt.toISOString();
+  }
   return recipe;
 }
 

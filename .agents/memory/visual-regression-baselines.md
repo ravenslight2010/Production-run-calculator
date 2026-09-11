@@ -50,3 +50,14 @@ copy regressions invisible.
 **How to apply:** Intercept the authenticated bootstrap in the visual test,
 return a minimal fixture with a unique identity, and update only the snapshots
 whose visible content intentionally changed.
+
+Release-local browser runs do not include the Replit development banner; optional
+banner cleanup must query non-blockingly (for example, `evaluateAll`), never wait
+for a selector that is absent outside the managed preview.
+
+**Why:** A release-local accessibility run lost its entire timeout waiting for
+an absent banner, while the same helper passed in the managed preview.
+
+**How to apply:** Treat preview-only DOM as optional in release helpers and keep
+the full browser timeout as a real failure signal, not something to extend or
+waive.

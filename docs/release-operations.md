@@ -22,7 +22,7 @@ two API/database shards at once. Each API shard remains serialized internally
 and has an eight-minute hard limit with a six-minute warning. Browser stages
 remain strictly serial for disposable live-day safety. The full browser suite
 has a 45-minute hard limit with a 40-minute warning. This is a bounded
-execution budget, not a retry or an evidence-validation bypass: all 117
+execution budget, not a retry or an evidence-validation bypass: all 159
 enumerated cases still need to complete and the retained report must pass the
 same revision-bound evidence verifier.
 
@@ -38,7 +38,7 @@ evidence paths: the bounded smoke and accessibility gates cannot overwrite the
 full-suite report.
 It records the run revision, total/complete/pass/skip/fail/not-run counts,
 wall-clock duration, and a sorted per-file duration table. The report is generated from
-Playwright's completed test results; a `GO` report requires all 117 cases to be
+Playwright's completed test results; a `GO` report requires all 159 cases to be
 enumerated and completed. The main config remains serial with `workers: 1`,
 with no retries or reduced test-match coverage. The release report also records
 total wall-clock time and per-stage wall-clock durations so the scheduler's
@@ -68,7 +68,7 @@ as regressions.
   failure, never a pass.
 - A browser duration alert is an operational review signal, not a coverage or
   serial-execution bypass. It is copied into the release summary for
-  investigation; the full suite still must complete all 117 cases and pass the
+  investigation; the full suite still must complete all 159 cases and pass the
   revision-bound evidence verifier.
 
 Without an explicit `RELEASE_EVIDENCE_DIR`, standard and full checks retain
@@ -132,6 +132,42 @@ and explicitly require authoritative production reconciliation evidence. The
 normal release command remains fail-closed: outside the narrowly identified
 disposable CI test database, the production reconciliation verifier and its
 retained evidence are mandatory.
+
+### Bind production reconciliation evidence to the deployed build
+
+Set `RELEASE_REVISION` on the controlled deployment to the full 40-character
+Git commit SHA that was deployed. The operational report exposes that value at
+`evidence.release.revision`; malformed or absent revision metadata is reported
+as `unknown` and is not valid release proof. `REPLIT_GIT_COMMIT` and
+`GIT_COMMIT` remain compatibility fallbacks, but operators should not depend on
+either being supplied automatically by the deployment platform.
+
+Capture production reconciliation evidence with the exact revision returned by
+the deployed operational report:
+
+```bash
+SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
+SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT=release \
+pnpm --filter @workspace/scripts exec tsx \
+  ./src/verify-source-library-reconciliation.mts \
+  --environment release \
+  --revision <deployed-40-character-sha> \
+  --output /secure/path/source-library-reconciliation.json
+```
+
+Import that file into a release run with the same explicit revision:
+
+```bash
+SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
+pnpm run release:check -- \
+  --source-library-environment release \
+  --source-library-revision <deployed-40-character-sha> \
+  --source-library-evidence /secure/path/source-library-reconciliation.json
+```
+
+Release captures and imports reject a missing, malformed, `unknown`, or
+different revision. The production revision must come from the controlled
+deployment/report path; never substitute the current repository `HEAD`.
 
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume

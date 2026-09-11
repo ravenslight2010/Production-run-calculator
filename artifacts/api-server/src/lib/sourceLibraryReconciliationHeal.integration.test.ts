@@ -171,6 +171,13 @@ describe("runSourceLibraryReconciliationHeal", () => {
     expect(await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, STUBS[2][0]))).toHaveLength(1);
     const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, HEAL));
     expect(marker.result).toEqual({ replacements: 4, aliasesInserted: 2, repointedProfiles: 2, repointedRuns: 2, deletedStubs: 1 });
+
+    await db.update(mixesTable).set({ batchSize: 321 })
+      .where(eq(mixesTable.id, "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix"));
+    const managerEditedStatus = await sourceLibraryReconciliationStatus(db, "live");
+    expect(managerEditedStatus.findings).not.toContainEqual(expect.objectContaining({
+      id: "source:pool-mismatch:mixes:premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix",
+    }));
   });
 
   it("is marker-guarded on the second execution", async () => {

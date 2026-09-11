@@ -38,6 +38,7 @@ node_modules
 /release-evidence/release-check-report.md
 /release-evidence/release-check-state.json
 /release-evidence/report-key-rotation-preflight.json
+/release-evidence/.source-library-reconciliation.json.pending
 /release-evidence-full/
 /rollback-rehearsal-report.md
 /libpeerconnection.log

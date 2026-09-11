@@ -2323,112 +2323,6 @@ export interface ScheduleOptimizeResponse {
   generatedAt: number;
 }
 
-export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
-
-
-export const FillMissingFieldCategory = {
-  identity: 'identity',
-  line: 'line',
-  packaging: 'packaging',
-  sauce: 'sauce',
-  applicator: 'applicator',
-  pepperoni: 'pepperoni',
-  dough: 'dough',
-} as const;
-
-export type FillMissingFieldKind = typeof FillMissingFieldKind[keyof typeof FillMissingFieldKind];
-
-
-export const FillMissingFieldKind = {
-  number: 'number',
-  text: 'text',
-  select: 'select',
-} as const;
-
-/**
- * One still-blank run-setup field the model should suggest a value for.
- */
-export interface FillMissingField {
-  /** Stable field key (matches the run-settings field name) */
-  key: string;
-  /** Human-readable field label */
-  label: string;
-  category: FillMissingFieldCategory;
-  kind: FillMissingFieldKind;
-  /** Allowed values when kind is "select" */
-  options?: string[];
-}
-
-/**
- * A field already filled in, given to the model for grounding.
- */
-export interface FillMissingContextItem {
-  key: string;
-  label: string;
-  value: string;
-}
-
-export interface FillMissingInput {
-  brand: string;
-  flavor: string;
-  /** Die/size of the run, if known */
-  dieType?: string;
-  /** Fields already known, for grounding the suggestions */
-  context?: FillMissingContextItem[];
-  /** The blank fields needing a suggested value */
-  fields: FillMissingField[];
-}
-
-/**
- * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
- */
-export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
-
-
-export const ReviewVerdictStatus = {
-  ok: 'ok',
-  warn: 'warn',
-  reject: 'reject',
-} as const;
-
-/**
- * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
- */
-export interface ReviewVerdict {
-  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
-  status: ReviewVerdictStatus;
-  /** Short reason for a warn/reject verdict */
-  reason?: string;
-}
-
-export interface FillMissingSuggestion {
-  /** The field key this suggestion is for (echoes a requested key) */
-  key: string;
-  /** Suggested value, as a string (numbers/selects coerced client-side) */
-  value: string;
-  /** Short plain-language reason for the suggested value */
-  rationale: string;
-  review?: ReviewVerdict;
-}
-
-export type FillMissingResultDecision = typeof FillMissingResultDecision[keyof typeof FillMissingResultDecision];
-
-
-export const FillMissingResultDecision = {
-  suggestion: 'suggestion',
-} as const;
-
-export interface FillMissingResult {
-  suggestions: FillMissingSuggestion[];
-  generatedAt: number;
-  /** Optional message when no suggestions could be made */
-  note?: string;
-  decision: FillMissingResultDecision;
-  aiGenerated?: boolean;
-  aiStatus?: AiStatus;
-  modelStatus?: AiModelStatus;
-}
-
 /**
  * An imported flavor (under a resolved saved brand) needing a match.
  */
@@ -2499,7 +2393,6 @@ export interface MatchImportBrandMatch {
   candidate: string;
   /** The saved brand it best matches (always one of brands) */
   match: string;
-  review?: ReviewVerdict;
 }
 
 export interface MatchImportFlavorMatch {
@@ -2509,7 +2402,6 @@ export interface MatchImportFlavorMatch {
   candidate: string;
   /** The saved flavor it best matches (always within that brand) */
   match: string;
-  review?: ReviewVerdict;
 }
 
 /**
@@ -3734,6 +3626,8 @@ export interface MixComponent {
 export interface Mix {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required for updates to existing rows */
+  updatedAt?: string;
   /** Display name of the mix */
   name: string;
   /** Product brand, matched case-insensitively against scheduled runs */
@@ -3842,6 +3736,8 @@ export interface CheeseComponent {
 export interface CheeseRecipe {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required for updates to existing rows */
+  updatedAt?: string;
   /** Display name of the cheese recipe */
   name: string;
   /** Customer this recipe belongs to (empty = any) */
@@ -3910,6 +3806,8 @@ export interface DoughballVariant {
 export interface NamedRecipe {
   /** Stable client-generated id */
   id: string;
+  /** Server persistence revision; required when updating an existing row */
+  updatedAt?: string;
   /** Display name of the recipe */
   name: string;
   /** Optional free-form notes */
@@ -4022,46 +3920,6 @@ export interface DeleteCycleCountSchedulesInput {
 export interface MarkCycleCountCountedInput {
   /** The client's local factory day (YYYY-MM-DD) to stamp as the last-counted date. Sent so the stamp matches the same local-day basis the clients use to compute the due list (avoiding timezone off-by-one drift). If omitted or malformed, the server falls back to its own current date. */
   today?: string;
-}
-
-export interface SuggestMergesInput {
-  /** The full pool of mergeable ingredient/die names to cluster */
-  names: string[];
-  /** Learned merge aliases to ground the suggestions */
-  aliases?: MergeAlias[];
-  category?: MergeSuggestCategory;
-  /** When category is "flavor", the single brand `names` was scoped to — used only to tailor the AI prompt's wording. */
-  brand?: string;
-}
-
-export interface MergeSuggestion {
-  /** The recommended canonical name to keep */
-  target: string;
-  /** The duplicate names to merge into the target */
-  sources: string[];
-  /** Optional short rationale for the suggested grouping */
-  reason?: string;
-  review?: ReviewVerdict;
-}
-
-export type SuggestMergesResultDecision = typeof SuggestMergesResultDecision[keyof typeof SuggestMergesResultDecision];
-
-
-export const SuggestMergesResultDecision = {
-  suggestion: 'suggestion',
-} as const;
-
-export interface SuggestMergesResult {
-  suggestions: MergeSuggestion[];
-  /** Epoch ms when the suggestions were generated */
-  generatedAt: number;
-  /** True when the AI supplied merge suggestions; false for unavailable responses */
-  aiGenerated: boolean;
-  aiStatus: AiStatus;
-  /** Optional brief overall comment from the model */
-  note?: string;
-  decision: SuggestMergesResultDecision;
-  modelStatus?: AiModelStatus;
 }
 
 /**
@@ -4193,7 +4051,6 @@ export interface SpecImportProfile {
   sauceBarrelLbs?: number;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
-  review?: ReviewVerdict;
 }
 
 export interface SpecImportRecipeRow {
@@ -4229,7 +4086,6 @@ export interface SpecImportRecipe {
   doughballsPerTray?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
-  review?: ReviewVerdict;
 }
 
 export type ParseSpecSheetResultDecision = typeof ParseSpecSheetResultDecision[keyof typeof ParseSpecSheetResultDecision];
@@ -4266,7 +4122,6 @@ export interface MatchImportNameMatch {
   candidate: string;
   /** The saved name it best matches (always one of the known list) */
   match: string;
-  review?: ReviewVerdict;
 }
 
 /**
@@ -4288,7 +4143,6 @@ export interface MatchImportIngredientMatch {
   candidate: string;
   /** The saved ingredient it best matches (within that kind's pool) */
   match: string;
-  review?: ReviewVerdict;
 }
 
 export type MatchImportResultDecision = typeof MatchImportResultDecision[keyof typeof MatchImportResultDecision];
@@ -4338,7 +4192,6 @@ export interface MatchPremixMatch {
   brand: string;
   /** The saved flavor under that brand, or empty when none fits */
   flavor: string;
-  review?: ReviewVerdict;
 }
 
 export type MatchPremixResultDecision = typeof MatchPremixResultDecision[keyof typeof MatchPremixResultDecision];
