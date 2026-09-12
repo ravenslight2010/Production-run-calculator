@@ -153,6 +153,18 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);

@@ -97,9 +97,11 @@ const ALLOWED_FILES = new Set<string>([
   // are operator-visible rather than incidental subscription churn.
   "components/ScreenModeView.tsx",
 
-  // LineMapDashboard.tsx — the production line map shows live zone status
-  // (cases progress, freezer occupancy, batch numbers, auto-track whispers),
-  // so its per-second subscription is deliberate operator feedback.
+  // LineMapDashboard.tsx — the factory-floor line-map overview: zone status
+  // badges, depletion countdowns, and next-batch timers all derive from
+  // nowTime/elapsedBatchSec/secUntilNextBatch, so the per-second re-render is
+  // the feature, not incidental churn. (Re-applied after the Replit merge;
+  // this allowlist entry was missed at the time — see .agents/memory/claude-bugs.md.)
   "components/LineMapDashboard.tsx",
 ]);
 
