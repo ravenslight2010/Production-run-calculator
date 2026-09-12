@@ -50,7 +50,7 @@ import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm, useFieldArray, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   formSchema,
@@ -3998,7 +3998,7 @@ export default function Home() {
   });
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: (() => {
       const ds = loadDayState();
       return loadRunValues(ds.runs[ds.currentIndex]?.id ?? "");
