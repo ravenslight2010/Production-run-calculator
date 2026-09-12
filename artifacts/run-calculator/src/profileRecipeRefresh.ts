@@ -59,19 +59,19 @@ export async function orchestrateSharedRecipeRefresh<T>(
  * function prevents the initial pool hydration path from updating profiles
  * while leaving already-scheduled runs stale.
  */
-export function refreshNamedRecipeProfilesAndPropagate(
+export async function refreshNamedRecipeProfilesAndPropagate(
   kind: "dough" | "sauce",
   patches: ReadonlyArray<NamedRecipePoolPatch>,
   opts: { emptyRowsOnly?: boolean } | undefined,
-  onProfileSaved: (brand: string, flavor: string) => void,
-): ProfileRecipeRefreshTarget[] {
+  onProfileSaved: (brand: string, flavor: string) => void | Promise<void>,
+): Promise<ProfileRecipeRefreshTarget[]> {
   const touched = refreshProfilesFromNamedRecipes(kind, patches, opts);
   const seen = new Set<string>();
   for (const profile of touched) {
     const key = `${profile.brand.trim().toLowerCase()}__${profile.flavor.trim().toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    onProfileSaved(profile.brand, profile.flavor);
+    await onProfileSaved(profile.brand, profile.flavor);
   }
   return touched;
 }

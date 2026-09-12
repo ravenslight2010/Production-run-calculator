@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type RequestHandler } from "express";
 import {
   ChangePasswordBody,
   CheckUsernameAvailableQueryParams,
@@ -50,11 +50,16 @@ const authRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(AUTH_RATE_WINDOW_MS)
     : undefined;
-const authRateLimit = rateLimit({
-  windowMs: AUTH_RATE_WINDOW_MS,
-  max: AUTH_RATE_MAX,
-  store: authRateStore,
-});
+const approvedDestructiveE2E =
+  process.env.E2E_TEST_DB === "1"
+  && process.env.E2E_APPROVED_DESTRUCTIVE_MODE === "1";
+const authRateLimit: RequestHandler = approvedDestructiveE2E
+  ? (_req, _res, next) => next()
+  : rateLimit({
+      windowMs: AUTH_RATE_WINDOW_MS,
+      max: AUTH_RATE_MAX,
+      store: authRateStore,
+    });
 
 // Sign-up is gated behind a facility access code so the endpoint isn't fully
 // public self-registration — anyone reaching it can otherwise mint an account

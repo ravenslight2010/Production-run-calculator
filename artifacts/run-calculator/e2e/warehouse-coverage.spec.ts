@@ -38,12 +38,13 @@ async function createManager(
   request: APIRequestContext,
   db: Client,
   username: string,
-): Promise<void> {
+): Promise<string> {
   const response = await request.post(`${API_BASE}/api/auth/sign-up`, {
     headers: { "Content-Type": "application/json" },
     data: { username, password: PASSWORD, accessCode: SIGNUP_CODE },
   });
   expect(response.ok(), `sign-up failed: ${response.status()}`).toBe(true);
+  const { token } = await response.json() as { token: string };
 
   const user = await db.query<{ id: string }>(
     "SELECT id FROM users WHERE username = $1",
@@ -69,18 +70,20 @@ async function createManager(
   await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [
     user.rows[0].id,
   ]);
+  return token;
 }
 
 async function createStaff(
   request: APIRequestContext,
   db: Client,
   username: string,
-): Promise<void> {
+): Promise<string> {
   const response = await request.post(`${API_BASE}/api/auth/sign-up`, {
     headers: { "Content-Type": "application/json" },
     data: { username, password: PASSWORD, accessCode: SIGNUP_CODE },
   });
   expect(response.ok(), `sign-up failed: ${response.status()}`).toBe(true);
+  const { token } = await response.json() as { token: string };
 
   const user = await db.query<{ id: string }>(
     "SELECT id FROM users WHERE username = $1",
@@ -95,14 +98,12 @@ async function createStaff(
   await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [
     user.rows[0].id,
   ]);
+  return token;
 }
 
-async function signIn(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+async function openAuthenticated(page: Page, token: string): Promise<void> {
+  await page.context().addCookies([{ name: "rc_auth", value: token, url: API_BASE }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 }
 
@@ -215,8 +216,23 @@ async function cleanupInventory(db: Client): Promise<void> {
   }
 }
 
-test.beforeAll(async () => {
+const managerUsername = uniqueTestId("warehouse_manager");
+const staffUsername = uniqueTestId("warehouse_staff");
+let managerToken = "";
+let staffToken = "";
+
+test.beforeAll(async ({ request }) => {
   await requireIsolatedTestDatabase("warehouse coverage browser check");
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    testUsernames.add(managerUsername);
+    testUsernames.add(staffUsername);
+    managerToken = await createManager(request, db, managerUsername);
+    staffToken = await createStaff(request, db, staffUsername);
+  } finally {
+    await db.end().catch(() => {});
+  }
 });
 
 
@@ -244,11 +260,8 @@ test.afterEach(async () => {
 
 test("shows capped offsite transfer guidance and hides it when onsite stock covers demand", async ({
   page,
-  request,
 }, testInfo) => {
-  const username = uniqueTestId("warehouse_manager");
   const runId = uniqueTestId("warehouse_run");
-  testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
@@ -261,8 +274,7 @@ test("shows capped offsite transfer guidance and hides it when onsite stock cove
   try {
     await db.connect();
     await seedInventory(db);
-    await createManager(request, db, username);
-    await signIn(page, username);
+    await openAuthenticated(page, managerToken);
     await seedRun(page, runId);
     await openInventory(page);
 
@@ -317,10 +329,7 @@ test("shows capped offsite transfer guidance and hides it when onsite stock cove
 
 test("explains restricted inventory actions to non-managers", async ({
   page,
-  request,
 }, testInfo) => {
-  const username = uniqueTestId("warehouse_staff");
-  testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
@@ -333,8 +342,7 @@ test("explains restricted inventory actions to non-managers", async ({
   try {
     await db.connect();
     await seedInventory(db);
-    await createStaff(request, db, username);
-    await signIn(page, username);
+    await openAuthenticated(page, staffToken);
     await openInventory(page, false);
 
     const itemName = page.getByText(fixture.itemName, { exact: true });
@@ -343,7 +351,7 @@ test("explains restricted inventory actions to non-managers", async ({
 
     const addStock = page.getByRole("button", { name: "Add stock", exact: true });
     await expect(addStock).toBeVisible();
-    await page.getByPlaceholder("Qty", { exact: true }).fill("1");
+    await page.getByLabel(`Restock quantity for ${fixture.itemName}`, { exact: true }).fill("1");
     await expect(addStock).toBeEnabled();
 
     await expect(
@@ -406,13 +414,10 @@ test("explains restricted inventory actions to non-managers", async ({
 
 test("keeps capped offsite transfer guidance readable on a phone", async ({
   page,
-  request,
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
-  const username = uniqueTestId("warehouse_phone_manager");
   const runId = uniqueTestId("warehouse_phone_run");
-  testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
@@ -425,8 +430,7 @@ test("keeps capped offsite transfer guidance readable on a phone", async ({
   try {
     await db.connect();
     await seedInventory(db);
-    await createManager(request, db, username);
-    await signIn(page, username);
+    await openAuthenticated(page, managerToken);
     await seedRun(page, runId);
     await openInventory(page);
 
@@ -468,14 +472,11 @@ test("keeps capped offsite transfer guidance readable on a phone", async ({
 
 test("keeps capped offsite transfer guidance readable on a tablet", async ({
   page,
-  request,
 }, testInfo) => {
   const viewport = { width: 768, height: 1024 };
   await page.setViewportSize(viewport);
 
-  const username = uniqueTestId("warehouse_tablet_manager");
   const runId = uniqueTestId("warehouse_tablet_run");
-  testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
@@ -488,8 +489,7 @@ test("keeps capped offsite transfer guidance readable on a tablet", async ({
   try {
     await db.connect();
     await seedInventory(db);
-    await createManager(request, db, username);
-    await signIn(page, username);
+    await openAuthenticated(page, managerToken);
     await seedRun(page, runId);
     await openInventory(page);
 

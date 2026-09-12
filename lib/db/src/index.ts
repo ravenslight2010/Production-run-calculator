@@ -16,9 +16,15 @@ if (!process.env.DATABASE_URL) {
 // diagnostics deadline, allowing its local fallback to run after acquisition
 // fails without leaving a waiter in node-postgres' pending queue.
 const POOL_CONNECTION_TIMEOUT_MS = 900;
+const configuredPoolMax = Number(process.env.DATABASE_POOL_MAX);
+const POOL_MAX =
+  Number.isInteger(configuredPoolMax) && configuredPoolMax > 0
+    ? configuredPoolMax
+    : 10;
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   connectionTimeoutMillis: POOL_CONNECTION_TIMEOUT_MS,
+  max: POOL_MAX,
 });
 
 // node-postgres emits an `error` event on idle pooled clients when the backend

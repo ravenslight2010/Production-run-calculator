@@ -197,7 +197,18 @@ export function useHomeFormLifecycle({
       }
       saveRunValues(runId, capturedValues);
       markRunValuesUpdated(runId, now);
-      if (canManageProfiles && (capturedRun.brand || capturedRun.flavor)) {
+      // A started/paused/ended run owns an immutable recipe snapshot. Its
+      // debounced form write must not rewrite the shared profile after a
+      // manager edits a recipe for future pending work. Read the latest
+      // durable metadata here rather than relying on the render that captured
+      // this callback; Start can land while the debounce is waiting.
+      const latestRun = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
+      const canWriteSharedProfile =
+        !!latestRun &&
+        !latestRun.startedAt &&
+        !latestRun.pausedAt &&
+        !latestRun.endedAt;
+      if (canManageProfiles && canWriteSharedProfile && (capturedRun.brand || capturedRun.flavor)) {
         if (saveProfileForRun(capturedRun.brand, capturedRun.flavor, capturedValues)) {
           void propagateProfileToPendingRuns(capturedRun.brand, capturedRun.flavor);
         }

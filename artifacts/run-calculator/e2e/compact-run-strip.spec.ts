@@ -21,7 +21,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers } from "./isolation";
+import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -71,6 +71,30 @@ async function signUpAndDismissOnboarding(
   });
 }
 
+async function resetTodayRunFixture(page: Page): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("CompactRunStrip fixture reset"),
+  });
+  await page.context().setOffline(true);
+  try {
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await db.connect();
+    await db.query(
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [new Date().toISOString().slice(0, 10)],
+    );
+  } finally {
+    await db.end().catch(() => {});
+    await page.context().setOffline(false);
+  }
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+}
+
 // ── test ─────────────────────────────────────────────────────────────────────
 
 test.describe("CompactRunStrip — ended-run round-trip", () => {
@@ -82,6 +106,7 @@ test.describe("CompactRunStrip — ended-run round-trip", () => {
 
       // 1. Sign up, land on the main app, dismiss onboarding dialog
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await resetTodayRunFixture(page);
 
       // 2. Navigate to Run tab and start a run
       await page.locator('[data-testid="tab-run"]').click();
@@ -95,6 +120,10 @@ test.describe("CompactRunStrip — ended-run round-trip", () => {
 
       // 4. End the run
       await stopBtn.click();
+      await expect(stopBtn).toBeHidden({ timeout: 5_000 }).catch(async () => {
+        await stopBtn.click();
+        await expect(stopBtn).toBeHidden({ timeout: 15_000 });
+      });
 
       // 5. Navigate to Dough tab (non-run tab)
       await page.locator('[data-testid="tab-dough"]').click();

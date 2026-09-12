@@ -22,14 +22,21 @@ const SAUCE_RECIPE = `Unit Sauce ${suffix}`;
 const CHEESE_RECIPE = `Unit Cheese ${suffix}`;
 
 function unitProvenanceWorkbook(): Buffer {
-  const sheet = XLSX.utils.aoa_to_sheet([
-    ["Brand", "Flavor", "Recipe", "Kind", "Ingredient", "Raw Value", "Unit"],
-    [BRAND, FLAVOR, DOUGH_RECIPE, "dough", "Flour", 50.25, "lbs"],
-    [BRAND, FLAVOR, SAUCE_RECIPE, "sauce", "Tomato Paste", 3.75, ""],
-    [BRAND, FLAVOR, CHEESE_RECIPE, "cheese", "Mozzarella", 7.125, "batch weight"],
+  const profiles = XLSX.utils.aoa_to_sheet([
+    ["Brand", "Flavor", "Cases Planned", "Notes"],
+    [BRAND, FLAVOR, 12, "Unit provenance review fixture"],
   ]);
+  // Keep the source data in one unsupported row so deterministic preparation
+  // recognizes the profile sheet but retains this complete row for explicit AI
+  // review instead of misclassifying recipe rows as extra profiles.
+  const recipeReview = XLSX.utils.aoa_to_sheet([[
+    DOUGH_RECIPE, "dough", "Flour", 50.25, "lbs",
+    SAUCE_RECIPE, "sauce", "Tomato Paste", 3.75,
+    CHEESE_RECIPE, "cheese", "Mozzarella", 7.125, "batch weight",
+  ]]);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Recipe Unit Review");
+  XLSX.utils.book_append_sheet(workbook, profiles, "Production Runs");
+  XLSX.utils.book_append_sheet(workbook, recipeReview, "Recipe Unit Review");
   return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
 }
 
@@ -112,6 +119,12 @@ test("shows recipe unit provenance without rescaling workbook values or blocking
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await dismissOnboardingIfPresent(page, { visibilityTimeout: 5_000 });
+  await expect.poll(async () => page.evaluate(async () => {
+    const response = await fetch("/api/me", { cache: "no-store" });
+    if (!response.ok) return false;
+    const me = await response.json() as { capabilities?: string[] };
+    return me.capabilities?.includes("use-ai-tools") ?? false;
+  }), { timeout: 20_000 }).toBe(true);
 
   let workbookText = "";
   let structuredParseCount = 0;
@@ -173,11 +186,22 @@ test("shows recipe unit provenance without rescaling workbook values or blocking
 
   const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
   await expect(review).toContainText("Step 1 of 2 — products", { timeout: 20_000 });
-  expect(structuredParseCount).toBeGreaterThanOrEqual(1);
+  // This customer-style table is intentionally outside the documented export
+  // layouts. Preparation must remain deterministic-first and must not call AI
+  // until a manager explicitly asks it to interpret the unresolved source.
+  expect(structuredParseCount).toBe(0);
+
+  await review.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(review).toContainText("Step 2 of 2 — details");
+  await expect(review).toContainText("need review; no guesses were applied");
+  await review.getByRole("button", { name: /Use AI for \d+ unresolved items?/ }).click();
+  await expect.poll(() => structuredParseCount).toBeGreaterThanOrEqual(1);
   expect(workbookText).toContain(DOUGH_RECIPE);
   expect(workbookText).toContain("50.25");
   expect(workbookText).toContain("batch weight");
-
+  // A newly prepared AI result intentionally restarts review at products so
+  // the manager sees every interpreted addition before inspecting details.
+  await expect(review).toContainText("Step 1 of 2 — products");
   await review.getByRole("button", { name: "Next", exact: true }).click();
   await expect(review).toContainText("Step 2 of 2 — details");
 
@@ -186,11 +210,11 @@ test("shows recipe unit provenance without rescaling workbook values or blocking
   const sauce = recipeCards.filter({ hasText: SAUCE_RECIPE });
   const cheese = recipeCards.filter({ hasText: CHEESE_RECIPE });
   await expect(dough).toContainText("Reported row unit: lbs");
-  await expect(dough).toContainText("Read: Flour 50.25 lb");
+  await expect(dough).toContainText(/(?:Read|Will change to): Flour 50\.25 lb/);
   await expect(sauce).toContainText("The workbook did not clearly state");
-  await expect(sauce).toContainText(/Read: Tomato (?:Paste|Sauce) 3\.75 lb/);
+  await expect(sauce).toContainText(/(?:Read|Will change to): Tomato (?:Paste|Sauce) 3\.75 lb/);
   await expect(cheese).toContainText("The reported row unit “batch weight” is ambiguous.");
-  await expect(cheese).toContainText("Read: Mozzarella 7.125 lb");
+  await expect(cheese).toContainText(/(?:Read|Will change to): Mozzarella 7\.125 lb/);
   await expect(sauce).toContainText("the values will stay exactly as reported");
   await expect(cheese).toContainText("the values will stay exactly as reported");
 

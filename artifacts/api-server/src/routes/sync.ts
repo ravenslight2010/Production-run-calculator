@@ -89,6 +89,37 @@ const router: IRouter = Router();
 
 type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string; resetEpoch: number };
 const clients = new Set<SseClient>();
+
+// Manual packaging corrections temporarily pause automatic case claims. The
+// deadline is server-owned: accepting a client-clock timestamp here would let
+// a skewed or malicious device suppress automatic tracking indefinitely.
+const MAX_PACKAGING_MANUAL_OVERRIDE_MS = 60_000;
+function capPackagingManualOverrideUntil(payload: unknown, serverTime: number): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const root = payload as Record<string, unknown>;
+  const rawProgress = root.packagingProgress;
+  if (!rawProgress || typeof rawProgress !== "object" || Array.isArray(rawProgress)) return payload;
+
+  const maxUntil = serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS;
+  let changed = false;
+  const packagingProgress: Record<string, unknown> = {};
+  for (const [runId, rawEntry] of Object.entries(rawProgress as Record<string, unknown>)) {
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+      packagingProgress[runId] = rawEntry;
+      continue;
+    }
+    const entry = rawEntry as Record<string, unknown>;
+    const manualOverrideUntil = entry.manualOverrideUntil;
+    if (typeof manualOverrideUntil === "number" && Number.isFinite(manualOverrideUntil) && manualOverrideUntil > maxUntil) {
+      packagingProgress[runId] = { ...entry, manualOverrideUntil: maxUntil };
+      changed = true;
+    } else {
+      packagingProgress[runId] = rawEntry;
+    }
+  }
+  return changed ? { ...root, packagingProgress } : payload;
+}
+
 function requestedSnapshot(req: Request): string | undefined {
   const value = req.query.snapshot;
   return typeof value === "string" && SYNC_SNAPSHOT_ID_RE.test(value) ? value : undefined;
@@ -925,7 +956,8 @@ async function upsertProtected(
         // Today's row must always be additive/tombstone-driven: a new device can
         // hold a newer local marker before it receives this row, but that marker
         // must never erase other operators' scheduled or live runs.
-        const m = capMergedResult(protectRunValues(payloadForMerge, existing?.data, {
+        const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
+        const m = capMergedResult(protectRunValues(serverOwnedPayload, existing?.data, {
           allowRunListReplacement: date > clientTodayDate,
         }));
         canonicalizePepNames(m);
@@ -1599,10 +1631,10 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   let client: SseClient | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
 
-  // Register this before any awaited work. A browser can abort its wake
-  // reconciliation while the initial row lookup is in flight; registering
-  // afterward would add a disconnected response to `clients` permanently.
-  req.once("close", () => {
+  // Register this before any awaited work. The event stream lives on the
+  // response; the incoming request can finish normally while that response
+  // remains open, so request-close must not remove a healthy SSE client.
+  res.once("close", () => {
     closed = true;
     if (client) clients.delete(client);
     if (heartbeat) clearInterval(heartbeat);
@@ -1690,6 +1722,81 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       }
     })();
   }, Math.max(1_000, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000));
+});
+
+router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Promise<void> => {
+  if (
+    process.env.E2E_TEST_DB !== "1"
+    || process.env.E2E_APPROVED_DESTRUCTIVE_MODE !== "1"
+  ) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const nowMs = Number(req.body?.nowMs);
+  if (!Number.isFinite(nowMs) || nowMs <= 0) {
+    res.status(400).json({ error: "A valid nowMs is required" });
+    return;
+  }
+  const scope = currentScope();
+  const date = clientToday(req);
+  if (req.body?.rearm === true) {
+    await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, scope),
+        eq(dailySyncTable.date, date),
+      )).for("update");
+      if (!locked) return;
+      const data = locked.data as Record<string, any>;
+      const run = data.dayState?.runs?.[data.dayState?.currentIndex ?? 0];
+      if (!run?.id || !run.startedAt || run.pausedAt || run.endedAt) return;
+      const serverState = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+        ? data.autoTrackServerState as Record<string, any>
+        : {};
+      const wallClockBookkeeping = { ...(serverState.wallClockBookkeeping ?? {}) };
+      delete wallClockBookkeeping[run.id];
+      await tx.update(dailySyncTable).set({
+        data: {
+          ...data,
+          autoTrackServerState: {
+            ...serverState,
+            version: 1,
+            wallClockBookkeeping,
+          },
+        },
+        canonicalRevision: (locked.canonicalRevision ?? 0) + 1,
+      }).where(and(
+        eq(dailySyncTable.scope, scope),
+        eq(dailySyncTable.date, date),
+      ));
+    });
+  }
+  const summary = await runAutoTrackServerTicks({ nowMs, scope, date });
+  // A deterministic E2E clock step is also an authoritative projection frame.
+  // Production heartbeats publish this frame even when no counter cadence is
+  // due; without it, a test step inside the freezer-fill window would leave the
+  // browser displaying the projection captured at the previous server beat.
+  // Keep this fixture scoped exactly like the normal SSE path.
+  const [row] = await db.select().from(dailySyncTable).where(and(
+    eq(dailySyncTable.scope, scope),
+    eq(dailySyncTable.date, date),
+  ));
+  if (row) {
+    broadcast(row.data, "server:e2e-clock", scope, date, {
+      canonicalRevision: row.canonicalRevision ?? 0,
+      serverTime: nowMs,
+    });
+  }
+  const authoritative = row
+    ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
+    : null;
+  res.json({
+    ...summary,
+    canonicalRevision: row?.canonicalRevision ?? 0,
+    serverTime: nowMs,
+    projected: !!row,
+    autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
+    operationalProjection: authoritative?.operationalProjection ?? null,
+  });
 });
 
 // ── Scheduled (future) days ──────────────────────────────────────────────────
@@ -2017,13 +2124,20 @@ export type ServerTickSummary = {
 /** Executes automatic claims under the same locked, idempotent path as the
  * public claim route. A beat writes wall-clock bookkeeping even without an
  * accepted claim, which prevents a restart from replaying elapsed time. */
-export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?: number } = {}): Promise<ServerTickSummary> {
+export async function runAutoTrackServerTicks(opts: {
+  nowMs?: number;
+  maxClaims?: number;
+  scope?: Scope;
+  date?: string;
+} = {}): Promise<ServerTickSummary> {
   const nowMs = opts.nowMs ?? Date.now();
   const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
   const rows = await db.select().from(dailySyncTable).where(and(
     gte(dailySyncTable.date, serverTickStartDate(nowMs)),
     // Client-local dates may be one calendar day ahead of server UTC.
     lte(dailySyncTable.date, new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
+    ...(opts.scope ? [eq(dailySyncTable.scope, opts.scope)] : []),
+    ...(opts.date ? [eq(dailySyncTable.date, opts.date)] : []),
   ));
   let builtClaims = 0;
   let accepted = 0;

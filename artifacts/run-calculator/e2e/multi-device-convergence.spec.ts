@@ -138,6 +138,18 @@ test.describe("multi-device convergence", () => {
           () => session.localRunValue("device-b", runId, "casesNeeded"),
           { timeout: 15_000, message: "device-b did not adopt canonical casesNeeded" },
         ).toBe(17);
+        await Promise.all([
+          session.page("device-a").reload({ waitUntil: "domcontentloaded" }),
+          session.page("device-b").reload({ waitUntil: "domcontentloaded" }),
+        ]);
+        await Promise.all([
+          session.page("device-a").getByTestId("tab-run").waitFor({ state: "attached" }),
+          session.page("device-b").getByTestId("tab-run").waitFor({ state: "attached" }),
+        ]);
+        await Promise.all([
+          session.page("device-a").getByTestId("tab-run").click(),
+          session.page("device-b").getByTestId("tab-run").click(),
+        ]);
         await expect(session.page("device-a").getByTestId("input-casesNeeded"))
           .toHaveValue("17");
         await expect(session.page("device-b").getByTestId("input-casesNeeded"))

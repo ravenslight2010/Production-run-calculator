@@ -94,7 +94,9 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByRole("button", { name: "Open full manager queue" })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("manager-attention-open.png") });
 
-    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByRole("dialog", { name: "Manager attention" })
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
     await expect(page.getByRole("dialog", { name: "Manager attention" })).toBeHidden();
     await expect(page.getByRole("button", { name: /^More/ })).toBeFocused();
     await openManagerAttention(page);
@@ -110,7 +112,8 @@ test("manager attention remains stable across dialog and destination transitions
 
     await openManagerAttention(page);
     await page.getByTestId("manager-attention-action-incidents").click();
-    await expect(page.getByRole("heading", { name: "Reported issues" })).toBeVisible();
+    await expect(page.getByText("Reported issues", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Incident list", exact: true })).toBeVisible();
 
     await openManagerAttention(page);
     await page.getByTestId("manager-attention-action-recipe-setup").click();
@@ -118,7 +121,7 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
     await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("manager-attention-destination.png") });
-    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });

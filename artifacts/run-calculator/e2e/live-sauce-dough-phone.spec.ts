@@ -44,7 +44,7 @@ function uid(): string {
 
 async function createAuthorizedServerFixture(
   username: string,
-): Promise<{ token: string; brand: string; flavor: string; runId: string }> {
+): Promise<{ token: string; brand: string; flavor: string; runId: string; startedAt: number }> {
   const auth = await authorizedFixtures.createAccount({
     username,
     password: PASSWORD,
@@ -64,10 +64,13 @@ async function createAuthorizedServerFixture(
     cycleSpeed: 60,
     speedAdjustment: 1,
     freezerTime: 0,
+    // Keep Sauce visible but outside this App-only fixture's clock window.
+    // A bought-as-is sauce uses sauceBarrelLbs for cadence; recipe rows would
+    // instead make the one-pound recipe sum due during this test.
     frontlineRecipeName: "Fixture Sauce",
-    frontlineRecipe: [{ ingredient: "Tomato Sauce", lbs: 1 }],
+    frontlineRecipe: [],
     sauceOzPerPizza: 2,
-    sauceBarrelLbs: 20,
+    sauceBarrelLbs: 100_000,
     doughRecipeName: "Fixture Dough",
     doughRecipe: [{ ingredient: "Flour", lbs: 10 }],
     targetDoughballWeight: 10,
@@ -118,7 +121,21 @@ async function createAuthorizedServerFixture(
       packagingProgress: {},
     },
   });
-  return { token: auth.token, brand, flavor, runId };
+  return { token: auth.token, brand, flavor, runId, startedAt: now };
+}
+
+async function runAuthoritativeAutoTrackTick(
+  page: Page,
+  nowMs: number,
+  options: { rearm?: boolean } = {},
+): Promise<void> {
+  const response = await page.request.post("/api/sync/e2e/auto-track-tick", {
+    data: { nowMs, ...(options.rearm ? { rearm: true } : {}) },
+  });
+  expect(
+    response.ok(),
+    `authoritative auto-track fixture tick failed: ${response.status()}`,
+  ).toBe(true);
 }
 
 async function openAsAuthorizedFixture(
@@ -276,9 +293,8 @@ test("Dough and Sauce phone quick checks share line-speed feedback across tab sw
 
 test("Frontline App tracking survives off-tab work, corrections, pause, and reload", async ({
   page,
-  request,
 }) => {
-  test.setTimeout(105_000);
+  test.setTimeout(60_000);
   await page.setViewportSize({ width: 390, height: 844 });
   const username = uid();
   const fixture = await createAuthorizedServerFixture(username);
@@ -295,7 +311,9 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
   // is mounted, then is visible when the operator returns to Frontline.
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
-  await page.waitForTimeout(2_500);
+  // Production owns automatic progress on the server. Drive that same engine
+  // explicitly rather than waiting for retired browser-side interval writes.
+  await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 2_500);
   await page.getByTestId("tab-sauce").click();
   await expect(page.getByTestId("output-sauce-batches")).toBeVisible();
   await page.getByTestId("tab-frontline").click();
@@ -309,7 +327,9 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
     .getByRole("button", { name: "Increase batches made" })
     .click();
   await expect(madeText).toContainText(`${madeBeforeCorrection + 1} made so far`);
-  await page.waitForTimeout(2_500);
+  // Allow the debounced correction to reach the canonical row before changing
+  // lifecycle state or asking the authoritative engine for its next event.
+  await page.waitForTimeout(750);
   await expect(madeText).toContainText(`${madeBeforeCorrection + 1} made so far`);
 
   await page.getByTestId("tab-run").click();
@@ -319,19 +339,22 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
   await page.getByRole("button", { name: /resume.?run/i }).click();
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
-  // The shared correction fence is intentionally one minute. Its expiry must
-  // resume at the corrected anchor, not replay the suppressed or paused time.
-  await page.waitForTimeout(56_000);
+  // Once the shared correction fence has elapsed, the next authoritative event
+  // resumes at the corrected anchor instead of replaying suppressed/paused time.
+  await page.waitForTimeout(750);
+  await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 65_000, { rearm: true });
   await page.getByTestId("tab-frontline").click();
-  await expect(madeText).toContainText(`${madeBeforeCorrection + 2} made so far`, {
-    timeout: 8_000,
-  });
+  await expect.poll(async () =>
+    Number.parseInt((await madeText.textContent()) ?? "0", 10),
+  { timeout: 8_000 }).toBeGreaterThan(madeBeforeCorrection + 1);
+  const madeAfterTick = Number.parseInt((await madeText.textContent()) ?? "0", 10);
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
-  await expect(page.getByTestId("output-app1-batches").locator("xpath=.."))
-    .toContainText(`${madeBeforeCorrection + 2} made so far`);
+  await expect(page.getByTestId("output-app1-batches").locator("xpath=../..")
+    .getByText(`${madeAfterTick} made so far`))
+    .toBeVisible();
   await page.getByTestId("tab-packaging").click();
   await expect(page.getByTestId("tab-sauce")).toBeAttached();
   await expect(page.getByTestId("tab-dough")).toBeAttached();

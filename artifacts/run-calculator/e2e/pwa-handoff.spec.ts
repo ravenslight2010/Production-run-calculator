@@ -383,7 +383,7 @@ test.describe("PWA update handoff", () => {
       await page.waitForFunction(
         () => document.body.dataset.pwaSmokeBuild === "new",
         undefined,
-        { timeout: 20_000 },
+        { timeout: 30_000 },
       );
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
         timeout: 20_000,

@@ -80,6 +80,10 @@ args = "release:standard"
 task = "workflow.run"
 args = "release:full"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "browser-full-159"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -260,6 +264,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run release:check:full"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "browser-full-159"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "set -euo pipefail; PG_BIN=$(dirname \"$(command -v postgres)\"); PGDATA=$(mktemp -d /tmp/browser-validation-pg.XXXXXX); trap '\"$PG_BIN/pg_ctl\" -D \"$PGDATA\" -m immediate stop >/dev/null 2>&1 || true; rm -rf \"$PGDATA\"' EXIT; \"$PG_BIN/initdb\" -D \"$PGDATA\" -U postgres --auth=trust >/dev/null; \"$PG_BIN/pg_ctl\" -D \"$PGDATA\" -o '-F -p 15432 -k /tmp' -w start >/dev/null; \"$PG_BIN/createdb\" -h 127.0.0.1 -p 15432 -U postgres browser_e2e; export DATABASE_URL='postgresql://postgres@127.0.0.1:15432/browser_e2e' E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 RELEASE_BROWSER_LOCAL_SERVERS=1 PLAYWRIGHT_BASE_URL='http://127.0.0.1:18084' PLAYWRIGHT_RELEASE_REPORT_PATH='/home/runner/workspace/release-evidence/browser-full/FINAL-REPORT.md'; pnpm --filter @workspace/db run push-force; cd artifacts/run-calculator; pnpm exec playwright test --config=playwright.config.ts"
 
 [workflows.workflow.metadata]
 isValidation = true

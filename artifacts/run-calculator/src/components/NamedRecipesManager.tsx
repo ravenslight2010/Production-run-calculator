@@ -60,9 +60,15 @@ function blankNamedRecipe(prefix: string, name: string): NamedRecipe {
 export default function NamedRecipesManager({
   kind,
   ingredientSuggestions = [],
+  onSaved,
 }: {
   kind: NamedRecipeKind;
   ingredientSuggestions?: string[];
+  onSaved?: (
+    kind: NamedRecipeKind,
+    canonicalItems: NamedRecipe[],
+    submittedItems: NamedRecipe[],
+  ) => Promise<void>;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useNamedRecipes(kind);
@@ -92,9 +98,12 @@ export default function NamedRecipesManager({
 
   const saveMutation = useMutation({
     mutationFn: (next: NamedRecipe[]) => saveNamedRecipes(kind, next),
-    onSuccess: (saved) => {
+    onSuccess: async (saved, submitted) => {
       setMasterDataSlice(qc, kind === "dough" ? "doughRecipes" : "sauceRecipes", saved);
       setError(null);
+      // Wait for profile and pending-run propagation so a recipe save is not
+      // reported as complete while linked pending runs still hold old rows.
+      await onSaved?.(kind, saved, submitted);
     },
     onError: () =>
       setError(

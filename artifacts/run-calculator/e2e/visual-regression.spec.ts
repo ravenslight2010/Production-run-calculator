@@ -21,7 +21,9 @@ const visualMixFixture = {
   daysEarly: 0,
   notes: "Deterministic visual fixture",
   amountAlreadyMade: 0,
-  components: [{ ingredient: "Visual Fixture Ingredient", perPizza: 1.5 }],
+  // Keep the fixture master row deliberately unrelated to the seeded default
+  // run. The visual state asserts the empty Mix Plan before import review.
+  components: [{ ingredient: `Visual Fixture Ingredient ${suffix}`, perPizza: 1.5 }],
   isPrep: false,
   enabled: true,
 };
@@ -68,17 +70,6 @@ async function signUp(page: Page, account = username): Promise<void> {
   });
 }
 
-async function freezeMixMasterData(page: Page): Promise<void> {
-  await page.route("**/api/master-data/bootstrap", async (route) => {
-    const response = await route.fetch();
-    const data = (await response.json()) as Record<string, unknown>;
-    await route.fulfill({
-      response,
-      body: JSON.stringify({ ...data, mixes: [visualMixFixture] }),
-    });
-  });
-}
-
 async function goToMixPlan(page: Page): Promise<void> {
   await page.locator('button[title="More"]').click();
   await page.getByRole("menuitem", { name: /^(mixes|mix plan)$/i }).click();
@@ -86,6 +77,22 @@ async function goToMixPlan(page: Page): Promise<void> {
     state: "visible",
     timeout: 10_000,
   });
+  // Master-data bootstrap is intentionally jittered to avoid a startup
+  // thundering herd. Wait for the fixture-backed plan state, not the
+  // transient "no recipes" state that renders before bootstrap completes.
+  // Accepting both states lets the assertion race the real master-data load.
+  await expect
+    .poll(
+      async () =>
+        await page
+          .getByText("No mixes to make for this day. Pick a make-day with scheduled runs whose product matches a mix (within its days-early window).", {
+            exact: true,
+          })
+          .isVisible()
+          .catch(() => false),
+      { timeout: 15_000 },
+    )
+    .toBe(true);
 }
 
 function importWorkbook(): Buffer {
@@ -100,11 +107,16 @@ function importWorkbook(): Buffer {
 
 function dynamicMask(page: Page) {
   return [
+    // The Replit preview banner is injected by the local preview host, not
+    // rendered by the product. Keep it out of product screenshots while
+    // retaining the page-level visual assertion.
+    page.locator("#replit-dev-banner"),
     page.locator("time"),
     page.locator('[data-testid*="timer"]'),
     page.locator('[data-testid*="clock"]'),
     page.locator('[data-testid*="timestamp"]'),
     page.locator('[data-testid="elapsed-card-value"]'),
+    page.getByTestId("operational-state-badge"),
     page.locator('input[type="date"]'),
   ];
 }
@@ -124,11 +136,47 @@ test.describe("intentional visual regression baselines", () => {
     await cleanupDb.query("DELETE FROM daily_sync WHERE date = $1", [
       new Date().toLocaleDateString("en-CA"),
     ]);
+    for (const scope of ["live", "sandbox"]) {
+      await cleanupDb.query(
+        `INSERT INTO mixes
+           (id, scope, name, brand, flavor, batch_size, days_early, notes,
+            amount_already_made, components, is_prep, enabled, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, true, NOW(), NOW())
+         ON CONFLICT (id, scope) DO UPDATE SET
+           name = EXCLUDED.name,
+           brand = EXCLUDED.brand,
+           flavor = EXCLUDED.flavor,
+           batch_size = EXCLUDED.batch_size,
+           days_early = EXCLUDED.days_early,
+           notes = EXCLUDED.notes,
+           amount_already_made = EXCLUDED.amount_already_made,
+           components = EXCLUDED.components,
+           is_prep = EXCLUDED.is_prep,
+           enabled = true,
+           updated_at = NOW()`,
+        [
+          visualMixFixture.id,
+          scope,
+          visualMixFixture.name,
+          visualMixFixture.brand,
+          visualMixFixture.flavor,
+          visualMixFixture.batchSize,
+          visualMixFixture.daysEarly,
+          visualMixFixture.notes,
+          visualMixFixture.amountAlreadyMade,
+          JSON.stringify(visualMixFixture.components),
+          visualMixFixture.isPrep,
+        ],
+      );
+    }
   });
 
   test.afterAll(async () => {
     if (!cleanupDb) return;
     try {
+      await cleanupDb.query("DELETE FROM mixes WHERE id = $1 AND scope IN ('live', 'sandbox')", [
+        visualMixFixture.id,
+      ]);
       await cleanupDb.query("DELETE FROM users WHERE username = ANY($1::text[])", [
         [username, phoneUsername, tabletUsername],
       ]);
@@ -141,7 +189,6 @@ test.describe("intentional visual regression baselines", () => {
   test("desktop production states: live run, Mix Plan, import review, and alert dialog", async ({
     page,
   }) => {
-    await freezeMixMasterData(page);
     await signUp(page, phoneUsername);
     const startRun = page.getByRole("button", { name: /start run/i });
     if (await startRun.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -151,6 +198,9 @@ test.describe("intentional visual regression baselines", () => {
       state: "visible",
       timeout: 10_000,
     });
+    await expect(page.getByTestId("operational-state-badge")).toHaveText(
+      "Confirmed server baseline",
+    );
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
     await expect(page).toHaveScreenshot("live-run-desktop.png", {
@@ -165,9 +215,10 @@ test.describe("intentional visual regression baselines", () => {
     // runs. Clear that transient focus ring so the Mix Plan baseline captures
     // the page, not the menu interaction that navigated to it.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await expect(page.getByTestId("mix-plan-empty")).toHaveText(
+    await expect(page.getByText(
       "No mixes to make for this day. Pick a make-day with scheduled runs whose product matches a mix (within its days-early window).",
-    );
+      { exact: true },
+    )).toBeVisible();
     await expect(page).toHaveScreenshot("mix-plan-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
@@ -213,6 +264,14 @@ test.describe("intentional visual regression baselines", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await signUp(page);
     await page.locator('[data-testid="tab-run"]').click();
+    const startRun = page.getByRole("button", { name: /start run/i });
+    if (await startRun.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await startRun.click();
+    }
+    await page.getByRole("button", { name: /pause run/i }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
       fullPage: false,
       mask: dynamicMask(page),

@@ -105,9 +105,10 @@ export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): Au
     const cadence = Math.max(0, entry.dueAt - Math.max(0, number(values[anchorField])));
     const claimNextDueAt = entry.nextDueAt > entry.dueAt
       ? entry.nextDueAt : entry.dueAt + cadence;
+    const prior = coordination?.[entry.channel];
     return [{
       version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
-      sequence: number(coordination?.[entry.channel]?.sequence) + 1,
+      sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
       eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
       nextDueAt: claimNextDueAt, baseUpdatedAt, correctionGeneration, mutations,
     } as AutoTrackClaim];

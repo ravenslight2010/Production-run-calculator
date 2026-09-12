@@ -482,17 +482,10 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
       durationMs: Math.round(durationMs * 100) / 100,
     }));
   const evidence = {
-    networkProfile: { latencyMs: 400, downloadKbps: 500, uploadKbps: 500 },
-    authenticatedVisitMs: Math.round(runReadyMs * 100) / 100,
-    budgetMs: AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs,
-    homeChunkRequests,
-    homeChunkDiagnostic: homeChunkDiagnostic
-      ? { name: homeChunkDiagnostic.name, durationMs: homeChunkDiagnostic.durationMs, kind: homeChunkDiagnostic.kind }
-      : null,
-    chunkLoadFailure: failureDiagnostic
-      ? { name: failureDiagnostic.name, durationMs: failureDiagnostic.durationMs, kind: failureDiagnostic.kind }
-      : null,
-    failedResources,
+    diagnostics: report,
+    budgets: budgetByName,
+    staffChunkRequests: staffChunkRequests.length,
+    staffApiRequests: staffApiEvidence,
     setup: "isolated account and facility created; manager role authorized",
   };
   await testInfo.attach("calculator-authenticated-startup.png", {

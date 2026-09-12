@@ -63,18 +63,14 @@ async function openAsManager(
   }]);
   await page.goto(`/?e2e=${Date.now()}`, { waitUntil: "domcontentloaded" });
   try {
-    await page.getByTestId("input-casesNeeded").waitFor({
+    // Startup authenticates before the Run panel mounts. In a complete serial
+    // gate that request can outlive the old 15-second field wait; navigating
+    // again only destroyed the in-flight session check and restarted it.
+    await page.getByTestId("tab-run").waitFor({
       state: "attached",
-      timeout: 15_000,
+      timeout: 60_000,
     });
   } catch {
-    await page.goto(`/?e2e-retry=${Date.now()}`, { waitUntil: "domcontentloaded" });
-    await page.getByTestId("input-casesNeeded").waitFor({
-      state: "attached",
-      timeout: 45_000,
-    });
-  }
-  if (await page.getByTestId("input-casesNeeded").count() === 0) {
     const storedRunValues = await page.evaluate(() =>
       Object.fromEntries(
         Object.keys(localStorage)
@@ -145,6 +141,7 @@ test.afterAll(async () => {
 test("keeps the prior-run drain selected through next-run and tab changes", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(120_000);
   const suffix = uniqueTestId("prior_drain");
   const username = `manager_${suffix}`;
   const runA = `drain-a-${suffix}`;

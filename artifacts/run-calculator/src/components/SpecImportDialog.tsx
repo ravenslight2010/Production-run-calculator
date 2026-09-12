@@ -902,7 +902,7 @@ export default function SpecImportDialog({
       // silently cancel the import (the late parse result is discarded by the
       // generation guard, so to the user "nothing happens"). Close is explicit
       // only: the X button or Cancel.
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
     >
       <div
         ref={dialogRef}

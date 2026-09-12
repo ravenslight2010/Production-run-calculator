@@ -709,7 +709,7 @@ test.describe("phone layout smoke", () => {
         await assertPhoneLayout(page, `tablet ${tab}`);
       }
 
-      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Inventory", exact: true }).click();
       await expect(page.getByTestId("inventory-page-heading")).toBeVisible();
       await assertPhoneLayout(page, "tablet inventory");
@@ -727,7 +727,7 @@ test.describe("phone layout smoke", () => {
           "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
       });
 
-      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
       const manageDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
       await expect(manageDialog).toBeVisible();
@@ -893,7 +893,14 @@ test.describe("phone layout smoke", () => {
       await signInToSandbox(page);
       await page.getByTestId("tab-run").click();
       const startRun = page.getByTestId("button-start-run");
-      if (await startRun.isVisible()) await startRun.click();
+      for (let attempt = 0; attempt < 2 && await startRun.isVisible(); attempt += 1) {
+        await startRun.click();
+        await page.waitForTimeout(500);
+      }
+      await expect(startRun).toBeHidden({ timeout: 20_000 });
+      await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible({
+        timeout: 20_000,
+      });
 
       // New accounts start with Floor Mode disabled, but enabling it here
       // exercises the account-backed setting and the real header launch path.
@@ -939,8 +946,10 @@ test.describe("phone layout smoke", () => {
       }
 
       await pause.click();
-      await expect(page.getByTestId("floor-resume-run")).toBeVisible();
-      await page.getByTestId("floor-resume-run").click();
+      await expect(pause).toBeHidden({ timeout: 15_000 });
+      await expect(page.getByTestId("floor-resume-run")).toBeVisible({ timeout: 15_000 });
+      const resume = page.getByTestId("floor-resume-run");
+      await resume.click();
       await expect(page.getByTestId("floor-pause-run")).toBeVisible();
       await page.getByTestId("floor-complete-run").click();
       const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
@@ -1124,7 +1133,7 @@ test.describe("phone layout smoke", () => {
           "#replit-dev-banner { display: none !important; pointer-events: none !important; }",
       });
 
-      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
       const manageDialog = page.getByRole("dialog", {
         name: "Manage Lists & Settings",
@@ -1304,7 +1313,7 @@ test.describe("phone layout smoke", () => {
       // Password uses the manager's More menu and remains unsubmitted: filling
       // valid-shaped values enables the real lower action without changing the
       // disposable account's credentials.
-      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Password", exact: true }).click();
       const passwordDialog = page.getByRole("dialog", { name: "Password" });
       await expect(passwordDialog).toBeVisible();
@@ -1320,7 +1329,7 @@ test.describe("phone layout smoke", () => {
 
       // Schedule is also opened from More. Exercise both the list's lower
       // action and the editor's lower actions without saving a schedule.
-      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
       const scheduleDialog = page.getByRole("dialog");
       await expect(scheduleDialog).toBeVisible();

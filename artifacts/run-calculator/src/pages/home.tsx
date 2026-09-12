@@ -139,6 +139,7 @@ import {
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
+import { fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
   isSharedRecipeRefreshEligible,
@@ -285,6 +286,8 @@ import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import { consumeSyncWriteResponse } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
+  flushProfileQueueStrict,
+  markProfileForceEdited,
   reconcileProfilesFromServer,
   reconcileProfilesFromServerDetailed,
   seedProfilesFromServer,
@@ -429,9 +432,9 @@ import {
   normalizeBatchWeightChanges,
   buildBatchWeightMap,
   lookupBatchWeight,
-  collectBatchWeightCandidates,
   collectBatchWeightCandidatesFromProfile,
   filterStillCurrentBatchWeightEntries,
+  enqueueBatchWeightPropagation,
   executeBatchWeightPropagation,
   type BatchWeightCandidate,
   type IngredientBatchWeightRow,
@@ -2312,6 +2315,7 @@ export function NumField({
   step,
   testId,
   disabled,
+  onCommit,
 }: {
   control: any;
   name: keyof FormValues;
@@ -2319,6 +2323,7 @@ export function NumField({
   step?: string;
   testId?: string;
   disabled?: boolean;
+  onCommit?: (value: number) => void;
 }) {
   return (
     <FormField
@@ -2339,6 +2344,13 @@ export function NumField({
               onChange={(e) =>
                 field.onChange(e.target.value === "" ? "" : Number(e.target.value))
               }
+              onBlur={(e) => {
+                field.onBlur();
+                if (onCommit) {
+                  const value = e.target.value === "" ? 0 : Number(e.target.value);
+                  if (Number.isFinite(value) && value >= 0) onCommit(value);
+                }
+              }}
               onFocus={e => e.target.select()}
             />
           </FormControl>
@@ -4625,6 +4637,10 @@ export default function Home() {
   // Saves are chained so an older in-flight request can never land after (and
   // overwrite) a newer one — the server applies them in the order entered.
   const batchWeightSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  // Profile and pending-run fan-out stays independent from canonical saves,
+  // but must preserve their acknowledgement order so an older propagation
+  // cannot finish after and overwrite a newer learned weight.
+  const batchWeightPropagationChainRef = useRef<Promise<void>>(Promise.resolve());
   // Keep failed writes in memory so a later edit retries the failed entry
   // instead of making a profile save look complete while its learned weight is
   // silently lost.
@@ -4726,6 +4742,7 @@ export default function Home() {
                 brand,
                 flavor,
                 { ...profile, ...updates } as FormValues,
+                { authoritative: true },
               );
             },
             propagateToPendingRuns: propagateProfileToPendingRuns,
@@ -4739,6 +4756,12 @@ export default function Home() {
           return result;
         },
         refreshOpenForm: () => {
+          // A started run owns an immutable production snapshot. Learned
+          // batch weights may update its saved profile and future pending
+          // runs, but they must never hydrate the live form and autosave the
+          // new weight into the active run.
+          const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+          if (!isSharedRecipeRefreshEligible(liveRun)) return;
           for (const [field, lbs] of Object.entries(openFormUpdates)) {
             if (lbs !== undefined) {
               form.setValue(
@@ -4772,44 +4795,61 @@ export default function Home() {
       for (const change of changes) {
         pendingBatchWeightChangesRef.current.set(change.name.toLowerCase(), change);
       }
-      const save = batchWeightSaveChainRef.current.then(async () => {
-        const submitted = [...pendingBatchWeightChangesRef.current.values()];
-        const canonical = await saveIngredientBatchWeights(submitted);
-        cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
-          ["ingredientBatchWeights"],
-          canonical,
-        );
-        for (const change of submitted) {
-          const current = pendingBatchWeightChangesRef.current.get(change.name.toLowerCase());
-          if (current?.lbs === change.lbs) {
-            pendingBatchWeightChangesRef.current.delete(change.name.toLowerCase());
+      batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
+        .then(async () => {
+          const submitted = [...pendingBatchWeightChangesRef.current.values()];
+          const canonical = await saveIngredientBatchWeights(submitted);
+          cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+            ["ingredientBatchWeights"],
+            canonical,
+          );
+          for (const change of submitted) {
+            const current = pendingBatchWeightChangesRef.current.get(change.name.toLowerCase());
+            if (current?.lbs === change.lbs) {
+              pendingBatchWeightChangesRef.current.delete(change.name.toLowerCase());
+            }
           }
-        }
-        // A newer edit may have been queued while this request was in
-        // flight. The old request was acknowledged, but its value is no
-        // longer current and must not overwrite the newer profile/run
-        // snapshot during propagation. The next queue turn owns that work.
-        const positive = filterStillCurrentBatchWeightEntries(
-          submitted,
-          pendingBatchWeightChangesRef.current,
-        ).filter((entry) => entry.lbs > 0);
-        if (positive.length > 0) await propagateBatchWeightUpdates(positive);
-      });
-      const completion = save.catch((error) => {
-        toast({
-          title: "Batch weight was not saved",
-          description: error instanceof Error
-            ? error.message
-            : "The server did not acknowledge this weight. Try again.",
-          variant: "destructive",
+          const positive = filterStillCurrentBatchWeightEntries(
+            submitted,
+            pendingBatchWeightChangesRef.current,
+          ).filter((entry) => entry.lbs > 0);
+          if (positive.length > 0) {
+            batchWeightPropagationChainRef.current = enqueueBatchWeightPropagation(
+              batchWeightPropagationChainRef.current,
+              () => propagateBatchWeightUpdates(positive),
+              (error) => {
+                toast({
+                  title: "Batch weight propagation delayed",
+                  description: error instanceof Error
+                    ? error.message
+                    : "The weight was saved, but pending setups may update shortly.",
+                  variant: "destructive",
+                });
+              },
+            );
+            await batchWeightPropagationChainRef.current;
+          }
+        })
+        .catch((error) => {
+          toast({
+            title: "Batch weight was not saved",
+            description: error instanceof Error
+              ? error.message
+              : "The server did not acknowledge this weight. Try again.",
+            variant: "destructive",
+          });
         });
-      });
-      // Keep the chain usable after a failed request while returning a
-      // promise callers can await for the complete POST + fan-out boundary.
-      batchWeightSaveChainRef.current = completion;
-      return completion;
+      return batchWeightSaveChainRef.current;
     },
     [cycleCountQc, propagateBatchWeightUpdates],
+  );
+  const commitBatchWeightField = useCallback(
+    (name: string, lbs: number): void => {
+      const normalizedName = name.trim();
+      if (!normalizedName || !Number.isFinite(lbs) || lbs < 0) return;
+      queueBatchWeightChanges([{ name: normalizedName, lbs }]);
+    },
+    [queueBatchWeightChanges],
   );
 
   // After a cheese recipe workbook import, fan the updated per-batch lbs into
@@ -4817,6 +4857,9 @@ export default function Home() {
   // the saved recipes. Also updates the open form and pending runs.
   const propagateCheeseRecipeUpdates = useCallback(
     async (updatedRecipes: CheeseRecipe[]) => {
+      sharedRecipeRefreshGenerationRef.current += 1;
+      acknowledgedCheeseSaveFingerprintRef.current = JSON.stringify(updatedRecipes);
+      return enqueueSharedRecipeRefresh(async () => {
       if (updatedRecipes.length === 0) return;
 
       // Build name-key → fresh row snapshot for recipes that have real lbs.
@@ -4832,10 +4875,10 @@ export default function Home() {
       if (recipeByName.size === 0) return;
 
       const cheeseSlots = [
-        { nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe" },
-        { nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe" },
-        { nameField: "app3CheeseRecipeName", rowsField: "app3CheeseRecipe" },
-        { nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe" },
+        { nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe", replace: replaceCheese1 },
+        { nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe", replace: replaceCheese2 },
+        { nameField: "app3CheeseRecipeName", rowsField: "app3CheeseRecipe", replace: replaceCheese3 },
+        { nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe", replace: replaceCheese4 },
       ] as const;
 
       const updatedCount = await orchestrateSharedRecipeRefresh({
@@ -4861,7 +4904,7 @@ export default function Home() {
           }
 
           let count = 0;
-          const propagations: Promise<void>[] = [];
+          const touchedProfiles: Array<{ brand: string; flavor: string }> = [];
 
           for (const suffix of profileSuffixes) {
             const dunderIdx = suffix.indexOf("__");
@@ -4896,24 +4939,56 @@ export default function Home() {
             const updated = { ...profile, ...updates } as FormValues;
             // Profile writes are manager-only; non-managers still get the
             // in-memory heal (open-form update below) but never persist it.
-            const saved = canManageProfiles && saveProfile(brand, flavor, updated);
+            const saved = canManageProfiles && saveProfile(
+              brand,
+              flavor,
+              updated,
+              { authoritative: true },
+            );
             if (saved) {
               count++;
-              propagations.push(propagateProfileToPendingRuns(brand, flavor));
+              touchedProfiles.push({ brand, flavor });
             }
           }
 
-          await Promise.allSettled(propagations);
+          try {
+            await flushProfileQueueStrict();
+          } catch {
+            // Keep the local profile write queued, but still refresh pending
+            // runs; the ordinary profile retry path will reconcile it later.
+          }
+          // Do not race a dependent run snapshot against the authoritative
+          // profile write. The named-recipe path uses the same ordering:
+          // profile acknowledgement first, then pending-run propagation.
+          for (const profile of touchedProfiles) {
+            // A recipe edit is an explicit new source snapshot. Do not let a
+            // same-session navigation/profile save dedup suppress the
+            // dependent pending-run write after the recipe manager has
+            // acknowledged this edit.
+            propagateSigRef.current.delete(canonicalProfileKey(profile.brand, profile.flavor));
+            await propagateProfileToPendingRuns(profile.brand, profile.flavor);
+          }
+      for (const [name, rows] of recipeByName) {
+        await propagateRecipeRowsToPendingRuns(name, rows);
+      }
           return count;
         },
         refreshOpenForm: () => {
+          const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+          if (liveRun?.startedAt || liveRun?.endedAt) return;
           const cv = form.getValues() as unknown as Record<string, unknown>;
-          for (const { nameField, rowsField } of cheeseSlots) {
+          for (const slot of cheeseSlots) {
+            const { nameField, rowsField } = slot;
             const recipeName = ((cv[nameField] as string) ?? "").trim();
             if (!recipeName) continue;
             const freshRows = recipeByName.get(recipeName.toLowerCase());
             if (!freshRows) continue;
             form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
+            // These rows are rendered through useFieldArray. Updating only the
+            // form value leaves the field-array snapshot stale; a later
+            // lifecycle/autosave can then publish the old recipe back to the
+            // pending run. Keep both representations in lockstep.
+            slot.replace(freshRows);
           }
         },
       });
@@ -4924,6 +4999,7 @@ export default function Home() {
           description: `${updatedCount} profile${updatedCount === 1 ? "" : "s"} refreshed with new recipe weights`,
         });
       }
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [form, canManageProfiles],
@@ -5366,7 +5442,9 @@ export default function Home() {
   useEffect(() => {
     if (showStopDialog) {
       window.requestAnimationFrame(() => document.getElementById("stop-dialog-close")?.focus());
-      return;
+      // Keep the local edit and queued profile operation intact. A different
+      // queued profile write can fail independently during a transient pool
+      // checkout timeout; do not strand the dependent pending-run refresh.
     }
     document.querySelector<HTMLButtonElement>('[data-testid="button-log-stoppage"]')?.focus();
   }, [showStopDialog]);
@@ -7398,8 +7476,8 @@ export default function Home() {
   async function fetchSchedulePayload(date: string): Promise<{ payload: SyncPayload | null; available: boolean }> {
     try {
       const res = date === todayStr()
-        ? await fetch(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" })
-        : await fetch(`/api/sync/${date}?today=${todayStr()}`, { cache: "no-store" });
+        ? await fetchWithTimeout(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" }, 10_000)
+        : await fetchWithTimeout(`/api/sync/${date}?today=${todayStr()}`, { cache: "no-store" }, 10_000);
       if (!res.ok) return { payload: null, available: false };
       const payload = await res.json() as SyncPayload | null;
       return {
@@ -9645,7 +9723,11 @@ export default function Home() {
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
     );
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
-    if (result.body?.partialFallback && result.body.data === null) {
+    const partialFallbackBody = result.body as
+      | { partialFallback?: boolean; data?: unknown }
+      | null
+      | undefined;
+    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
       // A partial write against a missing row has no valid snapshot identity.
       // Clear the partial baseline so the queued recovery push is complete.
       syncSnapshotIdRef.current = "";
@@ -9670,13 +9752,31 @@ export default function Home() {
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
-    const res = await writeToday({
+    let res = await writeToday({
       payload,
       clientId: clientId.current,
       snapshotId: syncSnapshotIdRef.current,
       epoch: getStoredResetEpoch(),
     });
-    await consumeCanonicalSyncWriteResponse(res, true);
+    let result = await consumeCanonicalSyncWriteResponse(res, true);
+    // A stale partial snapshot can return successful transport with no
+    // canonical data. The local change is not acknowledged in that case.
+    // The response consumer clears the unusable snapshot identity, so replay
+    // the current local state as a complete write before reporting success.
+    const partialFallbackBody = result.body as
+      | { partialFallback?: boolean; data?: unknown }
+      | null
+      | undefined;
+    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
+      const recoveryPayload = buildSyncPayload(dayStateRef.current);
+      res = await writeToday({
+        payload: recoveryPayload,
+        clientId: clientId.current,
+        snapshotId: syncSnapshotIdRef.current,
+        epoch: getStoredResetEpoch(),
+      });
+      result = await consumeCanonicalSyncWriteResponse(res, true);
+    }
     return res;
   }
 
@@ -9764,12 +9864,40 @@ export default function Home() {
       // server returned parseable JSON with a 5xx status.
       if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
       const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
-      const { stale } = await consumeCanonicalSyncWriteResponse(
+      let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
         true,
         () => generation === syncPushGenerationRef.current,
       );
       if (generation !== syncPushGenerationRef.current) return;
+      // A stale partial snapshot is successful transport, but it did not
+      // persist this local change. The response consumer clears the stale
+      // snapshot identity; replay the latest local state as a complete write
+      // so lifecycle changes cannot leave another run absent until a timer
+      // happens to repair it.
+      const partialFallbackBody = canonicalResult.body as
+        | { partialFallback?: boolean; data?: unknown }
+        | null
+        | undefined;
+      if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
+        const recoveryPayload = buildSyncPayload(dayStateRef.current);
+        res = await writeToday({
+          payload: recoveryPayload,
+          clientId: clientId.current,
+          snapshotId: syncSnapshotIdRef.current,
+          epoch: getStoredResetEpoch(),
+          signal: controller.signal,
+          queuedAtEpoch: timing?.queuedAtEpoch,
+        });
+        if (!res.ok) throw new Error(`Sync recovery write failed: ${res.status}`);
+        canonicalResult = await consumeCanonicalSyncWriteResponse(
+          res,
+          true,
+          () => generation === syncPushGenerationRef.current,
+        );
+        if (generation !== syncPushGenerationRef.current) return;
+      }
+      const { stale } = canonicalResult;
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
@@ -10088,7 +10216,17 @@ export default function Home() {
     brand: string,
     flavor: string,
     savedValues?: FormValues,
+    sharedRefreshGeneration?: number,
   ) {
+    // Boot reconciliation is best-effort background work. If an acknowledged
+    // manager save arrived after it started, abandon the stale pass before it
+    // can flush or fan out old profile rows.
+    if (
+      sharedRefreshGeneration !== undefined &&
+      sharedRefreshGeneration !== sharedRecipeRefreshGenerationRef.current
+    ) {
+      return;
+    }
     // SetupProfileEditor calls this only after saveProfileAndWaitForServer
     // receives an exact server acknowledgement. Publish only the values from
     // that acknowledged save, never a stale open-run form.
@@ -10100,9 +10238,33 @@ export default function Home() {
       );
       await queueBatchWeightChanges(entries);
     }
+    // A shared-recipe edit first rewrites linked profiles locally and queues
+    // those profile writes. Do not publish pending-run snapshots until the
+    // profile server has acknowledged the same values; otherwise a slow
+    // profile POST can race the run sync and leave the canonical run pointing
+    // at the previous profile snapshot.
+    try {
+      await flushProfileQueueStrict();
+    } catch {
+      // Keep the local edit and queued profile operation intact. A different
+      // queued profile write can fail independently during a transient pool
+      // checkout timeout; do not strand the dependent pending-run refresh.
+    }
+    if (
+      sharedRefreshGeneration !== undefined &&
+      sharedRefreshGeneration !== sharedRecipeRefreshGenerationRef.current
+    ) {
+      return;
+    }
     // The profile is the source of truth for every run that hasn't started:
     // fan the fresh save out to today's pending runs and future scheduled days.
-    void propagateProfileToPendingRuns(brand, flavor);
+    await propagateProfileToPendingRuns(brand, flavor);
+    if (
+      sharedRefreshGeneration !== undefined &&
+      sharedRefreshGeneration !== sharedRecipeRefreshGenerationRef.current
+    ) {
+      return;
+    }
     const liveDay = dayStateRef.current;
     const liveRun = liveDay?.runs[liveDay.currentIndex];
     if (!liveRun) return;
@@ -10112,6 +10274,15 @@ export default function Home() {
     ) {
       return;
     }
+    // A started run owns an immutable recipe snapshot. Profile propagation
+    // above still updates future work, but the open production form must not
+    // rehydrate from the newly edited profile after Start.
+    // React state can briefly lag the stamped localStorage lifecycle after a
+    // reload/start handoff. Read the durable run metadata too so a shared
+    // recipe save can never rehydrate an already-started production snapshot.
+    const persistedDay = loadDayState();
+    const persistedRun = persistedDay.runs.find((run) => run.id === liveRun.id);
+    if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
     runSharedRecipeRefresh(liveRun, () => {
@@ -10182,10 +10353,26 @@ export default function Home() {
   // (mergeProfileIntoOpenForm skips them), and untouched runs are never
   // re-stamped, so this can't clobber operator-entered data.
   const propagateSigRef = useRef<Map<string, string>>(new Map());
+  const profilePropagationChainsRef = useRef<Map<string, Promise<void>>>(new Map());
   async function propagateProfileToPendingRuns(brand: string, flavor: string) {
     const b = (brand ?? "").trim();
     const f = (flavor ?? "").trim();
     if (!b && !f) return;
+    const chainKey = `${b.toLowerCase()}::${f.toLowerCase()}`;
+    const previous = profilePropagationChainsRef.current.get(chainKey) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(() => propagateProfileToPendingRunsNow(b, f));
+    profilePropagationChainsRef.current.set(chainKey, next);
+    try {
+      await next;
+    } finally {
+      if (profilePropagationChainsRef.current.get(chainKey) === next) {
+        profilePropagationChainsRef.current.delete(chainKey);
+      }
+    }
+  }
+  async function propagateProfileToPendingRunsNow(b: string, f: string) {
     const profile = loadProfile(b, f);
     if (!profile) return;
     // Cheap dedup: nav-saves fire on every tab change — skip the fan-out when
@@ -10222,13 +10409,31 @@ export default function Home() {
     }
     if (todayChanged) {
       lastLocalEditRef.current = now;
-      schedulePush(ds, 0);
+      // Recipe/profile fan-out is an acknowledged operation, not an ordinary
+      // debounced form edit. Persist the refreshed pending-run snapshots before
+      // returning so Start/freeze and a later queued sync cannot overtake this
+      // propagation. Per-run LWW stamps above protect this payload from older
+      // queued writes that may still be draining.
+      try {
+        const res = await pushTodayCanonical(buildSyncPayload(ds));
+        if (!res.ok) return;
+      } catch {
+        return;
+      }
     }
     // 2) Future scheduled days. Each day's payload is fetched, matching
     //    not-started runs get the overlay, and the day is PUT back with fresh
     //    per-run edit stamps so the server's LWW merge accepts the update.
     try {
-      const listRes = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`);
+      // Scheduled-day fan-out is secondary to today's acknowledged recipe
+      // update. Bound these reads/writes so a saturated or waking server
+      // cannot leave the recipe editor disabled after today's snapshot has
+      // already been persisted.
+      const listRes = await fetchWithTimeout(
+        `/api/sync/scheduled?include=runs&today=${todayStr()}`,
+        {},
+        10_000,
+      );
       if (listRes.status === 401) { reportUnauthorized(); return; }
       if (!listRes.ok) return;
       const days = (await listRes.json()) as
@@ -10254,11 +10459,15 @@ export default function Home() {
           dayChanged = true;
         }
         if (!dayChanged) continue;
-        const res = await fetch(`/api/sync/${day.date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
-        });
+        const res = await fetchWithTimeout(
+          `/api/sync/${day.date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
+          },
+          10_000,
+        );
         if (res.status === 401) { reportUnauthorized(); return; }
         if (!res.ok) { allOk = false; continue; }
         const { stale } = await consumeCanonicalSyncWriteResponse(res, false);
@@ -10272,6 +10481,64 @@ export default function Home() {
     } catch {}
   }
 
+  // Recipe-manager acknowledgements also update linked profiles, but today's
+  // pending run snapshot must not depend on a later profile-queue refresh.
+  // Keep started/history runs immutable through the shared eligibility guard.
+  async function propagateRecipeRowsToPendingRuns(
+    recipeName: string,
+    rows: ReadonlyArray<{ ingredient: string; lbs: number }>,
+    kind: "cheese" | "mix" | "dough" | "sauce" = "cheese",
+  ) {
+    const nameLc = recipeName.trim().toLowerCase();
+    if (!nameLc || rows.length === 0) return;
+    const ds = dayStateRef.current;
+    const openId = ds.runs[ds.currentIndex]?.id;
+    const now = Date.now();
+    let changed = false;
+    for (const run of ds.runs) {
+      // The open run is refreshed through the form/orchestration path. Do not
+      // publish a second full snapshot for it here: a manager save can still
+      // be finishing when an operator taps Start, and that stale snapshot
+      // would race the lifecycle write back over the new startedAt.
+      if (!isSharedRecipeRefreshEligible(run)) continue;
+      // A pending run that is currently open is refreshed by the form
+      // orchestration path. Started/ended runs are already excluded above, so
+      // this guard only protects the pending form from a competing full
+      // snapshot while Start is being tapped.
+      if (run.id === openId) continue;
+      const stored = loadRunValues(run.id);
+      const next = { ...stored };
+      let runChanged = false;
+      const slots = kind === "cheese" ? [1, 2, 3, 4] as const : [0] as const;
+      for (const slot of slots) {
+        const nameField = kind === "cheese"
+          ? `app${slot}CheeseRecipeName` as keyof FormValues
+          : kind === "mix" ? "mixRecipeName" as keyof FormValues
+          : kind === "dough" ? "doughRecipeName" as keyof FormValues : "frontlineRecipeName" as keyof FormValues;
+        const rowsField = kind === "cheese"
+          ? `app${slot}CheeseRecipe` as keyof FormValues
+          : kind === "mix" ? "mixRecipe" as keyof FormValues
+          : kind === "dough" ? "doughRecipe" as keyof FormValues : "frontlineRecipe" as keyof FormValues;
+        if (String(stored[nameField] ?? "").trim().toLowerCase() !== nameLc) continue;
+        const currentRows = (stored[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+        if (recipeRowsEqual(currentRows, rows)) continue;
+        next[rowsField] = rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs })) as never;
+        runChanged = true;
+      }
+      if (!runChanged) continue;
+      saveRunValues(run.id, next);
+      markRunValuesUpdated(run.id, now);
+      changed = true;
+    }
+    if (!changed) return;
+    lastLocalEditRef.current = now;
+    try {
+      await pushTodayCanonical(buildSyncPayload(loadDayState()));
+    } catch {
+      // Local values remain queued for the ordinary sync retry path.
+    }
+  }
+
   // (2) Manage Lists dough/sauce pool → run forms + saved profiles. When a
   // shared recipe's rows (or dough target weight) change — edited locally or
   // on another device (the pool refetches periodically) — fan the new version
@@ -10281,7 +10548,69 @@ export default function Home() {
   // stamps it. The first snapshot of each pool only primes the ref — a page
   // load must not look like "everything changed".
   const namedPoolSnapRef = useRef<{ dough: Map<string, string> | null; sauce: Map<string, string> | null }>({ dough: null, sauce: null });
-  async function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
+  const sharedRecipeRefreshGenerationRef = useRef(0);
+  // Master-data React Query updates and acknowledged manager saves can arrive
+  // in either order. Keep the profile hydration, dependent run writes, and
+  // open-form refreshes in one acknowledgement-order chain so an older
+  // snapshot cannot finish after a newer recipe edit.
+  const sharedRecipeRefreshChainRef = useRef<Promise<void>>(Promise.resolve());
+  function enqueueSharedRecipeRefresh<T>(
+    work: () => T | PromiseLike<T>,
+  ): Promise<T> {
+    const previous = sharedRecipeRefreshChainRef.current;
+    const next = previous.catch(() => {}).then(work);
+    sharedRecipeRefreshChainRef.current = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+  async function applyAcknowledgedNamedRecipeSave(
+    kind: "dough" | "sauce",
+    canonicalItems: NamedRecipe[],
+    submittedItems: NamedRecipe[],
+  ) {
+    sharedRecipeRefreshGenerationRef.current += 1;
+    return enqueueSharedRecipeRefresh(async () => {
+      // The profile cache can still be empty while the authenticated bootstrap
+      // is settling. Gap-fill it before the acknowledged pool edit scans linked
+      // profiles, otherwise a valid server profile is invisible to the fan-out.
+      try {
+        await seedProfilesFromServer();
+      } catch {
+        // Continue with the authenticated local profile cache. A transient
+        // bootstrap failure must not strand an acknowledged pool edit.
+      }
+      const submittedIds = new Set(submittedItems.map((item) => item.id));
+      const prior = new Map(namedPoolSnapRef.current[kind] ?? []);
+      namedPoolSnapRef.current[kind] = prior;
+      const acknowledgedNames = new Set(
+        canonicalItems
+          .filter((item) => submittedIds.has(item.id))
+          .map((item) => item.name.trim().toLowerCase()),
+      );
+      await applyNamedPoolChange(kind, canonicalItems, undefined, acknowledgedNames);
+    });
+  }
+  async function applyNamedPoolChange(
+    kind: "dough" | "sauce",
+    list: NamedRecipe[],
+    backgroundGeneration?: number,
+    acknowledgedNames?: ReadonlySet<string>,
+  ) {
+    const onNamedProfileSaved = (brand: string, flavor: string) => {
+      // A manager acknowledgement is authoritative even when the profile was
+      // already touched by the boot reconciler. Clear the propagation
+      // signature and upgrade the queued profile write before the dependent
+      // pending-run snapshot is published; otherwise the signature dedupe can
+      // make an acknowledged recipe edit look already propagated.
+      if (acknowledgedNames && acknowledgedNames.size > 0) {
+        const key = canonicalProfileKey(brand, flavor);
+        markProfileForceEdited(key);
+        propagateSigRef.current.delete(key);
+      }
+      return handleSetupProfileSaved(brand, flavor, undefined, backgroundGeneration);
+    };
     const snap = new Map<string, string>();
     const byKey = new Map<string, NamedRecipePoolPatch>();
     for (const r of list) {
@@ -10324,19 +10653,19 @@ export default function Home() {
       if (patches.length > 0) {
         const markerKey = `run-calc-${kind}-row-heal-v1`;
         if (!localStorage.getItem(markerKey)) {
-          refreshNamedRecipeProfilesAndPropagate(
+          await refreshNamedRecipeProfilesAndPropagate(
             kind,
             patches,
             undefined,
-            handleSetupProfileSaved,
+            onNamedProfileSaved,
           );
           localStorage.setItem(markerKey, "1");
         } else {
-          refreshNamedRecipeProfilesAndPropagate(
+          await refreshNamedRecipeProfilesAndPropagate(
             kind,
             patches,
             { emptyRowsOnly: true },
-            handleSetupProfileSaved,
+            onNamedProfileSaved,
           );
         }
       }
@@ -10344,19 +10673,29 @@ export default function Home() {
     }
     const changed: NamedRecipePoolPatch[] = [];
     for (const [key, sig] of snap) {
-      if (prev.get(key) !== undefined && prev.get(key) !== sig) changed.push(byKey.get(key)!);
+      if (
+        acknowledgedNames?.has(key)
+        || (prev.get(key) !== undefined && prev.get(key) !== sig)
+      ) {
+        changed.push(byKey.get(key)!);
+      }
     }
     if (changed.length === 0) return;
     let formUpdated = false;
     const touched = await orchestrateSharedRecipeRefresh({
       getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
-      refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
+        refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
         kind,
         changed,
         undefined,
-        handleSetupProfileSaved,
+        onNamedProfileSaved,
       ),
       refreshOpenForm: () => {
+        const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+        const persistedRun = liveRun
+          ? loadDayState().runs.find((run) => run.id === liveRun.id)
+          : undefined;
+        if (liveRun?.startedAt || liveRun?.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
         const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
         const linked = String(linkedRaw ?? "").trim().toLowerCase();
         const hit = linked
@@ -10391,6 +10730,9 @@ export default function Home() {
         }
       },
     });
+    for (const recipe of changed) {
+      await propagateRecipeRowsToPendingRuns(recipe.name, recipe.rows, kind);
+    }
     if (!formUpdated && touched.length === 0) return;
     const label = kind === "dough" ? "dough" : "sauce";
     toast({
@@ -10401,11 +10743,21 @@ export default function Home() {
     });
   }
   useEffect(() => {
-    void applyNamedPoolChange("dough", doughRecipesList);
+    // First-load reconciliation must share the acknowledgement queue. A
+    // manager save can update the pool while this effect is starting; letting
+    // the initial heal run independently can publish an older profile snapshot
+    // after the acknowledged recipe edit.
+    const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    void enqueueSharedRecipeRefresh(() =>
+      applyNamedPoolChange("dough", doughRecipesList, backgroundGeneration),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doughRecipesList]);
   useEffect(() => {
-    void applyNamedPoolChange("sauce", sauceRecipesList);
+    const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    void enqueueSharedRecipeRefresh(() =>
+      applyNamedPoolChange("sauce", sauceRecipesList, backgroundGeneration),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList]);
 
@@ -10428,61 +10780,141 @@ export default function Home() {
   //     app is open) WITHOUT the ref guard, so newly imported amounts are
   //     picked up immediately without a page reload.
   const cheeseMixFullHealDoneRef = useRef(false);
+  const acknowledgedCheeseSaveFingerprintRef = useRef<string | null>(null);
+  const acknowledgedMixSaveFingerprintRef = useRef<string | null>(null);
+  async function applyAcknowledgedMixSave(
+    canonicalItems: typeof mixes,
+    submittedItems: typeof mixes,
+  ) {
+    sharedRecipeRefreshGenerationRef.current += 1;
+    // Set this before awaited profile hydration. The pool observer runs from
+    // the same React update and must not launch a second background repair for
+    // an already acknowledged save.
+    acknowledgedMixSaveFingerprintRef.current = JSON.stringify(canonicalItems);
+    return enqueueSharedRecipeRefresh(async () => {
+      // See applyAcknowledgedNamedRecipeSave: pool saves are allowed to arrive
+      // before the profile-cache bootstrap has completed.
+      try {
+        await seedProfilesFromServer();
+      } catch {
+        // Continue with the authenticated local profile cache. A transient
+        // bootstrap failure must not strand an acknowledged pool edit.
+      }
+      const submittedIds = new Set(submittedItems.map((item) => item.id));
+      const touched = new Map<string, { brand: string; flavor: string }>();
+      for (const mix of canonicalItems) {
+        if (!submittedIds.has(mix.id)) continue;
+        const rows = (mix.components ?? [])
+          .map((component) => ({
+            ingredient: (component.ingredient ?? "").trim(),
+            lbs: Math.max(0, component.perPizza ?? 0),
+          }))
+          .filter((component) => component.ingredient);
+        for (const profile of refreshCheeseOrMixProfileRows(mix.name, rows)) {
+          touched.set(`${profile.brand.toLowerCase()}::${profile.flavor.toLowerCase()}`, profile);
+        }
+      }
+      for (const profile of touched.values()) {
+        // The manager's acknowledged recipe save is authoritative. The shared
+        // row helper has already written the linked profile locally; upgrade
+        // its queued operation before flushing so an older profile stamp cannot
+        // prevent the pending-run fan-out.
+        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor));
+        // A recipe edit must always publish its dependent pending-run snapshot,
+        // even if an earlier same-session profile propagation recorded an
+        // identical signature before the manager acknowledgement completed.
+        propagateSigRef.current.delete(canonicalProfileKey(profile.brand, profile.flavor));
+        await handleSetupProfileSaved(profile.brand, profile.flavor);
+      }
+      for (const recipe of canonicalItems) {
+        if (!submittedIds.has(recipe.id)) continue;
+        const rows = (recipe.components ?? [])
+          .map((component) => ({
+            ingredient: (component.ingredient ?? "").trim(),
+            lbs: Math.max(0, component.perPizza ?? 0),
+          }))
+          .filter((row) => row.ingredient);
+        await propagateRecipeRowsToPendingRuns(recipe.name, rows, "mix");
+      }
+    });
+  }
   useEffect(() => {
     const markerKey = "run-calc-cheese-mix-row-heal-v1";
-    const markerSet = !!localStorage.getItem(markerKey);
+    const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    const refresh = async () => {
+      const cheeseFingerprint = JSON.stringify(cheeseRecipesList);
+      if (acknowledgedCheeseSaveFingerprintRef.current === cheeseFingerprint) {
+        acknowledgedCheeseSaveFingerprintRef.current = null;
+        return;
+      }
+      const mixFingerprint = JSON.stringify(mixes);
+      if (acknowledgedMixSaveFingerprintRef.current === mixFingerprint) {
+        acknowledgedMixSaveFingerprintRef.current = null;
+        return;
+      }
+      const markerSet = !!localStorage.getItem(markerKey);
 
-    // Build rows for a mix correctly: components use `perPizza` not `lbs`.
-    // normalizeRecipeRowsForCompare reads `r.lbs` and would return 0 for all.
-    function mixRows(m: (typeof mixes)[number]) {
-      return (m.components ?? [])
-        .map((c) => ({ ingredient: (c.ingredient ?? "").trim(), lbs: Math.max(0, c.perPizza ?? 0) }))
-        .filter((c) => c.ingredient);
-    }
+      // Build rows for a mix correctly: components use `perPizza` not `lbs`.
+      // normalizeRecipeRowsForCompare reads `r.lbs` and would return 0 for all.
+      function mixRows(m: (typeof mixes)[number]) {
+        return (m.components ?? [])
+          .map((c) => ({ ingredient: (c.ingredient ?? "").trim(), lbs: Math.max(0, c.perPizza ?? 0) }))
+          .filter((c) => c.ingredient);
+      }
 
-    const touched = new Map<string, { brand: string; flavor: string }>();
-    const remember = (profiles: { brand: string; flavor: string }[]) => {
-      for (const profile of profiles) {
-        touched.set(`${profile.brand.toLowerCase()}::${profile.flavor.toLowerCase()}`, profile);
+      const touched = new Map<string, { brand: string; flavor: string }>();
+      const remember = (profiles: { brand: string; flavor: string }[]) => {
+        for (const profile of profiles) {
+          touched.set(`${profile.brand.toLowerCase()}::${profile.flavor.toLowerCase()}`, profile);
+        }
+      };
+      if (markerSet) {
+        // Ongoing pass — recipe edits are authoritative for linked pending work,
+        // not just for profiles whose rows happened to be empty.
+        for (const r of cheeseRecipesList) {
+          if (r.enabled === false || !r.name.trim()) continue;
+          const rows = normalizeRecipeRowsForCompare(r.components);
+          if (rows.length === 0) continue;
+          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+        }
+        for (const m of mixes) {
+          if (!m.name.trim()) continue;
+          const rows = mixRows(m);
+          if (rows.length === 0) continue;
+          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+        }
+      } else {
+        // First-time full heal — wait for pool data, run once per mount.
+        if (cheeseRecipesList.length === 0 && mixes.length === 0) return;
+        if (cheeseMixFullHealDoneRef.current) return;
+        cheeseMixFullHealDoneRef.current = true;
+        for (const r of cheeseRecipesList) {
+          if (r.enabled === false || !r.name.trim()) continue;
+          const rows = normalizeRecipeRowsForCompare(r.components);
+          if (rows.length === 0) continue;
+          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+        }
+        for (const m of mixes) {
+          if (!m.name.trim()) continue;
+          const rows = mixRows(m);
+          if (rows.length === 0) continue;
+          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+        }
+        localStorage.setItem(markerKey, "1");
+      }
+      for (const profile of touched.values()) {
+        await handleSetupProfileSaved(
+          profile.brand,
+          profile.flavor,
+          undefined,
+          backgroundGeneration,
+        );
       }
     };
-    if (markerSet) {
-      // Ongoing pass — recipe edits are authoritative for linked pending work,
-      // not just for profiles whose rows happened to be empty.
-      for (const r of cheeseRecipesList) {
-        if (r.enabled === false || !r.name.trim()) continue;
-        const rows = normalizeRecipeRowsForCompare(r.components);
-        if (rows.length === 0) continue;
-        remember(refreshCheeseOrMixProfileRows(r.name, rows));
-      }
-      for (const m of mixes) {
-        if (!m.name.trim()) continue;
-        const rows = mixRows(m);
-        if (rows.length === 0) continue;
-        remember(refreshCheeseOrMixProfileRows(m.name, rows));
-      }
-    } else {
-      // First-time full heal — wait for pool data, run once per mount.
-      if (cheeseRecipesList.length === 0 && mixes.length === 0) return;
-      if (cheeseMixFullHealDoneRef.current) return;
-      cheeseMixFullHealDoneRef.current = true;
-      for (const r of cheeseRecipesList) {
-        if (r.enabled === false || !r.name.trim()) continue;
-        const rows = normalizeRecipeRowsForCompare(r.components);
-        if (rows.length === 0) continue;
-        remember(refreshCheeseOrMixProfileRows(r.name, rows));
-      }
-      for (const m of mixes) {
-        if (!m.name.trim()) continue;
-        const rows = mixRows(m);
-        if (rows.length === 0) continue;
-        remember(refreshCheeseOrMixProfileRows(m.name, rows));
-      }
-      localStorage.setItem(markerKey, "1");
-    }
-    for (const profile of touched.values()) {
-      handleSetupProfileSaved(profile.brand, profile.flavor);
-    }
+    // The initial full reconciliation must share the acknowledgement queue.
+    // Otherwise a first-load heal can publish an older profile snapshot after
+    // an acknowledged manager save.
+    void enqueueSharedRecipeRefresh(refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cheeseRecipesList, mixes]);
 
@@ -10491,7 +10923,8 @@ export default function Home() {
   // recipe rows. Covers: page load before mixes arrive from the server, and
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
-    const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+    const liveDay = loadDayState();
+    const liveRun = liveDay.runs[liveDay.currentIndex] ?? dayStateRef.current.runs[dayStateRef.current.currentIndex];
     runSharedRecipeRefresh(liveRun, () => {
       if (serverMixRowsByName.size === 0) return;
     const mixFormSlots = [
@@ -14008,48 +14441,6 @@ export default function Home() {
   // differs from the remembered weight gets upserted server-side so the
   // weight follows the ingredient onto every device. Gated on the learned
   // list having loaded so we never blind-resave unchanged values on mount.
-  const batchWeightCandidatesSig = JSON.stringify(
-    batchWeightsLoaded
-      ? collectBatchWeightCandidates(
-          {
-            apps: [
-              { type: v.app1Type, batchLbs: v.app1BatchLbs, cheeseRecipe: v.app1CheeseRecipe },
-              { type: v.app2Type, batchLbs: v.app2BatchLbs, cheeseRecipe: v.app2CheeseRecipe },
-              { type: v.app3Type, batchLbs: v.app3BatchLbs, cheeseRecipe: v.app3CheeseRecipe },
-              { type: v.app4Type, batchLbs: v.app4BatchLbs, cheeseRecipe: v.app4CheeseRecipe },
-            ],
-            peps: [
-              { type: v.pep1Type, batchLbs: v.pep1BatchLbs },
-              { type: v.pep1TypeB, batchLbs: v.pep1BatchLbsB },
-              // Pep 2 slots are hidden while pep 1 covers both applicators.
-              ...(v.pep1Combined === true
-                ? []
-                : [
-                    { type: v.pep2Type, batchLbs: v.pep2BatchLbs },
-                    { type: v.pep2TypeB, batchLbs: v.pep2BatchLbsB },
-                  ]),
-            ],
-            defaultPepTypes: DEFAULT_PEP_TYPES,
-            sauce: {
-              recipeName: v.frontlineRecipeName,
-              barrelLbs: v.sauceBarrelLbs,
-              recipe: v.frontlineRecipe,
-            },
-          },
-          learnedBatchWeights,
-        )
-      : [],
-  );
-  useEffect(() => {
-    const candidates = JSON.parse(batchWeightCandidatesSig) as BatchWeightCandidate[];
-    if (candidates.length === 0) return;
-    const t = setTimeout(() => {
-      queueBatchWeightChanges(candidates);
-    }, 2000);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchWeightCandidatesSig, queueBatchWeightChanges]);
-
   // ── Next-run die type (for change warning) ────────────────────────────────
   const nextRunDieType = useMemo(() => {
     const nextRun = dayState.runs[dayState.currentIndex + 1];
@@ -14351,9 +14742,9 @@ export default function Home() {
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
     appendCheese1, appendCheese2, appendCheese3, appendCheese4, appendDough, appendFrontline,
-    applyCaseUpdateChoices, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange,
+    applyCaseUpdateChoices, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange, commitBatchWeightField,
     applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
-    autoSandboxResetRef, autoSuppressUntilRef, batchWeightCandidatesSig, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
+    autoSandboxResetRef, autoSuppressUntilRef, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
     buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
@@ -15199,6 +15590,7 @@ export default function Home() {
                         <DeferredNamedRecipesManager
                           kind={manageCategory === "dough" ? "dough" : "sauce"}
                           ingredientSuggestions={unifiedIngredientUniverse}
+                          onSaved={applyAcknowledgedNamedRecipeSave}
                         />
                       </div>
                     )}
@@ -16002,6 +16394,7 @@ export default function Home() {
                       brands={brands}
                       brandFlavors={brandFlavors}
                       ingredientSuggestions={unifiedIngredientUniverse}
+                      onSaved={applyAcknowledgedMixSave}
                     />
                     <MixReconcilePanel isManager={isManager} canManageInventory={canManageInventory} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
                   </div>
@@ -21318,7 +21711,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
                   <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
                   <p className="text-xl font-mono font-bold text-foreground tabular-nums">
@@ -21329,7 +21722,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 </div>
               </div>
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
                   <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
                   <p className="text-xl font-mono font-bold text-foreground tabular-nums">
@@ -21340,7 +21733,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 </div>
               </div>
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Next case in</p>
                 <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
                   {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
                 </p>
@@ -22090,7 +22483,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
+                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                                   <div className="flex items-center justify-center gap-1.5 mt-0.5">
                                     <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
                                     <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-skids">
@@ -22101,7 +22494,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                   </div>
                                 </div>
                                 <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
+                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
                                   <div className="flex items-center justify-center gap-1.5 mt-0.5">
                                     <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
                                     <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-cases">
@@ -22112,7 +22505,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                   </div>
                                 </div>
                                 <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
+                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Next case in</p>
                                   <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
                                     {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
                                   </p>
@@ -22481,7 +22874,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
     addDoughIngredient, addDoughRecipeName, addFrontlineIngredient, addFrontlineRecipeName,
     addIngredientType, addPepType, appendCheese1, appendCheese2,
     appendCheese3, appendCheese4, appendDough, appendFrontline,
-    applyLearnedBatchLbs, canManageInventory, cheese1Fields, cheese2Fields,
+    applyLearnedBatchLbs, canManageInventory, cheese1Fields, cheese2Fields, commitBatchWeightField,
     cheese3Fields, cheese4Fields, cheeseNameBrandTags, cheeseNamesForRun, dayState,
     currentRun, doughFields, doughPoolDrift, doughRecipeNameOptions,
     doughVariantPick, form, frontlineFields, frontlineRecipeNameOptions,
@@ -22678,6 +23071,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                                 control={form.control}
                                 name="sauceBarrelLbs"
                                 label="Barrel Weight (lbs)"
+                                onCommit={(lbs) => commitBatchWeightField(v.frontlineRecipeName, lbs)}
                               />
                             )}
                           </div>
@@ -22746,7 +23140,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
                             <NumField control={form.control} name="app1OzPerPizza" label="Oz Per Pizza" />
                             {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app1BatchLbs" label="Batch Weight (lbs)" />
+                              <NumField control={form.control} name="app1BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app1Type, lbs)} />
                             )}
                           </div>
                         );
@@ -22823,7 +23217,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
                             <NumField control={form.control} name="app2OzPerPizza" label="Oz Per Pizza" />
                             {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app2BatchLbs" label="Batch Weight (lbs)" />
+                              <NumField control={form.control} name="app2BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app2Type, lbs)} />
                             )}
                           </div>
                         );
@@ -22926,6 +23320,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                                 control={form.control}
                                 name="pep1BatchLbs"
                                 label="Batch Weight (lbs)"
+                                onCommit={(lbs) => commitBatchWeightField(v.pep1Type, lbs)}
                               />
                             </div>
                           )}
@@ -22961,7 +23356,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                               ) : (
                                 <div className="grid grid-cols-2 gap-3">
                                   <NumField control={form.control} name="pep1OzPerPizzaB" label="Oz Per Pizza" />
-                                  <NumField control={form.control} name="pep1BatchLbsB" label="Batch Weight (lbs)" />
+                                  <NumField control={form.control} name="pep1BatchLbsB" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.pep1TypeB ?? "", lbs)} />
                                 </div>
                               )}
                             </>
@@ -23011,6 +23406,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                                     control={form.control}
                                     name="pep2BatchLbs"
                                     label="Batch Weight (lbs)"
+                                    onCommit={(lbs) => commitBatchWeightField(v.pep2Type, lbs)}
                                   />
                                 </div>
                               )}
@@ -23046,7 +23442,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                                   ) : (
                                     <div className="grid grid-cols-2 gap-3">
                                       <NumField control={form.control} name="pep2OzPerPizzaB" label="Oz Per Pizza" />
-                                      <NumField control={form.control} name="pep2BatchLbsB" label="Batch Weight (lbs)" />
+                                      <NumField control={form.control} name="pep2BatchLbsB" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.pep2TypeB ?? "", lbs)} />
                                     </div>
                                   )}
                                 </>
@@ -23079,7 +23475,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
                             <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
                             {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" />
+                              <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app3Type, lbs)} />
                             )}
                           </div>
                         );
@@ -23156,7 +23552,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
                             <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
                             {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" />
+                              <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app4Type, lbs)} />
                             )}
                           </div>
                         );

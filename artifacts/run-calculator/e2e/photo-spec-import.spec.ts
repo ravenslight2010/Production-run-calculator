@@ -28,6 +28,7 @@ const RAW_RECIPE = `ZZZ${FIXTURE_SUFFIX}Recipe`;
 const EDITED_RECIPE = `ZZZ${FIXTURE_SUFFIX}RecipeReviewed`;
 const RAW_MULTI_DOUGH_RECIPE = `ZZZ${FIXTURE_SUFFIX}MultiDough`;
 const EDITED_MULTI_DOUGH_RECIPE = `ZZZ${FIXTURE_SUFFIX}MultiDoughReviewed`;
+const PHOTO_DOUGH_WATER = `Photo Water ${FIXTURE_SUFFIX}`;
 const RAW_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}Sauce`;
 const EDITED_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}SauceReviewed`;
 const RAW_CHEESE_RECIPE = `ZZZ${FIXTURE_SUFFIX}Cheese`;
@@ -176,7 +177,7 @@ test("keeps photographed pages editable and canceling review leaves master data 
         // Keep the deterministic downstream workbook in one grid/chunk. The
         // photo count is exercised by this request; chunk fan-out and pacing
         // belong to the workbook-import tests.
-        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
+        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
         generatedAt: Date.now(),
         note: "Two photographed pages transcribed for review.",
       }),
@@ -309,7 +310,7 @@ test("applies photographed review edits to the authenticated profile and recipe 
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
+        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
         generatedAt: Date.now(),
         note: "Two photographed pages transcribed for review.",
       }),
@@ -476,7 +477,7 @@ test("persists every ingredient from a photographed multi-ingredient dough recip
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_MULTI_DOUGH_RECIPE}`,
+        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_MULTI_DOUGH_RECIPE}`,
         generatedAt: Date.now(),
         note: "Two photographed dough pages transcribed for review.",
       }),
@@ -503,7 +504,7 @@ test("persists every ingredient from a photographed multi-ingredient dough recip
             name: RAW_MULTI_DOUGH_RECIPE,
             rows: [
               { ingredient: "High Gluten Flour", lbs: 50 },
-              { ingredient: "Water", lbs: 29.5 },
+              { ingredient: PHOTO_DOUGH_WATER, lbs: 29.5 },
               { ingredient: "Olive Oil", lbs: 1.25 },
             ],
           },
@@ -599,8 +600,7 @@ test("persists every ingredient from a photographed multi-ingredient dough recip
     name: EDITED_MULTI_DOUGH_RECIPE,
     components: [
       { ingredient: "High Gluten Flour", lbs: 50 },
-      // Ingredient master data canonicalizes this name during persistence.
-      { ingredient: "WATER", lbs: 29.5 },
+      { ingredient: PHOTO_DOUGH_WATER, lbs: 29.5 },
       { ingredient: "Olive Oil", lbs: 1.25 },
     ],
   });
@@ -637,7 +637,7 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_SAUCE_RECIPE}`,
+        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_SAUCE_RECIPE}`,
         generatedAt: Date.now(),
         note: "Two photographed sauce pages transcribed for review.",
       }),
@@ -798,7 +798,7 @@ test("persists every ingredient from a photographed multi-ingredient cheese reci
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_CHEESE_RECIPE}`,
+        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_CHEESE_RECIPE}`,
         generatedAt: Date.now(),
         note: "Two photographed cheese pages transcribed for review.",
       }),
