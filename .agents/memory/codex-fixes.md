@@ -43,3 +43,52 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 - `casesPerLayer` must be present in run values — without it `totalPizzasForSauce` becomes NaN, zeroing ALL applicator/pep demand lines silently.
 - DEFAULT_VALUES now defaults `cartoned: "cartoned"` — any `casesNeeded > 0` produces `packaging:shipper-labels:count` even without a real profile. This is correct behavior (packaging labels apply to all cartoned runs) but tests relying on DEFAULT_VALUES = no demand need updating.
 - UseFirstCard test mocks `/api/inventory/*` broadly — the new `/api/inventory/warehouse-snapshot` route matches the prefix and returns `server.inventory` (an array), which the snapshot client correctly rejects via `isValidSnap` guard (shape mismatch → null → local fallback).
+
+---
+
+## Merge: Replit 4 commits + Claude cherry-pick + typecheck fix
+
+**Date**: 2026-09-12
+**Branch**: `main` + `feat/warehouse-snapshot-server`
+**Files changed**:
+- `AGENTS.md` (claude-bugs.md reference)
+- `.agents/memory/MEMORY.md` (acknowledged-master-data-propagation)
+- `.agents/memory/claude-bugs.md` (new — claude's fix log)
+- `lib/db/src/schema/users.ts` (lower(username) uniqueIndex)
+- `artifacts/api-server/src/routes/sync.ts` (facilityDate() alignment)
+- `artifacts/api-server/src/routes/sandboxIsolation.integration.test.ts` (facilityDate() fix)
+- `artifacts/run-calculator/src/contexts/__tests__/useLiveRun-allowed-callers.test.ts` (LineMapDashboard allowlist)
+- `artifacts/run-calculator/src/hooks/useRunLifecycleManager.ts` (deferred lifecycle race fix)
+- `artifacts/run-calculator/src/hooks/useHomeSyncCoordination.ts` (fetchWithTimeout)
+- `artifacts/run-calculator/src/hooks/useHomeFormLifecycle.ts` (profile write guard)
+- `artifacts/run-calculator/src/profileServerSync.ts` (fetchWithTimeout + strict flush)
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` (occupancy rebase)
+- `artifacts/run-calculator/src/pages/home.tsx` (batch weight chain, sync recovery, timeouts)
+- `artifacts/run-calculator/src/components/CheeseRecipesManager.tsx` (await onSaved)
+- `artifacts/run-calculator/src/components/MixesManager.tsx` (await onSaved)
+- `artifacts/run-calculator/src/components/NamedRecipesManager.tsx` (await onSaved)
+- `artifacts/run-calculator/src/specImport.ts` (PARSE_VERSION 38→39, unresolved field)
+- `artifacts/run-calculator/src/fetchWithTimeout.ts` (new — timeout wrapper)
+- `artifacts/run-calculator/src/components/ui/toast.tsx` (z-index 100→45)
+- Plus e2e browser fixtures, webkit results, release evidence, render.yaml
+
+**What was fixed**:
+- Username case-race: concurrent sign-ups for "Bob"/"bob" no longer create duplicate rows
+- Daily-reset boundary: clientToday() fallback aligned to facilityDate() — no more UTC-vs-local date mismatch
+- Lifecycle start/pause/resume: deferred until canonical adoption settles — prevents dropped commands
+- Batch weight save: propagation chain error handling with proper retry
+- Recipe manager saves: mutation awaited before UI reports success — fixes stale pending-run rows
+- Sync write recovery: stale partial fallback → replay as complete write
+- Profile write guard: debounce won't overwrite shared profile for started/paused/ended runs
+- fetchWithTimeout: all client API calls capped at 10s to prevent hangs on autoscale cold starts
+- LiveRun occupancy: casesOnLine/casesInFreezer rebased onto local clock after wake/reload
+- Toast z-index: lowered to not overlap dialogs
+
+**Why it was needed**:
+- Replit merged 4 commits (browser fixtures + release gate + render deploy)
+- Claude found 3 real bugs (username case-race, facilityDate boundary, LineMapDashboard allowlist)
+- Claude's cherry-pick left one stale `todayStr()` reference in sandboxIsolation test — fixed with `facilityDate()`
+
+**How to apply**:
+- All merged into main, feature branch rebased on top
+- Pushed: main (65107e86) + feat/warehouse-snapshot-server (881b4711)
