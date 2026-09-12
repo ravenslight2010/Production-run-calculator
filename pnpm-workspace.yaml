@@ -75,7 +75,7 @@ onlyBuiltDependencies:
 overrides:
   # Security overrides formerly stored in package.json. Keep them here because
   # pnpm 11 reads workspace overrides and ignores package.json.pnpm.
-  adm-zip: "0.6.0"
+  adm-zip: "0.6.1"
   browserslist: "4.28.7"
   image-size: ">=2.0.2"
   body-parser: "2.3.0"
@@ -83,7 +83,9 @@ overrides:
   "minimatch@5>brace-expansion": "2.1.4"
   "minimatch@10>brace-expansion": "5.0.9"
   fast-uri: "3.1.6"
-  js-yaml: "4.3.1"
+  js-yaml: "4.3.2"
+  vitest: "4.1.11"
+  "@vitest/mocker": "4.1.11"
   undici: "7.29.0"
   "@esbuild-kit/esm-loader": "npm:tsx@^4.23.12"
   esbuild: "^0.28.1"
@@ -168,7 +170,7 @@ overrides:
   uuid: "^11.1.1"
   # js-yaml has a quadratic-complexity DoS in merge key handling; patched per major line
   "js-yaml@3": "^3.15.0"
-  "js-yaml@4": "^4.2.0"
+  "js-yaml@4": "4.3.2"
   # qs.stringify can crash with a TypeError on malformed comma-format arrays (DoS)
   qs: "^6.16.0"
   # postcss has an XSS via unescaped </style> in stringified output
