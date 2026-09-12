@@ -4,13 +4,14 @@ This repository is worked on by **multiple coding agents** (Codex, Replit Agent,
 
 ## Before making any change
 
-1. **Check `.agents/memory/codex-fixes.md`** — this file logs every fix Codex has made.
-2. **Check `.agents/memory/`** — other memory files contain design decisions, patterns, and gotchas. Read them before modifying code.
-3. **Never force-push to `main`** — always use a feature branch + PR. Branch protection is enabled.
+1. **Check `.agents/memory/codex-fixes.md`** — this file logs every fix Codex has made. If a fix is already documented there, do NOT re-apply it.
+2. **Check `.agents/memory/claude-bugs.md`** — bugs Claude has found (Open) or already fixed (Fixed). Don't re-report an Open bug as new, and don't re-apply a Fixed one.
+3. **Check `.agents/memory/`** — other memory files contain design decisions, patterns, and gotchas. Read them before modifying code.
+4. **Never force-push to `main`** — always use a feature branch + PR. Branch protection is enabled.
 
 ## After making a fix
 
-1. **Update `.agents/memory/codex-fixes.md`** (or create your own equivalent) with:
+1. **Update `.agents/memory/codex-fixes.md`** (or `.agents/memory/claude-bugs.md` if you're Claude) with:
    - File path(s) changed
    - What was wrong (the bug/issue)
    - What the fix was (the change)
@@ -21,6 +22,7 @@ This repository is worked on by **multiple coding agents** (Codex, Replit Agent,
 ## Shared knowledge files
 
 - `.agents/memory/codex-fixes.md` — running log of Codex fixes
+- `.agents/memory/claude-bugs.md` — Claude's bug tracker (Bugs Found / Bugs Fixed)
 - `.agents/memory/*.md` — design decisions, patterns, gotchas (200+ files)
 - `AGENTS.md` — this file (shared instructions)
 
