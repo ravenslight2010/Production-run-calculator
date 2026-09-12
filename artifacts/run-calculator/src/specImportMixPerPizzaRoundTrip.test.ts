@@ -361,7 +361,6 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     // Simulate the server round-trip: the server normalizes + stores + returns
     // the same structure. normalizeMix is used server-side for validation.
     // It must NOT zero out valid perPizza values.
-    const { normalizeMixes } = require("@workspace/mixes");
     // Build what the server would store/return: JSON-round-trip then normalize.
     // (The server runs normalizeMix on every upsert before persisting + echoing.)
     const serverEchoed = normalizeMixes(JSON.parse(JSON.stringify(savedMixes)));

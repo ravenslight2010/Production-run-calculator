@@ -96,6 +96,11 @@ const ALLOWED_FILES = new Set<string>([
   // production counters and clocks, so their deliberate per-second updates
   // are operator-visible rather than incidental subscription churn.
   "components/ScreenModeView.tsx",
+
+  // LineMapDashboard.tsx — the production line map shows live zone status
+  // (cases progress, freezer occupancy, batch numbers, auto-track whispers),
+  // so its per-second subscription is deliberate operator feedback.
+  "components/LineMapDashboard.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────
