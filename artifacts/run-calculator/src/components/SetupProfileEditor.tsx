@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle } from "lucide-react";
 import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
+import type { Resolver } from "react-hook-form";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -331,7 +332,7 @@ export default function SetupProfileEditor({
   const [doughVariantPick, setDoughVariantPick] = useState<{ recipeName: string; variants: DoughballVariant[] } | null>(null);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: DEFAULT_VALUES,
   });
   const v = form.watch();
