@@ -87,7 +87,6 @@ import {
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
-  fetchPhotoAliases,
   savePhotoAliases,
   applyPhotoAliases,
   type PhotoAlias,
@@ -99,6 +98,8 @@ import {
   type PhotoGuess,
   type InventoryCategory,
 } from "../inventoryShared";
+import { setPhotoAliasesCache, usePhotoAliases } from "../photoAliasesStore";
+import { useWarehouseSnapshot, refreshWarehouseSnapshot } from "../warehouseSnapshotClient";
 import { useMe } from "../useRole";
 import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
@@ -166,6 +167,9 @@ export default function InventoryTab({
   const [subPrefill, setSubPrefill] = useState<string | null>(null);
   const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
   const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
+  // Online: the server pre-computes transfer warnings from today's canonical
+  // run plan; fall back to local computation when the snapshot is unavailable.
+  const serverSnap = useWarehouseSnapshot();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const canUseAiTools = hasCapability("use-ai-tools");
@@ -225,7 +229,10 @@ export default function InventoryTab({
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data) as { senderId?: string | null };
-        if (msg.senderId !== inventoryClientId()) refetchRef.current();
+        if (msg.senderId !== inventoryClientId()) {
+          refetchRef.current();
+          void refreshWarehouseSnapshot();
+        }
       } catch {
         /* ignore */
       }
@@ -265,8 +272,8 @@ export default function InventoryTab({
   // run plan while another location holds transferable stock. Shared math with
   // mobile so the two raise identical warnings (replit.md parity).
   const transferNeeds = useMemo<TransferNeed[]>(
-    () => computeRunTransferNeeds(runValsList, items),
-    [runValsList, items],
+    () => serverSnap ? serverSnap.transfer : computeRunTransferNeeds(runValsList, items),
+    [serverSnap, runValsList, items],
   );
 
   const existingKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
@@ -421,7 +428,7 @@ export default function InventoryTab({
 
       {canUseAiTools && <ProductionSheetCard />}
 
-      {canUseAiTools && <WasteInsightCard />}
+      <WasteInsightCard />
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -658,6 +665,9 @@ function ItemRow({
 }
 
 function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngredients }: { item: InventoryItem; locations: InventoryLocation[]; onChanged: () => void; expirySoonDays: number; productionIngredients: ProductionIngredient[] }) {
+  // Online: the server pre-computes transfer warnings from today's canonical
+  // run plan; fall back to local computation when the snapshot is unavailable.
+  const serverSnap = useWarehouseSnapshot();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const [busy, setBusy] = useState(false);
@@ -2148,9 +2158,9 @@ function LabelVerifyCard() {
   );
 }
 
-// ── AI expiry & waste insight ────────────────────────────────────────────────
-// The server flags expired/expiring-soon stock and (when anything is at risk)
-// suggests a run order to consume it first. Advisory only — nothing is changed.
+// ── Deterministic expiry & waste insight ─────────────────────────────────────
+// The server flags expired/expiring-soon stock and returns a deterministic
+// use-first view. Nothing is changed.
 function WasteInsightCard() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -2192,7 +2202,7 @@ function WasteInsightCard() {
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Recycle className="w-4 h-4" /> Waste Insight
+            <Recycle className="w-4 h-4" /> Use-First Stock
           </CardTitle>
           <button
             type="button"
@@ -2207,8 +2217,8 @@ function WasteInsightCard() {
       {open && (
         <CardContent className="px-4 pb-4 space-y-3">
           <p className="text-xs text-muted-foreground">
-            Flag stock that's expired or expiring soon and get an AI suggestion for which runs to
-            prioritize so it gets used first. Advisory only — nothing is rescheduled.
+            Flag stock that's expired or expiring soon so the team can prioritize it manually.
+            This deterministic check is advisory only — nothing is rescheduled.
           </p>
           <Button
             size="sm"
@@ -2317,23 +2327,8 @@ function PhotoIntakeCard({
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [noResults, setNoResults] = useState(false);
   const [committingId, setCommittingId] = useState<string | null>(null);
-  // Server-persisted learned photo aliases (guessName -> itemKey), factory-wide.
-  // Fetched once on mount; best-effort, so any failure leaves the list empty.
-  const [photoAliases, setPhotoAliases] = useState<PhotoAlias[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchPhotoAliases()
-      .then((a) => {
-        if (!cancelled) setPhotoAliases(a);
-      })
-      .catch(() => {
-        /* best-effort: proceed without learned aliases */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Shared so sync invalidations update an already-open intake card.
+  const photoAliases = usePhotoAliases();
 
   // Count down the rate-limit (429) cooldown so the retry button re-enables
   // exactly when the server will accept another request.
@@ -2520,12 +2515,10 @@ function PhotoIntakeCard({
         row.guessName.trim().toLowerCase() !== name.toLowerCase()
       ) {
         const alias: PhotoAlias = { guessName: row.guessName.trim(), itemKey: row.matchedKey };
-        setPhotoAliases((prev) => {
-          const others = prev.filter(
-            (a) => a.guessName.trim().toLowerCase() !== alias.guessName.toLowerCase(),
-          );
-          return [...others, alias];
-        });
+        const others = photoAliases.filter(
+          (a) => a.guessName.trim().toLowerCase() !== alias.guessName.toLowerCase(),
+        );
+        setPhotoAliasesCache([...others, alias]);
         void savePhotoAliases([alias]).catch(() => {
           /* best-effort */
         });
