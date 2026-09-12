@@ -142,3 +142,31 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 - The live-runs inclusion uses `row.date === facilityDate()`; scheduled rows use
   `date >= today` with `clientToday` semantics (client `?today=` param mirrors
   `/sync/scheduled`), so the boundary can't drift for a user behind UTC.
+
+## Orval 8.31.0 upgrade with react-query v5 output (chore/orval-8.31)
+
+**Date**: 2026-09-12
+**Branch**: `chore/orval-8.31`
+**Files changed**:
+- `lib/api-spec/package.json` (orval 8.26.0 → 8.31.0)
+- `lib/api-spec/orval.config.ts` (added `query: { version: 5 }` to api-client-react output override)
+- `lib/api-client-react/src/generated/api.ts` (regenerated — v5 hook signatures)
+- `lib/api-client-react/src/generated/api.schemas.ts` (minor null-type fix)
+- `lib/api-zod/src/generated/api.ts` (regenerated)
+- `lib/api-zod/src/generated/types/operationalProjectionFactsPaceStatus.ts` (null-type fix)
+- `pnpm-lock.yaml`
+
+**What was wrong**:
+- Orval was at 8.26.0, two minor versions behind.
+- When upgraded to 8.31.0, orval 8.31 warns that without `query.version: 5`, it generates react-query v4 hooks (positional `useQuery(key, fn, options)`) which are incompatible with the app's `@tanstack/react-query ^5.90.21`.
+- pnpm `minimumReleaseAge: 1440` blocks 8.32.0 (published same day), so 8.31.0 is the correct latest.
+
+**What the fix was**:
+- Bumped orval to 8.31.0 (latest allowed by maturity policy).
+- Added `query: { version: 5 }` to the `api-client-react` output's `override` block in `orval.config.ts`.
+- Regenerated all output; the generated hooks now use v5 types (`DataTag`, `DefinedInitialDataOptions`, object-style `{ queryKey, queryFn, ...options }`).
+- Verified: freshness check passes, full typecheck (`typecheck:libs` + web app) all clean.
+
+**Why it was needed**:
+- Without the version pin, regenerated hooks break at runtime with v5 — `useQuery` positional args are no longer accepted in v5.
+- Keeps generated client aligned with the project's react-query v5 dependency.
