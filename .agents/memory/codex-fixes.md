@@ -170,3 +170,28 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**:
 - Without the version pin, regenerated hooks break at runtime with v5 — `useQuery` positional args are no longer accepted in v5.
 - Keeps generated client aligned with the project's react-query v5 dependency.
+
+## Dependabot security advisories — all resolved (chore/security-vuln-fixes)
+
+**Date**: 2026-09-12
+**Branch**: `chore/security-vuln-fixes`
+**Files changed**:
+- `pnpm-workspace.yaml` (override bumps: adm-zip 0.6.0→0.6.1, js-yaml 4.3.1→4.3.2, js-yaml@4 4.3.2, new vitest + @vitest/mocker pins)
+- `pnpm-lock.yaml` (re-resolved)
+- `lib/api-zod/package.json` (vitest 4.1.9→4.1.11)
+
+**What was wrong** — 4 advisories on main (`pnpm audit`):
+- **High** GHSA-2883-xcg3-v3hh: js-yaml `maxTotalMergeKeys` DoS (empty merge sources) — js-yaml 4.3.1 via orval; fix is 4.3.2.
+- **Moderate** GHSA-82fw-gwwq-j7x9: vitest/@vitest/mocker path traversal via redirect mock — 33 dependent packages were on 4.1.9; fix is 4.1.11.
+- **Moderate** GHSA-vwc7-r8mq-g2x9: adm-zip extraction follows destination symlinks (arbitrary file overwrite) via github-actionlint; fix is 0.6.1.
+
+**What the fix was**:
+- Bumped the three override pins and `vitest` in `lib/api-zod/package.json`.
+- Added workspace-level overrides `vitest: "4.1.11"` and `"@vitest/mocker": "4.1.11"` so every dependent workspace resolves the patched version — matches the repo's existing security-override pattern in `pnpm-workspace.yaml`.
+- Also pinned `"js-yaml@4"` from `^4.2.0` to `4.3.2` in overrides; the range form re-resolved to a stale 4.3.1.
+
+**Why it was needed**: supply-chain/DoS/file-write exposure in dev + tooling deps. `pnpm audit` now reports zero vulnerabilities.
+
+**Gotchas encountered**:
+- `pnpm install --force` after editing overrides can leave bin links broken and optional platform binaries missing. On ARM64 (aarch64) host machines, vitest/rollup tests cannot run at all because the workspace excludes non-x64 rollup platform binaries (size optimization for x64 Render/Replit). Use typecheck as the local gate; CI runs tests on x64.
+- The `overrides` key at workspace scope takes precedence, but package-specific range overrides (e.g. `js-yaml@4`) must also be bumped, or pnpm keeps the stale resolution.
