@@ -13,6 +13,7 @@ import {
   type UseFirstEntry,
 } from "../inventoryShared";
 import type { FormValues } from "../types";
+import { useWarehouseSnapshot, refreshWarehouseSnapshot } from "../warehouseSnapshotClient";
 
 // Format a "YYYY-MM-DD" lot expiration date for display (e.g. "Jun 24"). Parsed
 // as a local calendar date (split, not new Date(str)) so it never shifts a day
@@ -45,6 +46,9 @@ export default function UseFirstCard({
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [soonDays, setSoonDays] = useState<number>(EXPIRY_SOON_DAYS);
+  // Online: use the server's shared FEFO list (canonical lots + today's keys)
+  // instead of recomputing it locally on every inventory refresh.
+  const serverSnap = useWarehouseSnapshot();
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
@@ -69,7 +73,10 @@ export default function UseFirstCard({
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data) as { senderId?: string | null };
-        if (msg.senderId !== inventoryClientId()) refetchRef.current();
+        if (msg.senderId !== inventoryClientId()) {
+          refetchRef.current();
+          void refreshWarehouseSnapshot();
+        }
       } catch {
         /* ignore */
       }
@@ -77,12 +84,14 @@ export default function UseFirstCard({
     return () => es.close();
   }, []);
 
-  const useFirst: UseFirstEntry[] = computeRunUseFirstList(
-    items,
-    locations,
-    soonDays,
-    todayValsList,
-  );
+  const useFirst: UseFirstEntry[] = serverSnap
+    ? serverSnap.useFirst
+    : computeRunUseFirstList(
+        items,
+        locations,
+        soonDays,
+        todayValsList,
+      );
   if (useFirst.length === 0) return null;
 
   return (

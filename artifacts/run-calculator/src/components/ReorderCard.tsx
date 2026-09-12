@@ -8,6 +8,7 @@ import {
   type InventoryItem,
   type ReorderItem,
 } from "../inventoryShared";
+import { useWarehouseSnapshot, refreshWarehouseSnapshot } from "../warehouseSnapshotClient";
 import type { FormValues } from "../types";
 
 // Advisory "Reorder Now" card for the Warehouse tab. Self-contained: it fetches
@@ -25,6 +26,10 @@ export default function ReorderCard({
   scheduledValsList?: FormValues[];
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  // Online: the server pre-computes the same reorder list from canonical sync
+  // data + inventory, so every device flags identically with a single shared
+  // fetch instead of per-device recomputation on every inventory refresh.
+  const serverSnap = useWarehouseSnapshot();
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
@@ -42,7 +47,10 @@ export default function ReorderCard({
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data) as { senderId?: string | null };
-        if (msg.senderId !== inventoryClientId()) refetchRef.current();
+        if (msg.senderId !== inventoryClientId()) {
+          refetchRef.current();
+          void refreshWarehouseSnapshot();
+        }
       } catch {
         /* ignore */
       }
@@ -50,7 +58,9 @@ export default function ReorderCard({
     return () => es.close();
   }, []);
 
-  const reorder: ReorderItem[] = computeRunReorderList(items, scheduledValsList);
+  const reorder: ReorderItem[] = serverSnap
+    ? serverSnap.reorder
+    : computeRunReorderList(items, scheduledValsList);
   if (reorder.length === 0) return null;
 
   return (

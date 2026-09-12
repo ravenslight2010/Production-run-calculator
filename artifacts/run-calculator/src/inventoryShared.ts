@@ -1193,6 +1193,20 @@ export const declinePasswordReset = (id: string) =>
   );
 
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+
+// Server-authority warehouse advisory snapshot. The server pre-computes the
+// reorder list, use-first list, and transfer warnings from canonical sync data
+// + inventory (same @workspace/inventory-math functions the client uses), so
+// every device online sees identical numbers. The web cards prefer this when
+// online and fall back to their own local computation when offline.
+export type WarehouseSnapshot = {
+  reorder: ReorderItem[];
+  useFirst: UseFirstEntry[];
+  transfer: TransferNeed[];
+  generatedAt: number;
+};
+export const fetchWarehouseSnapshot = () =>
+  api<WarehouseSnapshot>("/inventory/warehouse-snapshot");
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");
 export const updateInventorySettings = (body: InventorySettings) =>
