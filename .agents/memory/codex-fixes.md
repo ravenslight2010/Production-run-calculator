@@ -195,3 +195,22 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Gotchas encountered**:
 - `pnpm install --force` after editing overrides can leave bin links broken and optional platform binaries missing. On ARM64 (aarch64) host machines, vitest/rollup tests cannot run at all because the workspace excludes non-x64 rollup platform binaries (size optimization for x64 Render/Replit). Use typecheck as the local gate; CI runs tests on x64.
 - The `overrides` key at workspace scope takes precedence, but package-specific range overrides (e.g. `js-yaml@4`) must also be bumped, or pnpm keeps the stale resolution.
+
+## Dependency refresh — within declared ranges (chore/dep-updates)
+
+**Date**: 2026-09-12
+**Branch**: `chore/dep-updates`
+**Files changed**: 37 `package.json` files, `pnpm-workspace.yaml` catalog, `pnpm-lock.yaml`
+
+**What was wrong / intent**:
+- After the security pinned versions landed, the workspace had drifted on minor/patch releases within existing `^` ranges (radix-ui, tailwind, tanstack-query, types, tooling).
+- User asked for all remaining minor/upgrade opportunities.
+
+**What the fix was**:
+- `pnpm update -r` — bumps every package to the newest version its declared range allows, and bakes the updated ranges back into the manifests/catalog.
+- Highlights: @tanstack/react-query 5.100.9→5.102.8, tailwind 4.3.0→4.3.3, @types/react(-dom) 19.2→19.3, @types/node 25.6.2→25.9.6, framer-motion 12.38→12.43, esbuild 0.28.1→0.28.2, @playwright/test 1.61.1→1.63.0, tsx 4.23.12→4.23.13, prettier 3.8.3→3.9.6.
+- Deliberately left at current majors (breaking): vite 8, vitest 5, zod 4, typescript 7, react 19.3+, framer-motion 13, recharts 3, pino 10, openai 7, date-fns 4, jsdom 30, chokidar 5, @vitejs/plugin-react 6, p-retry 8, @hookform/resolvers 5, react-resizable-panels 4, react-day-picker 10, lucide-react 1.x. These need dedicated migration work.
+
+**Why it was needed**: hygiene — avoid transitive drift, stay on patched releases, reduce future audit noise.
+
+**Verification**: `typecheck:libs`, all artifact typechecks (api-server, run-calculator, mockup-sandbox, scripts), and `check-generated.sh` all pass.
