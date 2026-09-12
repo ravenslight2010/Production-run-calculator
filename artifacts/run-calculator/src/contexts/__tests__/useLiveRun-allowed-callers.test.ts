@@ -97,11 +97,9 @@ const ALLOWED_FILES = new Set<string>([
   // are operator-visible rather than incidental subscription churn.
   "components/ScreenModeView.tsx",
 
-  // LineMapDashboard.tsx — the factory-floor line-map overview: zone status
-  // badges, depletion countdowns, and next-batch timers all derive from
-  // nowTime/elapsedBatchSec/secUntilNextBatch, so the per-second re-render is
-  // the feature, not incidental churn. (Re-applied after the Replit merge;
-  // this allowlist entry was missed at the time — see .agents/memory/claude-bugs.md.)
+  // LineMapDashboard.tsx — the production line map shows live zone status
+  // (cases progress, freezer occupancy, batch numbers, auto-track whispers),
+  // so its per-second subscription is deliberate operator feedback.
   "components/LineMapDashboard.tsx",
 ]);
 
@@ -152,7 +150,7 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
       "../../../src/pages/home.tsx",
     );
 
-        const lines = content.split("\n");
+    const lines = readFileSync(homePath, "utf8").split("\n");
 
     // Regex to detect a top-level function declaration in two forms:
     //   1. `function FunctionName(` or `function FunctionName<`
@@ -164,10 +162,10 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     const MEMO_FUNC_RE = /^const \w+ = \w+\(function ([A-Z][A-Za-z0-9]*)[\s<(]/;
 
     let currentFunction: string | null = null;
-      const violations: { file: string; lines: number[] }[] = [];
+    const violations: { line: number; fn: string }[] = [];
 
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
 
       // Track the current enclosing function (plain decl or memo-wrapped).
       const funcMatch = line.match(FUNC_DECL_RE) ?? line.match(MEMO_FUNC_RE);
@@ -188,12 +186,12 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     }
 
     if (violations.length > 0) {
-        const detail = violations
-          .map(
-            ({ file, lines }) =>
-              `  src/${file}  (line${lines.length > 1 ? "s" : ""} ${lines.join(", ")})`,
-          )
-          .join("\n");
+      const detail = violations
+        .map(
+          ({ line, fn }) =>
+            `  Line ${line}: useLiveRun() called inside "${fn}" — add it to ALLOWED_CALLERS if intentional`,
+        )
+        .join("\n");
 
       expect.fail(
         `Found ${violations.length} unexpected useLiveRun() call(s) in home.tsx:\n${detail}\n\n` +
