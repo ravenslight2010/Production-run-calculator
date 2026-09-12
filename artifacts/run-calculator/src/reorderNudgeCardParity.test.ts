@@ -170,7 +170,7 @@ describe("reorder nudge vs. warehouse card parity", () => {
 
     // The past day contributes nothing; the future day does.
     expect(pastScheduled).toHaveLength(0);
-    expect(buildReorderDemandByKey(pastScheduled)).toEqual({});
+    expect(buildReorderDemandByKey(pastScheduled)[CHEESE_KEY]).toBeUndefined();
     expect(buildReorderDemandByKey(futureScheduled)[CHEESE_KEY]).toBeGreaterThan(0);
 
     const futureDemand = buildReorderDemandByKey(futureScheduled)[CHEESE_KEY];
@@ -196,7 +196,9 @@ describe("reorder nudge vs. warehouse card parity", () => {
     ];
     const scheduled = resolveScheduledValsList(days, loadCheeseProfile, TODAY);
     expect(scheduled).toHaveLength(1); // resolved (to DEFAULT_VALUES), not dropped
-    expect(buildReorderDemandByKey(scheduled)).toEqual({});
+    // DEFAULT_VALUES is cartoned with no recipe rows so packaging labels
+    // may appear, but ingredient demand must not leak from a missing profile.
+    expect(buildReorderDemandByKey(scheduled)[CHEESE_KEY]).toBeUndefined();
 
     const items = [
       item({ key: CHEESE_KEY, onHand: 50, reorderThreshold: 10 }), // comfortably above

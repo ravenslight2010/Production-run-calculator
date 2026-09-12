@@ -99,6 +99,7 @@ import {
   type InventoryCategory,
 } from "../inventoryShared";
 import { setPhotoAliasesCache, usePhotoAliases } from "../photoAliasesStore";
+import { useWarehouseSnapshot, refreshWarehouseSnapshot } from "../warehouseSnapshotClient";
 import { useMe } from "../useRole";
 import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
@@ -166,6 +167,9 @@ export default function InventoryTab({
   const [subPrefill, setSubPrefill] = useState<string | null>(null);
   const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
   const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
+  // Online: the server pre-computes transfer warnings from today's canonical
+  // run plan; fall back to local computation when the snapshot is unavailable.
+  const serverSnap = useWarehouseSnapshot();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const canUseAiTools = hasCapability("use-ai-tools");
@@ -225,7 +229,10 @@ export default function InventoryTab({
     es.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data) as { senderId?: string | null };
-        if (msg.senderId !== inventoryClientId()) refetchRef.current();
+        if (msg.senderId !== inventoryClientId()) {
+          refetchRef.current();
+          void refreshWarehouseSnapshot();
+        }
       } catch {
         /* ignore */
       }
@@ -265,8 +272,8 @@ export default function InventoryTab({
   // run plan while another location holds transferable stock. Shared math with
   // mobile so the two raise identical warnings (replit.md parity).
   const transferNeeds = useMemo<TransferNeed[]>(
-    () => computeRunTransferNeeds(runValsList, items),
-    [runValsList, items],
+    () => serverSnap ? serverSnap.transfer : computeRunTransferNeeds(runValsList, items),
+    [serverSnap, runValsList, items],
   );
 
   const existingKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
@@ -658,6 +665,9 @@ function ItemRow({
 }
 
 function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngredients }: { item: InventoryItem; locations: InventoryLocation[]; onChanged: () => void; expirySoonDays: number; productionIngredients: ProductionIngredient[] }) {
+  // Online: the server pre-computes transfer warnings from today's canonical
+  // run plan; fall back to local computation when the snapshot is unavailable.
+  const serverSnap = useWarehouseSnapshot();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const [busy, setBusy] = useState(false);
