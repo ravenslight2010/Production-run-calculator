@@ -96,6 +96,13 @@ const ALLOWED_FILES = new Set<string>([
   // production counters and clocks, so their deliberate per-second updates
   // are operator-visible rather than incidental subscription churn.
   "components/ScreenModeView.tsx",
+
+  // LineMapDashboard.tsx — the factory-floor line-map overview: zone status
+  // badges, depletion countdowns, and next-batch timers all derive from
+  // nowTime/elapsedBatchSec/secUntilNextBatch, so the per-second re-render is
+  // the feature, not incidental churn. (Re-applied after the Replit merge;
+  // this allowlist entry was missed at the time — see .agents/memory/claude-bugs.md.)
+  "components/LineMapDashboard.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────

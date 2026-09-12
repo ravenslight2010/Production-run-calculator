@@ -37,6 +37,7 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
 import { signToken } from "../lib/auth";
+import { facilityDate } from "../lib/facilityTime";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -70,11 +71,6 @@ const LIVE_MANAGER = "live-manager-1";
 let sandboxUserId: string;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -445,7 +441,7 @@ describe("daily-reset / auth boundary stays pinned to live", () => {
     const liveRows = await db
       .select()
       .from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, "live")));
+      .where(and(eq(dailySyncTable.date, facilityDate()), eq(dailySyncTable.scope, "live")));
     expect(liveRows.length).toBe(1);
   });
 });

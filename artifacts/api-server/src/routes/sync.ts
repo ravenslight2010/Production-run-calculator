@@ -79,7 +79,7 @@ import {
   type ServerCalcResult,
 } from "@workspace/live-calc";
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
-import { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
+import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
 import { buildSyncHealthReport } from "../lib/syncHealth";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
@@ -138,12 +138,28 @@ function isValidDate(s: string): boolean {
 }
 
 // "Today" for scheduling is the CLIENT's local date, not the server's. The app
-// is driven by client-local midnight, but the server runs in UTC in production,
-// so prefer the client-supplied `today` query param and fall back to the server
-// date only when it's absent or malformed.
+// is physically run from the facility's own local time, so prefer the
+// client-supplied `today` query param (the client's own local date) and fall
+// back to the FACILITY's configured timezone — never the server's raw OS-local
+// date — when the param is absent or malformed.
+//
+// This must match the timezone anchor sessionBoundary.getSessionBoundaryMs
+// uses to look up today's row (facilityDate), or a same-day write that lands
+// on this fallback can silently write a DIFFERENT date-keyed row than the one
+// the daily-reset session fence reads. A server deployed with its OS clock in
+// UTC (the normal case on Render/most containers) serving a facility in
+// America/Chicago disagrees with facilityDate for ~5-6 hours every single day
+// (whenever UTC's calendar date has already advanced past the facility's) —
+// during that window a same-day live-scope reset pushed without `?today=`
+// would set resetBoundaryAt on a row the fence never looks at, silently
+// disabling the "every session is force-signed-out" guarantee. Real web/mobile
+// clients always send `?today=`, so this only matters when the param is
+// missing (a stripped query string, a non-standard caller, or a future client
+// bug) — but the fence is meant to hold even then, not merely when clients
+// cooperate. See sessionBoundaryFacilityFallback in .agents/memory.
 function clientToday(req: Request): string {
   const t = req.query.today;
-  return typeof t === "string" && isValidDate(t) ? t : todayStr();
+  return typeof t === "string" && isValidDate(t) ? t : facilityDate();
 }
 
 const MAX_COMMAND_ACTION_BYTES = 64 * 1024;
