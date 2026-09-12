@@ -22,7 +22,7 @@
     "test:release:concurrency": "timeout 180s sh -c 'pnpm exec vitest run src/routes/inventory.integration.test.ts --testNamePattern=\"concurrent|parallel|same run twice\" && pnpm exec vitest run src/routes/sync.integration.test.ts --testNamePattern=\"concurrent|burst under pool pressure|repeated first-write burst\"'"
   },
   "dependencies": {
-    "@google/genai": "^2.18.0",
+    "@google/genai": "^2.22.0",
     "@workspace/ai-memory": "workspace:*",
     "@workspace/anomaly": "workspace:*",
     "@workspace/api-zod": "workspace:*",
@@ -49,23 +49,23 @@
     "cors": "^2.8.6",
     "drizzle-orm": "catalog:",
     "express": "^5.2.1",
-    "http-proxy-middleware": "^4.1.1",
+    "http-proxy-middleware": "^4.2.0",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
-    "zod": "catalog:",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
-    "esbuild": "^0.28.1",
+    "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
     "esbuild-plugin-pino": "^2.3.3",
-    "pg": "^8.20.0",
+    "pg": "^8.23.0",
     "pino-pretty": "^13.1.3",
     "thread-stream": "3.1.0",
-    "vitest": "^4.1.9"
+    "vitest": "4.1.11"
   }
 }
