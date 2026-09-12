@@ -190,6 +190,7 @@ const LEGACY_BLANK_RUN_VALUE: Record<string, unknown> = {
 // Today's DEFAULT_VALUES shape (all-zero quantities; speedAdjustment 1.0).
 const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesNeeded: 0,
+  cartonSize: 1,
   crustsPerCycle: 0,
   cycleSpeed: 0,
   speedAdjustment: 1.0,

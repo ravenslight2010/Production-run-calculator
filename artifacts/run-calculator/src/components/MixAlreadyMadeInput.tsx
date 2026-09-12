@@ -49,7 +49,7 @@ export function MixAlreadyMadeInput({
     } catch {
       toast({
         variant: "destructive",
-        title: "Couldn't save mix amount",
+        title: field === "already" ? "Couldn't save already made amount" : "Couldn't save made today amount",
         description: "Please check your connection and try again.",
       });
     }
@@ -64,6 +64,7 @@ export function MixAlreadyMadeInput({
           min={0}
           step={0.1}
           value={alreadyVal}
+          aria-label="Already made"
           onChange={(e) => setAlreadyVal(Math.max(0, Number(e.target.value) || 0))}
           onBlur={async () => {
             const isRetry = alreadyFailedRef.current === alreadyVal;
@@ -83,6 +84,7 @@ export function MixAlreadyMadeInput({
           step={0.1}
           value={actualVal || ""}
           placeholder="plan"
+          aria-label="Made today"
           onChange={(e) => setActualVal(Math.max(0, Number(e.target.value) || 0))}
           onBlur={async () => {
             const isRetry = actualFailedRef.current === actualVal;

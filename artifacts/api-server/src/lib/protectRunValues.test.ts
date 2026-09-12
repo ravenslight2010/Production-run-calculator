@@ -97,6 +97,7 @@ const BLANK = {
 // including the pep "B"-slot, timer, and label fields added since.
 const CURRENT_BLANK = {
   casesNeeded: 0,
+  cartonSize: 1,
   crustsPerCycle: 0,
   cycleSpeed: 0,
   speedAdjustment: 1.0,

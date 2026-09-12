@@ -47,7 +47,7 @@ describe("MixAlreadyMadeInput", () => {
       />,
     );
 
-    const input = screen.getByRole("spinbutton");
+    const input = screen.getByRole("spinbutton", { name: "Already made" });
     await user.clear(input);
     await user.type(input, "7.5");
     await user.tab();
@@ -79,7 +79,7 @@ describe("MixAlreadyMadeInput", () => {
       />,
     );
 
-    const input = screen.getByRole("spinbutton");
+    const input = screen.getByRole("spinbutton", { name: "Already made" });
     await user.clear(input);
     await user.type(input, "4");
     await user.tab();
