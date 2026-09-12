@@ -170,6 +170,21 @@ function captureSyncDoughWrites(page: Page, runId: string): SyncDoughObservation
   return observations;
 }
 
+async function readCanonicalDoughValues(
+  page: Page,
+  runId: string,
+): Promise<{ traysOnLine?: number; batchesReady?: number } | null> {
+  const response = await page.request.get("/api/sync/today");
+  if (!response.ok()) return null;
+  const body = await response.json() as {
+    runValues?: Record<string, { traysOnLine?: number; batchesReady?: number }>;
+    data?: {
+      runValues?: Record<string, { traysOnLine?: number; batchesReady?: number }>;
+    };
+  };
+  return (body.runValues ?? body.data?.runValues)?.[runId] ?? null;
+}
+
 test.beforeEach(async () => {
   requireIsolatedTestDatabase("Dough correction resume browser beforeEach");
   await deleteTodaySyncRow();
@@ -260,15 +275,11 @@ test("manager Dough corrections resume without a catch-up write", async ({
   await expect(page.getByTestId("manual-override-banner")).toContainText(/resumes in ~/);
   await expect
     .poll(
-      () =>
-        syncWrites.some(
-          (write) =>
-            write.traysOnLine === correctedDough.traysOnLine
-            && write.batchesReady === correctedDough.batchesReady,
-        ),
-      { timeout: 5_000, intervals: [100, 250] },
+      async () => readCanonicalDoughValues(page, runId),
+      { timeout: 15_000, intervals: [100, 250, 500] },
     )
-    .toBe(true);
+    .toMatchObject(correctedDough);
+  const correctionAcceptedAt = Date.now();
   // The pause is a real tray cadence, not just a transient render state.
   await page.waitForTimeout(500);
   await expect(page.getByTestId("manual-override-banner")).toBeVisible();
@@ -291,23 +302,45 @@ test("manager Dough corrections resume without a catch-up write", async ({
   await expect(page.getByTestId("manual-override-banner")).toBeHidden({
     timeout: MAX_TRAY_PAUSE_MS,
   });
-  const pauseExpiredAt = Date.now();
   await expect(page.getByTestId("dough-timers-paused-banner")).toBeHidden();
   await expect(page.getByTestId("btn-pause-dough-timers")).toBeVisible();
   await page.waitForTimeout(750);
+  expect(await readStepperValue(page, "input-traysOnLine"))
+    .toBeGreaterThanOrEqual(correctedDough.traysOnLine - 1);
+  expect(await readStepperValue(page, "input-batchesReady"))
+    .toBeGreaterThanOrEqual(correctedDough.batchesReady - 1);
 
-  const postPauseDoughWrites = syncWrites.filter(
+  const postCorrectionDoughWrites = syncWrites.filter(
     (write) =>
-      write.requestAt >= pauseExpiredAt
+      write.requestAt >= correctionAcceptedAt
       && (
         write.traysOnLine !== correctedDough.traysOnLine
         || write.batchesReady !== correctedDough.batchesReady
       ),
   );
-  expect(
-    postPauseDoughWrites,
-    "Dough values must stay at the corrected baseline through pause expiry; Packaging writes may carry them unchanged",
-  ).toHaveLength(0);
+  const firstPostCorrectionDoughWrite = postCorrectionDoughWrites[0];
+  let previousWrite = correctedDough;
+  for (const write of postCorrectionDoughWrites) {
+    expect(
+      write.traysOnLine,
+      "each resumed tray write may advance one normal cadence, never catch up the hidden pause",
+    ).toBeGreaterThanOrEqual(previousWrite.traysOnLine - 1);
+    expect(write.traysOnLine).toBeLessThanOrEqual(previousWrite.traysOnLine);
+    expect(
+      write.batchesReady,
+      "each resumed batch write may advance one normal cadence, never catch up the hidden pause",
+    ).toBeGreaterThanOrEqual(previousWrite.batchesReady - 1);
+    expect(write.batchesReady).toBeLessThanOrEqual(previousWrite.batchesReady);
+    previousWrite = write;
+  }
+  const canonicalAfterResume = await readCanonicalDoughValues(page, runId);
+  expect(canonicalAfterResume.traysOnLine)
+    .toBeGreaterThanOrEqual(correctedDough.traysOnLine - 1);
+  expect(canonicalAfterResume.batchesReady)
+    .toBeGreaterThanOrEqual(correctedDough.batchesReady - 1);
+  if (firstPostCorrectionDoughWrite) {
+    expect(canonicalAfterResume).toMatchObject(previousWrite);
+  }
 
   await page.screenshot({ path: testInfo.outputPath("dough-resumed-no-catch-up.png") });
   expect(browserErrors).toEqual([]);

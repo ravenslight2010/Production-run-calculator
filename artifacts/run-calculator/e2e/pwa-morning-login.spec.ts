@@ -159,7 +159,7 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
     apiRequests: apiEvidence,
     consoleErrors,
     expectedHttpErrorConsoleMessages: consoleErrors.filter((message) =>
-      /failed to load resource: the server responded with a status of (401|403) \(\)$/i.test(
+      /failed to load resource: the server responded with a status of (?:401 \(Unauthorized\)|403 \(Forbidden\))$/i.test(
         message,
       ),
     ),
@@ -181,7 +181,7 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
   expect(pageErrors, "the authenticated tablet journey must have no page errors").toEqual([]);
   const unexpectedConsoleErrors = consoleErrors.filter(
     (message) =>
-      !/failed to load resource: the server responded with a status of (401|403) \(\)$/i.test(
+      !/failed to load resource: the server responded with a status of (?:401 \(Unauthorized\)|403 \(Forbidden\))$/i.test(
         message,
       ),
   );

@@ -172,21 +172,31 @@ async function initializeStartup(startedAt: number): Promise<void> {
   );
   recordStartupEvent("ready", { durationMs: performance.now() - startedAt, outcome: "success" });
 
-  // Best-effort, bounded ownership for live automatic production tracking.
-  // The runner shares the claim transaction path with connected clients.
+  // The managed release browser suite drives explicit authoritative ticks for
+  // its deterministic cases, but one live phone smoke also relies on the
+  // production cadence. Keep auto-track enabled while excluding unrelated
+  // polling workers from the disposable fixture so they cannot starve the
+  // request pool during the long serialized suite.
   startAutoTrackServerTicks();
-  stopDailyRolloverScheduler = startDailyRolloverScheduler(
-    sandboxAllowed() ? ["live", "sandbox"] : ["live"],
-  ).stop;
-  stopWebPushAlertScheduler = startWebPushAlertScheduler().stop;
-  stopServerJobWorker = startServerJobWorkerLoop({
-    onError(error, operation) {
-      logger.error(
-        { err: error, operation, outcome: "degraded", errorCode: `server_job_${operation}_failed` },
-        "Server job background task failed",
-      );
-    },
-  }).stop;
+  if (process.env.DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS !== "1") {
+    stopDailyRolloverScheduler = startDailyRolloverScheduler(
+      sandboxAllowed() ? ["live", "sandbox"] : ["live"],
+    ).stop;
+    stopWebPushAlertScheduler = startWebPushAlertScheduler().stop;
+    stopServerJobWorker = startServerJobWorkerLoop({
+      onError(error, operation) {
+        logger.error(
+          { err: error, operation, outcome: "degraded", errorCode: `server_job_${operation}_failed` },
+          "Server job background task failed",
+        );
+      },
+    }).stop;
+  } else {
+    logger.info(
+      { event: "background_auxiliary_schedulers", outcome: "disabled", reason: "managed_browser_fixture" },
+      "Auxiliary background schedulers disabled for managed browser fixture",
+    );
+  }
 
   // Ensure the seeded sandbox account exists with a known password + manager
   // role on every boot. Best-effort and non-production only.

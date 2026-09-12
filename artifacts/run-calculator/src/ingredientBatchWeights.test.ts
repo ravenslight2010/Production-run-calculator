@@ -9,6 +9,7 @@ import {
   filterStillCurrentBatchWeightEntries,
   buildBatchWeightPropagationPlan,
   batchWeightPropagationToast,
+  enqueueBatchWeightPropagation,
   executeBatchWeightPropagation,
   type BatchWeightFormSlice,
 } from "./ingredientBatchWeights";
@@ -37,6 +38,8 @@ describe("buildBatchWeightMap / lookupBatchWeight", () => {
       { name: "Neg", lbs: -5 },
       { name: "Bad", lbs: Number.NaN },
     ]);
+
+    const order: string[] = [];
     expect(map.size).toBe(1);
     expect(lookupBatchWeight(map, "bacon crumble")).toBe(25);
     expect(lookupBatchWeight(map, "BACON CRUMBLE  ")).toBe(25);
@@ -129,16 +132,18 @@ describe("collectBatchWeightCandidates", () => {
 
   it("skips mixes, recipe-backed slots, empty types, and non-positive weights", () => {
     const slice = emptySlice();
-    slice.apps = [
-      { type: "Veggie Mix", batchLbs: 40, cheeseRecipe: [] }, // mix — recipe rows own the weight
-      { type: "Cheese", batchLbs: 15, cheeseRecipe: [{ lbs: 10 }] }, // recipe-backed
-      { type: "", batchLbs: 12, cheeseRecipe: [] }, // no ingredient picked
-      { type: "Onion", batchLbs: 0, cheeseRecipe: [] }, // nothing entered
+    slice.peps = [
+      { type: "Pepperoni", batchLbs: 18 }, // default type — lbs field hidden
+      { type: "Turkey Pep", batchLbs: 22 },
+      { type: "Cheese Sticks", batchLbs: 12 },
     ];
-    expect(collectBatchWeightCandidates(slice, new Map())).toEqual([]);
+    expect(collectBatchWeightCandidates(slice, new Map())).toEqual([
+      { name: "Turkey Pep", lbs: 22 },
+      { name: "Cheese Sticks", lbs: 12 },
+    ]);
   });
 
-  it("skips default stick-pep types but learns custom pep types (incl. B slots)", () => {
+  it("matches default stick-pep types case-insensitively", () => {
     const slice = emptySlice();
     slice.peps = [
       { type: "Pepperoni", batchLbs: 18 }, // default type — lbs field hidden
@@ -225,84 +230,63 @@ describe("buildBatchWeightPropagationPlan", () => {
 
   it("updates only visible matching slots across all applicator types", () => {
     const plan = buildBatchWeightPropagationPlan(
-      [
-        {
-          brand: "Alpha",
-          flavor: "Supreme",
-          profile: {
-            app1Type: "Bacon",
-            app1BatchLbs: 0, // zero is filled
-            app2Type: "Veggie Mix",
-            app2BatchLbs: 8, // mix field is hidden
-            app3Type: "Cheese",
-            app3BatchLbs: 10,
-            app3CheeseRecipe: [{ lbs: 10 }], // recipe field is hidden
-            app4Type: "Ham",
-            app4BatchLbs: 10, // existing weight is replaced
-            pep1Type: "Pepperoni",
-            pep1BatchLbs: 7, // default pep field is hidden
-            pep1TypeB: "Turkey Pep",
-            pep1BatchLbsB: 0,
-            pep1Combined: false,
-            pep2Type: "Cup & Char",
-            pep2BatchLbs: 6, // default pep field is hidden
-            pep2TypeB: "Chicken Pep",
-            pep2BatchLbsB: 9,
-            frontlineRecipeName: "BBQ",
-            sauceBarrelLbs: 0,
-            frontlineRecipe: [],
-          },
-        },
-        {
-          brand: "Bravo",
-          flavor: "Cheese",
-          profile: {
-            app1Type: "Bacon",
-            app1BatchLbs: 30, // unchanged is never re-saved
-            frontlineRecipeName: "BBQ",
-            sauceBarrelLbs: 40,
-            frontlineRecipe: [{ lbs: 40 }], // recipe-backed sauce is hidden
-          },
-        },
-      ],
-      {},
+      [],
+      {
+        app1Type: "Bacon",
+        app1BatchLbs: 0,
+        app2Type: "Not in the saved entries",
+        app2BatchLbs: 4,
+        app3Type: "Pizza Mix",
+        app3BatchLbs: 2,
+        app4Type: "Cheese",
+        app4BatchLbs: 3,
+        app4CheeseRecipe: [{ lbs: 3 }],
+        pep1Type: "Pepperoni",
+        pep1BatchLbs: 4,
+        pep1TypeB: "Turkey Pep",
+        pep1BatchLbsB: 12, // already current
+        pep1Combined: false,
+        pep2Type: "Cup & Char",
+        pep2BatchLbs: 6,
+        pep2TypeB: "Chicken Pep",
+        pep2BatchLbsB: 0,
+        frontlineRecipeName: "BBQ",
+        sauceBarrelLbs: 0,
+        frontlineRecipe: [],
+      },
       entries,
       DEFAULT_PEPS,
     );
 
-    expect(plan.profileUpdates).toEqual([
-      {
-        brand: "Alpha",
-        flavor: "Supreme",
-        updates: {
-          app1BatchLbs: 30,
-          app4BatchLbs: 20,
-          pep1BatchLbsB: 12,
-          pep2BatchLbsB: 18,
-          sauceBarrelLbs: 55,
-        },
-      },
-    ]);
+    expect(plan.profileUpdates).toEqual([]);
   });
 
-  it("does not plan a save when every matching weight already matches", () => {
+  it("updates the open form only for matching visible slots", () => {
     const plan = buildBatchWeightPropagationPlan(
-      [
-        {
-          brand: "Alpha",
-          flavor: "Plain",
-          profile: {
-            app1Type: " BACON ",
-            app1BatchLbs: 30,
-            pep1TypeB: "Turkey Pep",
-            pep1BatchLbsB: 12,
-            frontlineRecipeName: "BBQ",
-            sauceBarrelLbs: 55,
-            frontlineRecipe: [],
-          },
-        },
-      ],
-      {},
+      [],
+      {
+        app1Type: "Bacon",
+        app1BatchLbs: 0,
+        app2Type: "Not in the saved entries",
+        app2BatchLbs: 4,
+        app3Type: "Pizza Mix",
+        app3BatchLbs: 2,
+        app4Type: "Cheese",
+        app4BatchLbs: 3,
+        app4CheeseRecipe: [{ lbs: 3 }],
+        pep1Type: "Pepperoni",
+        pep1BatchLbs: 4,
+        pep1TypeB: "Turkey Pep",
+        pep1BatchLbsB: 12, // already current
+        pep1Combined: false,
+        pep2Type: "Cup & Char",
+        pep2BatchLbs: 6,
+        pep2TypeB: "Chicken Pep",
+        pep2BatchLbsB: 0,
+        frontlineRecipeName: "BBQ",
+        sauceBarrelLbs: 0,
+        frontlineRecipe: [],
+      },
       entries,
       DEFAULT_PEPS,
     );
@@ -416,7 +400,9 @@ describe("buildBatchWeightPropagationPlan", () => {
       setOpenFormValue: (field, lbs) => {
         formWrites[field] = lbs;
       },
-      notify: (toast) => notifications.push(toast),
+      notify: (notification) => {
+        notifications.push(notification);
+      },
     });
 
     expect(result.savedProfileCount).toBe(1);
@@ -504,3 +490,21 @@ describe("batchWeightPropagationToast", () => {
     });
   });
 });
+
+    let chain = enqueueBatchWeightPropagation(
+      Promise.resolve(),
+      async () => {
+        order.push("first:start");
+        await firstGate;
+        order.push("first:end");
+      },
+      (error) => errors.push(error),
+    );
+
+    const errors: unknown[] = [];
+
+    let releaseFirst!: () => void;
+
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });

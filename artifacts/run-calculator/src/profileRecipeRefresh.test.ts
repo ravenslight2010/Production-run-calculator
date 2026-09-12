@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 
 describe("initial named-recipe pool propagation", () => {
-  it("fans a boot-time Sauce profile repair into pending runs while freezing started runs", () => {
+  it("fans a boot-time Sauce profile repair into pending runs while freezing started runs", async () => {
     localStorage.setItem(PROFILE_KEY(BRAND, FLAVOR), JSON.stringify({
       frontlineRecipeName: "Shared Sauce",
       frontlineRecipe: [{ ingredient: "Tomato", lbs: 10 }],
@@ -44,7 +44,7 @@ describe("initial named-recipe pool propagation", () => {
       }
     });
 
-    const touched = refreshNamedRecipeProfilesAndPropagate(
+    const touched = await refreshNamedRecipeProfilesAndPropagate(
       "sauce",
       [{
         name: "Shared Sauce",

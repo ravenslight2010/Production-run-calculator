@@ -67,10 +67,12 @@ export default function MixesManager({
   brands = [],
   brandFlavors = {},
   ingredientSuggestions = [],
+  onSaved,
 }: {
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
   ingredientSuggestions?: string[];
+  onSaved?: (canonicalItems: Mix[], submittedItems: Mix[]) => Promise<void>;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useMixes();
@@ -117,8 +119,9 @@ export default function MixesManager({
 
   const saveMutation = useMutation({
     mutationFn: (next: Mix[]) => saveMixes(next),
-    onSuccess: (saved) => {
+    onSuccess: async (saved, submitted) => {
       setMasterDataSlice(qc, "mixes", saved);
+      await onSaved?.(saved, submitted);
       setError(null);
     },
     onError: () =>

@@ -8,7 +8,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers } from "./isolation";
+import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
 
 function uid(): string {
@@ -62,6 +62,26 @@ async function openRunForm(page: Page): Promise<void> {
   await page.getByText("Die Type", { exact: true }).waitFor({ state: "visible" });
 }
 
+async function seedDieTypes(): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("die tunnel defaults fixture"),
+  });
+  try {
+    await db.connect();
+    for (const name of ['7" Dies', '12"']) {
+      await db.query(
+        `INSERT INTO die_types (id, scope, name, created_at, updated_at)
+         VALUES ($1, 'live', $2, NOW(), NOW())
+         ON CONFLICT (id, scope) DO UPDATE
+           SET name = EXCLUDED.name, updated_at = NOW()`,
+        [name.toLowerCase(), name],
+      );
+    }
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 test.describe("run-form die tunnel defaults", () => {
   test("fills 7-inch values, switches to 12-inch values, and preserves typed time", async ({
     page,
@@ -79,17 +99,9 @@ test.describe("run-form die tunnel defaults", () => {
     const username = uid();
     testUsernames.add(username);
     await signUpAndDismissOnboarding(page, username, "TestPass123!");
-    // Make the two options available in the factory pool as well as the
-    // browser cache. This keeps the test independent of whatever die names
-    // another local test run may have left on the development database.
-    await page.evaluate(async () => {
-      const response = await fetch("/api/die-types", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names: ['7" Dies', '12"'] }),
-      });
-      if (!response.ok) throw new Error(`Unable to seed die types (${response.status})`);
-    });
+    // Seed through the disposable database because a later serial-suite user
+    // is correctly denied the manager-only master-data endpoint.
+    await seedDieTypes();
     await page.reload({ waitUntil: "domcontentloaded" });
     await openRunForm(page);
 

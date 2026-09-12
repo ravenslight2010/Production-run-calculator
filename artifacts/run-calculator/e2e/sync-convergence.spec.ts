@@ -21,6 +21,16 @@ import {
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const users = new Set<string>();
+const MANAGER_CAPABILITIES = [
+  "manage-staff",
+  "manage-inventory",
+  "edit-production-rules",
+  "approve-password-resets",
+  "review-incidents",
+  "use-ai-tools",
+  "manage-factory-settings",
+  "manage-profiles",
+];
 
 function uid(): string {
   return `e2e_sync_${Math.random().toString(36).slice(2, 10)}`;
@@ -71,7 +81,7 @@ async function signUp(page: Page, username: string): Promise<void> {
 
 async function promoteToManager(page: Page): Promise<void> {
   const identity = await page.evaluate(async () => {
-    const response = await fetch("/api/me");
+    const response = await fetch("/api/me", { cache: "no-store" });
     return response.ok ? await response.json() as { userId?: string } : null;
   });
   expect(identity?.userId, "signed-in test user id").toBeTruthy();
@@ -80,10 +90,51 @@ async function promoteToManager(page: Page): Promise<void> {
   });
   try {
     await db.connect();
-    await db.query("UPDATE user_roles SET role = 'manager' WHERE user_id = $1", [identity?.userId]);
+    await db.query("BEGIN");
+    const role = await db.query(
+      `UPDATE roles
+       SET capabilities = $1::jsonb, updated_at = NOW()
+       WHERE name = 'manager'
+       RETURNING name`,
+      [JSON.stringify(MANAGER_CAPABILITIES)],
+    );
+    expect(role.rows, "built-in manager role fixture").toHaveLength(1);
+    await db.query(
+      `INSERT INTO user_roles (user_id, role)
+       VALUES ($1, 'manager')
+       ON CONFLICT (user_id)
+       DO UPDATE SET role = 'manager', updated_at = NOW()`,
+      [identity!.userId],
+    );
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     await db.end().catch(() => {});
   }
+  // The current page already cached /api/me before the direct fixture role
+  // update. Re-enter the application so capability-gated reset and scheduling
+  // controls use the promoted identity rather than that stale auth snapshot.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+  await expect.poll(async () => page.evaluate(async () => {
+    const response = await fetch("/api/me", { cache: "no-store" });
+    if (!response.ok) return null;
+    const me = await response.json() as { role?: string; capabilities?: string[] };
+    return {
+      role: me.role,
+      canReset: me.capabilities?.includes("manage-staff") ?? false,
+      canSchedule: me.capabilities?.includes("manage-factory-settings") ?? false,
+    };
+  }), {
+    message: "promoted manager identity and capabilities",
+    timeout: 20_000,
+  }).toEqual({
+    role: "manager",
+    canReset: true,
+    canSchedule: true,
+  });
 }
 
 type ScheduleMoveFixture = {

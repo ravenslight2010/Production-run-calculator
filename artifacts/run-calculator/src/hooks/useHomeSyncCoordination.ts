@@ -4,6 +4,7 @@ import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import { fetchWithTimeout } from "../fetchWithTimeout";
 import type { SyncPayload } from "../types";
 import type { SyncMeasurementTrigger } from "../syncDiagnostics";
 import { todayStr } from "../utils";
@@ -119,18 +120,25 @@ export function useHomeSyncCoordination() {
 
   // The write construction lives beside queue ownership so every Home caller
   // uses the same epoch, snapshot and optional queue-age envelope.
-  const writeToday = useCallback(({ payload, clientId, snapshotId, epoch, signal, queuedAtEpoch }: TodayWrite) =>
-    fetch(`/api/sync/today?today=${todayStr()}&epoch=${epoch}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        senderId: clientId,
-        payload,
-        snapshotId: snapshotId || undefined,
-        ...(queuedAtEpoch ? { syncMeta: { queuedAt: queuedAtEpoch } } : {}),
-      }),
-      signal,
-    }), []);
+  const writeToday = useCallback(
+    ({ payload, clientId, snapshotId, epoch, signal, queuedAtEpoch }: TodayWrite) =>
+      fetchWithTimeout(
+        `/api/sync/today?today=${todayStr()}&epoch=${epoch}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId,
+            payload,
+            snapshotId: snapshotId || undefined,
+            ...(queuedAtEpoch ? { syncMeta: { queuedAt: queuedAtEpoch } } : {}),
+          }),
+          signal,
+        },
+        10_000,
+      ),
+    [],
+  );
 
   const requestBaselinePush = useCallback(
     () => syncBaselineGateRef.current.requestPush(),

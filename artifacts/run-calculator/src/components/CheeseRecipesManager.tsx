@@ -132,7 +132,7 @@ export default function CheeseRecipesManager({
   brands?: string[];
   ingredientSuggestions?: string[];
   /** Called with the full server-normalized pool after any successful save. */
-  onSaved?: (saved: CheeseRecipe[]) => void;
+    onSaved?: (saved: CheeseRecipe[]) => void | Promise<void>;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useCheeseRecipes();
@@ -175,10 +175,12 @@ export default function CheeseRecipesManager({
 
   const saveMutation = useMutation({
     mutationFn: (next: CheeseRecipe[]) => saveCheeseRecipes(next),
-    onSuccess: (saved) => {
+    onSuccess: async (saved) => {
       setMasterDataSlice(qc, "cheeseRecipes", saved);
       setError(null);
-      onSaved?.(saved);
+      // Wait for the shared-profile/run fan-out so the acknowledged recipe
+      // cannot leave linked pending runs with stale ingredient rows.
+      await onSaved?.(saved);
     },
     onError: () =>
       setError("Could not save the cheese recipe. Check your connection and try again."),

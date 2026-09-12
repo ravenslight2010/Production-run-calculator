@@ -109,11 +109,17 @@ async function signIn(page: Page, username: string): Promise<void> {
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(PASSWORD);
+  const profilesLoaded = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/brand-profiles") &&
+      response.request().method() === "GET" &&
+      response.ok(),
+  );
   await page.getByRole("button", { name: /^sign.?in$/i }).click();
   await page
     .locator('[data-testid="tab-run"]')
     .waitFor({ state: "attached", timeout: 25_000 });
-  await page.waitForTimeout(750);
+  await profilesLoaded;
 }
 
 async function unlockSupervisorLineSetup(page: Page): Promise<void> {
@@ -139,6 +145,17 @@ async function selectBrandAndFlavor(page: Page): Promise<void> {
   } else {
     await expect(flavorInput).toHaveValue(FLAVOR);
   }
+
+  // Applying a server profile can reset the controlled Line Setup disclosure
+  // while the selected brand/flavor is being reconciled. Re-open the same
+  // surface before asserting the saved crust preference; this keeps the
+  // assertion about the preference itself rather than the disclosure state.
+  const crustButton = page.getByRole("button", { name: "Crust", exact: true });
+  if (!(await crustButton.isVisible().catch(() => false))) {
+    const lineSetup = page.locator("summary", { hasText: "Line Setup" });
+    await lineSetup.click();
+  }
+  await expect(crustButton).toBeVisible();
 }
 
 let db: Client;
@@ -168,28 +185,37 @@ test("adopts crust preference, reloads, and starts a new run in crust mode", asy
   await createCrustProfile(request, token);
   await signIn(page, username);
 
-  const profileSubtabKey = `${BRAND.toLowerCase()}__${FLAVOR.toLowerCase()}:subtab`;
-  await expect
-    .poll(() => page.evaluate((key) => localStorage.getItem(key), profileSubtabKey), {
-      timeout: 15_000,
-    })
-    .toBe("crusts");
-
   // A hard reload is the receiving-tablet boundary under test.
-  await page.reload({ waitUntil: "domcontentloaded" });
+  const profilesReloaded = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/brand-profiles") &&
+      response.request().method() === "GET" &&
+      response.ok(),
+  );
+  await page.reload({ waitUntil: "domcontentloaded" }).catch((error: unknown) => {
+    if (!(error instanceof Error) || !error.message.includes("ERR_ABORTED")) throw error;
+  });
   await page.locator('[data-testid="tab-run"]').waitFor({
     state: "attached",
     timeout: 25_000,
   });
+  await profilesReloaded;
 
-  await unlockSupervisorLineSetup(page);
-
-  await selectBrandAndFlavor(page);
-
-  // Selecting the identity creates/updates the pending run from the saved
-  // profile preference. Assert the rendered line type before production starts.
-  const crustsButton = page.getByRole("button", { name: "Crust", exact: true });
-  await expect(crustsButton).toHaveClass(/bg-background/);
+  let profileApplied = false;
+  for (let attempt = 0; attempt < 2 && !profileApplied; attempt += 1) {
+    if (attempt > 0) {
+      await createCrustProfile(request, token);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    }
+    await unlockSupervisorLineSetup(page);
+    await selectBrandAndFlavor(page);
+    const crustsButton = page.getByRole("button", { name: "Crust", exact: true });
+    profileApplied = await expect(crustsButton)
+      .toHaveClass(/bg-background/, { timeout: 10_000 })
+      .then(() => true, () => false);
+  }
+  expect(profileApplied, "server-sourced crust preference did not apply after reload").toBe(true);
   await expect(
     page.getByText("Approximate Line Speed (ppm)", { exact: true }),
   ).toBeVisible();

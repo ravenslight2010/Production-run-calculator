@@ -79,10 +79,40 @@ export function useRunLifecycleManager(deps: {
 }) {
   const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
   const pauseDecisionPauseIdRef = useRef<string | null>(null);
-  const lifecycleBlocked = (runId: string) =>
-    (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0 ||
+  const deferredLifecycleRef = useRef<{
+    runId: string;
+    action: "start" | "pause" | "resume";
+  } | null>(null);
+  const startRunRef = useRef<() => void>(() => {});
+  const pauseRunRef = useRef<() => void>(() => {});
+  const resumeRunRef = useRef<() => void>(() => {});
+  const lifecycleBlocked = (runId: string, waitForAdoption = true) =>
+    (waitForAdoption && (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0) ||
     (deps.operationalIntentBlocksLifecycle?.(runId) ?? false);
   const canonicalRevision = () => deps.operationalCanonicalRevisionRef?.current ?? 0;
+  const deferUntilAdoptionSettles = (runId: string, action: "start" | "pause" | "resume") => {
+    if (
+      (!deps.operationalAdoptionInFlightRef && !deps.operationalIntentBlocksLifecycle) ||
+      deferredLifecycleRef.current
+    ) return;
+    deferredLifecycleRef.current = { runId, action };
+    const poll = () => {
+      const deferred = deferredLifecycleRef.current;
+      if (!deferred || deferred.runId !== runId || deferred.action !== action) return;
+      if (
+        (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0 ||
+        (deps.operationalIntentBlocksLifecycle?.(runId) ?? false)
+      ) {
+        window.setTimeout(poll, 25);
+        return;
+      }
+      deferredLifecycleRef.current = null;
+      if (action === "start") startRunRef.current();
+      else if (action === "pause") pauseRunRef.current();
+      else resumeRunRef.current();
+    };
+    window.setTimeout(poll, 0);
+  };
 
   const switchToRun = useEvent((newIndex: number) => {
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
@@ -119,7 +149,10 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
-    if (lifecycleBlocked(activeRun.id)) return;
+    if (lifecycleBlocked(activeRun.id)) {
+      deferUntilAdoptionSettles(activeRun.id, "start");
+      return;
+    }
     deps.flushFormWrites();
     const now = Date.now();
     const activeRunId = activeRun.id;
@@ -184,6 +217,7 @@ export function useRunLifecycleManager(deps: {
     deps.schedulePush(next, 0);
     if (autoEnded.length) void deps.reportRunInsightsAfterFinalize(autoEnded, runs, deps.getRunInsightsSignal());
   });
+  startRunRef.current = startRun;
 
   const pauseRun = useEvent(() => {
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
@@ -191,7 +225,13 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (!run?.startedAt || run.pausedAt || run.endedAt) return;
-    if (lifecycleBlocked(run.id)) return;
+    // Pause is an explicit operator command. Wait for an in-flight canonical
+    // adoption, then re-read the run before applying it so the command cannot
+    // be dropped or built from a stale lifecycle stamp.
+    if (lifecycleBlocked(run.id)) {
+      deferUntilAdoptionSettles(run.id, "pause");
+      return;
+    }
     deps.flushFormWrites();
     const now = Date.now();
     const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
@@ -214,6 +254,7 @@ export function useRunLifecycleManager(deps: {
     pauseDecisionPauseIdRef.current = stop.id;
     setPauseDecisionRunId(run.id);
   });
+  pauseRunRef.current = pauseRun;
 
   const setPauseTunnelPolicy = useEvent((stopTunnel: boolean) => {
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
@@ -248,7 +289,11 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (!run) return;
-    if (lifecycleBlocked(run.id)) return;
+    // Resume follows the same FIFO admission rule as pause.
+    if (lifecycleBlocked(run.id)) {
+      deferUntilAdoptionSettles(run.id, "resume");
+      return;
+    }
     deps.flushFormWrites();
     const now = Date.now();
     const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
@@ -270,6 +315,7 @@ export function useRunLifecycleManager(deps: {
     deps.schedulePush(next, 0);
     setPauseDecisionRunId(null);
   });
+  resumeRunRef.current = resumeRun;
 
   const endRun = useEvent((expectedRunId?: string, fromForegroundRecovery = false) => {
     const base = deps.dayStateRef.current;

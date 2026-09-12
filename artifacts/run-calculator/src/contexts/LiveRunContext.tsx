@@ -318,7 +318,16 @@ export function LiveRunProvider({
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
   const operationalCalc =
     confirmedProjection?.calc
-      ?? (operationalDisplayState === "confirmed" && operationalServerCalc
+      ? {
+          // The server frame remains authoritative for production counters,
+          // but occupancy is a time-relative display value. Rebase both
+          // windows onto the current clock so a wake/reload can drain stale
+          // freezer contents without waiting for another server frame.
+          ...confirmedProjection.calc,
+          casesOnLine: calc.casesOnLine,
+          casesInFreezer: calc.casesInFreezer,
+        }
+      : (operationalDisplayState === "confirmed" && operationalServerCalc
         ? operationalServerCalc
         : calc);
   const packagingAutoTrackActive =

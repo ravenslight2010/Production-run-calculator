@@ -94,12 +94,31 @@ async function openQueue(page: Page): Promise<void> {
 
 async function revealHistoryItem(page: Page, title: string): Promise<void> {
   const itemStatus = page.getByLabel(`Status for ${title}`);
-  for (let pageNumber = 0; pageNumber < 12 && !(await itemStatus.isVisible().catch(() => false)); pageNumber += 1) {
+  const itemTitle = page.getByText(title, { exact: true });
+  for (let pageNumber = 0; pageNumber < 12 && (await itemTitle.count()) === 0; pageNumber += 1) {
     const loadOlder = page.getByRole("button", { name: "Load older history", exact: true });
     if (!(await loadOlder.isVisible().catch(() => false))) break;
     await loadOlder.click();
   }
+  await expect(itemTitle).toBeVisible();
+  const itemCard = itemTitle.locator(
+    "xpath=ancestor::div[.//button[normalize-space(.)='Details']][1]",
+  );
+  await itemCard.getByRole("button", { name: "Details", exact: true }).click();
   await expect(itemStatus).toBeVisible();
+}
+
+async function openQueueItemDetails(page: Page, title: string): Promise<void> {
+  const itemTitle = page.getByText(title, { exact: true });
+  await expect(itemTitle).toBeVisible();
+  // The title header and action row are siblings in the current queue card.
+  // Walking a fixed number of parents stops at the header and leaves
+  // Playwright waiting forever for a Details descendant that cannot appear.
+  const itemCard = itemTitle.locator(
+    "xpath=ancestor::div[.//button[normalize-space(.)='Details']][1]",
+  );
+  await itemCard.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.getByLabel(`Status for ${title}`)).toBeVisible();
 }
 
 function scopeQueueBody(body: string): string {
@@ -324,6 +343,7 @@ test("loads the active view without hiding large queue history", async ({ page }
 });
 
 test("shows a stale update error, then refreshes and safely retries", async ({ browser }: { browser: Browser }, testInfo: TestInfo) => {
+  test.setTimeout(120_000);
   const username = uniqueTestId("e2e_manager_queue");
   testUsernames.add(username);
   const firstContext = await browser.newContext();
@@ -377,6 +397,8 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     // the second page.
     await second.getByLabel("Filter action status").selectOption("all");
 
+    await openQueueItemDetails(first, title);
+    await openQueueItemDetails(second, title);
     const firstStatus = first.getByLabel(`Status for ${title}`);
     const secondStatus = second.getByLabel(`Status for ${title}`);
     const firstOwner = first.getByLabel(`Owner for ${title}`);
@@ -406,6 +428,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await openQueue(second);
     await second.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action status").selectOption("in_progress");
+    await openQueueItemDetails(second, title);
     await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
     const retryUpdate = second.waitForResponse(
       (response) =>
@@ -528,8 +551,10 @@ test("opens an incident queue item in the matching incident review surface", asy
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
-  await expect(page.getByText("Queue fixture diagnosis", { exact: true }).first()).toBeVisible();
-  await expect(selectedIncident.locator("xpath=../../..").getByRole("button", { name: "Mark reviewed", exact: true })).toBeVisible();
+  const selectedIncidentCard = selectedIncident.locator("xpath=../../..");
+  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
+  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
+  await expect(selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("incident-queue-review-surface.png"), fullPage: true });
   expect(browserErrors).toEqual([]);
 });
@@ -567,18 +592,21 @@ test("keeps a direct incident link focused after reload", async ({ page }, testI
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
-  await expect(directPage.getByText("Queue fixture diagnosis", { exact: true }).first()).toBeVisible();
+  const selectedIncidentCard = selectedIncident.locator("xpath=../../..");
+  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
+  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
   await expect(
-    selectedIncident.locator("xpath=../../..").getByRole("button", { name: "Mark reviewed", exact: true }),
+    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
 
   await directPage.reload({ waitUntil: "domcontentloaded" });
   await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
   await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
   await expect(selectedIncident).toBeVisible();
-  await expect(directPage.getByText("Queue fixture diagnosis", { exact: true }).first()).toBeVisible();
+  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
+  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
   await expect(
-    selectedIncident.locator("xpath=../../..").getByRole("button", { name: "Mark reviewed", exact: true }),
+    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
   await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
   await directPage.close();

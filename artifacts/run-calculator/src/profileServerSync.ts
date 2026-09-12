@@ -28,6 +28,7 @@
 // the run form even fully offline.
 
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 import {
   activeProfileCacheOwnsLegacyData,
   cachedProfileKeys,
@@ -291,9 +292,11 @@ async function apiList(): Promise<ApiProfile[]> {
   const cacheGeneration = getProfileCacheGeneration();
   if (apiListInFlight?.generation === cacheGeneration) return apiListInFlight.promise;
   const promise = (async () => {
-    const res = await fetch("/api/brand-profiles", {
-      headers: { "x-client-id": inventoryClientId() },
-    });
+    const res = await fetchWithTimeout(
+      "/api/brand-profiles",
+      { headers: { "x-client-id": inventoryClientId() } },
+      10_000,
+    );
     if (!res.ok) throw new Error(`List brand profiles failed (${res.status})`);
     const data = (await res.json()) as { items: ApiProfile[] };
     return Array.isArray(data.items) ? data.items : [];
@@ -342,14 +345,18 @@ class ProfileWriteForbiddenError extends Error {
 async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
   const serverStamps = new Map<string, number>();
   for (const part of chunk(items, SERVER_MAX_BATCH)) {
-    const res = await fetch("/api/brand-profiles", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-client-id": inventoryClientId(),
+    const res = await fetchWithTimeout(
+      "/api/brand-profiles",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-client-id": inventoryClientId(),
+        },
+        body: JSON.stringify({ items: part }),
       },
-      body: JSON.stringify({ items: part }),
-    });
+      10_000,
+    );
     if (res.status === 403) throw new ProfileWriteForbiddenError("Save");
     if (!res.ok) throw new Error(`Save brand profiles failed (${res.status})`);
     let data: { items?: ApiProfile[] };
@@ -389,14 +396,18 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
 
 async function apiDelete(keys: string[]): Promise<void> {
   for (const part of chunk(keys, SERVER_MAX_BATCH)) {
-    const res = await fetch("/api/brand-profiles", {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        "x-client-id": inventoryClientId(),
+    const res = await fetchWithTimeout(
+      "/api/brand-profiles",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "x-client-id": inventoryClientId(),
+        },
+        body: JSON.stringify({ keys: part }),
       },
-      body: JSON.stringify({ keys: part }),
-    });
+      10_000,
+    );
     if (res.status === 403) throw new ProfileWriteForbiddenError("Delete");
     if (!res.ok) throw new Error(`Delete brand profiles failed (${res.status})`);
   }
@@ -450,11 +461,27 @@ export async function flushProfileQueueStrict(): Promise<void> {
   // observe the queue in the small window between its completion and the
   // follow-up kick, making a healthy import report a misleading pending-save
   // error. Keep draining until the coalesced work has settled.
-  for (;;) {
+  const MAX_STRICT_FLUSH_ROUNDS = 3;
+  for (let round = 0; ; round++) {
+    if (round >= MAX_STRICT_FLUSH_ROUNDS) {
+      // A background reconciliation can keep re-enqueuing work while an
+      // acknowledged recipe save is waiting. Leave that work queued for the
+      // ordinary retry path rather than holding the recipe editor forever.
+      throw new Error("Profile write queue did not settle");
+    }
+    const queueBefore = JSON.stringify(readQueue());
     await flushProfileQueue();
     if (lastFlushError) throw lastFlushError;
     if (flushInFlight || flushAgain) continue;
-    if (readQueue().length === 0) return;
+    const queueAfter = JSON.stringify(readQueue());
+    if (queueAfter === "[]") return;
+    // A profile-cache identity handoff can temporarily make the queue
+    // ineligible for a flush. The ordinary background retry will try again
+    // once the cache is current, but an explicit recipe acknowledgement must
+    // not spin forever waiting for that retry.
+    if (queueAfter === queueBefore) {
+      throw new Error("Profile write queue made no progress");
+    }
   }
 }
 

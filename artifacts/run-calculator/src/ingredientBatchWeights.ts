@@ -131,6 +131,22 @@ export function normalizeBatchWeightChanges(
   return [...byKey.values()];
 }
 
+/**
+ * Append profile/run propagation without blocking canonical server saves.
+ * Every returned chain resolves after reporting its own failure, so one failed
+ * fan-out cannot prevent a later acknowledged weight from propagating.
+ */
+export function enqueueBatchWeightPropagation(
+  chain: Promise<void>,
+  propagate: () => Promise<void>,
+  onError: (error: unknown) => void,
+): Promise<void> {
+  return chain
+    .then(propagate)
+    .catch((error) => {
+      onError(error);
+    });
+}
 type RecipeRowLike = { lbs?: number | string | null };
 
 function hasRecipeRows(rows: unknown): boolean {

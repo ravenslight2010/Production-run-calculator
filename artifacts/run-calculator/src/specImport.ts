@@ -626,6 +626,7 @@ function canonicalizeParsed(
       recipes,
       ...(raw.note ? { note: raw.note } : {}),
       ...(warnings.length ? { warnings } : {}),
+      ...(raw.unresolved?.length ? { unresolved: raw.unresolved } : {}),
     },
     resolved,
   };
@@ -1426,7 +1427,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "38";
+export const SPEC_PARSE_VERSION = "39";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1959,7 +1960,7 @@ export async function prepareSpecImportFromText(
   const ws = XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Photographed spec sheets");
   const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  return prepareSpecImport(bytes, name, signal);
+  return prepareSpecImportWithAi(bytes, name, signal);
 }
 
 /** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */
