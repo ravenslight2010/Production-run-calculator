@@ -5,14 +5,11 @@
   "scripts": {
     "generate": "orval --config ./orval.config.ts",
     "codegen": "pnpm run generate && pnpm -w run typecheck:libs",
-    "check:toolchain": "node ./check-toolchain.mjs",
-    "check:shell": "shellcheck ./check-generated.sh ./check-generated.test.sh ./check-typescript-7-bridge.sh",
+    "check:shell": "shellcheck ./check-generated.sh ./check-generated.test.sh",
     "check-generated": "pnpm run check:shell && bash ./check-generated.sh",
-    "check:typescript-7-bridge": "bash ./check-typescript-7-bridge.sh",
     "test:generated-isolation": "bash ./check-generated.test.sh"
   },
   "devDependencies": {
-    "orval": "8.32.0",
-    "typescript": "6.0.3"
+    "orval": "8.31.0"
   }
 }
