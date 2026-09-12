@@ -241,7 +241,7 @@ export default memo(function MixesTabContent() {
                                         </div>
                                         {/* Already made — controlled component so state stays stable during saves */}
                                         {(() => {
-                                          const liveMix = ctx.mixPlanItems.find((mx) => mx.id === m.mixId);
+                                         const liveMix = ctx.mixPlanItems.find((mx) => mx.id === m.mixId);
                                           return liveMix ? (
                                             <MixAlreadyMadeInput
                                               mix={liveMix}
