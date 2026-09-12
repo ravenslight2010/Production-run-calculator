@@ -92,3 +92,53 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **How to apply**:
 - All merged into main, feature branch rebased on top
 - Pushed: main (65107e86) + feat/warehouse-snapshot-server (881b4711)
+
+---
+
+## Mix Plan Snapshot — Server-authority migration (feat/mix-plan-snapshot-server)
+
+**Date**: 2026-09-12
+**Branch**: `feat/mix-plan-snapshot-server`
+**Files changed**:
+- `artifacts/api-server/src/lib/mixPlanSnapshot.ts` (new — pure functions)
+- `artifacts/api-server/src/routes/mixPlanSnapshot.ts` (new — GET /inventory/mix-plan-snapshot)
+- `artifacts/api-server/src/routes/capabilities/inventoryOperations.ts` (mount new route)
+- `artifacts/api-server/src/lib/mixPlanSnapshot.test.ts` (new — 5 tests)
+- `artifacts/run-calculator/src/mixPlanSnapshotClient.ts` (new — make-day-keyed shared cache + hook)
+- `artifacts/run-calculator/src/inventoryShared.ts` (added MixPlanSnapshot type + fetch)
+- `artifacts/run-calculator/src/components/MixesTabContent.tsx` (prefer server plan when online)
+
+**What was wrong**:
+- The Mix Plan tab computed the make-day plan locally on every device from
+  localStorage profiles + synced schedules — CPU waste and potential drift
+  between devices.
+
+**What the fix was**:
+- Server: `GET /inventory/mix-plan-snapshot?makeDay=...&today=...` builds the
+  plan with the SAME `@workspace/mixes buildMixPlan` the web tab uses, fed from
+  canonical daily-sync runs (today's live dayState runs + future scheduled runs
+  resolved via brand profiles) and the server mix pool. Run resolution mirrors
+  the web `valsToMixRun` (computeSummaryStats totalPizzasForSauce + totalCases,
+  computeCheesePerPizzaOz expansion across the 4 applicator slots).
+- Client: `useMixPlanSnapshot(makeDay)` (make-day-keyed module cache, deduped
+  in-flight per day, drop-on-failure → local fallback). `MixesTabContent` uses
+  `serverSnap.plan` when online and only builds the local runs+plan inside a
+  lazy IIFE when the snapshot is unavailable. Refreshes when make-day or the
+  canonical mix pool signature changes.
+
+**Why it was needed**:
+- Final step of the server-side migration order: calc adoption, summaryStats,
+  warehouse snapshot, mix plan. App slot validation was already server-authored
+  via the auto-track schedule (`buildAutoTrackScheduleFromPayload` computes per
+  app cadence + validForClaim and broadcasts over SSE; local math = offline
+  fallback).
+
+**Key gotchas**:
+- Route must be under `/inventory/...` prefix (family routers mounted at API root).
+- `normalizeMix` returns `Mix | null` — filter before typing as `Mix[]`.
+- Server run values from the DB may lack optional recipe fields; recipes are
+  normalized through `toRecipeRows` before `computeCheesePerPizzaOz` and values
+  are cast `unknown as SummaryStatsInput` (the lib guards reads).
+- The live-runs inclusion uses `row.date === facilityDate()`; scheduled rows use
+  `date >= today` with `clientToday` semantics (client `?today=` param mirrors
+  `/sync/scheduled`), so the boundary can't drift for a user behind UTC.
