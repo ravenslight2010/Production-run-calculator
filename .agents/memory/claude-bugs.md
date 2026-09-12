@@ -64,3 +64,65 @@ Real web/mobile clients always send `?today=` (confirmed by checking every call 
 **How confirmed:** Ran the failing test, read its own diagnostic output (which names the exact file/line), then read `LineMapDashboard.tsx` directly — it genuinely needs the live clock (zone status badges, depletion countdowns, and next-batch timers all derive from `nowTime`/`elapsedBatchSec`/`secUntilNextBatch`), so this is a real, intentional live subscription, not an accidental one.
 
 **Fix:** Added `"components/LineMapDashboard.tsx"` to `ALLOWED_FILES` with an explanatory comment, following the exact style of the existing entries (`GlanceOverlay.tsx`, `CompactRunStrip.tsx`, `ScreenModeView.tsx`). Re-ran the test file: 3/3 passing.
+
+---
+
+### 2026-09-10 — `consume-day-start` authorization matrix entry misplaced (test-accuracy, not a real hole)
+
+**File(s):** `artifacts/api-server/src/routes/index.ts`
+
+**Problem:** `POST /inventory/consume-day-start` was grouped into the `"floor-operational"` (no capability required) bucket in `mutationAuthorizationInventory`, but the actual route requires `requireCapability("manage-inventory")`. The introducing commit (`feat: Inventory Auto-Deduction — All Features (#40)`) explicitly says the endpoint is "manager-gated" and that a `403` for non-managers is expected/harmless (the client calls it best-effort on boot). The route code was correct; only the test-facing matrix entry was wrong, which meant the authorization guard test wasn't actually verifying this endpoint's real access control.
+
+**How confirmed:** Ran the failing `roles.integration.test.ts` ("keeps every registered application write in the mutation authorization matrix"), read the exact error naming the mismatched route, then read the introducing commit's message directly to confirm which side (code vs. matrix) was correct.
+
+**Fix:** Moved `"POST /inventory/consume-day-start"` out of the undefined-capability `floor-operational` group and into the existing `capability-gated` / `manage-inventory` group, matching the route's real middleware. Re-ran `roles.integration.test.ts`: 168/168 passing.
+
+---
+
+### 2026-09-10 — `cartonSize` missing from `CURRENT_BLANK_RUN_VALUE` (data-loss guard degradation)
+
+**File(s):** `artifacts/api-server/src/lib/protectRunValues.ts`
+
+**Problem:** `cartonSize` was added to the client's `DEFAULT_VALUES` (default `1`) as part of packaging work, but never added to the server's `CURRENT_BLANK_RUN_VALUE` — the exact-match template the "empty-over-populated" guard uses to decide whether an incoming run value is genuinely blank. A blank run now carrying `cartonSize` would no longer deep-equal the template, silently re-opening the "I entered it, it vanished" data-loss bug the guard exists to prevent.
+
+**How confirmed:** `blankRunValueSync.test.ts` (a source-parsing lint test comparing the two constants across artifacts) failed with an explicit diagnostic naming the missing field and its expected value.
+
+**Fix:** Added `cartonSize: 1` to `CURRENT_BLANK_RUN_VALUE`. Re-ran the test: 6/6 passing.
+
+---
+
+### 2026-09-10 — `cartonSize` missing from legacy-fallback test's documented exceptions
+
+**File(s):** `artifacts/run-calculator/src/pickCurrentRunPushValue.test.ts`
+
+**Problem:** A test asserting "empty blob parses to all-zero quantity fields" enumerates deliberate non-zero exceptions (`speedAdjustment`, machine times, tunnel pre/post times) but didn't include `cartonSize` (correctly defaults to `1`, a packaging setting, not an accumulating quantity), so the test failed against otherwise-correct runtime behavior.
+
+**How confirmed:** Ran the failing test; the actual parsed value was `1` (correct), the test's blanket expectation of `0` was stale.
+
+**Fix:** Added `cartonSize` as a documented exception (expect `1`), same pattern as `speedAdjustment`. Re-ran the test: 17/17 passing.
+
+---
+
+### 2026-09-10 — `MixAlreadyMadeInput`: ambiguous test query + regressed generic error message
+
+**File(s):** `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx`, `artifacts/run-calculator/src/components/MixAlreadyMadeInput.test.tsx`
+
+**Problem:** Two issues from the same "Made today" (Feature B2) field addition:
+1. The component gained a second number input, but had no accessible labels (`<span>` siblings only, no `<label>`/`aria-label`), so `screen.getByRole("spinbutton")` in the existing tests became ambiguous (matched 2 elements).
+2. `saveField` was generalized to handle both "already made" and "made today" in one function, and in the process the field-specific toast title ("Couldn't save already made amount") was flattened to a generic "Couldn't save mix amount" — confirmed via git history that the specific message was the original, intentional one.
+
+**How confirmed:** Ran the failing tests; read the component source directly; checked `git log -p` on the component to confirm the specific toast title predated the generalization.
+
+**Fix:** Added `aria-label="Already made"` / `aria-label="Made today"` to the two inputs (also a real accessibility improvement). Updated the two ambiguous test queries to `getByRole("spinbutton", { name: "Already made" })`. Restored the field-specific toast title (`field === "already" ? ... : "Couldn't save made today amount"`). Re-ran the test file: 4/4 passing.
+
+---
+
+### 2026-09-10 — `protectRunValues.test.ts`'s own `CURRENT_BLANK` fixture also missing `cartonSize`
+
+**File(s):** `artifacts/api-server/src/lib/protectRunValues.test.ts`
+
+**Problem:** This test file keeps its own local `CURRENT_BLANK` literal (a duplicate of the source `CURRENT_BLANK_RUN_VALUE`, not an import) for constructing test payloads. After fixing `CURRENT_BLANK_RUN_VALUE` to include `cartonSize: 1` (see the earlier entry in this file), the test's own copy fell out of sync: its blank-shaped fixtures no longer matched what the real guard now considers "blank," so the guard stopped recognizing them as blank and the LWW-merge path took over instead — surfacing as a full 83-key object where a small preserved fixture was expected.
+
+**How confirmed:** Running the full `api-server` suite (not just the single file in isolation) surfaced 2 failures in `protectRunValues.test.ts` that a single-file run of that same file had NOT shown immediately after the `CURRENT_BLANK_RUN_VALUE` fix — a reminder that isolated single-file test runs can miss cross-file fixture drift; a full suite run is the only reliable check for this class of issue.
+
+**Fix:** Added `cartonSize: 1` to the test file's own `CURRENT_BLANK` fixture, matching the source constant. Re-ran the file: 90/90 passing.
