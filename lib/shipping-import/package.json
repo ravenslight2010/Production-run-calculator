@@ -10,10 +10,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@workspace/spec-import": "workspace:*",
-    "@workspace/name-match": "workspace:*"
+    "@workspace/name-match": "workspace:*",
+    "@workspace/spec-import": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^4.1.9"
+    "vitest": "4.1.11"
   }
 }

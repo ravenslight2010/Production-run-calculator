@@ -13,15 +13,15 @@
   },
   "dependencies": {
     "@workspace/cheese-import": "workspace:*",
+    "@workspace/name-match": "workspace:*",
     "@workspace/premix-import": "workspace:*",
     "@workspace/shipping-import": "workspace:*",
     "@workspace/spec-import": "workspace:*",
-    "@workspace/name-match": "workspace:*",
     "xlsx": "npm:@e965/xlsx@^0.20.3"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "tsx": "catalog:",
-    "vitest": "^4.1.9"
+    "vitest": "4.1.11"
   }
 }
