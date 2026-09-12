@@ -223,7 +223,7 @@ async function putDayState(userId: string, payload: unknown): Promise<void> {
   const res = await req(
     userId,
     "PUT",
-    `/api/sync/today?today=${todayStr()}`,
+    `/api/sync/today?today=${facilityDate()}`,
     { senderId: "test", payload },
   );
   expect(res.status).toBe(200);
