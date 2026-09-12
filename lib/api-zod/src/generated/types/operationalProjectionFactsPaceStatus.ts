@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus];
+export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus] | null;
 
 
 export const OperationalProjectionFactsPaceStatus = {
