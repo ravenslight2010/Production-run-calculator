@@ -393,7 +393,7 @@ export const OperationalProjectionFactsRunStatus = {
   ended: 'ended',
 } as const;
 
-export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus];
+export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus] | null;
 
 
 export const OperationalProjectionFactsPaceStatus = {
