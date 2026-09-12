@@ -27,6 +27,7 @@ import {
   type UseFirstItemInput,
   type UseFirstEntry,
 } from "@workspace/inventory-math";
+import type { MixPlanGroup } from "@workspace/mixes";
 
 // Consumption/summary math now lives in @workspace/inventory-math (shared with
 // mobile so the two can't drift). Re-export the types so this module's public
@@ -1207,6 +1208,24 @@ export type WarehouseSnapshot = {
 };
 export const fetchWarehouseSnapshot = () =>
   api<WarehouseSnapshot>("/inventory/warehouse-snapshot");
+
+// Server-authority mix plan snapshot. The server builds the make-day plan
+// (buildMixPlan over canonical live + scheduled runs and the mix pool) so every
+// device online sees identical batches/lbs; the Mixes tab prefers this when
+// online and falls back to its own buildMixPlan call when offline.
+export type MixPlanSnapshot = {
+  plan: MixPlanGroup[];
+  generatedAt: number;
+};
+export function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export const fetchMixPlanSnapshot = (makeDay: string) =>
+  api<MixPlanSnapshot>(
+    `/inventory/mix-plan-snapshot?makeDay=${encodeURIComponent(makeDay)}&today=${encodeURIComponent(localToday())}`,
+  );
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");
 export const updateInventorySettings = (body: InventorySettings) =>
