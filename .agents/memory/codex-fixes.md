@@ -330,3 +330,18 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Files changed**: `pnpm-lock.yaml` (range already `^7.87.0`)
 **What**: `pnpm update -r react-hook-form` brought the lockfile to 7.88.0 (minor). Verified by GitHub sweep via `pnpm outdated`; typescript 7 and @replit/vite-plugin-cartographer 0.6.1 are the only other outdated items and both are blocked (TS7 resolution bug; cartographer PR #48 typecheck fails).
 **Verification**: run-calculator + mockup-sandbox typechecks pass; MixAlreadyMadeInput suite passes.
+
+
+## Fix CI: skill-catalog repo-root smoke test assumed platform-injected .local (fix/skill-catalog-ci)
+
+**Date**: 2026-09-13
+**Branch**: `fix/skill-catalog-ci`
+**Files changed**: `scripts/src/skill-catalog.test.mts`
+
+**What was wrong**: Replit-added test `ffea5a56` ("CLI checks repository skill roots with its default project root") asserted `PASS .local/skills/agent-inbox/SKILL.md [managed]` on the repo root. `.local/*` is gitignored and never provisioned in GitHub Actions, so the Typecheck job (which runs `check:skill-catalog` + `test:skill-catalog`) was red on main and on every PR — that is why dependabot PRs #47/#48/#49 and Claude PR #46 all showed "Typecheck fail" (unrelated to their actual changes).
+
+**What the fix was**: gated the `.local` assertion on `existsSync(...)` so the smoke test verifies the injected skill only when the platform actually injects it (Replit); the existing "missing roots warn so platform-injected roots remain optional in CI" test covers the absent case.
+
+**Why it was needed**: restore a meaningful CI signal so real regressions (and the actual upgrade candidates) can be reviewed instead of everything showing the same unrelated failure.
+
+**Verification**: `test:skill-catalog` 13/13 pass; `check:skill-catalog` exit 0 (18 skills, 0 failures).

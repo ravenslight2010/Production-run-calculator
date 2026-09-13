@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -317,10 +318,16 @@ test("CLI checks repository skill roots with its default project root", async ()
     result.stdout,
     /PASS \.agents\/skills\/brainstorming\/SKILL\.md \[editable\]/,
   );
-  assert.match(
-    result.stdout,
-    /PASS \.local\/skills\/agent-inbox\/SKILL\.md \[managed\]/,
-  );
+  // .local/skills is platform-injected: present on Replit, but absent in
+  // GitHub CI checkouts (.local/* is gitignored). Only assert it when the
+  // injected skill actually exists; the "missing roots warn" test below
+  // covers the absent case.
+  if (existsSync(join(packageRoot, ".local/skills/agent-inbox/SKILL.md"))) {
+    assert.match(
+      result.stdout,
+      /PASS \.local\/skills\/agent-inbox\/SKILL\.md \[managed\]/,
+    );
+  }
   assert.match(result.stdout, /Summary:[^\n]*0 failure\(s\),/);
 });
 
