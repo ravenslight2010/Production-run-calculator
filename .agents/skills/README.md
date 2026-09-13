@@ -50,6 +50,12 @@ changes to secondary or platform-managed content.
   before installation. Accepted content goes only to editable roots and must
   pass an explicit review recommendation and approval gate before files are
   copied.
+- `evidence-hygiene` controls sanitization and provenance for screenshots,
+  traces, HAR files, logs, and reports; release, browser, security, and
+  deployment skills still own what evidence is required.
+- `ci-security-review` performs read-only workflow trust-boundary review.
+  `security-scan` owns supported automated scans, while `release-checklist` and
+  `production-go` own release readiness and the final decision.
 
 When maintaining skills, preserve these boundaries and existing safety
 requirements. Do not rewrite descriptions based on unavailable model
