@@ -303,3 +303,22 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: moves the workspace one major closer to TS 7 (7.0.x still needs a resolution-bug fix before it can land here).
 
 **Verification**: `tsc --version` = 6.0.3; `typecheck:libs` exit 0; api-server + run-calculator + mockup-sandbox + scripts typechecks exit 0; generated-client build (`lib/api-client-react`, `lib/api-zod`) OK; vitest: blankRunValueSync 6/6 (exercises the TS compiler API), protectRunValues 90/90, inventory-math 74/74, api-zod 3/3. (Full `pnpm run typecheck` still stops only at `shellcheck: not found` — host-only, CI runs it.)
+
+
+## Applied Claude PR #46 remainder — auth matrix + MixAlreadyMade a11y/toasts (merge/claude-pr46-remainder)
+
+**Date**: 2026-09-13
+**Branch**: `merge/claude-pr46-remainder`
+**Files changed**:
+- `artifacts/api-server/src/routes/index.ts` (consume-day-start auth-matrix bucket)
+- `artifacts/run-calculator/src/components/MixAlreadyMadeInput.tsx` (aria-labels + field-specific toast titles)
+- `artifacts/run-calculator/src/components/MixAlreadyMadeInput.test.tsx` (named spinbutton queries + toast expectation)
+- `.agents/memory/claude-bugs.md` (appended Claude's five 2026-09-10 entries from PR #46)
+
+**What was wrong / intent**: During a GitHub sweep found Claude PRs #44/#46 with real fixes still unmerged. #44's content (username lowercase unique index, facilityDate fallback, LineMap allowlist) was already in main — superseded. PR #46's cartonSize/protectRunValues/pickCurrentRunPushValue parts also already landed via earlier merges; what remained was: consume-day-start listed in the no-capability auth bucket while the route requires `manage-inventory`, and MixAlreadyMadeInput missing accessible labels + flattened toast titles.
+
+**What the fix was**: moved `POST /inventory/consume-day-start` into the capability-gated manage-inventory group (test-accuracy; CI roles.integration.test validates); restored `aria-label` on both number inputs and field-specific "Couldn't save already made amount"/"Couldn't save made today amount" toasts; switched tests to named `getByRole` queries; ported Claude's memory entries.
+
+**Why it was needed**: authorization matrix must mirror route middleware so the guard test verifies real access control; a11y + precise error messages for the mixes card.
+
+**Verification**: api-server typecheck exit 0; run-calculator typecheck exit 0; vitest MixAlreadyMadeInput + blankRunValueSync + pickCurrentRunPushValue 27/27; protectRunValues 90/90.
