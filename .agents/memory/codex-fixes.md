@@ -354,3 +354,26 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Files changed**: `pnpm-workspace.yaml` (catalog), `pnpm-lock.yaml`
 **What**: catalog `'@types/node': ^25.9.6` -> `^26.5.1`. Verified locally after the skill-catalog CI fix: typecheck:libs + api-server + run-calculator + mockup-sandbox + scripts all pass. Supersedes dependabot PR #47 (its earlier Typecheck red was the stale skill-catalog assertion that `fix/skill-catalog-ci` already fixed).
 **Why**: stay current on Node type defs for the Node 22/24 runtime.
+
+## Live server-calc streaming (slice 1)
+
+**Date**: 2026-09-13
+**Branch**: `feat/live-calc-stream`
+**Files changed**:
+- `artifacts/api-server/src/lib/liveCalcTick.ts` (new) — pure `shouldEmitLiveCalcTick` + `buildLiveCalcTickFrame`; `DEFAULT_LIVE_CALC_TICK_MS = 5000`
+- `artifacts/api-server/src/routes/sync.ts` — per-client calc tick on the sync SSE (cache `lastData`/`lastCanonicalRevision`/`lastCalcEmitMs`; interval `LIVE_CALC_TICK_MS`, floor 2000; read-only, no DB reads)
+- `artifacts/api-server/src/routes/sync.liveCalcTick.test.ts` (new) — 9 unit tests
+- `artifacts/api-server/src/routes/sync.integration.test.ts` — active-run calc-tick SSE integration test (CI, needs `DATABASE_URL`)
+- `artifacts/run-calculator/src/operationalState.ts` — `LIVE_CALC_STALE_MS = 10_000` + pure `shouldUseServerCalc`
+- `artifacts/run-calculator/src/operationalState.test.ts` — 6 freshness-window tests
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — replaced the `operationalDisplayState === "confirmed"` adoption gate with the freshness-window `adoptServerCalc` guard (used by both the `calc` memo and `operationalCalc`), so stale/offline/run-switch falls back to local `computeCalc`
+- `artifacts/run-calculator/src/contexts/__tests__/LiveRunContext.calcTick.test.tsx` (new) — 6 adoption/fallback tests
+- `docs/idea-backlog.md` §13 — marked slice 1 done
+
+**What was wrong / missing**: while a run was active, the web client re-ran the heavy `computeCalc` every clock tick (1s) even though the server already computed the same calc. The server only sent operational frames on events/heartbeat, so the client had no fresh server calc to lean on.
+
+**What the fix was**: the server emits a 5s calc tick (`calcTick: true` + reused `ServerCalcResult`/`operationalProjection` payload) on the existing sync SSE while a run is active (started, not ended) — idle days emit nothing, and ticks are pure read-only derivations that never write day state or LWW stamps. The client adopts the streamed `serverCalc` whenever online + sync-connected + the receipt is fresh (≤ 10s = 2 tick intervals) + the receipt is for the current run; otherwise it falls back to local `computeCalc`, so there is never a blank UI.
+
+**Why it was needed**: battery + consistency — stops per-second client recomputation when online while keeping the offline path exactly as before.
+
+**Verification**: `LiveRunContext.clock-isolation`, `operationalState`, `LiveRunContext.calcTick` (26/26), api-server `sync.liveCalcTick` (9/9); run-calculator + api-server typecheck clean; lib typechecks clean. Integration SSE test runs in CI with `DATABASE_URL`.
