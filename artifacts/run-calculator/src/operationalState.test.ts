@@ -109,3 +109,29 @@ describe("shouldUseServerCalc (freshness-window adoption)", () => {
     })).toBe(true);
   });
 });
+
+const pendingReceipt = (runId: string, capturedAt: number) => ({
+  runId,
+  snapshotId: `pending-snap-${runId}`,
+  capturedAt,
+});
+
+describe("shouldUseServerCalc for pending (setup) runs", () => {
+  it("is true for a fresh receipt on a pending run (no startedAt)", () => {
+    expect(shouldUseServerCalc({
+      online: true,
+      syncConnected: true,
+      receipt: pendingReceipt("run-pending-1", 90_000),
+      nowMs: 95_000, // 5s after capture — fresh
+    })).toBe(true);
+  });
+
+  it("is false for a stale receipt on a pending run", () => {
+    expect(shouldUseServerCalc({
+      online: true,
+      syncConnected: true,
+      receipt: pendingReceipt("run-pending-1", 80_000),
+      nowMs: 95_000, // 15s after capture — stale
+    })).toBe(false);
+  });
+});
