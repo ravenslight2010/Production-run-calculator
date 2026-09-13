@@ -274,6 +274,7 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   cartoned: "cartoned",
   labelPosition: "",
   cartonsPerCase: 0,
+  cartonSize: 1,
   labelsPerRoll: 0,
   topLabelsPerRoll: 0,
   bottomLabelsPerRoll: 0,

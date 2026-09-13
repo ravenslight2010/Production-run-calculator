@@ -166,6 +166,7 @@ const CURRENT_BLANK = {
   cartoned: "cartoned",
   labelPosition: "",
   cartonsPerCase: 0,
+  cartonSize: 1,
   labelsPerRoll: 0,
   topLabelsPerRoll: 0,
   bottomLabelsPerRoll: 0,
