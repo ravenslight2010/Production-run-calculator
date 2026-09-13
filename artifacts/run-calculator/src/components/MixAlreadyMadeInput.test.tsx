@@ -47,7 +47,9 @@ describe("MixAlreadyMadeInput", () => {
       />,
     );
 
-    const input = screen.getByRole("spinbutton");
+    // The component renders two spinbuttons ("Already made" + "Made today").
+    // These tests exercise the already-made field, which is the first one.
+    const input = screen.getAllByRole("spinbutton")[0];
     await user.clear(input);
     await user.type(input, "7.5");
     await user.tab();
@@ -57,7 +59,7 @@ describe("MixAlreadyMadeInput", () => {
     expect(input).toHaveProperty("value", "7.5");
     expect(toast).toHaveBeenCalledWith({
       variant: "destructive",
-      title: "Couldn't save already made amount",
+      title: "Couldn't save mix amount",
       description: "Please check your connection and try again.",
     });
   });
@@ -79,7 +81,9 @@ describe("MixAlreadyMadeInput", () => {
       />,
     );
 
-    const input = screen.getByRole("spinbutton");
+    // The component renders two spinbuttons ("Already made" + "Made today").
+    // These tests exercise the already-made field, which is the first one.
+    const input = screen.getAllByRole("spinbutton")[0];
     await user.clear(input);
     await user.type(input, "4");
     await user.tab();
