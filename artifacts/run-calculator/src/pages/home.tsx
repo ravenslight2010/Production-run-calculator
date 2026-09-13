@@ -7674,6 +7674,7 @@ export default function Home() {
   const [serverCalc, setServerCalc] = useState<Calc | null>(null);
   // Server-computed summary stats keyed by run ID — used when online to avoid local recomputation.
   const serverSummaryStatsRef = useRef<Record<string, unknown>>({});
+  const serverRunLinesRef = useRef<Record<string, unknown>>({});
   const serverProjectionRef = useRef<OperationalProjection | null>(null);
   const [serverProjection, setServerProjection] = useState<OperationalProjection | null>(null);
   const serverClockOffsetMsRef = useRef(0);
@@ -9063,6 +9064,7 @@ export default function Home() {
           operationalProjection?: OperationalProjection | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
           summaryStats?: Record<string, unknown>;
+          runLines?: Record<string, unknown>;
           serverTime?: number;
           canonicalRevision?: number;
           masterDataChanged?: boolean;
@@ -9093,6 +9095,9 @@ export default function Home() {
         // Adopt server-computed summary stats when available (offline fallback: compute locally)
         if (msg.summaryStats && typeof msg.summaryStats === "object") {
           serverSummaryStatsRef.current = msg.summaryStats;
+        }
+        if (msg.runLines && typeof msg.runLines === "object") {
+          serverRunLinesRef.current = msg.runLines;
         }
         if (msg.initial) {
           // An initial frame is also the reconnect baseline: refresh every
@@ -14062,11 +14067,20 @@ export default function Home() {
     () => {
       if (!needsSummarySnapshot) return new Map();
       const summaries = new Map(persistedRunSummaryStats);
-      // Current run always computes locally (form is being edited)
-      if (currentRunId) summaries.set(currentRunId, computeSummaryStats(v));
+      if (currentRunId) {
+        const serverSS = serverSummaryStatsRef.current;
+        // Adopt server-computed stats for the current run when online and the
+        // server has data (it only has data after a sync push, which happens on
+        // every form change).  Offline or no server data → compute locally.
+        if (isOnline && serverSS && typeof serverSS === "object" && serverSS[currentRunId]) {
+          summaries.set(currentRunId, serverSS[currentRunId] as ReturnType<typeof computeSummaryStats>);
+        } else {
+          summaries.set(currentRunId, computeSummaryStats(v));
+        }
+      }
       return summaries;
     },
-    [needsSummarySnapshot, persistedRunSummaryStats, currentRunId, v],
+    [needsSummarySnapshot, persistedRunSummaryStats, currentRunId, v, isOnline],
   );
   const activeRunIds = useMemo(() => buildActiveRunIds(dayState.runs), [dayState.runs]);
   const activeRuns = useMemo(
