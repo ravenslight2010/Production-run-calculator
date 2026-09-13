@@ -214,3 +214,77 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: hygiene — avoid transitive drift, stay on patched releases, reduce future audit noise.
 
 **Verification**: `typecheck:libs`, all artifact typechecks (api-server, run-calculator, mockup-sandbox, scripts), and `check-generated.sh` all pass.
+
+
+## Phase 1 — UI/runtime major upgrades (upgrade/phase1-ui-runtime)
+
+**Date**: 2026-09-13
+**Branch**: `upgrade/phase1-ui-runtime` (merged `047e388b`)
+**Files changed**:
+- Root + run-calculator `package.json` / `pnpm-lock.yaml` (react 19.3, framer-motion 13.2, lucide-react 1.45, recharts 3.10, react-day-picker 10.0, react-resizable-panels 4.12, @hookform/resolvers 5.9)
+- `artifacts/run-calculator/src/components/ui/resizable.tsx` (Group/Panel/Separator exports)
+- `artifacts/run-calculator/src/components/ui/calendar.tsx` (`table` -> `month_grid` classNames key)
+- `artifacts/run-calculator/src/components/ui/chart.tsx` (`TooltipContentProps`/`DefaultLegendContentProps`, `key={String(item.dataKey ?? key)}`)
+- `artifacts/run-calculator/src/pages/home.tsx`, `SetupProfileEditor` (zodResolver `as Resolver<FormValues>` casts)
+
+**What was wrong / intent**: these were the remaining breaking majors from the 2026-09-12 dep-refresh list; the new majors changed component APIs and type exports.
+
+**What the fix was**: bumped the majors and adapted the four UI component files to the new APIs; resolver casts handle zod 4 + react-hook-form v7 typing.
+
+**Verification**: typecheck + run-calculator tests green at merge.
+
+## Phase 2 — Server major upgrades (upgrade/phase2-server)
+
+**Date**: 2026-09-13
+**Branch**: `upgrade/phase2-server` (merged `f488083d`)
+**Files changed**: root `package.json`, `pnpm-lock.yaml`
+**Majors**: pino 10.3, pino-http 11, thread-stream 4.2, openai 7.15, p-retry 8.0, date-fns 4.4
+**What the fix was**: pure version bumps — zero code changes needed; all APIs used are compatible.
+
+## Phase 3 — Toolchain major upgrades (upgrade/phase3-toolchain)
+
+**Date**: 2026-09-13
+**Branch**: `upgrade/phase3-toolchain` (merged `a800e00b`)
+**Files changed**: root `package.json`, `pnpm-workspace.yaml` (pins), `pnpm-lock.yaml`
+**Majors**: vite 8.3 (rolldown), @vitejs/plugin-react 6.1, vitest 5.0 + @vitest/mocker 5.0, jsdom 30, chokidar 5
+**Key win**: vitest 5 now RUNS on the ARM64 host (rolldown native binaries) — validated inventory-math (74), api-zod (3), reorderNudgeCardParity (4), warehouseSnapshot (6); api-server errorHandler fails only from missing DATABASE_URL.
+
+## Phase 4 — zod 4 upgrade + regenerated client (upgrade/phase4-zod4)
+
+**Date**: 2026-09-13
+**Branch**: `upgrade/phase4-zod4` (merged `666e9be6`)
+**Files changed**:
+- Root `package.json`, `pnpm-workspace.yaml` (orval `override.zod.version: 4`), `pnpm-lock.yaml`
+- `lib/api-zod/src/generated/api.ts` (regenerated with orval v4 schemas)
+- `pickCurrentRunPushValue.test.ts` (cartonSize defaults to 1 — from inventory auto-deduction `b6cd9f3d`, not an invented quantity)
+- `MixAlreadyMadeInput.test.tsx` (two spinbuttons now; toast title changed to "Couldn't save mix amount")
+
+**What the fix was**: zod 3.25 -> 4.6.2 across the workspace; fixed two pre-existing stale tests exposed by zod 4 coercion. Full run-calculator vitest suite passes.
+
+## Phase 5 — TypeScript 7 deferred (upgrade/phase5-typescript, NOT MERGED)
+
+**Date**: 2026-09-13
+**Branch**: attempted on `main`, reverted before commit
+**Files changed**: none (reverted `package.json` + `pnpm-lock.yaml` back to `typescript: ~5.9.3`)
+
+**What was wrong** — two blockers, both environmental:
+1. TS 7 ships a Go native binary (`@typescript/typescript-linux-arm64/lib/tsc`). Under pnpm's default hardlink import, `/proc/self/exe` resolves into the content-addressed store (`files/<hash>-exec`) so the sibling `lib.d.ts` is not name-addressable => `panic: bundled: ...lib.d.ts does not exist`. Fixed locally with `package-import-method=copy` (real file copies => tsc runs).
+2. With copy method, `tsc` runs but TS 7.0.2 fails to resolve packages through pnpm's symlinked `node_modules` in the default path (`TS2307 Cannot find module 'vitest'`), while `--traceResolution` (sync path) and `--preserveSymlinks` both succeed => a TS 7.0.2 module-resolution bug on this host (latest stable is 7.0.2; no patch yet).
+
+**What the fix was**: reverted to `typescript: ~5.9.3`. Defer TS 7 until a patched 7.0.x/7.1 release; do not ship `preserveSymlinks` as a workaround (it changes module-identity semantics across the 46-project monorepo). TS 5.9.3 fully validated: `typecheck:libs`, all artifact typechecks, vitest suites.
+
+## Blank-guard cartonSize drift — protectRunValues (session 2026-09-13)
+
+**Date**: 2026-09-13
+**Branch**: `main` (direct)
+**Files changed**:
+- `artifacts/api-server/src/lib/protectRunValues.ts`
+- `artifacts/api-server/src/lib/protectRunValues.test.ts`
+
+**What was wrong**: `CURRENT_BLANK_RUN_VALUE` (server empty-over-populated template) was missing `cartonSize: 1`, which exists in `DEFAULT_VALUES` (`artifacts/run-calculator/src/types.ts`). Found by the lint-style guard `artifacts/run-calculator/src/blankRunValueSync.test.ts` (the only failure in a full 2592-test run-calculator sweep). Drift degrades the blank guard: a blank run carrying `cartonSize` no longer deep-equals the template and silently falls through to stamp-only logic (the "I entered it, it vanished" data-loss class).
+
+**What the fix was**: added `cartonSize: 1` to `CURRENT_BLANK_RUN_VALUE` between `cartonsPerCase` and `labelsPerRoll` (mirrors `DEFAULT_VALUES`), and added the same field to the `CURRENT_BLANK` fixture in `protectRunValues.test.ts`. Client-side mirror (`isAllDefaultRunValue` in run-calculator `storage.ts`) compares against `DEFAULT_VALUES` directly, so no client change was needed. `LEGACY_BLANK_RUN_VALUE` intentionally untouched (older field set).
+
+**Why it was needed**: §6 of `.agents/skills/sync-invariant-check/SKILL.md` — any field added to `DEFAULT_VALUES` must be added to `CURRENT_BLANK_RUN_VALUE`.
+
+**Verification**: `blankRunValueSync.test.ts` 6/6 pass; `protectRunValues.test.ts` 90/90 pass; `typecheck:libs`, api-server typecheck, all artifact typechecks, api-zod tests pass. (`pnpm run typecheck` full gate stops at `shellcheck: not found` — missing binary on this host, CI-only tool.)
