@@ -212,7 +212,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("floor-operational", "scoped", "allowed", undefined, [
     "POST /completed-history", "POST /field-checks/observations",
-    "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume", "POST /inventory/consume-day-start",
+    "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
     "POST /run-suggestions/follow-up", "POST /sync/operational-intents",
     "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
@@ -244,7 +244,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/count-observations", "POST /inventory/count-observations/:id/cancel",
     "POST /inventory/count-observations/:id/apply", "POST /inventory/adjust", "POST /inventory/locations",
     "PATCH /inventory/locations/:id", "DELETE /inventory/locations/:id", "POST /inventory/transfer",
-    "POST /inventory/merge", "PUT /inventory/settings",
+    "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
