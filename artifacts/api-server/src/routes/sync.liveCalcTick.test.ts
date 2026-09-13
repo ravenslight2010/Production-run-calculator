@@ -58,3 +58,75 @@ describe("buildLiveCalcTickFrame", () => {
     expect(buildLiveCalcTickFrame(data, 4_999, 0, 0, TICK_MS)).toBeNull();
   });
 });
+
+import { buildSetupCalcTickFrame, shouldEmitSetupCalcTick } from "../lib/liveCalcTick";
+
+function runValues(id: string) {
+  return { dayState: { runs: [{ id }], currentIndex: 0 }, runValues: { [id]: { approxLineSpeed: 60 } } };
+}
+
+describe("shouldEmitSetupCalcTick", () => {
+  it("emits when the selected run has runValues (pending, no startedAt)", () => {
+    const data = runValues("r1");
+    expect(shouldEmitSetupCalcTick(data, 6_000, 0, TICK_MS)).toBe(true);
+  });
+
+  it("emits when the selected run has runValues AND is active", () => {
+    const data = {
+      dayState: { runs: [{ id: "r1", startedAt: 1000 }], currentIndex: 0 },
+      runValues: { r1: { approxLineSpeed: 60 } },
+    };
+    expect(shouldEmitSetupCalcTick(data, 6_000, 0, TICK_MS)).toBe(true);
+  });
+
+  it("does not emit when the day state is idle (no runs)", () => {
+    expect(shouldEmitSetupCalcTick({ dayState: { runs: [], currentIndex: 0 } }, 6_000, 0, TICK_MS)).toBe(false);
+    expect(shouldEmitSetupCalcTick(null, 6_000, 0, TICK_MS)).toBe(false);
+  });
+
+  it("does not emit when the selected run has no runValues", () => {
+    const data = { dayState: { runs: [{ id: "r1" }], currentIndex: 0 } };
+    expect(shouldEmitSetupCalcTick(data, 6_000, 0, TICK_MS)).toBe(false);
+  });
+
+  it("does not emit before the tick interval has elapsed", () => {
+    const data = runValues("r1");
+    expect(shouldEmitSetupCalcTick(data, 4_999, 0, TICK_MS)).toBe(false);
+  });
+
+  it("emits at exactly the tick interval boundary", () => {
+    const data = runValues("r1");
+    expect(shouldEmitSetupCalcTick(data, 5_000, 0, TICK_MS)).toBe(true);
+  });
+
+  it("does not emit when the run has ended", () => {
+    const data = {
+      dayState: { runs: [{ id: "r1", startedAt: 1000, endedAt: 1500 }], currentIndex: 0 },
+      runValues: { r1: { approxLineSpeed: 60 } },
+    };
+    expect(shouldEmitSetupCalcTick(data, 6_000, 0, TICK_MS)).toBe(true); // setup tick does NOT require active — still emits for ended runs with runValues for Setup display
+  });
+});
+
+describe("buildSetupCalcTickFrame", () => {
+  it("returns a frame with setupTick: true when the interval has elapsed", () => {
+    const data = runValues("r1");
+    const result = buildSetupCalcTickFrame(data, 6_000, 0, 42, TICK_MS);
+    expect(result).not.toBeNull();
+    expect(result!.frame).toMatchObject({ calcTick: true, setupTick: true, canonicalRevision: 42 });
+  });
+
+  it("returns null when the interval has not elapsed", () => {
+    const data = runValues("r1");
+    expect(buildSetupCalcTickFrame(data, 4_999, 0, 42, TICK_MS)).toBeNull();
+  });
+
+  it("returns null when there are no runs", () => {
+    expect(buildSetupCalcTickFrame({ dayState: { runs: [] } }, 6_000, 0, 42, TICK_MS)).toBeNull();
+  });
+
+  it("returns null when there is no runValues", () => {
+    const data = { dayState: { runs: [{ id: "r1" }] } };
+    expect(buildSetupCalcTickFrame(data, 6_000, 0, 42, TICK_MS)).toBeNull();
+  });
+});
