@@ -377,3 +377,22 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: battery + consistency — stops per-second client recomputation when online while keeping the offline path exactly as before.
 
 **Verification**: `LiveRunContext.clock-isolation`, `operationalState`, `LiveRunContext.calcTick` (26/26), api-server `sync.liveCalcTick` (9/9); run-calculator + api-server typecheck clean; lib typechecks clean. Integration SSE test runs in CI with `DATABASE_URL`.
+
+## Live server-calc streaming (slice 2)
+
+**Date**: 2026-09-13
+**Branch**: `feat/live-calc-stream-slice2`
+**Files changed**:
+- `artifacts/api-server/src/lib/liveCalcTick.ts` — new `shouldEmitSetupCalcTick` + `buildSetupCalcTickFrame` (emits when the selected run has `runValues`, regardless of started/ended state); `setupTick: true` frame marker.
+- `artifacts/api-server/src/routes/sync.ts` — per-client calc tick now tries active-run first, then falls back to setup tick for pending runs; import updated.
+- `artifacts/api-server/src/routes/sync.liveCalcTick.test.ts` — 11 new tests for setup-tick helpers (20/20 total).
+- `artifacts/run-calculator/src/operationalState.test.ts` — 2 new tests for pending-run freshness guard (11/11 total).
+
+**What was wrong**: slice 1 only emitted calc ticks for active (started, not ended) runs. Pending runs in the Setup tab had no server-authoritative calc, causing cold-start delays and potential cross-device inconsistency on tab switch.
+
+**What the fix was**: widened the tick predicate to emit for any selected run with `runValues` in the sync payload. The frame carries `setupTick: true` so the client can distinguish from active-run ticks. Active-run ticks take priority; setup ticks fill the gap for pending runs.
+
+**Why it was needed**: the Setup tab now benefits from server-authoritative calcs even before a run starts — all devices see identical projected values and the Live tab gets a fresh calc immediately on switch.
+
+**Verification**: api-server `sync.liveCalcTick` 20/20; api-server typecheck clean; run-calculator `operationalState` 11/11 + `LiveRunContext.calcTick` 6/6 + clock-isolation 3/3 = 28/28; web typecheck clean.
+
