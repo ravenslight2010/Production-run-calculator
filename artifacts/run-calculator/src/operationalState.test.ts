@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  LIVE_CALC_STALE_MS,
   classifyOperationalDisplay,
   shouldAdoptOperationalSnapshot,
+  shouldUseServerCalc,
 } from "./operationalState";
 
 const receipt = (runId: string, snapshotId: string, capturedAt: number) => ({
@@ -53,5 +55,57 @@ describe("operational snapshot adoption", () => {
     expect(classifyOperationalDisplay({
       online: false, syncConnected: false, selectedRunId: "run-1", receipt: current,
     })).toBe("offline");
+  });
+});
+
+describe("shouldUseServerCalc (freshness-window adoption)", () => {
+  const fresh = receipt("run-1", "s1", 90_000);
+
+  it("is false when offline or disconnected even with a fresh receipt", () => {
+    expect(shouldUseServerCalc({
+      online: false, syncConnected: true, receipt: fresh, nowMs: 95_000,
+    })).toBe(false);
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: false, receipt: fresh, nowMs: 95_000,
+    })).toBe(false);
+  });
+
+  it("is false when there is no server calc receipt", () => {
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: null, nowMs: 95_000,
+    })).toBe(false);
+  });
+
+  it("is false when the receipt is older than the freshness window", () => {
+    // capturedAt 90_000, now 100_001 -> 10_001ms of age > 10s window
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: 100_001,
+    })).toBe(false);
+  });
+
+  it("is true while the receipt is fresh (at or inside the window)", () => {
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: 95_000,
+    })).toBe(true);
+    // exactly at the default window boundary is still fresh
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: 100_000,
+    })).toBe(true);
+  });
+
+  it("honors an explicit windowMs override", () => {
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: 95_000, windowMs: 4_000,
+    })).toBe(false);
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: 94_000, windowMs: 4_000,
+    })).toBe(true);
+  });
+
+  it("exposes LIVE_CALC_STALE_MS as the 10s default window", () => {
+    expect(LIVE_CALC_STALE_MS).toBe(10_000);
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: 95_000,
+    })).toBe(true);
   });
 });
