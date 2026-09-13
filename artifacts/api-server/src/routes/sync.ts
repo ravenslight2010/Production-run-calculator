@@ -79,6 +79,11 @@ import {
   type OperationalProjection,
   type ServerCalcResult,
 } from "@workspace/live-calc";
+import {
+  DEFAULT_LIVE_CALC_TICK_MS,
+  buildLiveCalcTickFrame,
+  shouldEmitLiveCalcTick,
+} from "../lib/liveCalcTick";
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
 import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
 import { buildSyncHealthReport } from "../lib/syncHealth";
@@ -88,7 +93,16 @@ export { syncSnapshotId } from "../lib/syncContract";
 
 const router: IRouter = Router();
 
-type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string; resetEpoch: number };
+type SseClient = {
+  res: Response;
+  clientId: string;
+  scope: Scope;
+  watchDate: string;
+  resetEpoch: number;
+  lastData: unknown;
+  lastCanonicalRevision: number;
+  lastCalcEmitMs: number;
+};
 const clients = new Set<SseClient>();
 
 // Manual packaging corrections temporarily pause automatic case claims. The
@@ -380,6 +394,10 @@ function broadcast(
   })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
+      if (data != null) {
+        client.lastData = data;
+        client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
+      }
       try { client.res.write(msg); } catch {}
     }
   }
@@ -1687,6 +1705,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   let closed = false;
   let client: SseClient | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
+  let calcTick: NodeJS.Timeout | undefined;
 
   // Register this before any awaited work. The event stream lives on the
   // response; the incoming request can finish normally while that response
@@ -1695,6 +1714,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
     closed = true;
     if (client) clients.delete(client);
     if (heartbeat) clearInterval(heartbeat);
+    if (calcTick) clearInterval(calcTick);
   });
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -1739,7 +1759,11 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  client = { res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch };
+  client = {
+    res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch,
+    lastData: data, lastCanonicalRevision: row?.canonicalRevision ?? 0,
+    lastCalcEmitMs: initialServerTime,
+  };
   clients.add(client);
 
   // Refresh schedule leases on the established heartbeat. A schedule never
@@ -1779,6 +1803,30 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       }
     })();
   }, Math.max(1_000, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000));
+
+  // Active-run calc tick: re-emit the server-computed calc at a low cadence
+  // while a run is active so connected clients skip per-second local
+  // recomputation. Uses the cached day payload (no extra DB reads); the
+  // authoritative heartbeat still picks up other-device writes. Idle days
+  // emit nothing new. Read-only derivation — never writes day state.
+  const liveCalcTickMs = Math.max(2_000, Number(process.env.LIVE_CALC_TICK_MS) || DEFAULT_LIVE_CALC_TICK_MS);
+  calcTick = setInterval(() => {
+    if (!client || client.lastData == null) return;
+    const nowMs = Date.now();
+    const tick = buildLiveCalcTickFrame(
+      client.lastData,
+      nowMs,
+      client.lastCalcEmitMs,
+      client.lastCanonicalRevision,
+      liveCalcTickMs,
+    );
+    if (!tick) return;
+    client.lastCalcEmitMs = tick.lastCalcEmitMs;
+    const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
+    try {
+      client.res.write(`data: ${JSON.stringify({ ...tick.frame, ...live })}\n\n`);
+    } catch {}
+  }, liveCalcTickMs);
 });
 
 router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Promise<void> => {

@@ -415,17 +415,21 @@ Move more logic from client to server to improve consistency, reduce battery, an
 - Auto-track schedule computation (server-owned)
 - Wall-clock bootstrap (server-side timing)
 - Client skip-latch (reduces redundant network ticks)
+- **Live server-calc streaming (slice 1 — DONE)** — server is the live calc authority for the active run: a 5s calc tick on the sync SSE while a run is active; client adopts the streamed `serverCalc` inside a 10s freshness window and falls back to local `computeCalc` on stale/offline/run-switch. Pure tick helper + per-client SSE tick on the API (`artifacts/api-server/src/lib/liveCalcTick.ts`, `sync.ts`), freshness-window guard on the web (`operationalState.ts` `shouldUseServerCalc`), adoption in `LiveRunContext` / `home.tsx` SSE receive. Spec: `docs/superpowers/specs/2026-09-13-server-live-calc-stream-design.md`. Plan: `docs/superpowers/plans/2026-09-13-server-live-calc-stream.md`.
 
 ### What's Left
 - Move form calculations to server (yield, batch needs, dough supply)
 - Move ingredient math to server
 - Move run timing calculations to server
 - Client becomes thin display layer + input collector
+- Live server-calc streaming slice 2: setup-form calcs (yield, batch needs, dough supply) and ingredient/consumption sums beyond server snapshots
 
 ### Code References
 - `lib/live-calc/src/index.ts` — core calculation engine
 - `artifacts/run-calculator/src/liveRunCalc.ts` — client-side calc (to be migrated)
 - `artifacts/api-server/src/routes/run-calc.ts` — server calc endpoint (new)
+- `artifacts/api-server/src/lib/liveCalcTick.ts` — active-run calc tick policy
+- `artifacts/run-calculator/src/operationalState.ts` — `shouldUseServerCalc` freshness gate
 
 ---
 

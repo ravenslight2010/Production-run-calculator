@@ -2425,6 +2425,63 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
   });
 });
 
+describe("/sync/events — active-run calc tick", () => {
+  // The server re-emits the server-computed calc on a low cadence while a run
+  // is active. Uses LIVE_CALC_TICK_MS so the test does not wait on the 15s
+  // default heartbeat.
+  it("pushes a calcTick frame with serverCalc for the active run", async () => {
+    const date = "2030-03-13";
+    process.env.LIVE_CALC_TICK_MS = "2000";
+    await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "calc-tick-writer",
+        payload: {
+          dayState: { runs: [{ id: "active-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }] },
+          runValues: { "active-run": { casesNeeded: 240 } },
+          runValuesUpdatedAt: { "active-run": 1 },
+        },
+      }),
+    });
+
+    const ctrl = new AbortController();
+    const res = await fetch(
+      `${baseUrl}/api/sync/events?clientId=calc-tick-watcher&today=${date}`,
+      { headers: authHeaders(), signal: ctrl.signal },
+    );
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let tickFrame: Record<string, unknown> | undefined;
+    const deadline = Date.now() + 5_000;
+    try {
+      while (Date.now() < deadline && !tickFrame) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() ?? "";
+        for (const f of frames) {
+          const line = f.split("\n").find((entry) => entry.startsWith("data: "));
+          if (!line) continue;
+          const parsed = JSON.parse(line.slice("data: ".length)) as Record<string, unknown>;
+          if (parsed.calcTick === true) { tickFrame = parsed; break; }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      ctrl.abort();
+      delete process.env.LIVE_CALC_TICK_MS;
+    }
+
+    expect(tickFrame).toBeDefined();
+    const serverCalc = tickFrame!.serverCalc as { runId?: string } | null | undefined;
+    expect(serverCalc?.runId).toBe("active-run");
+    expect(typeof (tickFrame!.serverTime as number | undefined)).toBe("number");
+  });
+});
+
 describe("/sync/events — date-scoped broadcasts", () => {
   // Two live watchers on the SAME scope but DIFFERENT local dates must not
   // receive each other's pushes, or a peer behind/ahead of UTC would clobber its
