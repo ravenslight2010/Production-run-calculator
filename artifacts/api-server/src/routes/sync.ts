@@ -82,7 +82,9 @@ import {
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
   buildLiveCalcTickFrame,
+  buildSetupCalcTickFrame,
   shouldEmitLiveCalcTick,
+  shouldEmitSetupCalcTick,
 } from "../lib/liveCalcTick";
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
 import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
@@ -1778,21 +1780,32 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // authoritative heartbeat still picks up other-device writes. Idle days
   // emit nothing new. Read-only derivation — never writes day state.
   const liveCalcTickMs = Math.max(2_000, Number(process.env.LIVE_CALC_TICK_MS) || DEFAULT_LIVE_CALC_TICK_MS);
+  // Slice 2: emit ticks for both active-run AND any selected run with runValues
+  // (setup-form calcs).  The active-run tick takes priority; if it fires, the
+  // setup tick is skipped for that interval to avoid duplicate frames.
   calcTick = setInterval(() => {
     if (!client || client.lastData == null) return;
     const nowMs = Date.now();
-    const tick = buildLiveCalcTickFrame(
-      client.lastData,
-      nowMs,
-      client.lastCalcEmitMs,
-      client.lastCanonicalRevision,
-      liveCalcTickMs,
+    const activeTick = buildLiveCalcTickFrame(
+      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
     );
-    if (!tick) return;
-    client.lastCalcEmitMs = tick.lastCalcEmitMs;
+    if (activeTick) {
+      client.lastCalcEmitMs = activeTick.lastCalcEmitMs;
+      const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
+      try {
+        client.res.write(`data: ${JSON.stringify({ ...activeTick.frame, ...live })}\n\n`);
+      } catch {}
+      return;
+    }
+    // Fallback: setup-form tick for pending (or any) selected run with runValues
+    const setupTick = buildSetupCalcTickFrame(
+      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
+    );
+    if (!setupTick) return;
+    client.lastCalcEmitMs = setupTick.lastCalcEmitMs;
     const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
     try {
-      client.res.write(`data: ${JSON.stringify({ ...tick.frame, ...live })}\n\n`);
+      client.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
     } catch {}
   }, liveCalcTickMs);
 });
