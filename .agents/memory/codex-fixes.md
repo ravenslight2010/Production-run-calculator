@@ -345,3 +345,12 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: restore a meaningful CI signal so real regressions (and the actual upgrade candidates) can be reviewed instead of everything showing the same unrelated failure.
 
 **Verification**: `test:skill-catalog` 13/13 pass; `check:skill-catalog` exit 0 (18 skills, 0 failures).
+
+
+## @types/node 25.9.6 -> 26.5.1 (upgrade/types-node-26)
+
+**Date**: 2026-09-13
+**Branch**: `upgrade/types-node-26`
+**Files changed**: `pnpm-workspace.yaml` (catalog), `pnpm-lock.yaml`
+**What**: catalog `'@types/node': ^25.9.6` -> `^26.5.1`. Verified locally after the skill-catalog CI fix: typecheck:libs + api-server + run-calculator + mockup-sandbox + scripts all pass. Supersedes dependabot PR #47 (its earlier Typecheck red was the stale skill-catalog assertion that `fix/skill-catalog-ci` already fixed).
+**Why**: stay current on Node type defs for the Node 22/24 runtime.
