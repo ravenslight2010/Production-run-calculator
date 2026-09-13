@@ -322,3 +322,11 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: authorization matrix must mirror route middleware so the guard test verifies real access control; a11y + precise error messages for the mixes card.
 
 **Verification**: api-server typecheck exit 0; run-calculator typecheck exit 0; vitest MixAlreadyMadeInput + blankRunValueSync + pickCurrentRunPushValue 27/27; protectRunValues 90/90.
+
+
+## Dependency refresh — react-hook-form 7.87.0 -> 7.88.0 (chore/rhf-refresh)
+
+**Date**: 2026-09-13
+**Files changed**: `pnpm-lock.yaml` (range already `^7.87.0`)
+**What**: `pnpm update -r react-hook-form` brought the lockfile to 7.88.0 (minor). Verified by GitHub sweep via `pnpm outdated`; typescript 7 and @replit/vite-plugin-cartographer 0.6.1 are the only other outdated items and both are blocked (TS7 resolution bug; cartographer PR #48 typecheck fails).
+**Verification**: run-calculator + mockup-sandbox typechecks pass; MixAlreadyMadeInput suite passes.
