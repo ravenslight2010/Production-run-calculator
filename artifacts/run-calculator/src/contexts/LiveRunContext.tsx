@@ -21,12 +21,10 @@ import { useClock } from "../hooks/useClock";
 import { useNotifications } from "../hooks/useNotifications";
 import {
   useAutoTrack,
-  suggestedDoughStaging,
   type AutoTrackEventClaim,
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
-import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../adapters/browserRunPersistence";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
 import { recordPerformance } from "../performanceDiagnostics";
@@ -50,9 +48,11 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   classifyOperationalDisplay,
+  shouldUseServerCalc,
   type OperationalDisplayState,
   type OperationalSnapshotReceipt,
 } from "../operationalState";
+import type { OperationalProjection } from "@workspace/live-calc";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -141,8 +141,11 @@ export interface LiveRunProviderProps {
   autoTrackRebaseAfterBlock?: boolean;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  onAutoTrackProgressChange?: (enabled: boolean) => void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
+  operationalProjection?: OperationalProjection | null;
+  serverClockOffsetMs?: number;
   operationalOnline?: boolean;
   operationalSyncConnected?: boolean;
 }
@@ -179,8 +182,11 @@ export function LiveRunProvider({
   autoTrackRebaseAfterBlock = false,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutoTrackProgressChange,
   operationalSnapshotReceipt = null,
   operationalServerCalc = null,
+  operationalProjection = null,
+  serverClockOffsetMs = 0,
   operationalOnline = true,
   operationalSyncConnected = false,
 }: LiveRunProviderProps) {
@@ -190,10 +196,32 @@ export function LiveRunProvider({
   // react-hook-form settles a run switch. Staged Dough values remain intact
   // because they may be intentionally seeded before Start.
   const v = isolatePendingRunPackagingProgress(currentRun, liveValues);
+  const operationalDisplayState = classifyOperationalDisplay({
+    online: operationalOnline,
+    syncConnected: operationalSyncConnected,
+    selectedRunId: currentRunId,
+    receipt: operationalSnapshotReceipt,
+  });
+  const confirmedProjection =
+    operationalDisplayState === "confirmed" && operationalProjection?.runId === currentRunId
+      ? operationalProjection
+      : null;
+  // This is a display-only rebase between server frames. It never writes a
+  // counter or claim; the next server projection remains authoritative.
+  const operationalNowMs = nowTime.getTime() + serverClockOffsetMs;
 
   // Freezer-fill ramp: rises over elapsed run time, capped to freezerTime.
   // Pausing freezes the ramp at the paused-at moment.
   const liveFreezerMin = (() => {
+    if (confirmedProjection) {
+      const projectedElapsed =
+        confirmedProjection.effectiveElapsedSec + (
+          confirmedProjection.facts.runStatus === "running"
+            ? Math.max(0, operationalNowMs - confirmedProjection.capturedAtServerMs) / 1000
+            : 0
+        );
+      return Math.min(projectedElapsed, Number(ve.freezerTime) * 60) / 60;
+    }
     if (!currentRun?.startedAt) return 0;
     if (currentRun.endedAt) return Number(ve.freezerTime);
     const refTime = currentRun.pausedAt ?? nowTime.getTime();
@@ -202,16 +230,26 @@ export function LiveRunProvider({
   })();
 
   // ── Core production calc ─────────────────────────────────────────────────
-  // Server-authority calc: when online and a server-bound calc exists for the
-  // current run, adopt it instead of recomputing locally (battery win).
-  // Offline fallback: compute locally exactly as before.
+  // Server-authority calc: adopt the streamed server calc while online, tied
+  // to the current run, and the receipt is still inside the freshness window
+  // (2 tick intervals). Stale/offline/reconnected falls back to local
+  // computeCalc — never a blank UI.
+  const adoptServerCalc =
+    operationalServerCalc != null &&
+    currentRunId === currentRun?.id &&
+    operationalSnapshotReceipt?.runId === currentRunId &&
+    shouldUseServerCalc({
+      online: operationalOnline,
+      syncConnected: operationalSyncConnected,
+      receipt: operationalSnapshotReceipt,
+      nowMs: nowTime.getTime() + serverClockOffsetMs,
+    });
   const calc = useMemo((): Calc => {
-    if (
-      operationalOnline &&
-      operationalServerCalc &&
-      operationalDisplayState === "confirmed" &&
-      currentRunId === currentRun?.id
-    ) {
+    if (adoptServerCalc) {
+      // Server-authority calc: the streamed server calc is fresh and tied to
+      // the current run — adopt it instead of recomputing locally (battery
+      // win). Stale/offline/reconnected falls through to local computeCalc,
+      // never a blank UI.
       return operationalServerCalc;
     }
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
@@ -227,7 +265,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, operationalOnline, operationalServerCalc, operationalDisplayState, currentRunId]);
+  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, adoptServerCalc, operationalServerCalc]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
@@ -237,9 +275,16 @@ export function LiveRunProvider({
     [currentRun?.stoppages],
   );
 
-  const elapsedBatchSec = currentRun?.startedAt
+  const localElapsedBatchSec = currentRun?.startedAt
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
+  const elapsedBatchSec = confirmedProjection
+    ? confirmedProjection.effectiveElapsedSec + (
+        confirmedProjection.facts.runStatus === "running"
+          ? Math.max(0, operationalNowMs - confirmedProjection.capturedAtServerMs) / 1000
+          : 0
+      )
+    : localElapsedBatchSec;
 
   const linePhases = useMemo(() => {
     const pauses = (currentRun?.stoppages ?? []).filter((s) => s.type === "pause");
@@ -266,7 +311,7 @@ export function LiveRunProvider({
       preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
       postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
       freezerTime: Number(ve.freezerTime),
-      nowMs: nowTime.getTime(),
+      nowMs: operationalNowMs,
       endedAt: currentRun?.endedAt,
     });
   }, [
@@ -274,7 +319,7 @@ export function LiveRunProvider({
     currentRun?.pausedAt,
     currentRun?.stoppages,
     elapsedBatchSec,
-    nowTime,
+    operationalNowMs,
     runStatus,
     ve.freezerTime,
     ve.preTunnelMin,
@@ -282,16 +327,20 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
-  const operationalDisplayState = classifyOperationalDisplay({
-    online: operationalOnline,
-    syncConnected: operationalSyncConnected,
-    selectedRunId: currentRunId,
-    receipt: operationalSnapshotReceipt,
-  });
   const operationalCalc =
-    operationalDisplayState === "confirmed" && operationalServerCalc
-      ? operationalServerCalc
-      : calc;
+    confirmedProjection?.calc
+      ? {
+          // The server frame remains authoritative for production counters,
+          // but occupancy is a time-relative display value. Rebase both
+          // windows onto the current clock so a wake/reload can drain stale
+          // freezer contents without waiting for another server frame.
+          ...confirmedProjection.calc,
+          casesOnLine: calc.casesOnLine,
+          casesInFreezer: calc.casesInFreezer,
+        }
+      : (adoptServerCalc
+        ? operationalServerCalc
+        : calc);
   const packagingAutoTrackActive =
     runStatus !== "running" || linePhases.stage3.state === "active";
   const packagingDrainElapsedSec = computePackagingDrainElapsedSec({
@@ -403,7 +452,7 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
+  const { autoTrackProgress, setAutoTrackProgress: setLocalAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
     useAutoTrack({
       runId: currentRunId,
       runGeneration: String(currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0),
@@ -429,8 +478,18 @@ export function LiveRunProvider({
       autoTrackRebaseAfterBlock,
       autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
+      authoritativeServerAutoTrack: true,
+      autoTrackProgressEnabled: currentRun?.autoTrackDisabled !== true,
       nextRunPrepActive,
     });
+  const setAutoTrackProgress = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
+    (next) => {
+      const enabled = typeof next === "function" ? next(autoTrackProgress) : next;
+      setLocalAutoTrackProgress(enabled);
+      onAutoTrackProgressChange?.(enabled);
+    },
+    [autoTrackProgress, onAutoTrackProgressChange, setLocalAutoTrackProgress],
+  );
 
   // Packaging speed feedback is shared by the Packaging tab and the quick
   // check cards on Dough/Sauce. Keep the lifecycle in this always-mounted
@@ -522,38 +581,6 @@ export function LiveRunProvider({
     setSpeedNudge(null);
     setSpeedNudgeStatus(null);
   }, []);
-
-  // ── Pre-seed next run's dough counters when this run's press is done ─────
-  const nextRunSeededRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (screenMode !== null || !autoTrackProgress) return;
-    if (runStatus !== "running" || !calc.pressDone) return;
-    const nextRun = dayState.runs[dayState.currentIndex + 1];
-    if (!nextRun || nextRun.startedAt) return;
-    if ((nextRun.subTab ?? "dough") === "crusts") return;
-    const key = `${currentRunId}->${nextRun.id}`;
-    if (nextRunSeededRef.current.has(key)) return;
-    const nv = { ...DEFAULT_VALUES, ...loadRunValues(nextRun.id) };
-    if ((Number(nv.traysOnLine) || 0) > 0 || (Number(nv.batchesReady) || 0) > 0) {
-      nextRunSeededRef.current.add(key);
-      return;
-    }
-    const totalPizzas = (Number(nv.casesNeeded) || 0) * (Number(nv.pizzasPerCase) || 0);
-    if (totalPizzas <= 0) return;
-    const perTray = Number(nv.doughballsPerTray) || 0;
-    const recipeLbs = (nv.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-    const yieldPerBatch =
-      recipeLbs > 0 && Number(nv.targetDoughballWeight) > 0
-        ? (recipeLbs * 16) / Number(nv.targetDoughballWeight)
-        : Number(nv.doughBatchYield) || 0;
-    const traysNeeded = perTray > 0 ? totalPizzas / perTray : 0;
-    const batchesNeeded = yieldPerBatch > 0 ? totalPizzas / yieldPerBatch : 0;
-    const seed = suggestedDoughStaging(traysNeeded, batchesNeeded);
-    if (seed.trays === null && seed.batches === null) return;
-    nextRunSeededRef.current.add(key);
-    saveRunValues(nextRun.id, { ...nv, traysOnLine: seed.trays ?? 0, batchesReady: seed.batches ?? 0 });
-    markRunValuesUpdated(nextRun.id, Date.now());
-  }, [runStatus, calc.pressDone, autoTrackProgress, screenMode, dayState.runs, dayState.currentIndex, currentRunId]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
