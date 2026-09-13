@@ -153,8 +153,7 @@
 - [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Browser peer startup ordering](browser-peer-startup-ordering.md) — assert snapshot no-ops before opening a peer; hydration may issue a legitimate background merge and change the canonical hash.
-- [Browser evidence assertions](browser-evidence-assertions.md) — assert visible labels and container text, not internal IDs or exact nodes with nested controls.
-- [Browser fixture server identifiers](browser-fixture-server-identifiers.md) — persisted recipe rows may gain server-owned IDs; assert business fields unless IDs are the behavior under test.
+- [Browser evidence assertions](browser-evidence-assertions.md) + [server IDs](browser-fixture-server-identifiers.md) — assert visible labels and business fields, not internal IDs or exact nested nodes.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
