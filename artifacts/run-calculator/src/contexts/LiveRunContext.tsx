@@ -48,6 +48,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   classifyOperationalDisplay,
+  shouldUseServerCalc,
   type OperationalDisplayState,
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -229,16 +230,26 @@ export function LiveRunProvider({
   })();
 
   // ── Core production calc ─────────────────────────────────────────────────
-  // Server-authority calc: when online and a server-bound calc exists for the
-  // current run, adopt it instead of recomputing locally (battery win).
-  // Offline fallback: compute locally exactly as before.
+  // Server-authority calc: adopt the streamed server calc while online, tied
+  // to the current run, and the receipt is still inside the freshness window
+  // (2 tick intervals). Stale/offline/reconnected falls back to local
+  // computeCalc — never a blank UI.
+  const adoptServerCalc =
+    operationalServerCalc != null &&
+    currentRunId === currentRun?.id &&
+    operationalSnapshotReceipt?.runId === currentRunId &&
+    shouldUseServerCalc({
+      online: operationalOnline,
+      syncConnected: operationalSyncConnected,
+      receipt: operationalSnapshotReceipt,
+      nowMs: nowTime.getTime() + serverClockOffsetMs,
+    });
   const calc = useMemo((): Calc => {
-    if (
-      operationalOnline &&
-      operationalServerCalc &&
-      operationalDisplayState === "confirmed" &&
-      currentRunId === currentRun?.id
-    ) {
+    if (adoptServerCalc) {
+      // Server-authority calc: the streamed server calc is fresh and tied to
+      // the current run — adopt it instead of recomputing locally (battery
+      // win). Stale/offline/reconnected falls through to local computeCalc,
+      // never a blank UI.
       return operationalServerCalc;
     }
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
@@ -254,7 +265,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, operationalOnline, operationalServerCalc, operationalDisplayState, currentRunId]);
+  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, adoptServerCalc, operationalServerCalc]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
@@ -327,7 +338,7 @@ export function LiveRunProvider({
           casesOnLine: calc.casesOnLine,
           casesInFreezer: calc.casesInFreezer,
         }
-      : (operationalDisplayState === "confirmed" && operationalServerCalc
+      : (adoptServerCalc
         ? operationalServerCalc
         : calc);
   const packagingAutoTrackActive =
