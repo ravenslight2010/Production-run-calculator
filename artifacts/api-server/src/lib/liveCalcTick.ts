@@ -21,3 +21,19 @@ export function shouldEmitLiveCalcTick(
   const run = runs[currentIndex] ?? runs[0];
   return Boolean(run && typeof run.startedAt === "number" && run.endedAt == null);
 }
+
+/**
+ * Build the SSE frame payload for an active-run calc tick, or null when no tick
+ * should be emitted (idle day, ended run, or inside the interval window).
+ * Pure and DB-free so it is unit-testable without DATABASE_URL.
+ */
+export function buildLiveCalcTickFrame(
+  data: unknown,
+  nowMs: number,
+  lastCalcEmitMs: number,
+  canonicalRevision: number,
+  tickMs = DEFAULT_LIVE_CALC_TICK_MS,
+): { frame: Record<string, unknown>; lastCalcEmitMs: number } | null {
+  if (!shouldEmitLiveCalcTick(data, nowMs, lastCalcEmitMs, tickMs)) return null;
+  return { frame: { calcTick: true, canonicalRevision }, lastCalcEmitMs: nowMs };
+}

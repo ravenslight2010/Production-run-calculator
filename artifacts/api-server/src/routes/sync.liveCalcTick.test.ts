@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldEmitLiveCalcTick } from "../lib/liveCalcTick";
+import { buildLiveCalcTickFrame, shouldEmitLiveCalcTick } from "../lib/liveCalcTick";
 
 const TICK_MS = 5_000;
 
@@ -36,5 +36,25 @@ describe("shouldEmitLiveCalcTick", () => {
   it("tracks a run that is paused but not ended as active", () => {
     const data = dayState([{ id: "r1", startedAt: 1000, pausedAt: 1100 }]);
     expect(shouldEmitLiveCalcTick(data, 6_000, 0, TICK_MS)).toBe(true);
+  });
+});
+
+
+describe("buildLiveCalcTickFrame", () => {
+  const data = dayState([{ id: "r1", startedAt: 1000 }]);
+
+  it("returns a calcTick frame with the canonical revision when eligible", () => {
+    const out = buildLiveCalcTickFrame(data, 6_000, 0, 7, TICK_MS);
+    expect(out).not.toBeNull();
+    expect(out!.frame).toEqual({ calcTick: true, canonicalRevision: 7 });
+    expect(out!.lastCalcEmitMs).toBe(6_000);
+  });
+
+  it("returns null for an idle day", () => {
+    expect(buildLiveCalcTickFrame(dayState([]), 6_000, 0, 0, TICK_MS)).toBeNull();
+  });
+
+  it("returns null inside the interval window", () => {
+    expect(buildLiveCalcTickFrame(data, 4_999, 0, 0, TICK_MS)).toBeNull();
   });
 });
