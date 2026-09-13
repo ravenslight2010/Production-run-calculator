@@ -130,6 +130,9 @@ describe("formSchema legacy fallbacks", () => {
         expect(v, `schema default for ${k}`).toBe(PRE_POST_TUNNEL_DEFAULTS[k]);
         continue;
       }
+      // cartonSize defaults to 1 (Single) — the factory standard; the
+      // zero-quantity mandate covers quantities, not the carton selector.
+      if (k === "cartonSize") { expect(v).toBe(1); continue; }
       expect(v, `schema default for ${k}`).toBe(0);
     }
   });
