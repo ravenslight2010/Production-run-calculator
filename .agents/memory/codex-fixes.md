@@ -288,3 +288,18 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: §6 of `.agents/skills/sync-invariant-check/SKILL.md` — any field added to `DEFAULT_VALUES` must be added to `CURRENT_BLANK_RUN_VALUE`.
 
 **Verification**: `blankRunValueSync.test.ts` 6/6 pass; `protectRunValues.test.ts` 90/90 pass; `typecheck:libs`, api-server typecheck, all artifact typechecks, api-zod tests pass. (`pnpm run typecheck` full gate stops at `shellcheck: not found` — missing binary on this host, CI-only tool.)
+
+
+## Phase 5 (retry) — TypeScript 6.0.3 bridge upgrade (upgrade/phase5-typescript6)
+
+**Date**: 2026-09-13
+**Branch**: `upgrade/phase5-typescript6`
+**Files changed**: root `package.json` (`typescript: "~5.9.3"` -> `"~6.0.3"`), `pnpm-lock.yaml`
+
+**What was wrong / intent**: TS 7.0.2 was deferred (native-port symlink-resolution bug). TS 6.x is the JS-based bridge release that prepares a repo for the TS 7 native port, so the user asked to take the latest 6.x now.
+
+**What the fix was**: bumped to `typescript: ~6.0.3` (latest 6.x stable; also available: 6.0.2). Pure version bump — zero code changes. TS 6 uses the same JS-based resolver as 5.9.x, so no pnpm-store/symlink issues; no config option warnings surfaced.
+
+**Why it was needed**: moves the workspace one major closer to TS 7 (7.0.x still needs a resolution-bug fix before it can land here).
+
+**Verification**: `tsc --version` = 6.0.3; `typecheck:libs` exit 0; api-server + run-calculator + mockup-sandbox + scripts typechecks exit 0; generated-client build (`lib/api-client-react`, `lib/api-zod`) OK; vitest: blankRunValueSync 6/6 (exercises the TS compiler API), protectRunValues 90/90, inventory-math 74/74, api-zod 3/3. (Full `pnpm run typecheck` still stops only at `shellcheck: not found` — host-only, CI runs it.)
