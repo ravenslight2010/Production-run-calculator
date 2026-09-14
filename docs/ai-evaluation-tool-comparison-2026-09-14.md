@@ -163,6 +163,13 @@ coverage should remain deterministic by default, keep provider-backed checks
 opt-in, preserve the project's fail-safe AI boundaries, and use existing pnpm
 and Vitest workflows.
 
+The third target is now implemented as a project-owned, bounded synthetic
+fixture set at the second-pass benchmark report boundary. The reporter projects
+observations onto an explicit aggregate-metric allowlist before serialization;
+tests assert that personal data, encoded workbook/photo content, malformed
+input, credentials, provider payloads/output, raw prompts, and conversation
+text cannot enter the retained report. No archive fixture was copied.
+
 ## Final ranked recommendation
 
 1. **Autocontext — ADAPT:** best source of directly relatable Vitest privacy,

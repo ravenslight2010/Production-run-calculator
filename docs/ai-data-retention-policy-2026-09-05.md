@@ -23,3 +23,7 @@ Conversation persistence and retired forecast/proactive/waste/quality facility-m
 ## Export and rollback posture
 
 Managers can export or inspect records through their existing administrative/history surfaces during the retention window. Cleanup does not retain deleted payload copies because doing so would defeat the privacy rule. Each cleanup run marker records bounded counts only, and the latest run time is shown in Data Health. Protected operational records remain available and are not reconstructed from generated data.
+
+## Evaluation report boundary
+
+Retained AI benchmark reports contain only allowlisted aggregate metrics, policy metadata, source hashes, and explicit result states. They must never contain raw prompts, workbook cells or files, photo bytes or data URLs, credentials, provider request/response payloads, generated free text, or user conversation text. Tests for this boundary use a small project-owned synthetic fixture set; archive privacy fixtures and production records are not copied into test data.

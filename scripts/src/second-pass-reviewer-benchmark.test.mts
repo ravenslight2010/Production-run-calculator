@@ -19,6 +19,10 @@ const expected = JSON.parse(
 assert.deepEqual(actual, expected, "checked-in reviewer evidence must match the pinned source and observations");
 assert.equal(ACCEPTANCE.minimumUniqueMaterialCatchRate, 0.2);
 assert.equal(actual.decision.retain, false);
+assert.deepEqual(actual.retention, {
+  dataClass: "synthetic-and-aggregate-metrics-only",
+  sanitization: "allowlisted-metrics; raw prompts and source/provider payloads excluded",
+});
 assert.deepEqual(actual.decision.thresholdPasses, {
   uniqueMaterialCatchCount: false,
   uniqueMaterialCatchRate: false,

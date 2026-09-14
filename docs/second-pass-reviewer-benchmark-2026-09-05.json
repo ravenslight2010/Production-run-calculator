@@ -1,6 +1,10 @@
 {
   "benchmarkVersion": 1,
   "sourceHash": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+  "retention": {
+    "dataClass": "synthetic-and-aggregate-metrics-only",
+    "sanitization": "allowlisted-metrics; raw prompts and source/provider payloads excluded"
+  },
   "acceptanceCriteria": {
     "minimumUniqueMaterialCatchRate": 0.2,
     "maximumFalseWarningRate": 0.05,
@@ -72,8 +76,7 @@
         "noOpVerdicts": 76,
         "latencyMs": 20732,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       },
       "match-import": {
         "cases": 22,
@@ -87,8 +90,7 @@
         "noOpVerdicts": 22,
         "latencyMs": 14851,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       },
       "match-premix": {
         "cases": 78,
@@ -102,8 +104,7 @@
         "noOpVerdicts": 78,
         "latencyMs": 24169,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       },
       "suggest-merges": {
         "cases": 3,
@@ -131,8 +132,7 @@
         "noOpVerdicts": 125,
         "latencyMs": 18479,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       }
     },
     "measuredTokens": false,
