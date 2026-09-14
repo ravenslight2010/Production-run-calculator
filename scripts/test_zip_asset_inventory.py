@@ -13,26 +13,113 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from copy import deepcopy
 
 from zip_asset_inventory import (
     COMMAND_ID,
     DEFAULT_MAX_EXPANDED_BYTES,
     MAX_RETAINED_REVIEW_BYTES,
+    REVIEW_LABEL,
     classify_environment,
     current_revision,
     inspect_archive,
     inventory_archives,
     report_integrity_sha256,
+    validate_review_report,
     verify_report_integrity,
     verify_retained_report,
 )
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 ASSET_ROOT = REPOSITORY_ROOT / "attached_assets"
 
 
 class ZipAssetInventoryTests(unittest.TestCase):
+    def _safe_report(self) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "safe.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("safe.txt", "review metadata only")
+            return inventory_archives([archive_path])
+
+    def test_current_report_is_accepted_by_retained_report_validator(self) -> None:
+        report = self._safe_report()
+        self.assertEqual(validate_review_report(report), ())
+
+    def test_legacy_report_without_provenance_is_rejected(self) -> None:
+        report = self._safe_report()
+        del report["provenance"]
+        self.assertEqual(validate_review_report(report), ("report_schema",))
+
+    def test_malformed_provenance_and_label_are_rejected_without_echoing_values(
+        self,
+    ) -> None:
+        report = self._safe_report()
+        provenance = report["provenance"]
+        assert isinstance(provenance, dict)
+        provenance["captured_at"] = "../../secret-capture.json"
+        provenance["command"] = "python3 scanner.py --output /tmp/private.json"
+        report["label"] = "approved for installation"
+        errors = validate_review_report(report)
+        self.assertIn("provenance_captured_at", errors)
+        self.assertIn("provenance_command", errors)
+        self.assertIn("label", errors)
+        self.assertNotIn("secret-capture.json", json.dumps(errors))
+        self.assertNotIn("private.json", json.dumps(errors))
+
+    def test_sensitive_looking_extra_fields_and_error_values_are_rejected(self) -> None:
+        report = self._safe_report()
+        report["request_path"] = "/tmp/credentials.json"
+        self.assertIn("report_schema", validate_review_report(report))
+
+        report = self._safe_report()
+        archive = report["archives"][0]
+        assert isinstance(archive, dict)
+        archive["error_codes"] = ["member=private-key.pem"]
+        errors = validate_review_report(report)
+        self.assertIn("archive_0_error_codes", errors)
+
+    def test_retained_report_cli_accepts_current_json_and_rejects_legacy_json(
+        self,
+    ) -> None:
+        report = self._safe_report()
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "review.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            valid_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    "--validate-report",
+                    str(report_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(valid_process.returncode, 0)
+            self.assertEqual(json.loads(valid_process.stdout), {"valid": True, "errors": []})
+
+            legacy = deepcopy(report)
+            del legacy["provenance"]
+            report_path.write_text(json.dumps(legacy), encoding="utf-8")
+            invalid_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    "--validate-report",
+                    str(report_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(invalid_process.returncode, 1)
+            self.assertEqual(
+                json.loads(invalid_process.stdout),
+                {"valid": False, "errors": ["report_schema"]},
+            )
+
     def test_report_has_bounded_scan_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "safe.zip"
@@ -140,7 +227,7 @@ class ZipAssetInventoryTests(unittest.TestCase):
             self.assertEqual(process.stdout, "")
             retained = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual(
-                retained["label"], "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL"
+                retained["label"], REVIEW_LABEL
             )
             self.assertEqual(retained["provenance"]["command"], COMMAND_ID)
             self.assertNotIn(str(Path(directory)), output_path.read_text())

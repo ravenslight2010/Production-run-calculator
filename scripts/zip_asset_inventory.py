@@ -29,11 +29,83 @@ DEFAULT_MAX_ENTRY_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_EXPANDED_BYTES = 512 * 1024 * 1024
 MAX_RETAINED_REVIEW_BYTES = 16 * 1024 * 1024
 COMMAND_ID = "scripts/zip_asset_inventory.py"
+REPORT_FORMAT = "zip-asset-inventory/v1"
+REVIEW_LABEL = "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL"
 INTEGRITY_FIELD = "integrity"
 INTEGRITY_ALGORITHM = "sha256"
 INTEGRITY_SCOPE = "report-excluding-integrity"
 ENVIRONMENT_CLASSES = frozenset(
     {"development", "isolated-test", "staging", "production", "unknown"}
+)
+PROVENANCE_CAPTURED_AT_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+)
+REVISION_RE = re.compile(r"^(?:unknown|[0-9a-f]{7,64})$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+ERROR_CODES = frozenset(
+    {
+        "source_is_symlink",
+        "source_not_regular_file",
+        "malformed_zip",
+        "unreadable_archive",
+    }
+)
+ARCHIVE_STATUSES = frozenset({"error", "unsafe-metadata", "review-only"})
+
+REPORT_KEYS = frozenset(
+    {
+        "format",
+        "label",
+        "provenance",
+        "read_only",
+        "member_data_opened",
+        "member_name_unicode_normalization",
+        "limits",
+        "archives",
+        "summary",
+        INTEGRITY_FIELD,
+    }
+)
+PROVENANCE_KEYS = frozenset({"captured_at", "environment", "command", "revision"})
+INTEGRITY_KEYS = frozenset({"algorithm", "scope", "sha256"})
+LIMIT_KEYS = frozenset(
+    {"max_entries", "max_entry_bytes", "max_expanded_bytes"}
+)
+ARCHIVE_KEYS = frozenset(
+    {
+        "filename",
+        "sha256",
+        "archive_size_bytes",
+        "entry_count",
+        "file_entry_count",
+        "directory_entry_count",
+        "expanded_size_bytes",
+        "largest_entry_bytes",
+        "unsafe_path_count",
+        "duplicate_normalized_path_count",
+        "unicode_normalization_collision_count",
+        "case_fold_collision_count",
+        "encrypted_entry_count",
+        "special_file_count",
+        "symlink_count",
+        "credential_like_path_count",
+        "entry_limit_exceeded",
+        "expanded_size_limit_exceeded",
+        "entry_size_limit_exceeded",
+        "archive_duplicate",
+        "unsafe_metadata",
+        "status",
+        "error_codes",
+    }
+)
+SUMMARY_KEYS = frozenset(
+    {
+        "archive_count",
+        "unsafe_archive_count",
+        "duplicate_archive_group_count",
+        "duplicate_archive_count",
+        "review_ready",
+    }
 )
 
 # NFC preserves the spelling users generally expect while treating canonically
@@ -99,14 +171,14 @@ def verify_report_integrity(report: Mapping[str, object]) -> bool:
     integrity = report.get(INTEGRITY_FIELD)
     if not isinstance(integrity, Mapping):
         return False
-    if set(integrity) != {"algorithm", "scope", "sha256"}:
+    if set(integrity) != INTEGRITY_KEYS:
         return False
     stored_digest = integrity.get("sha256")
     if (
         integrity.get("algorithm") != INTEGRITY_ALGORITHM
         or integrity.get("scope") != INTEGRITY_SCOPE
         or not isinstance(stored_digest, str)
-        or not re.fullmatch(r"[0-9a-f]{64}", stored_digest)
+        or not SHA256_RE.fullmatch(stored_digest)
     ):
         return False
     return hmac.compare_digest(stored_digest, report_integrity_sha256(report))
@@ -203,6 +275,218 @@ def build_provenance() -> dict[str, str]:
         "command": COMMAND_ID,
         "revision": current_revision(),
     }
+
+
+def _is_int(value: object) -> bool:
+    return type(value) is int
+
+
+def _has_exact_keys(value: object, keys: frozenset[str]) -> bool:
+    return isinstance(value, dict) and frozenset(value) == keys
+
+
+def validate_review_report(report: object) -> tuple[str, ...]:
+    """Return stable errors for a retained JSON report, failing closed.
+
+    The validator intentionally accepts only the scanner's current, redacted
+    schema.  In particular, it does not accept arbitrary metadata fields or
+    free-form error messages that could carry paths, arguments, member names,
+    or archive contents.
+    """
+
+    errors: list[str] = []
+    if not _has_exact_keys(report, REPORT_KEYS):
+        return ("report_schema",)
+    assert isinstance(report, dict)
+
+    if report["format"] != REPORT_FORMAT:
+        errors.append("format")
+    if report["label"] != REVIEW_LABEL:
+        errors.append("label")
+    if report["read_only"] is not True:
+        errors.append("read_only")
+    if report["member_data_opened"] is not False:
+        errors.append("member_data_opened")
+    if report["member_name_unicode_normalization"] != ZIP_MEMBER_UNICODE_NORMALIZATION:
+        errors.append("unicode_normalization")
+
+    integrity = report[INTEGRITY_FIELD]
+    if not _has_exact_keys(integrity, INTEGRITY_KEYS):
+        errors.append("integrity_schema")
+    else:
+        assert isinstance(integrity, dict)
+        if integrity["algorithm"] != INTEGRITY_ALGORITHM:
+            errors.append("integrity_algorithm")
+        if integrity["scope"] != INTEGRITY_SCOPE:
+            errors.append("integrity_scope")
+        if not (
+            isinstance(integrity["sha256"], str)
+            and SHA256_RE.fullmatch(integrity["sha256"])
+        ):
+            errors.append("integrity_sha256")
+
+    provenance = report["provenance"]
+    if not _has_exact_keys(provenance, PROVENANCE_KEYS):
+        errors.append("provenance_schema")
+    else:
+        assert isinstance(provenance, dict)
+        captured_at = provenance["captured_at"]
+        environment = provenance["environment"]
+        command = provenance["command"]
+        revision = provenance["revision"]
+        if not (
+            isinstance(captured_at, str)
+            and len(captured_at) == 20
+            and PROVENANCE_CAPTURED_AT_RE.fullmatch(captured_at)
+        ):
+            errors.append("provenance_captured_at")
+        if not (
+            isinstance(environment, str)
+            and environment in ENVIRONMENT_CLASSES
+            and len(environment) <= 16
+        ):
+            errors.append("provenance_environment")
+        if command != COMMAND_ID:
+            errors.append("provenance_command")
+        if not (
+            isinstance(revision, str)
+            and len(revision) <= 64
+            and REVISION_RE.fullmatch(revision)
+        ):
+            errors.append("provenance_revision")
+
+    limits = report["limits"]
+    if not _has_exact_keys(limits, LIMIT_KEYS):
+        errors.append("limits_schema")
+    else:
+        assert isinstance(limits, dict)
+        limit_maxima = {
+            "max_entries": DEFAULT_MAX_ENTRIES,
+            "max_entry_bytes": DEFAULT_MAX_ENTRY_BYTES,
+            "max_expanded_bytes": DEFAULT_MAX_EXPANDED_BYTES,
+        }
+        for key, maximum in limit_maxima.items():
+            value = limits[key]
+            if not _is_int(value) or not 1 <= value <= maximum:
+                errors.append(f"limit_{key}")
+
+    archives = report["archives"]
+    valid_archive_rows: list[dict[str, object]] = []
+    if not isinstance(archives, list):
+        errors.append("archives_schema")
+    else:
+        for index, archive in enumerate(archives):
+            if not _has_exact_keys(archive, ARCHIVE_KEYS):
+                errors.append(f"archive_{index}_schema")
+                continue
+            assert isinstance(archive, dict)
+            valid_archive_rows.append(archive)
+            filename = archive["filename"]
+            if not (
+                isinstance(filename, str)
+                and 1 <= len(filename) <= 255
+                and not any(
+                    character in filename for character in ("/", "\\", "\x00", "\n", "\r")
+                )
+            ):
+                errors.append(f"archive_{index}_filename")
+
+            archive_hash = archive["sha256"]
+            if archive_hash is not None and not (
+                isinstance(archive_hash, str) and SHA256_RE.fullmatch(archive_hash)
+            ):
+                errors.append(f"archive_{index}_sha256")
+
+            archive_size = archive["archive_size_bytes"]
+            if archive_size is not None and (
+                not _is_int(archive_size) or archive_size < 0
+            ):
+                errors.append(f"archive_{index}_archive_size")
+
+            for key in (
+                "entry_count",
+                "file_entry_count",
+                "directory_entry_count",
+                "expanded_size_bytes",
+                "largest_entry_bytes",
+                "unsafe_path_count",
+                "duplicate_normalized_path_count",
+                "unicode_normalization_collision_count",
+                "case_fold_collision_count",
+                "encrypted_entry_count",
+                "special_file_count",
+                "symlink_count",
+                "credential_like_path_count",
+            ):
+                if not _is_int(archive[key]) or archive[key] < 0:
+                    errors.append(f"archive_{index}_{key}")
+
+            for key in (
+                "entry_limit_exceeded",
+                "expanded_size_limit_exceeded",
+                "entry_size_limit_exceeded",
+                "archive_duplicate",
+                "unsafe_metadata",
+            ):
+                if type(archive[key]) is not bool:
+                    errors.append(f"archive_{index}_{key}")
+
+            status = archive["status"]
+            if not isinstance(status, str) or status not in ARCHIVE_STATUSES:
+                errors.append(f"archive_{index}_status")
+            error_codes = archive["error_codes"]
+            if not (
+                isinstance(error_codes, list)
+                and all(
+                    isinstance(code, str) and code in ERROR_CODES
+                    for code in error_codes
+                )
+            ):
+                errors.append(f"archive_{index}_error_codes")
+
+    summary = report["summary"]
+    if not _has_exact_keys(summary, SUMMARY_KEYS):
+        errors.append("summary_schema")
+    elif isinstance(archives, list) and len(valid_archive_rows) == len(archives):
+        assert isinstance(summary, dict)
+        for key in (
+            "archive_count",
+            "unsafe_archive_count",
+            "duplicate_archive_group_count",
+            "duplicate_archive_count",
+        ):
+            if not _is_int(summary[key]) or summary[key] < 0:
+                errors.append(f"summary_{key}")
+        if type(summary["review_ready"]) is not bool:
+            errors.append("summary_review_ready")
+        else:
+            unsafe_count = sum(
+                bool(archive["unsafe_metadata"]) for archive in valid_archive_rows
+            )
+            duplicate_hashes: defaultdict[str, int] = defaultdict(int)
+            for archive in valid_archive_rows:
+                archive_hash = archive["sha256"]
+                if isinstance(archive_hash, str):
+                    duplicate_hashes[archive_hash] += 1
+            duplicate_groups = [
+                count for count in duplicate_hashes.values() if count > 1
+            ]
+            duplicate_count = sum(count - 1 for count in duplicate_groups)
+            if summary["archive_count"] != len(archives):
+                errors.append("summary_archive_count")
+            if summary["unsafe_archive_count"] != unsafe_count:
+                errors.append("summary_unsafe_archive_count")
+            if summary["duplicate_archive_group_count"] != len(duplicate_groups):
+                errors.append("summary_duplicate_archive_group_count")
+            if summary["duplicate_archive_count"] != duplicate_count:
+                errors.append("summary_duplicate_archive_count")
+            if summary["review_ready"] != (unsafe_count == 0):
+                errors.append("summary_review_ready_value")
+
+    if not verify_report_integrity(report):
+        errors.append("integrity_mismatch")
+
+    return tuple(dict.fromkeys(errors))
 
 
 def normalized_member_path(raw_name: str) -> tuple[str, bool]:
@@ -432,8 +716,8 @@ def inventory_archives(
     unsafe_count = sum(bool(archive["unsafe_metadata"]) for archive in archives)
     duplicate_archive_count = sum(len(group) - 1 for group in duplicate_groups)
     return add_report_integrity({
-        "format": "zip-asset-inventory/v1",
-        "label": "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL",
+        "format": REPORT_FORMAT,
+        "label": REVIEW_LABEL,
         "provenance": build_provenance(),
         "read_only": True,
         "member_data_opened": False,
@@ -487,6 +771,11 @@ def _parser() -> argparse.ArgumentParser:
         help="write the JSON review evidence to this file instead of stdout",
     )
     parser.add_argument(
+        "--validate-report",
+        type=Path,
+        help="validate a retained JSON review report without reading archive members",
+    )
+    parser.add_argument(
         "--verify",
         type=Path,
         metavar="REVIEW_JSON",
@@ -530,12 +819,26 @@ def _text_report(report: dict[str, object]) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.verify:
-        if args.paths or args.output or args.format != "json":
-            parser.error("--verify cannot be combined with paths, --output, or --format text")
+    if args.verify is not None:
+        if args.paths or args.output or args.format != "json" or args.validate_report:
+            parser.error(
+                "--verify cannot be combined with paths, --output, --format text, "
+                "or --validate-report"
+            )
         valid, status = verify_retained_report(args.verify)
         print(status)
         return 0 if valid else 1
+    if args.validate_report is not None:
+        if args.paths or args.output or args.format != "json":
+            parser.error("--validate-report cannot be combined with archive inputs, --output, or --format text")
+        report, load_error = _load_retained_report(args.validate_report)
+        if report is None:
+            print(json.dumps({"valid": False, "errors": [load_error]}))
+            return 1
+        errors = validate_review_report(report)
+        print(json.dumps({"valid": not errors, "errors": list(errors)}))
+        return 0 if not errors else 1
+
     if min(args.max_entries, args.max_entry_bytes, args.max_expanded_bytes) < 1:
         parser.error("all limits must be positive")
 
