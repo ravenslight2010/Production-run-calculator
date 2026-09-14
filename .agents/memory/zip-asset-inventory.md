@@ -18,3 +18,12 @@ turning review metadata into a path, credential, or payload disclosure channel.
 
 **How to apply:** Use the scanner's explicit JSON output option for retention and keep the
 existing review-only/not-installation-approval label unchanged.
+
+Keep the emitted redacted report fields and the retained-report validator's exact-key
+allowlists in lockstep, including newly added safety counters and policy identifiers.
+
+**Why:** A scanner can produce a valid current report that its own retained-review
+validator rejects if a new bounded field is added in only one place.
+
+**How to apply:** When adding a report or archive field, update both schema allowlists
+and include a current-report validation assertion in the focused inventory suite.
