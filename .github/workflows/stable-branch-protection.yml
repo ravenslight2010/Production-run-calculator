@@ -9,7 +9,10 @@ on:
 
 permissions:
   contents: read
-  issues: write
+
+concurrency:
+  group: stable-branch-protection
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -19,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
@@ -48,16 +51,25 @@ jobs:
 
       - name: Retain protection check output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: stable-branch-protection-check
           path: ${{ runner.temp }}/stable-branch-protection-check.txt
           if-no-files-found: error
           retention-days: 14
 
+  notify:
+    name: Notify maintainers of scheduled protection drift
+    if: github.event_name == 'schedule' && needs.verify.result == 'failure'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
       - name: Notify maintainers of scheduled protection drift
-        if: failure() && github.event_name == 'schedule'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const title = '[Alert] Stable branch protection drift detected';

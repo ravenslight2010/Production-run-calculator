@@ -227,7 +227,7 @@ async function run(): Promise<void> {
   );
   assert.match(
     ciWorkflow,
-    /name: Informational security audit \(high severity; registry best-effort\)[\s\S]*continue-on-error: true[\s\S]*run: pnpm run audit:prod:ci/,
+    /name: Security audit \(prod deps\)[\s\S]*continue-on-error: true[\s\S]*run: pnpm run audit:prod:ci/,
     "CI must name and run the informational security policy",
   );
   assert.doesNotMatch(

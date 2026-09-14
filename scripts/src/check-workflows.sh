@@ -207,6 +207,69 @@ check_workflow_timeouts \
 check_workflow_timeouts "Stable branch protection" "$stable_branch_protection_workflow"
 check_workflow_timeouts "Workflow lint" "$workflow_lint_workflow"
 
+check_immutable_workflow_dependencies() {
+  local workflow_path="$1"
+  local failures=0
+  local line_number
+  local line
+  local reference
+
+  while IFS= read -r line; do
+    line_number="${line%%:*}"
+    line="${line#*:}"
+    reference="${line#*uses:}"
+    reference="${reference#"${reference%%[![:space:]]*}"}"
+    if [[ "$reference" =~ ^\./ ]]; then
+      continue
+    fi
+    if [[ ! "$reference" =~ ^[^@[:space:]]+@[0-9a-fA-F]{40}[[:space:]]+#.+$ ]]; then
+      echo "${workflow_path}:${line_number}: third-party actions must use a 40-character immutable SHA and a version comment." >&2
+      failures=$((failures + 1))
+    fi
+  done < <(grep -nE '^[[:space:]]+-[[:space:]]+uses:[[:space:]]+' "$workflow_path" || true)
+
+  if (( failures > 0 )); then
+    return 1
+  fi
+}
+
+check_digest_pinned_service_images() {
+  local workflow_path="$1"
+  local failures=0
+  local line_number
+  local line
+  local image
+
+  while IFS= read -r line; do
+    line_number="${line%%:*}"
+    line="${line#*:}"
+    image="${line#*image:}"
+    image="${image#"${image%%[![:space:]]*}"}"
+    if [[ ! "$image" =~ ^[^[:space:]@]+@sha256:[0-9a-fA-F]{64}[[:space:]]*$ ]]; then
+      echo "${workflow_path}:${line_number}: service images must use an immutable sha256 digest." >&2
+      failures=$((failures + 1))
+    fi
+  done < <(grep -nE '^[[:space:]]+image:[[:space:]]+' "$workflow_path" || true)
+
+  if (( failures > 0 )); then
+    return 1
+  fi
+}
+
+dependency_failures=0
+for workflow_file in "${workflow_files[@]}"; do
+  check_immutable_workflow_dependencies "$workflow_file" || dependency_failures=1
+  check_digest_pinned_service_images "$workflow_file" || dependency_failures=1
+done
+if (( dependency_failures > 0 )); then
+  cat >&2 <<'EOF'
+Workflow dependency pinning failed. Pin every third-party action to its full
+commit SHA with a human-readable release comment, and pin service images by
+sha256 manifest digest.
+EOF
+  exit 1
+fi
+
 if [[ -n "${ACTIONLINT_BIN:-}" ]]; then
   actionlint_bin="$ACTIONLINT_BIN"
 elif command -v github-actionlint >/dev/null 2>&1; then

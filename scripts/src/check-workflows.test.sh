@@ -289,7 +289,8 @@ test_schema_safe_rollback_ci_contract() {
   assert_contains "$job_block" "        run: pnpm run check:schema-safe-rollback"
   assert_contains "$job_block" "        if: always()"
   assert_contains "$job_block" "            cat rollback-rehearsal-report.md >> \"\$GITHUB_STEP_SUMMARY\""
-  assert_contains "$job_block" "        uses: actions/upload-artifact@v4"
+  assert_contains "$job_block" \
+    "        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4"
   assert_contains "$job_block" "          name: schema-safe-rollback-rehearsal"
   assert_contains "$job_block" "          path: rollback-rehearsal-report.md"
   assert_contains "$job_block" "          retention-days: 14"
@@ -313,7 +314,12 @@ test_stable_branch_protection_workflow_contract() {
   assert_contains "$workflow_content" "  workflow_dispatch:"
   assert_contains "$workflow_content" "permissions:"
   assert_contains "$workflow_content" "  contents: read"
-  assert_contains "$workflow_content" "  issues: write"
+  assert_contains "$workflow_content" "      issues: write"
+  assert_contains "$workflow_content" "  group: stable-branch-protection"
+  assert_contains "$workflow_content" "  cancel-in-progress: false"
+  assert_contains "$workflow_content" \
+    "    if: github.event_name == 'schedule' && needs.verify.result == 'failure'"
+  assert_contains "$workflow_content" "    needs: verify"
   assert_contains "$workflow_content" "    timeout-minutes: 5"
 
   check_block=$(stable_branch_protection_step_block "Check live main branch protection")
@@ -329,7 +335,8 @@ test_stable_branch_protection_workflow_contract() {
 
   upload_block=$(stable_branch_protection_step_block "Retain protection check output")
   assert_contains "$upload_block" "if: always()"
-  assert_contains "$upload_block" "uses: actions/upload-artifact@v4"
+  assert_contains "$upload_block" \
+    "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4"
   assert_contains "$upload_block" "name: stable-branch-protection-check"
   assert_contains "$upload_block" \
     "path: \${{ runner.temp }}/stable-branch-protection-check.txt"
@@ -339,8 +346,7 @@ test_stable_branch_protection_workflow_contract() {
   notification_block=$(stable_branch_protection_step_block \
     "Notify maintainers of scheduled protection drift")
   assert_contains "$notification_block" \
-    "if: failure() && github.event_name == 'schedule'"
-  assert_contains "$notification_block" "uses: actions/github-script@v7"
+    "uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7"
   assert_contains "$notification_block" \
     "const title = '[Alert] Stable branch protection drift detected';"
   assert_contains "$notification_block" "github.paginate("
@@ -356,6 +362,59 @@ test_stable_branch_protection_workflow_contract() {
     return 1
   fi
   echo "PASS: preserves stable branch protection drift-monitoring contract"
+}
+
+test_rejects_floating_workflow_dependencies() {
+  local workspace
+  workspace=$(make_workspace floating-action 1.7.12 1.7.12)
+  rm -f "$FAKE_ACTIONLINT_MARKER"
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+jobs:
+  unsafe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+EOF
+
+  if ACTIONLINT_BIN="$FAKE_ACTIONLINT" bash \
+    "$workspace/scripts/src/check-workflows.sh" >"$TEST_ROOT/floating-output" 2>&1; then
+    printf 'Expected floating action reference to fail workflow dependency checks.\n' >&2
+    return 1
+  fi
+  assert_contains "$(<"$TEST_ROOT/floating-output")" \
+    "third-party actions must use a 40-character immutable SHA"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected dependency pinning failure before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects floating workflow action references"
+}
+
+test_rejects_mutable_service_images() {
+  local workspace
+  workspace=$(make_workspace mutable-image 1.7.12 1.7.12)
+  rm -f "$FAKE_ACTIONLINT_MARKER"
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+services:
+  postgres:
+    image: postgres:16
+EOF
+
+  if ACTIONLINT_BIN="$FAKE_ACTIONLINT" bash \
+    "$workspace/scripts/src/check-workflows.sh" >"$TEST_ROOT/image-output" 2>&1; then
+    printf 'Expected mutable service image to fail workflow dependency checks.\n' >&2
+    return 1
+  fi
+  assert_contains "$(<"$TEST_ROOT/image-output")" \
+    "service images must use an immutable sha256 digest"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected image pinning failure before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects mutable workflow service images"
 }
 
 test_stable_branch_protection_alert_fixture() {
@@ -1112,3 +1171,5 @@ test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
 test_stable_branch_protection_alert_fixture
+test_rejects_floating_workflow_dependencies
+test_rejects_mutable_service_images
