@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import { useForm, useFieldArray } from "react-hook-form";
+import type { Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   formSchema,
@@ -339,7 +340,7 @@ export default function SetupProfileEditor({
   const [doughVariantPick, setDoughVariantPick] = useState<{ recipeName: string; variants: DoughballVariant[] } | null>(null);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: DEFAULT_VALUES,
   });
   const v = form.watch();

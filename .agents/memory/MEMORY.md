@@ -10,6 +10,7 @@
 - [SSE meta stamp source](sse-meta-stamp-source.md) — SSE LWW must use overlayRunMetaStamps(prev.runs) not raw React state; saveDayState stamps localStorage only, React state keeps old stamp, so startRun's startedAt gets erased by a stale SSE echo.
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
+- [Zod 4 form resolver boundary](zod4-form-resolver.md) — setup forms keep parsed FormValues while Zod 4 accepts raw browser inputs; localize the resolver type boundary.
 - [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
@@ -56,7 +57,7 @@
 - [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [One-time heals and placeholders](one-time-data-heals.md) + [data reset](one-time-data-purge.md) + [seeded-placeholder-runs.md] — use marker/epoch guards; seeded blank runs stay local-only and clients must never hold zero runs.
-- [Master-data merge](merge-server-master-data-repoint.md) — re-point server pools so merging or renaming master data does not destroy recipe references.
+- [Master-data merge and rename aliases](merge-server-master-data-repoint.md) + [brand-rename-aliases.md] — re-point server pools and learn import aliases so later imports do not resurrect old names.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
 - [Import units, sources, and dedup](spec-import-batch-vs-perpizza.md) + [import-source-file-semantics.md] + [import-order-dedup-keys.md] — preserve native units and order spec→dough/sauce→cheese/premix; dedup uses kind-specific keys.
 - [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher for importer link passes; only loose-key equality may auto-rename, reorder/typo/family-fold are declinable suggestions (prod cross-link incident).
@@ -104,7 +105,7 @@
 - [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa `autoUpdate` reloads clients; interactive “Reload now” UI requires `prompt` so `needRefresh` fires.
 - [Master-data health ownership](master-data-health-ownership.md) — legacy setup rows and purchased crusts stay protected as owned review warnings, not automatic launch blockers.
 - [Master-data audit boundary](master-data-audit-boundary.md) — scans are bounded/read-only; ambiguous refs stay review-only and unavailable immutable history is an explicit coverage gap.
-- [Browser, accessibility, and release evidence](visual-regression-baselines.md) + [release-browser-evidence.md] + [a11y-coverage-gate.md] + [a11y-dialog-browser-fixtures.md] + [browser-e2e-disposable-database.md] — isolated, masked artifacts need explicit review and disposable destructive-test databases.
+- [Browser and release evidence](visual-regression-baselines.md) + [release-browser-evidence.md] + [a11y-coverage-gate.md] + [a11y-dialog-browser-fixtures.md] — isolated, masked browser evidence needs explicit review.
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release verification and revision binding](release-check-shard-budget.md) + [revision-bound-release-evidence.md] + [release-evidence-verifier-mode.md] + [release-browser-coverage-contract.md] + [release-gate-dependencies.md] — reports must be current, complete, mode-verified, revision-bound, and explicit about blocked dependents.
@@ -115,7 +116,7 @@
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
-- [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
+- [Browser fixture and database isolation](browser-fixture-seeding.md) + [browser-e2e-disposable-database.md] — hydrate master data through server fixtures and use disposable DBs for destructive Playwright suites.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake sync claim fence](wake-sync-claim-fence.md) — monotonic wake acknowledgment fences stale claims without deadlocking same-tick dough claim requests.
@@ -131,7 +132,6 @@
 - [Scoped offline master-data queues](scoped-offline-master-data-queues.md) — partition caches/outboxes by auth scope, fence async handoffs, and reserve revision zero for non-overwriting legacy seeds.
 - [Historical repair compatibility](historical-repair-compatibility.md) — preserve released marker-first transactions; validate stored nested results with bounded recursive telemetry.
 - [Bundle boundary manifests](bundle-boundary-manifests.md) — Vite’s standard manifest omits same-chunk module membership; dependency guards need Rollup chunk.modules.
-- [Vite 8 config-loader compatibility](vite8-config-loader.md) — local imports in Vite configs should use explicit extensions for native-loader compatibility.
 - [Completed history durability](completed-history-durability.md) — immutable run completions use scope-bound caches/outboxes; normal resets and undo must preserve pending uploads.
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — `REPLIT_ENVIRONMENT=production` can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
@@ -148,13 +148,12 @@
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
-- [Browser peer startup ordering](browser-peer-startup-ordering.md) — assert snapshot no-ops before opening a peer; hydration may issue a legitimate background merge and change the canonical hash.
-- [Browser evidence assertions](browser-evidence-assertions.md) + [server IDs](browser-fixture-server-identifiers.md) — assert visible labels and business fields, not internal IDs or exact nested nodes.
+- [Browser peer and evidence assertions](browser-peer-startup-ordering.md) + [browser-evidence-assertions.md] + [browser-fixture-server-identifiers.md] — assert no-op startup, visible business labels, and stable fixture fields.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
-- [AI evaluation framework boundary](ai-evaluation-framework-boundary.md) — adapt provider-neutral invariants into project-owned offline TypeScript/Vitest; do not import external harness runtimes.
-- [AI benchmark network boundary](ai-benchmark-network-boundary.md) — routine evaluations stay offline; live provider checks require explicit opt-in and are never CI evidence.
+- [AI evaluation boundaries](ai-evaluation-framework-boundary.md) + [network](ai-benchmark-network-boundary.md) — use project-owned offline TypeScript/Vitest; live provider checks require opt-in and are never CI evidence.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
-- [React Day Picker v10 wrapper contract](react-day-picker-v10.md) — copied calendar wrappers must use the v10 month_grid class key and preserve default slot classes.
+- [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
+- [Frontend migration contracts](vite8-config-loader.md) + [React Day Picker v10](react-day-picker-v10.md) — use explicit Vite import extensions and preserve v10 calendar class/slot contracts.
