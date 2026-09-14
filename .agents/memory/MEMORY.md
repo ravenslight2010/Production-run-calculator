@@ -108,7 +108,7 @@
 - [Browser and release evidence](visual-regression-baselines.md) + [release-browser-evidence.md] + [a11y-coverage-gate.md] + [a11y-dialog-browser-fixtures.md] — isolated, masked browser evidence needs explicit review.
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
-- [Release verification and revision binding](release-check-shard-budget.md) + [revision-bound-release-evidence.md] + [release-evidence-verifier-mode.md] + [release-browser-coverage-contract.md] + [release-gate-dependencies.md] — reports must be current, complete, mode-verified, revision-bound, and explicit about blocked dependents.
+- [Release gate budgets](release-check-shard-budget.md) — size time and process use for serialized gates; keep reports revision-bound and explicit about blocked dependents.
 - [Container image release evidence](container-image-release-evidence.md) — image tags alone are insufficient; retain each pushed digest plus a pull-by-digest OCI revision-label check.
 - [Source reconciliation evidence boundary](source-reconciliation-evidence-boundary.md) — production repair proof cannot be inferred from a mixed development fixture; bind verification to the matching database.
 - [Source-audit reports and CLI paths](large-source-audit-captures.md) + [source-audit-report-versions.md] + [source-audit-cli-paths.md] — keep hashed captures shard-safe, dispatch supported read versions, and resolve inputs from the script repository.
@@ -150,7 +150,6 @@
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Browser peer and evidence assertions](browser-peer-startup-ordering.md) + [browser-evidence-assertions.md] + [browser-fixture-server-identifiers.md] — assert no-op startup, visible business labels, and stable fixture fields.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
-- [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [AI evaluation boundaries](ai-evaluation-framework-boundary.md) + [network](ai-benchmark-network-boundary.md) — use project-owned offline TypeScript/Vitest; live provider checks require opt-in and are never CI evidence.

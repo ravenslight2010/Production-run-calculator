@@ -19,6 +19,9 @@ if (Number.isNaN(port) || port <= 0) {
 // BASE_PATH affects the `base` option which IS relevant during builds.
 // Default to "/" (the production root) when not explicitly provided.
 const basePath = process.env.BASE_PATH ?? "/";
+const suppressPreviewReload =
+  process.env.REPL_ID !== undefined ||
+  process.env.CLEAN_START_REPLIT_PREVIEW === "1";
 const webBuildId =
   process.env.VITE_APP_VERSION?.trim() ||
   process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
@@ -108,7 +111,7 @@ export default defineConfig({
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(webBuildId),
   },
   plugins: [
-    ...(process.env.REPL_ID ? [suppressViteClientReload()] : []),
+    ...(suppressPreviewReload ? [suppressViteClientReload()] : []),
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),

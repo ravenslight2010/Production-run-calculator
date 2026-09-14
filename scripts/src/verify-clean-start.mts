@@ -52,6 +52,28 @@ type CleanStartEvidence = {
   startupLogs: Record<string, string>;
   browserResult: string;
   screenshot: string | null;
+  browser: BrowserEvidence | null;
+};
+
+type BrowserEvidence = {
+  kind: string;
+  generatedAt: string;
+  routes: Array<{
+    label: string;
+    url: string;
+    status: number;
+    expectedText: string | null;
+    passed: boolean;
+  }>;
+  consoleMessages: Array<Record<string, unknown>>;
+  expectedUnauthenticatedResponses: Array<Record<string, unknown>>;
+  unexpectedConsoleErrors: Array<Record<string, unknown>>;
+  hmrOrRoutingFailures: Array<Record<string, unknown>>;
+  pageErrors: Array<Record<string, unknown>>;
+  requestFailures: Array<Record<string, unknown>>;
+  responseErrors: Array<Record<string, unknown>>;
+  screenshot: string | null;
+  passed: boolean;
 };
 
 type ManagedProcess = {
@@ -65,6 +87,7 @@ const processes: ManagedProcess[] = [];
 const checks: Record<string, CheckEvidence> = {};
 let screenshot: string | null = null;
 let screenshotError: string | undefined;
+let browserEvidence: BrowserEvidence | null = null;
 let cleaningUp = false;
 
 function parsePort(value: string, variable: string): number {
@@ -119,6 +142,7 @@ function commandFor(name: "api" | "web" | "mockup"): {
       NODE_ENV: "development",
       PORT: String(webPort),
       VITE_API_PROXY_TARGET: `http://127.0.0.1:${apiPort}`,
+      CLEAN_START_REPLIT_PREVIEW: "1",
     },
   };
 }
@@ -307,6 +331,7 @@ async function writeEvidence(): Promise<void> {
     startupLogs,
     browserResult,
     screenshot,
+    browser: browserEvidence,
   };
   await writeFile(
     resolve(evidenceDir, "clean-start-evidence.json"),
@@ -322,7 +347,10 @@ async function writeEvidence(): Promise<void> {
         screenshot,
         screenshotError,
         web: checks.webHtml ?? null,
+        webFallback: checks.webFallbackHtml ?? null,
         api: checks.apiHealthViaWebProxy ?? null,
+        viteClient: checks.viteClientReloadSuppression ?? null,
+        browser: browserEvidence,
       },
       null,
       2,
@@ -334,54 +362,43 @@ async function writeEvidence(): Promise<void> {
   );
 }
 
-function chromiumExecutable(): string | undefined {
-  for (const executable of ["chromium", "chromium-browser", "google-chrome"]) {
-    try {
-      execFileSync(executable, ["--version"], {
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-      return executable;
-    } catch {
-      // Check the next known browser binary.
-    }
-  }
-  return undefined;
-}
-
-async function capturePreviewScreenshot(): Promise<void> {
-  const executable = chromiumExecutable();
-  if (!executable) {
-    screenshotError =
-      "Chromium was not available; retained HTTP browser result instead.";
-    return;
-  }
+async function runBrowserCheck(): Promise<void> {
   await mkdir(evidenceDir, { recursive: true });
   const fileName = "preview-home.png";
   const outputPath = resolve(evidenceDir, fileName);
   const result = await new Promise<{ code: number | null; output: string }>(
     (resolveResult) => {
       const browser = spawn(
-        executable,
+        process.execPath,
         [
-          "--headless=new",
-          "--no-sandbox",
-          "--disable-gpu",
-          "--window-size=1280,900",
-          `--screenshot=${outputPath}`,
-          `http://127.0.0.1:${webPort}/`,
+          resolve(
+            rootDir,
+            "artifacts/run-calculator/e2e/preview-host-browser.mjs",
+          ),
         ],
-        { stdio: ["ignore", "pipe", "pipe"] },
+        {
+          env: {
+            ...process.env,
+            CLEAN_START_WEB_PORT: String(webPort),
+            CLEAN_START_MOCKUP_PORT: String(mockupPort),
+            CLEAN_START_SCREENSHOT_PATH: outputPath,
+            CLEAN_START_BROWSER_TIMEOUT_MS: String(
+              Math.min(startupTimeoutMs, 30_000),
+            ),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
       );
       let output = "";
       browser.stdout?.on("data", (chunk: Buffer) => {
-        output = `${output}${chunk.toString()}`.slice(-2_000);
+        output = `${output}${chunk.toString()}`.slice(-100_000);
       });
       browser.stderr?.on("data", (chunk: Buffer) => {
-        output = `${output}${chunk.toString()}`.slice(-2_000);
+        output = `${output}${chunk.toString()}`.slice(-100_000);
       });
       const timeout = setTimeout(() => {
         browser.kill("SIGTERM");
-      }, 30_000);
+      }, Math.min(startupTimeoutMs, 45_000));
       browser.once("close", (code) => {
         clearTimeout(timeout);
         resolveResult({ code, output });
@@ -392,11 +409,30 @@ async function capturePreviewScreenshot(): Promise<void> {
       });
     },
   );
-  if (result.code === 0) {
+  const marker = result.output
+    .split("\n")
+    .find((line) => line.startsWith("CLEAN_START_BROWSER_RESULT="));
+  if (marker) {
+    browserEvidence = JSON.parse(
+      marker.slice("CLEAN_START_BROWSER_RESULT=".length),
+    ) as BrowserEvidence;
+    if (browserEvidence.screenshot) {
+      browserEvidence.screenshot = evidencePath(fileName);
+    }
+  }
+  if (result.code === 0 && browserEvidence?.passed) {
     screenshot = evidencePath(fileName);
     return;
   }
-  screenshotError = `Chromium screenshot failed (code=${result.code}): ${result.output}`;
+  const failureDetail = browserEvidence
+    ? JSON.stringify({
+        failedRoutes: browserEvidence.routes.filter((route) => !route.passed),
+        hmrOrRoutingFailures: browserEvidence.hmrOrRoutingFailures,
+        unexpectedConsoleErrors: browserEvidence.unexpectedConsoleErrors,
+      }).slice(0, 12_000)
+    : result.output.slice(-12_000);
+  screenshotError = `Preview browser check failed (code=${result.code}): ${failureDetail}`;
+  throw new Error(screenshotError);
 }
 
 async function stopManaged(managed: ManagedProcess): Promise<void> {
@@ -496,9 +532,25 @@ async function main(): Promise<void> {
     `PASS web: port ${webPort} open and / returns the initial HTML document`,
   );
   await fetchExpect(
+    "webFallbackHtml",
+    web,
+    `http://127.0.0.1:${webPort}/sign-in`,
+    (response, body) => {
+      if (response.status !== 200)
+        return `expected HTTP 200, received ${response.status}`;
+      if (!body.includes("<html") && !body.includes("<!doctype")) {
+        return "response did not contain an HTML document";
+      }
+      return undefined;
+    },
+  );
+  console.log(
+    `PASS web fallback: /sign-in returns the calculator HTML document`,
+  );
+  await fetchExpect(
     "apiHealthViaWebProxy",
     web,
-    `http://127.0.0.1:${webPort}/api/readyz`,
+    `http://127.0.0.1:${webPort}/api/healthz`,
     (response, body) => {
       if (response.status !== 200)
         return `expected HTTP 200, received ${response.status}: ${body.slice(0, 500)}`;
@@ -517,14 +569,31 @@ async function main(): Promise<void> {
     },
   );
   console.log(
-    `PASS web proxy: /api/readyz forwards a healthy API response on port ${webPort}`,
+    `PASS web proxy: /api/healthz forwards a healthy API response on port ${webPort}`,
   );
-  await capturePreviewScreenshot();
-  if (screenshot) {
-    console.log(`PASS browser: retained preview screenshot at ${screenshot}`);
-  } else {
-    console.log(`Browser screenshot unavailable: ${screenshotError}`);
-  }
+  await fetchExpect(
+    "viteClientReloadSuppression",
+    web,
+    `http://127.0.0.1:${webPort}/@vite/client`,
+    (response, body) => {
+      if (response.status !== 200)
+        return `expected HTTP 200, received ${response.status}`;
+      if (!body.includes("full page reload suppressed (Replit preview)")) {
+        return "served Vite client did not contain the Replit reconnect reload suppression";
+      }
+      if (body.includes("location.reload()")) {
+        return "served Vite client still contained location.reload()";
+      }
+      return undefined;
+    },
+  );
+  console.log(
+    "PASS Vite client: Replit reconnect reload suppression is active",
+  );
+  await runBrowserCheck();
+  console.log(
+    `PASS browser: ${browserEvidence?.expectedUnauthenticatedResponses.length ?? 0} expected unauthenticated responses; no HMR, routing, page, or unexpected console failures; screenshot retained at ${screenshot}`,
+  );
 
   const mockup = startManaged("mockup");
   await waitForPort(mockup, mockupPort);
@@ -543,6 +612,22 @@ async function main(): Promise<void> {
   );
   console.log(
     `PASS mockup: port ${mockupPort} open and /__mockup/ returns the initial HTML document`,
+  );
+  await fetchExpect(
+    "mockupFallbackHtml",
+    mockup,
+    `http://127.0.0.1:${mockupPort}/__mockup/preview/screen-improvements/LoginCurrent`,
+    (response, body) => {
+      if (response.status !== 200)
+        return `expected HTTP 200, received ${response.status}`;
+      if (!body.includes("<html") && !body.includes("<!doctype")) {
+        return "response did not contain an HTML document";
+      }
+      return undefined;
+    },
+  );
+  console.log(
+    "PASS mockup fallback: component preview route returns the mockup HTML document",
   );
 }
 

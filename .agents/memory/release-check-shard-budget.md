@@ -15,6 +15,21 @@ Detached, best-effort diagnostics must be tested as bounded telemetry, not lossl
 
 **How to apply:** Keep strict assertions on request availability and local alerts; require shared diagnostics to recover with a bounded subset, then drain the bounded background work before teardown or the next test.
 
+Browser-backed release gates also need a process/thread budget, not only a
+duration budget. In a shared Replit task environment, concurrent Vite, Vitest,
+Playwright, and release workflows can approach the cgroup PID ceiling; Chromium
+then fails with `pthread_create: Resource temporarily unavailable` even though
+the target app and available memory are healthy.
+
+**Why:** Treating this as a browser or routing regression leads to repeated,
+misleading retries and can make resource pressure worse.
+
+**How to apply:** Check `pids.current` against `pids.max` when Chromium exits
+during launch. Keep lightweight checks to one browser page and minimize
+simultaneous preview servers. Validate independent HTTP and browser portions
+separately if unrelated workflows occupy the remaining process budget, then run
+the combined gate when the workspace is quiet.
+
 Read-only release preflights that share a database with concurrent prerequisite
 gates should use a small bounded acquisition retry, while still failing closed
 after the retry budget is exhausted. Their retained evidence must also bind to
