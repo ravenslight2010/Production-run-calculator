@@ -1,16 +1,16 @@
 {
   "provider": "gemini",
+  "execution_mode": "sanitized_historical_artifact",
+  "ci_evidence": false,
   "manual_decisions_excluded_from_metrics": true,
   "cases": [
     {
       "id": "customer-import-audit-near-miss-1",
       "skill": "customer-import-audit",
-      "query": "The Excel parser linked a recipe to the wrong flavor; trace the bug and fix the poisoned records.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "uncertain",
-        "confidence": 0.5,
-        "rationale": "The user is reporting a bug with an Excel parser linking data incorrectly. While this could potentially be related to importing a new customer's spec workbook, the request does not explicitly mention a 'new customer' or a 'new-customer import'. The skill is specific to post-import audits for new customers, and this request lacks that specific context, making the connection ambiguous."
+        "confidence": 0.5
       },
       "error": null,
       "reason": "uncertain",
@@ -20,12 +20,10 @@
     {
       "id": "db-schema-change-near-miss-1",
       "skill": "db-schema-change",
-      "query": "Add one nullable field to an existing populated table using the detailed new-column checklist.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 1.0,
-        "rationale": "The user explicitly states the need to 'Add one nullable field to an existing populated table using the detailed new-column checklist'. The skill description states, 'For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.' This is a direct match, indicating the skill is highly relevant."
+        "confidence": 1.0
       },
       "error": null,
       "reason": "disagreement",
@@ -35,7 +33,6 @@
     {
       "id": "operational-browser-verification-near-miss-1",
       "skill": "operational-browser-verification",
-      "query": "Add a Playwright unit test for a pure date formatter.",
       "expected": "do_not_trigger",
       "gemini": {},
       "error": "invalid_output",
@@ -46,7 +43,6 @@
     {
       "id": "operational-browser-verification-near-miss-2",
       "skill": "operational-browser-verification",
-      "query": "Compare two screenshots visually and update the accessibility snapshots.",
       "expected": "do_not_trigger",
       "gemini": {},
       "error": "invalid_output",
@@ -57,12 +53,10 @@
     {
       "id": "production-go-near-miss-1",
       "skill": "production-go",
-      "query": "Please run the pre-publish checklist before I decide whether to deploy.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 0.9,
-        "rationale": "The user is explicitly asking to run a 'pre-publish checklist' before deciding to deploy, which directly aligns with the skill's purpose of running 'applicable release and shipping gates before recommending publish' and determining if an application is 'production-ready' or 'ready to publish'."
+        "confidence": 0.9
       },
       "error": null,
       "reason": "disagreement",
@@ -72,12 +66,10 @@
     {
       "id": "release-checklist-near-miss-1",
       "skill": "release-checklist",
-      "query": "Give me a final production-ready GO or NO-GO decision.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 0.9,
-        "rationale": "The user is asking for a 'final production-ready GO or NO-GO decision', which directly aligns with the 'Pre-publish verification' function of the skill. The skill's description indicates it is used 'before suggesting a deploy/publish', implying it leads to such a decision."
+        "confidence": 0.9
       },
       "error": null,
       "reason": "disagreement",
@@ -87,7 +79,6 @@
     {
       "id": "rollback-recovery-near-miss-2",
       "skill": "rollback-recovery",
-      "query": "Revert the last commit because the user wants a simple undo of their local edit.",
       "expected": "do_not_trigger",
       "gemini": {},
       "error": "invalid_output",
@@ -98,12 +89,10 @@
     {
       "id": "spec-import-guard-near-miss-1",
       "skill": "spec-import-guard",
-      "query": "Investigate a bad imported workbook by tracing what landed in the database.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 0.9,
-        "rationale": "The user wants to investigate a 'bad imported workbook' by 'tracing what landed in the database'. This directly relates to the outcome and process of the spec import pipeline, which is the domain of this skill. Understanding why an import was 'bad' or what 'landed in the database' necessitates understanding or debugging the spec import pipeline components, even if not directly 'touching' the code in a development sense."
+        "confidence": 0.9
       },
       "error": null,
       "reason": "disagreement",
@@ -113,12 +102,10 @@
     {
       "id": "state-accuracy-check-near-miss-2",
       "skill": "state-accuracy-check",
-      "query": "Audit SSE merge stamps and stale writes across multiple devices.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 0.9,
-        "rationale": "The user request to 'Audit SSE merge stamps and stale writes across multiple devices' directly aligns with the skill's purpose of 'Verify that timers, counters, and live state remain accurate and consistent'. Stale writes are a form of inaccurate or inconsistent state, and merge stamps are used to maintain accuracy and consistency of state across devices. 'Audit' is synonymous with 'Verify'."
+        "confidence": 0.9
       },
       "error": null,
       "reason": "disagreement",
@@ -128,12 +115,10 @@
     {
       "id": "verify-before-commit-near-miss-1",
       "skill": "verify-before-commit",
-      "query": "Run the full pre-publish release checklist and decide whether the application is ready to deploy.",
       "expected": "do_not_trigger",
       "gemini": {
         "decision": "trigger",
-        "confidence": 0.95,
-        "rationale": "The user request explicitly asks to 'decide whether the application is ready to deploy', which directly matches the skill's trigger condition 'ready to deploy'. The skill is designed for verification before deployment."
+        "confidence": 0.95
       },
       "error": null,
       "reason": "disagreement",
@@ -143,7 +128,6 @@
     {
       "id": "wrong-number-triage-near-miss-2",
       "skill": "wrong-number-triage",
-      "query": "A database import created incorrect stored values across many profiles.",
       "expected": "do_not_trigger",
       "gemini": {},
       "error": "invalid_output",
@@ -151,5 +135,16 @@
       "manual_decision": null,
       "manual_reason": null
     }
-  ]
+  ],
+  "privacy": {
+    "mode": "metadata-only",
+    "rawProviderPayloadsRetained": false,
+    "retainedEvaluationContent": "none"
+  },
+  "provenance": {
+    "evidence_type": "sanitized_historical_provider_benchmark",
+    "fresh_provider_run": false,
+    "sanitization": "Private-content fields were removed from previously checked-in output; the provider was not rerun.",
+    "original_run_at": "2026-09-03T14:25:20.586419+00:00"
+  }
 }

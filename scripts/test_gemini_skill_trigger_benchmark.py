@@ -9,10 +9,12 @@ from tempfile import TemporaryDirectory
 
 from gemini_skill_trigger_benchmark import (
     Classification,
+    check_checked_in_artifacts,
     GeminiAdapter,
     evaluate,
     evaluation_manifest,
     metrics,
+    private_artifact_fields,
     list_review_cases,
     provider_failure_cases,
     record_manual_decision,
@@ -157,6 +159,33 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertIn("not claims that Claude would trigger", report)
         queue = json.loads((root / "gemini-skill-trigger-review-queue.json").read_text())
         self.assertTrue(queue["manual_decisions_excluded_from_metrics"])
+
+    def test_checked_in_artifacts_are_sanitized_historical_evidence(self):
+        root = Path(__file__).resolve().parents[1]
+        check_checked_in_artifacts(root)
+        for name in (
+            "gemini-skill-trigger-benchmark.json",
+            "gemini-skill-trigger-review-queue.json",
+        ):
+            payload = json.loads((root / name).read_text())
+            self.assertEqual(payload["execution_mode"], "sanitized_historical_artifact")
+            self.assertFalse(payload["ci_evidence"])
+            self.assertFalse(payload["provenance"]["fresh_provider_run"])
+            self.assertEqual(payload["privacy"]["retainedEvaluationContent"], "none")
+
+    def test_private_artifact_field_check_is_recursive_and_deterministic(self):
+        payload = {
+            "results": [{"rationale": "private", "nested": {"query": "private"}}],
+            "provider_payload": {"body": "private"},
+        }
+        self.assertEqual(
+            private_artifact_fields(payload),
+            [
+                "$.provider_payload",
+                "$.results[0].nested.query",
+                "$.results[0].rationale",
+            ],
+        )
 
     def test_valid_classification_and_validation(self):
         value = validate_classification({"decision": "trigger", "confidence": 0.9, "rationale": "clear"})

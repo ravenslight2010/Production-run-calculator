@@ -32,6 +32,21 @@ MINIMUM_COVERAGE = 0.8
 MAX_RATIONALE_CHARS = 500
 MAX_MANUAL_REASON_CHARS = 1000
 DEFAULT_MANUAL_DECISIONS = Path("gemini-skill-trigger-manual-decisions.json")
+CHECKED_IN_ARTIFACTS = (
+    Path("gemini-skill-trigger-benchmark.json"),
+    Path("gemini-skill-trigger-review-queue.json"),
+)
+PRIVATE_ARTIFACT_FIELDS = {
+    "query",
+    "rationale",
+    "provider_payload",
+    "provider_response",
+    "raw_provider_payload",
+    "credential",
+    "conversation",
+    "prompt",
+    "response",
+}
 
 
 class ProviderUnavailable(RuntimeError):
@@ -294,6 +309,37 @@ def retained_results(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{key: record[key] for key in retained_keys if key in record} for record in records]
 
 
+def private_artifact_fields(value: Any, path: str = "$") -> list[str]:
+    """Return deterministic JSON paths for private fields retained in an artifact."""
+    findings: list[str] = []
+    if isinstance(value, dict):
+        for key in sorted(value):
+            child_path = f"{path}.{key}"
+            if key.lower() in PRIVATE_ARTIFACT_FIELDS:
+                findings.append(child_path)
+            findings.extend(private_artifact_fields(value[key], child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            findings.extend(private_artifact_fields(item, f"{path}[{index}]"))
+    return findings
+
+
+def check_checked_in_artifacts(root: Path) -> None:
+    failures: list[str] = []
+    for relative_path in CHECKED_IN_ARTIFACTS:
+        path = root / relative_path
+        value = _read_json_object(path)
+        failures.extend(
+            f"{relative_path}:{field_path}"
+            for field_path in private_artifact_fields(value)
+        )
+    if failures:
+        raise SystemExit(
+            "Private fields are forbidden in checked-in Gemini benchmark artifacts:\n"
+            + "\n".join(failures)
+        )
+
+
 def write_benchmark_artifacts(
     results_path: Path,
     queue_path: Path,
@@ -516,7 +562,12 @@ def main() -> None:
             "not CI evidence and requires an explicit live-provider opt-in."
         )
     )
-    parser.add_argument("command", nargs="?", choices=("benchmark", "review"), default="benchmark")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("benchmark", "review", "check-artifacts"),
+        default="benchmark",
+    )
     parser.add_argument(
         "review_action_positional",
         nargs="?",
@@ -549,6 +600,10 @@ def main() -> None:
     parser.add_argument("--decision", choices=("trigger", "do_not_trigger"))
     parser.add_argument("--reason", help="reason for a manual decision")
     args = parser.parse_args()
+    if args.command == "check-artifacts":
+        check_checked_in_artifacts(Path.cwd())
+        print("Checked-in Gemini benchmark artifacts retain metadata only.")
+        return
     if args.command == "review":
         review_action = args.review_action or args.review_action_positional
         if not review_action:
