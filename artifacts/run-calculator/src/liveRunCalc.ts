@@ -1,4 +1,4 @@
-import type { Calc } from "./contexts/LiveRunContext";
+import type { Calc } from "@workspace/live-calc";
 
 // Home reads the latest calculation for non-live UI without subscribing to the
 // per-second LiveRunContext clock. Keeping this bridge separate prevents the

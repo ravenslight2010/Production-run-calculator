@@ -1,9 +1,10 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { AlertTriangle, Blend, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useMixesTabCtx } from "../contexts/MixesTabCtx";
 import { buildMixPlan } from "@workspace/mixes";
+import { useMixPlanSnapshot, refreshMixPlanSnapshot } from "../mixPlanSnapshotClient";
 import { computeCheesePerPizzaOz, computeSummaryStats, fmtComma, fmtNum, todayStr } from "../utils";
 import { loadProfile, loadRunValues } from "../storage";
 import { DEFAULT_VALUES, type FormValues } from "../types";
@@ -18,6 +19,17 @@ import { PrepMixMissingAmountsWarning } from "./PrepMixMissingAmountsWarning";
 export default memo(function MixesTabContent() {
   const ctx = useMixesTabCtx();
   const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
+  // Online: the server pre-computes the make-day plan from canonical runs +
+  // the mix pool, so every device sees identical batches/lbs with a single
+  // shared fetch instead of per-device recomputation. Refetch when the make-day
+  // or the canonical mix pool changes (manager saves refresh the pool).
+  const serverSnap = useMixPlanSnapshot(ctx.mixMakeDay);
+  const mixesSignature = (ctx.mixPlanItems ?? [])
+    .map((m) => `${m.id}:${m.updatedAt ?? ""}:${m.amountAlreadyMade}`)
+    .join(",");
+  useEffect(() => {
+    void refreshMixPlanSnapshot(ctx.mixMakeDay);
+  }, [ctx.mixMakeDay, mixesSignature]);
   // Pre-blended mixes made ahead for a product. Pick a make-day; for every
   // scheduled run within a matching mix's days-early window, show per-product
   // cards with cases/pizzas, batches to make, total lbs, and a "Pull For Mix"
@@ -107,6 +119,10 @@ export default memo(function MixesTabContent() {
                     // Today's live runs (dayState.runs) are NOT in the scheduled
                     // pool — they live in the live day state. Include them as
                     // date=today so the make-day plan works when today is selected.
+                    // Offline fallback: build the plan exactly as before (profile
+                    // resolution + shared buildMixPlan). Skipped entirely when the
+                    // server snapshot is authoritative.
+                    const fallbackPlan = (() => {
                     const todayDateStr = todayStr();
                     const liveRunsForMixes = ctx.dayState.runs
                       .filter((r) => r.brand && !r.endedAt)
@@ -145,7 +161,9 @@ export default memo(function MixesTabContent() {
                           }),
                       ),
                     ];
-                    const plan = buildMixPlan({ runs, mixes: ctx.mixPlanItems, today: ctx.mixMakeDay });
+                    return buildMixPlan({ runs, mixes: ctx.mixPlanItems, today: ctx.mixMakeDay });
+                    })();
+                    const plan = serverSnap ? serverSnap.plan : fallbackPlan;
                     if (plan.length === 0) {
                       return (
                         <p className="text-sm text-muted-foreground px-1" data-testid="mix-plan-empty">

@@ -43,7 +43,7 @@ const run = {
 describe("computeWarehouseCoverage", () => {
   it("groups linked products and sums confirmed converted onsite stock", () => {
     const rows = computeWarehouseCoverage(
-      [run],
+      [{ values: run }],
       [
         item({
           id: 1,
@@ -73,7 +73,7 @@ describe("computeWarehouseCoverage", () => {
 
   it("identifies capped transferable stock by source location for an onsite shortfall", () => {
     const rows = computeWarehouseCoverage(
-      [run],
+      [{ values: run }],
       [
         item({
           productionIngredientId: "cheese",
@@ -112,7 +112,7 @@ describe("computeWarehouseCoverage", () => {
 
   it("does not report transfer stock when onsite coverage is sufficient", () => {
     const rows = computeWarehouseCoverage(
-      [run],
+      [{ values: run }],
       [item({
         productionIngredientId: "cheese",
         conversionFactor: 10,
@@ -130,7 +130,7 @@ describe("computeWarehouseCoverage", () => {
 
   it("distinguishes missing links, unconfirmed conversions, and shortages", () => {
     const rows = computeWarehouseCoverage(
-      [run],
+      [{ values: run }],
       [
         item({ id: 1, name: "Unconfirmed", productionIngredientId: "cheese", onHand: 100 }),
         item({ id: 2, name: "Short cheese", productionIngredientId: "cheese", conversionFactor: 1, conversionConfirmed: true, onHand: 1 }),
@@ -143,10 +143,48 @@ describe("computeWarehouseCoverage", () => {
 
   it("reports a required catalog ingredient without a linked product", () => {
     const rows = computeWarehouseCoverage(
-      [{ ...run, app1Type: "Sauce", app1OzPerPizza: 1 }],
+      [{ values: { ...run, app1Type: "Sauce", app1OzPerPizza: 1 } }],
       [],
       [ingredient("sauce", "Sauce")],
     );
     expect(rows[0]).toMatchObject({ ingredientName: "Sauce", status: "missing", linkedProducts: [] });
+  });
+
+  it("replaces a run's local lines with server lines when the run id matches", () => {
+    const sources = [
+      { runId: "run-server", values: run },
+      { runId: "run-local", values: run },
+    ];
+    const items = [
+      item({
+        productionIngredientId: "cheese",
+        conversionFactor: 10,
+        conversionConfirmed: true,
+        onHand: 3,
+        byLocation: [{ locationId: 1, locationName: "Onsite", isOnsite: true, onHand: 3 }],
+      }),
+    ];
+    const ingredients = [ingredient("cheese", "Cheese")];
+    const localOnly = computeWarehouseCoverage(sources, items, ingredients);
+    // Two identical runs: each contributes the same local quantity.
+    const perRunLocal = localOnly[0].needed / 2;
+    const withServer = computeWarehouseCoverage(sources, items, ingredients, {
+      // Server-canonical lines: 4 lbs of cheese for the server-backed run.
+      "run-server": [{ itemKey: "ingredient:Cheese:lbs", qty: 4 }],
+    });
+    expect(withServer).toHaveLength(1);
+    // run-local keeps its local derivation; run-server uses the server value.
+    expect(withServer[0].needed).toBe(perRunLocal + 4);
+    expect(withServer[0].covered).toBe(30);
+  });
+
+  it("ignores server lines for a run id with no matching source", () => {
+    const sources = [{ runId: "run-a", values: run }];
+    const ingredients = [ingredient("cheese", "Cheese")];
+    const localOnly = computeWarehouseCoverage(sources, [], ingredients);
+    const withServer = computeWarehouseCoverage(sources, [], ingredients, {
+      "run-other": [{ itemKey: "ingredient:Cheese:lbs", qty: 999 }],
+    });
+    expect(withServer).toEqual(localOnly);
   });
 });

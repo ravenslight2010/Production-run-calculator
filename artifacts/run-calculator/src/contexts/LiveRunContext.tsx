@@ -24,6 +24,8 @@ import {
   type AutoTrackEventClaim,
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
+import { suggestedDoughStaging } from "@workspace/live-calc";
+import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
@@ -33,6 +35,7 @@ import {
   computeLinePhases,
   computePackagingDrainElapsedSec,
   lineHasPackagingDrain,
+  type LinePhases,
 } from "../linePhases";
 import { pauseStopsTunnel } from "../pausePolicy";
 import {
@@ -48,6 +51,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   classifyOperationalDisplay,
+  shouldUseServerCalc,
   type OperationalDisplayState,
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -64,6 +68,8 @@ export interface LiveRunContextValue {
   calc: Calc;
   liveFreezerMin: number;
   elapsedBatchSec: number;
+  /** Day-state-owned line-phase model; server-adopted when confirmed, local fallback. */
+  linePhases: LinePhases;
   currentRunDowntimeMs: number;
   casesPct: number;
   casesFreezerPct: number;
@@ -229,7 +235,28 @@ export function LiveRunProvider({
   })();
 
   // ── Core production calc ─────────────────────────────────────────────────
+  // Server-authority calc: adopt the streamed server calc while online, tied
+  // to the current run, and the receipt is still inside the freshness window
+  // (2 tick intervals). Stale/offline/reconnected falls back to local
+  // computeCalc — never a blank UI.
+  const adoptServerCalc =
+    operationalServerCalc != null &&
+    currentRunId === currentRun?.id &&
+    operationalSnapshotReceipt?.runId === currentRunId &&
+    shouldUseServerCalc({
+      online: operationalOnline,
+      syncConnected: operationalSyncConnected,
+      receipt: operationalSnapshotReceipt,
+      nowMs: nowTime.getTime() + serverClockOffsetMs,
+    });
   const calc = useMemo((): Calc => {
+    if (adoptServerCalc) {
+      // Server-authority calc: the streamed server calc is fresh and tied to
+      // the current run — adopt it instead of recomputing locally (battery
+      // win). Stale/offline/reconnected falls through to local computeCalc,
+      // never a blank UI.
+      return operationalServerCalc;
+    }
     const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
     const result = computeCalc({
       v,
@@ -243,7 +270,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab]);
+  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, adoptServerCalc, operationalServerCalc]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
@@ -264,6 +291,14 @@ export function LiveRunProvider({
       )
     : localElapsedBatchSec;
 
+  const serverLinePhases = confirmedProjection?.linePhases ?? null;
+  // Slice 5: the 3-stage line-phase model is server-owned. While a confirmed
+  // projection exists for the current run AND its lifecycle stamp matches the
+  // local run status (a just-paused/ended run falls back locally for at most
+  // one tick until the server delivers the new lifecycle frame), adopt the
+  // server phases and extrapolate the countdowns from capturedAtServerMs.
+  // When an extrapolated countdown would cross zero, re-derive locally — the
+  // math is identical, so the device and the next server tick agree.
   const linePhases = useMemo(() => {
     const pauses = (currentRun?.stoppages ?? []).filter((s) => s.type === "pause");
     const openPause = pauses
@@ -278,7 +313,7 @@ export function LiveRunProvider({
         (latest, s) => (!latest || (s.endedAt ?? 0) > (latest.endedAt ?? 0) ? s : latest),
         undefined,
       );
-    return computeLinePhases({
+    const local = computeLinePhases({
       elapsedBatchSec,
       pausedAt: currentRun?.pausedAt,
       lastResumeWallMs: lastClosedPause?.endedAt ?? 0,
@@ -292,7 +327,25 @@ export function LiveRunProvider({
       nowMs: operationalNowMs,
       endedAt: currentRun?.endedAt,
     });
+    if (
+      !serverLinePhases ||
+      !confirmedProjection ||
+      confirmedProjection.facts.runStatus !== runStatus
+    ) {
+      return local;
+    }
+    const deltaMs = Math.max(0, operationalNowMs - confirmedProjection.capturedAtServerMs);
+    const wouldTransition = [serverLinePhases.stage1, serverLinePhases.stage2, serverLinePhases.stage3]
+      .some((phase) => phase.remainMs > 0 && phase.remainMs - deltaMs <= 0);
+    if (wouldTransition) return local;
+    return {
+      stage1: { ...serverLinePhases.stage1, remainMs: Math.max(0, serverLinePhases.stage1.remainMs - deltaMs) },
+      stage2: { ...serverLinePhases.stage2, remainMs: Math.max(0, serverLinePhases.stage2.remainMs - deltaMs) },
+      stage3: { ...serverLinePhases.stage3, remainMs: Math.max(0, serverLinePhases.stage3.remainMs - deltaMs) },
+    };
   }, [
+    serverLinePhases,
+    confirmedProjection,
     currentRun?.endedAt,
     currentRun?.pausedAt,
     currentRun?.stoppages,
@@ -316,7 +369,7 @@ export function LiveRunProvider({
           casesOnLine: calc.casesOnLine,
           casesInFreezer: calc.casesInFreezer,
         }
-      : (operationalDisplayState === "confirmed" && operationalServerCalc
+      : (adoptServerCalc
         ? operationalServerCalc
         : calc);
   const packagingAutoTrackActive =
@@ -349,13 +402,27 @@ export function LiveRunProvider({
       : 0;
   const casesPctWithFreezer = Math.min(1, casesPct + casesFreezerPct);
 
-  const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
+  // Slice 4: batch/finish timing is server-authoritative when a confirmed
+  // projection exists (older servers without the new fields fall back locally).
+  // The server computes the same formulas from its effectiveElapsedSec anchor,
+  // so all devices display the same batch counter / next-batch countdown.
+  const serverBatchTiming = confirmedProjection
+    ? confirmedProjection.timers
+    : null;
+  const currentBatchNum =
+    (serverBatchTiming != null && Number.isFinite(serverBatchTiming.currentBatchNum))
+      ? serverBatchTiming.currentBatchNum
+      : (calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0);
   const secUntilNextBatch =
-    calc.timePerBatchSec > 0 ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec) : 0;
+    (serverBatchTiming != null && Number.isFinite(serverBatchTiming.secUntilNextBatch))
+      ? serverBatchTiming.secUntilNextBatch
+      : (calc.timePerBatchSec > 0 ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec) : 0);
   const totalBatchesNeeded =
-    calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
-      ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
-      : 0;
+    (serverBatchTiming != null && Number.isFinite(serverBatchTiming.totalBatchesNeeded))
+      ? serverBatchTiming.totalBatchesNeeded
+      : (calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
+        ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
+        : 0);
   // Both the Sauce tab and batch-alert suppression measure the active barrel
   // on this net-production clock. The stored anchor is updated when the crew
   // starts a replacement barrel, so paused time never depletes sauce and a new
@@ -560,10 +627,44 @@ export function LiveRunProvider({
     setSpeedNudgeStatus(null);
   }, []);
 
+  // Pre-seed the next pending run's dough counters when this run's press is
+  // done. Keep this alongside the server-authoritative calculation display so
+  // the preparation handoff remains available without replacing the receipt.
+  const nextRunSeededRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (screenMode !== null || !autoTrackProgress) return;
+    if (runStatus !== "running" || !calc.pressDone) return;
+    const nextRun = dayState.runs[dayState.currentIndex + 1];
+    if (!nextRun || nextRun.startedAt) return;
+    if ((nextRun.subTab ?? "dough") === "crusts") return;
+    const key = `${currentRunId}->${nextRun.id}`;
+    if (nextRunSeededRef.current.has(key)) return;
+    const nv = { ...DEFAULT_VALUES, ...loadRunValues(nextRun.id) };
+    if ((Number(nv.traysOnLine) || 0) > 0 || (Number(nv.batchesReady) || 0) > 0) {
+      nextRunSeededRef.current.add(key);
+      return;
+    }
+    const totalPizzas = (Number(nv.casesNeeded) || 0) * (Number(nv.pizzasPerCase) || 0);
+    if (totalPizzas <= 0) return;
+    const perTray = Number(nv.doughballsPerTray) || 0;
+    const recipeLbs = (nv.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    const yieldPerBatch =
+      recipeLbs > 0 && Number(nv.targetDoughballWeight) > 0
+        ? (recipeLbs * 16) / Number(nv.targetDoughballWeight)
+        : Number(nv.doughBatchYield) || 0;
+    const traysNeeded = perTray > 0 ? totalPizzas / perTray : 0;
+    const batchesNeeded = yieldPerBatch > 0 ? totalPizzas / yieldPerBatch : 0;
+    const seed = suggestedDoughStaging(traysNeeded, batchesNeeded);
+    if (seed.trays === null && seed.batches === null) return;
+    nextRunSeededRef.current.add(key);
+    saveRunValues(nextRun.id, { ...nv, traysOnLine: seed.trays ?? 0, batchesReady: seed.batches ?? 0 });
+    markRunValuesUpdated(nextRun.id, Date.now());
+  }, [runStatus, calc.pressDone, autoTrackProgress, screenMode, dayState.runs, dayState.currentIndex, currentRunId]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -582,7 +683,7 @@ export function LiveRunProvider({
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,

@@ -96,6 +96,17 @@ export interface RunLinesInput extends SummaryStatsInput {
   circles?: string;
   shipper?: string;
   cartonsPerCase: number;
+  // Packaging: carton size (single=1, double=2, triple=3 pizzas per carton)
+  cartonSize?: number;
+  // Packaging: slip sheets, grip sheets, labels
+  slipSheets?: string;
+  gripSheets?: string;
+  labelPosition?: string;
+  labelsPerRoll?: number;
+  topLabelsPerRoll?: number;
+  bottomLabelsPerRoll?: number;
+  // Packaging: pallets
+  casesPerSkid?: number;
 }
 
 export type SummaryStats = ReturnType<typeof computeSummaryStats>;
@@ -369,21 +380,92 @@ export function computeRunLines(
     else add(`ingredient:${pep2TypeB}:lbs`, "ingredient", pep2TypeB, "lbs", s.pep2LbsB);
   }
 
-  // Packaging — only cartoned runs consume packaging. Accepts the web app's new
-  // "cartoned" value and the legacy/mobile "yes"; "labeled"/"n-a"/"no" consume none.
+  // Packaging — consume for cartoned AND labeled runs.
+  // Cartoned: full packaging suite (circles, shippers, cartons, pallets, labels, etc.)
+  // Labeled: circles + labels (no shippers/cartons)
+  // "n-a"/"no": nothing consumed (packaging exemption)
   const cartonedVal = (vals.cartoned ?? "").trim().toLowerCase();
-  if (cartonedVal === "cartoned" || cartonedVal === "yes") {
+  const isCartoned = cartonedVal === "cartoned" || cartonedVal === "yes";
+  const isLabeled = cartonedVal === "labeled";
+
+  if (isCartoned || isLabeled) {
+    // Circles: consumed for both cartoned and labeled runs
     const circle = (vals.circles ?? "").trim();
     if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
       add(`packaging:circles:${circle}`, "packaging", `Circles — ${circle}`, "circles", s.totalPizzas);
     }
-    const shipper = (vals.shipper ?? "").trim();
-    if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) {
-      add(`packaging:shippers:${shipper}`, "packaging", `Shippers — ${shipper}`, "shippers", s.totalCases);
+
+    // Cartons: cartoned runs only (with cartonSize support)
+    if (isCartoned) {
+      const shipper = (vals.shipper ?? "").trim();
+      if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) {
+        add(`packaging:shippers:${shipper}`, "packaging", `Shippers — ${shipper}`, "shippers", s.totalCases);
+      }
+      const perCase = Number(vals.cartonsPerCase) || 0;
+      const cartonSize = Math.max(1, Number(vals.cartonSize) || 1);
+      if (perCase > 0 && s.totalPizzas > 0) {
+        // Cartons: total pizzas / (pizzas per carton × cartons per case)
+        add("packaging:cartons:cases", "packaging", "Cartons", "cases",
+          Math.ceil(s.totalPizzas / (cartonSize * perCase)));
+      }
+      // Shipper labels: 1 per case
+      if (s.totalCases > 0) {
+        add("packaging:shipper-labels:count", "packaging", "Shipper Labels", "count", s.totalCases);
+      }
     }
-    const perCase = Number(vals.cartonsPerCase) || 0;
-    if (perCase > 0 && s.totalPizzas > 0) {
-      add("packaging:cartons:cases", "packaging", "Cartons", "cases", Math.ceil(s.totalPizzas / perCase));
+
+    // Slip sheets: 1 per layer (every layer)
+    if ((vals.slipSheets ?? "").trim().toLowerCase() === "yes" && s.totalCases > 0) {
+      const casesPerLayer = Number(vals.casesPerLayer) || 0;
+      if (casesPerLayer > 0) {
+        add("packaging:slip-sheets:count", "packaging", "Slip Sheets", "count",
+          Math.ceil(s.totalCases / casesPerLayer));
+      }
+    }
+
+    // Grip sheets: per skid (every other layer = ceil(layersPerSkkid/2), 3rd and 5th = 2)
+    const gripVal = (vals.gripSheets ?? "").trim().toLowerCase();
+    if (gripVal !== "none" && gripVal !== "" && s.totalCases > 0) {
+      const casesPerSkid = Number(vals.casesPerSkid) || 0;
+      const casesPerLayer = Number(vals.casesPerLayer) || 0;
+      if (casesPerSkid > 0 && casesPerLayer > 0) {
+        const layersPerSkkid = casesPerSkid / casesPerLayer;
+        const skidCount = Math.ceil(s.totalCases / casesPerSkid);
+        const perSkkid = gripVal === "every other layer"
+          ? Math.ceil(layersPerSkkid / 2)
+          : gripVal === "3rd and 5th" ? 2 : 0;
+        if (perSkkid > 0) {
+          add("packaging:grip-sheets:count", "packaging", "Grip Sheets", "count", perSkkid * skidCount);
+        }
+      }
+    }
+
+    // Labels: 1 per pizza that gets labeled (both = 2 per pizza: top + bottom)
+    const labelPos = (vals.labelPosition ?? "").trim().toLowerCase();
+    if (labelPos && s.totalPizzas > 0) {
+      const topRolls = Number(vals.topLabelsPerRoll) || Number(vals.labelsPerRoll) || 0;
+      const botRolls = Number(vals.bottomLabelsPerRoll) || Number(vals.labelsPerRoll) || 0;
+      if (labelPos === "top" || labelPos === "both") {
+        if (topRolls > 0) {
+          add("packaging:labels-top:rolls", "packaging", "Top Labels", "rolls",
+            Math.ceil(s.totalPizzas / topRolls));
+        }
+      }
+      if (labelPos === "bottom" || labelPos === "both") {
+        if (botRolls > 0) {
+          add("packaging:labels-bottom:rolls", "packaging", "Bottom Labels", "rolls",
+            Math.ceil(s.totalPizzas / botRolls));
+        }
+      }
+    }
+
+    // Pallets: 1 per skid
+    if (s.totalCases > 0) {
+      const casesPerSkid = Number(vals.casesPerSkid) || 0;
+      if (casesPerSkid > 0) {
+        add("packaging:pallets:count", "packaging", "Pallets", "count",
+          Math.ceil(s.totalCases / casesPerSkid));
+      }
     }
   }
 
@@ -395,6 +477,59 @@ export function computeRunConsumptionLines(
   defaultPepTypes: readonly string[],
 ): ConsumeLine[] {
   return computeRunLines(vals, defaultPepTypes).map((l) => ({ itemKey: l.key, qty: l.qty }));
+}
+
+// ── Mix component consumption (Feature B) ───────────────────────────────────
+//
+// Computes inventory deduction lines for the FRESH portion of a mix plan entry.
+// The `amountAlreadyMade` offset reduces totalLbs → remainingLbs; component lbs
+// are scaled proportionally so each ingredient's deduction reflects the fresh
+// mix only (not the pre-made surplus, which was already paid for).
+//
+// Inputs come from @workspace/mixes' MixPlanEntry:
+//   components:  [{ ingredient, lbs }] — pre-scale per-component lbs
+//   totalLbs:    componentLbs + 15% waste + 20 lb startup
+//   remainingLbs: max(0, totalLbs - amountAlreadyMade)
+//
+// Keys use `ingredient:{name}:lbs` to match the existing inventory item key
+// convention used by computeRunLines for applicator mixes.
+export function computeMixComponentConsumptionLines(
+  components: Array<{ ingredient: string; lbs: number }>,
+  totalLbs: number,
+  remainingLbs: number,
+): ConsumeLine[] {
+  if (remainingLbs <= 0 || totalLbs <= 0) return [];
+  const scale = remainingLbs / totalLbs;
+  const map = new Map<string, number>();
+  for (const c of components) {
+    const name = c.ingredient?.trim();
+    if (!name || c.lbs <= 0) continue;
+    const freshLbs = Math.round(c.lbs * scale * 1000) / 1000;
+    if (freshLbs <= 0) continue;
+    const key = `ingredient:${name}:lbs`;
+    map.set(key, (map.get(key) ?? 0) + freshLbs);
+  }
+  return [...map.entries()].map(([itemKey, qty]) => ({ itemKey, qty }));
+}
+
+// ── Daily supply consumption (Feature E7) ───────────────────────────────────
+//
+// Fixed daily production supplies (tape, glue, ink) consumed once per
+// production day. Rates are approximate (tape ≈ 4/day, glue ≈ 0.286/day,
+// ink ≈ 0.078/day). Called at day start to deduct from inventory.
+// Keys use `packaging:{item}:count` to match inventory item keys.
+export const DAILY_SUPPLY_RATES = {
+  tape: 4,
+  glue: 0.286,
+  ink: 0.078,
+} as const;
+
+export function computeDailySupplyConsumptionLines(): ConsumeLine[] {
+  return [
+    { itemKey: "packaging:tape:count", qty: DAILY_SUPPLY_RATES.tape },
+    { itemKey: "packaging:glue:count", qty: DAILY_SUPPLY_RATES.glue },
+    { itemKey: "packaging:ink:count", qty: DAILY_SUPPLY_RATES.ink },
+  ];
 }
 
 // ── Temporary recipe substitutions (day-state overlay) ───────────────────────

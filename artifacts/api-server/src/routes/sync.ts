@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { createHash, randomUUID } from "node:crypto";
+import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
 import {
   db,
   dailySyncTable,
@@ -78,8 +79,15 @@ import {
   type OperationalProjection,
   type ServerCalcResult,
 } from "@workspace/live-calc";
+import {
+  DEFAULT_LIVE_CALC_TICK_MS,
+  buildLiveCalcTickFrame,
+  buildSetupCalcTickFrame,
+  shouldEmitLiveCalcTick,
+  shouldEmitSetupCalcTick,
+} from "../lib/liveCalcTick";
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
-import { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
+import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
 import { buildSyncHealthReport } from "../lib/syncHealth";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
@@ -87,7 +95,16 @@ export { syncSnapshotId } from "../lib/syncContract";
 
 const router: IRouter = Router();
 
-type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string; resetEpoch: number };
+type SseClient = {
+  res: Response;
+  clientId: string;
+  scope: Scope;
+  watchDate: string;
+  resetEpoch: number;
+  lastData: unknown;
+  lastCanonicalRevision: number;
+  lastCalcEmitMs: number;
+};
 const clients = new Set<SseClient>();
 
 // Manual packaging corrections temporarily pause automatic case claims. The
@@ -169,12 +186,28 @@ function isValidDate(s: string): boolean {
 }
 
 // "Today" for scheduling is the CLIENT's local date, not the server's. The app
-// is driven by client-local midnight, but the server runs in UTC in production,
-// so prefer the client-supplied `today` query param and fall back to the server
-// date only when it's absent or malformed.
+// is physically run from the facility's own local time, so prefer the
+// client-supplied `today` query param (the client's own local date) and fall
+// back to the FACILITY's configured timezone — never the server's raw OS-local
+// date — when the param is absent or malformed.
+//
+// This must match the timezone anchor sessionBoundary.getSessionBoundaryMs
+// uses to look up today's row (facilityDate), or a same-day write that lands
+// on this fallback can silently write a DIFFERENT date-keyed row than the one
+// the daily-reset session fence reads. A server deployed with its OS clock in
+// UTC (the normal case on Render/most containers) serving a facility in
+// America/Chicago disagrees with facilityDate for ~5-6 hours every single day
+// (whenever UTC's calendar date has already advanced past the facility's) —
+// during that window a same-day live-scope reset pushed without `?today=`
+// would set resetBoundaryAt on a row the fence never looks at, silently
+// disabling the "every session is force-signed-out" guarantee. Real web/mobile
+// clients always send `?today=`, so this only matters when the param is
+// missing (a stripped query string, a non-standard caller, or a future client
+// bug) — but the fence is meant to hold even then, not merely when clients
+// cooperate. See sessionBoundaryFacilityFallback in .agents/memory.
 function clientToday(req: Request): string {
   const t = req.query.today;
-  return typeof t === "string" && isValidDate(t) ? t : todayStr();
+  return typeof t === "string" && isValidDate(t) ? t : facilityDate();
 }
 
 const MAX_COMMAND_ACTION_BYTES = 64 * 1024;
@@ -255,6 +288,13 @@ export function buildAutoTrackSchedule(
   });
 }
 
+
+// ── Server-side calculation cache ────────────────────────────────────────────
+// Cache serverCalc results keyed by snapshot ID + time bucket (1-second resolution).
+// Avoids recomputing the same calculation on every sync request within the same second.
+const serverCalcCache = new Map<string, ServerCalcResult>();
+const CACHE_MAX_SIZE = 128;
+
 function computeServerLiveState(
   data: unknown,
   nowMs = Date.now(),
@@ -263,6 +303,8 @@ function computeServerLiveState(
   serverCalc: ServerCalcResult | null;
   autoTrackSchedule: AutoTrackSchedule | null;
   operationalProjection: OperationalProjection | null;
+  summaryStats: Record<string, SummaryStats>;
+  runLines: Record<string, Array<{ itemKey: string; qty: number }>>;
   serverTime: number;
   calculationRevision: number;
   snapshotId?: string;
@@ -270,9 +312,25 @@ function computeServerLiveState(
   const snapshotId = data == null ? undefined : syncSnapshotId(data);
   try {
     const payload = data as BroadcastPayload | null;
-    const serverCalc = payload?.dayState
-      ? computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs)
-      : null;
+    let serverCalc: ServerCalcResult | null = null;
+    if (payload?.dayState) {
+      // Bucket time to 1-second resolution for caching
+      const timeBucket = Math.floor(nowMs / 1000);
+      const cacheKey = snapshotId ? `${snapshotId}:${timeBucket}` : undefined;
+      if (cacheKey && serverCalcCache.has(cacheKey)) {
+        serverCalc = serverCalcCache.get(cacheKey)!;
+      } else {
+        serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs);
+        if (cacheKey && serverCalc) {
+          serverCalcCache.set(cacheKey, serverCalc);
+          // Evict old entries when cache is full
+          if (serverCalcCache.size > CACHE_MAX_SIZE) {
+            const firstKey = serverCalcCache.keys().next().value;
+            if (firstKey) serverCalcCache.delete(firstKey);
+          }
+        }
+      }
+    }
     const autoTrackSchedule = buildAutoTrackSchedule(payload, serverCalc, nowMs);
     const operationalProjection = payload && serverCalc && autoTrackSchedule
       ? buildOperationalProjection({
@@ -283,10 +341,39 @@ function computeServerLiveState(
           calculationRevision,
         })
       : null;
+    // Pre-compute summaryStats for all runs so the client can read them
+    // without recomputing locally (saves ~21 computeSummaryStats calls per render).
+    // Pre-compute summaryStats AND consumption runLines for all runs so the
+    // client can read them without recomputing locally (saves ~21
+    // computeSummaryStats calls per render plus the warehouse/inventory
+    // consumption derivations). Same pepTypes derivation as the run-end
+    // rollup path so lines stay in parity between live stream and finalize.
+    const summaryStatsMap: Record<string, SummaryStats> = {};
+    const runLinesMap: Record<string, Array<{ itemKey: string; qty: number }>> = {};
+    if (payload?.dayState?.runs && payload?.runValues) {
+      const ds = payload.dayState as Record<string, unknown> | undefined;
+      const pepTypes = Array.isArray(ds?.pepTypes)
+        ? (ds.pepTypes as unknown[]).filter((value: unknown): value is string => typeof value === "string")
+        : SERVER_DEFAULT_PEP_TYPES;
+      for (const run of payload.dayState.runs) {
+        const rid = run.id;
+        if (typeof rid !== "string") continue;
+        const vals = payload.runValues[rid] as unknown as SummaryStatsInput | undefined;
+        if (!vals || typeof vals !== "object") continue;
+        try {
+          summaryStatsMap[rid] = computeSummaryStats(vals, pepTypes);
+        } catch { /* skip malformed run */ }
+        try {
+          runLinesMap[rid] = computeRunConsumptionLines(vals as any, pepTypes);
+        } catch { /* skip malformed run */ }
+      }
+    }
     return {
       serverCalc,
       autoTrackSchedule,
       operationalProjection,
+      summaryStats: summaryStatsMap,
+      runLines: runLinesMap,
       serverTime: nowMs,
       calculationRevision,
       ...(snapshotId ? { snapshotId } : {}),
@@ -296,6 +383,8 @@ function computeServerLiveState(
       serverCalc: null,
       autoTrackSchedule: null,
       operationalProjection: null,
+      summaryStats: {} as Record<string, SummaryStats>,
+      runLines: {} as Record<string, Array<{ itemKey: string; qty: number }>>,
       serverTime: nowMs,
       calculationRevision,
       ...(snapshotId ? { snapshotId } : {}),
@@ -323,6 +412,10 @@ function broadcast(
   })}\n\n`;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
+      if (data != null) {
+        client.lastData = data;
+        client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
+      }
       try { client.res.write(msg); } catch {}
     }
   }
@@ -1630,6 +1723,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   let closed = false;
   let client: SseClient | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
+  let calcTick: NodeJS.Timeout | undefined;
 
   // Register this before any awaited work. The event stream lives on the
   // response; the incoming request can finish normally while that response
@@ -1638,6 +1732,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
     closed = true;
     if (client) clients.delete(client);
     if (heartbeat) clearInterval(heartbeat);
+    if (calcTick) clearInterval(calcTick);
   });
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -1682,7 +1777,11 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  client = { res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch };
+  client = {
+    res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch,
+    lastData: data, lastCanonicalRevision: row?.canonicalRevision ?? 0,
+    lastCalcEmitMs: initialServerTime,
+  };
   clients.add(client);
 
   // Refresh schedule leases on the established heartbeat. A schedule never
@@ -1722,6 +1821,41 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       }
     })();
   }, Math.max(1_000, Number(process.env.AUTO_TRACK_HEARTBEAT_MS) || 15_000));
+
+  // Active-run calc tick: re-emit the server-computed calc at a low cadence
+  // while a run is active so connected clients skip per-second local
+  // recomputation. Uses the cached day payload (no extra DB reads); the
+  // authoritative heartbeat still picks up other-device writes. Idle days
+  // emit nothing new. Read-only derivation — never writes day state.
+  const liveCalcTickMs = Math.max(2_000, Number(process.env.LIVE_CALC_TICK_MS) || DEFAULT_LIVE_CALC_TICK_MS);
+  // Slice 2: emit ticks for both active-run AND any selected run with runValues
+  // (setup-form calcs).  The active-run tick takes priority; if it fires, the
+  // setup tick is skipped for that interval to avoid duplicate frames.
+  calcTick = setInterval(() => {
+    if (!client || client.lastData == null) return;
+    const nowMs = Date.now();
+    const activeTick = buildLiveCalcTickFrame(
+      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
+    );
+    if (activeTick) {
+      client.lastCalcEmitMs = activeTick.lastCalcEmitMs;
+      const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
+      try {
+        client.res.write(`data: ${JSON.stringify({ ...activeTick.frame, ...live })}\n\n`);
+      } catch {}
+      return;
+    }
+    // Fallback: setup-form tick for pending (or any) selected run with runValues
+    const setupTick = buildSetupCalcTickFrame(
+      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
+    );
+    if (!setupTick) return;
+    client.lastCalcEmitMs = setupTick.lastCalcEmitMs;
+    const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
+    try {
+      client.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
+    } catch {}
+  }, liveCalcTickMs);
 });
 
 router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Promise<void> => {

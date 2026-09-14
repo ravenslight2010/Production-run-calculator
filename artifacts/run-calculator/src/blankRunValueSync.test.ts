@@ -56,7 +56,6 @@ const WORKSPACE_ROOT = path.join(__dirname, "..", "..", "..");
 const BASELINE_CONSUMER_FILES = [
   "artifacts/run-calculator/src/types.ts",
   "artifacts/run-calculator/src/dieDefaults.ts",
-  "artifacts/run-calculator/src/lineSpeed.ts",
   "artifacts/api-server/src/lib/protectRunValues.ts",
   "artifacts/api-server/src/lib/repairs/speedAdjustmentBaselineRepair.ts",
   "artifacts/api-server/src/routes/dieLineDefaults.ts",

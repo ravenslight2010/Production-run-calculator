@@ -355,6 +355,8 @@ def validate_review_report(report: object) -> tuple[str, ...]:
         errors.append("member_data_opened")
     if report["member_name_unicode_normalization"] != ZIP_MEMBER_UNICODE_NORMALIZATION:
         errors.append("unicode_normalization")
+    if report["member_name_unicode_confusable_policy"] != ZIP_MEMBER_UNICODE_CONFUSABLE_POLICY:
+        errors.append("unicode_confusable_policy")
 
     integrity = report[INTEGRITY_FIELD]
     if not _has_exact_keys(integrity, INTEGRITY_KEYS):
@@ -458,6 +460,8 @@ def validate_review_report(report: object) -> tuple[str, ...]:
                 "unsafe_path_count",
                 "duplicate_normalized_path_count",
                 "unicode_normalization_collision_count",
+                "unicode_confusable_ambiguity_count",
+                "unicode_confusable_collision_count",
                 "case_fold_collision_count",
                 "encrypted_entry_count",
                 "special_file_count",

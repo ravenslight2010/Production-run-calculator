@@ -117,6 +117,59 @@ export function buildCaseClaimMutations(input: {
     { field: "casesOnCurrentSkid", from: input.casesFrom, to: input.casesTo },
   ];
 }
+
+export type SauceClaimMutation = {
+  field: "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration";
+  from: number;
+  to: number;
+};
+
+export function buildSauceClaimMutations(input: {
+  countFrom: number;
+  countTo: number;
+  anchorFrom: number;
+  anchorTo: number;
+  correctionGeneration: number;
+}): SauceClaimMutation[] {
+  return [
+    { field: "sauceBarrelsMade", from: input.countFrom, to: input.countTo },
+    { field: "sauceBarrelAnchorNetSec", from: input.anchorFrom, to: input.anchorTo },
+    {
+      field: "sauceBarrelCorrectionGeneration",
+      from: input.correctionGeneration,
+      to: input.correctionGeneration,
+    },
+  ];
+}
+
+export type AppSlotClaimMutation = {
+  field:
+    | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
+    | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
+    | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
+    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration";
+  from: number;
+  to: number;
+};
+
+export function buildAppSlotClaimMutations(input: {
+  slot: AppSlotKey;
+  madeFrom: number;
+  madeTo: number;
+  anchorFrom: number;
+  anchorTo: number;
+  correctionGeneration: number;
+}): AppSlotClaimMutation[] {
+  return [
+    { field: `${input.slot}BatchesMade`, from: input.madeFrom, to: input.madeTo },
+    { field: `${input.slot}BatchAnchorNetSec`, from: input.anchorFrom, to: input.anchorTo },
+    {
+      field: `${input.slot}BatchCorrectionGeneration`,
+      from: input.correctionGeneration,
+      to: input.correctionGeneration,
+    },
+  ];
+}
 export type CaseTickWriteDecision =
   | { action: "seed"; newTotal: number; caseClaimRetryReset: true; formResetSkippedNew: boolean }
   | { action: "write"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean }

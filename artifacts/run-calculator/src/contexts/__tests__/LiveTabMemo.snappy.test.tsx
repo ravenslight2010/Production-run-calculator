@@ -52,6 +52,14 @@ import * as LiveRunContextNS from "../../contexts/LiveRunContext";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
+import { WarehouseTabCtx, useWarehouseTabCtx } from "../../contexts/WarehouseTabCtx";
+import { WAREHOUSE_TAB_CTX_DEP_FIELDS } from "../../pages/warehouseTabCtxDeps";
+import { InventoryTabCtx, useInventoryTabCtx } from "../../contexts/InventoryTabCtx";
+import { MixesTabCtx, useMixesTabCtx } from "../../contexts/MixesTabCtx";
+import { INVENTORY_TAB_CTX_DEP_FIELDS } from "../../pages/inventoryTabCtxDeps";
+import { MIXES_TAB_CTX_DEP_FIELDS } from "../../pages/mixesTabCtxDeps";
+import { SetupTabCtx, useSetupTabCtx } from "../../contexts/SetupTabCtx";
+import { SETUP_TAB_CTX_DEP_FIELDS } from "../../pages/setupTabCtxDeps";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
 import { useNotifications } from "../../hooks/useNotifications";
 import * as HomeTabCtxNS from "../../contexts/HomeTabCtx";
@@ -905,6 +913,612 @@ describe("LiveTabMemo — Suite 4 counter-proof: guard DOES catch the regression
       );
 
       unmount();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 — WarehouseTabCtx: narrow warehouse context ref is stable across
+// dialog-state changes (warehouse freeze regression guard)
+//
+// Mirrors Suite 4's homeTabCtxValue guard for the Warehouse panel. The memo'd
+// WarehouseTabContent subscribes to WarehouseTabCtx, whose value
+// (warehouseTabCtxValue in home.tsx) is memoized on warehouse production deps
+// ONLY — dialog/manage/merge/import fields must never appear in the dep list.
+// If one does, every dialog open/close cycle creates a new context ref → the
+// memo'd Warehouse panel re-renders → the manage-dialog freeze regression that
+// originally hit the live tabs returns.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Simulation of warehouseTabCtxValue isolation ──────────────────────────────
+// Mirrors the pattern in home.tsx:
+//   const warehouseTabCtxValue = useMemo(
+//     () => warehouseTabCtxRef.current,
+//     [activeRunNeedDetails, activeRunValues, activeRuns, …]  // dialog fields omitted
+//   );
+// The dep array is driven by WAREHOUSE_TAB_CTX_DEP_FIELDS so the simulator
+// stays in sync with the real dep list (and with the static guard below).
+function WarehouseTabGuardProvider({
+  warehouseExtras,
+  dialogExtras,
+  children,
+}: {
+  warehouseExtras: Record<string, unknown>;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  const ctxValue = useMemo(
+    () => ({ ...warehouseExtras, ...dialogExtras }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [...WAREHOUSE_TAB_CTX_DEP_FIELDS.map((field) => warehouseExtras[field])],
+  );
+  return <WarehouseTabCtx.Provider value={ctxValue}>{children}</WarehouseTabCtx.Provider>;
+}
+
+// Realistic baseline warehouse production data — referentially stable so the
+// simulator's useMemo deps never change unless a test explicitly swaps them.
+const BASE_WAREHOUSE_EXTRAS: Record<string, unknown> = {
+  activeRunNeedDetails: new Map(),
+  activeRunValues: new Map(),
+  activeRuns: [{ id: "r1" }],
+  activeWarehouseRows: [],
+  activePackagingRows: [],
+  cycleCountSchedules: [],
+  dayState: { runs: [], stagedItems: {} },
+  freezerPullPlan: [],
+  freezerSurplus: [],
+  freezerSurplusBusy: false,
+  freezerSurplusError: null,
+  freezerSurplusLoaded: true,
+  isSupervisor: true,
+  markCountedMutation: { isPending: false },
+  runValuesById: new Map(),
+  scheduledDays: [],
+  scheduledValues: {},
+  todayScheduledValues: {},
+};
+
+describe("LiveTabMemo — Suite 4: WarehouseTabCtx ref is stable across ALL dialog-state field changes (warehouse registry guard)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("render count stays at 1 when every DIALOG_REGISTRY field toggles open then closed", async () => {
+    // Same mechanism as the homeTabCtxValue guard: if a dialog field
+    // accidentally enters warehouseTabCtxValue's deps, toggling it produces a
+    // new context ref → memo'd WarehouseTabContent re-renders → renderCount
+    // increases → this test fails.
+    let renderCount = 0;
+
+    const WarehouseSim = memo(function WarehouseSimInner() {
+      renderCount++;
+      const ctx = useWarehouseTabCtx() as {
+        activeRuns: Array<{ id: string }>;
+        isSupervisor: boolean;
+      };
+      return <span data-testid="wh-live">{ctx.activeRuns.length}|{String(ctx.isSupervisor)}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <WarehouseTabGuardProvider warehouseExtras={BASE_WAREHOUSE_EXTRAS} dialogExtras={{}}>
+        <WarehouseSim />
+      </WarehouseTabGuardProvider>,
+    );
+
+    // Confirm warehouse data is correct after initial render.
+    expect(getByTestId("wh-live").textContent).toBe("1|true");
+    const initialRenderCount = renderCount;
+    expect(initialRenderCount).toBe(1);
+
+    // Cycle through every dialog field: open → closed.
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      await act(async () => {
+        rerender(
+          <WarehouseTabGuardProvider
+            warehouseExtras={BASE_WAREHOUSE_EXTRAS}
+            dialogExtras={{ [field]: openValue }}
+          >
+            <WarehouseSim />
+          </WarehouseTabGuardProvider>,
+        );
+      });
+      await act(async () => {
+        rerender(
+          <WarehouseTabGuardProvider warehouseExtras={BASE_WAREHOUSE_EXTRAS} dialogExtras={{}}>
+            <WarehouseSim />
+          </WarehouseTabGuardProvider>,
+        );
+      });
+    }
+
+    // Warehouse values must be unchanged throughout — no dialog field affected them.
+    expect(getByTestId("wh-live").textContent).toBe("1|true");
+
+    // renderCount must still be 1: stable context ref → React bails out context
+    // update → memo()-wrapped subscriber never re-renders. A failure here means
+    // a DIALOG_REGISTRY field was added to warehouseTabCtxValue's deps.
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
+  it("live data DOES update when actual warehouse state changes (not over-isolated)", async () => {
+    // Counter-proof: the isolation must not prevent genuine warehouse updates.
+    let renderCount = 0;
+
+    const WarehouseSim2 = memo(function WarehouseSim2Inner() {
+      renderCount++;
+      const { activeRuns } = useWarehouseTabCtx() as { activeRuns: Array<{ id: string }> };
+      return <span data-testid="wh-live2">{String(activeRuns.length)}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <WarehouseTabGuardProvider warehouseExtras={BASE_WAREHOUSE_EXTRAS} dialogExtras={{}}>
+        <WarehouseSim2 />
+      </WarehouseTabGuardProvider>,
+    );
+
+    expect(getByTestId("wh-live2").textContent).toBe("1");
+    const countAfterMount = renderCount;
+
+    // Change a warehouse field (activeRuns) → warehouseTabCtxValue useMemo must
+    // invalidate → memo'd subscriber re-renders.
+    await act(async () => {
+      rerender(
+        <WarehouseTabGuardProvider
+          warehouseExtras={{ ...BASE_WAREHOUSE_EXTRAS, activeRuns: [{ id: "r1" }, { id: "r2" }] }}
+          dialogExtras={{}}
+        >
+          <WarehouseSim2 />
+        </WarehouseTabGuardProvider>,
+      );
+    });
+
+    expect(getByTestId("wh-live2").textContent).toBe("2");
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+
+  it("WAREHOUSE_TAB_CTX_DEP_FIELDS entries are distinct (no duplicates)", () => {
+    const unique = new Set(WAREHOUSE_TAB_CTX_DEP_FIELDS);
+    expect(unique.size).toBe(WAREHOUSE_TAB_CTX_DEP_FIELDS.length);
+  });
+
+  it("no DIALOG_REGISTRY field appears in WAREHOUSE_TAB_CTX_DEP_FIELDS (static dep-list guard)", () => {
+    // !! THIS IS THE PRIMARY REGRESSION GUARD FOR THE WAREHOUSE PANEL !!
+    //
+    // WAREHOUSE_TAB_CTX_DEP_FIELDS (from warehouseTabCtxDeps.ts) mirrors the
+    // warehouseTabCtxValue useMemo dep array in home.tsx. The two files carry a
+    // "KEEP IN SYNC" contract: when a developer adds a dep to
+    // warehouseTabCtxValue, they must also add it to warehouseTabCtxDeps.ts.
+    //
+    // Failure here means: a dialog/manage/import field has entered the
+    // warehouseTabCtxValue dep list, which will re-render the memo'd Warehouse
+    // panel on every dialog open/close cycle (the manage-dialog freeze
+    // regression spreading to the Warehouse tab).
+    const whDepSet = new Set<string>(WAREHOUSE_TAB_CTX_DEP_FIELDS);
+    const violations: string[] = [];
+    for (const { field } of DIALOG_REGISTRY) {
+      if (whDepSet.has(field)) {
+        violations.push(field);
+      }
+    }
+    if (violations.length > 0) {
+      throw new Error(
+        `The following dialog-state fields were found in WAREHOUSE_TAB_CTX_DEP_FIELDS ` +
+        `(warehouseTabCtxDeps.ts) — they must be removed from warehouseTabCtxValue's ` +
+        `dep list to prevent the warehouse freeze regression:\n  ${violations.join(", ")}`,
+      );
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 — Inventory & Mixes tab contexts: narrow context refs are stable
+// across dialog-state changes (freeze regression guards)
+//
+// Mirrors the WarehouseTabCtx guard for the Inventory and Mix Plan panels
+// (refactor step 4b). Each memo'd panel subscribes to its own narrow context
+// whose value (inventoryTabCtxValue / mixesTabCtxValue in home.tsx) is
+// memoized on panel-production deps ONLY — dialog/manage/merge/import fields
+// must never appear. If one does, every dialog open/close cycle creates a new
+// context ref → the memo'd panel re-renders → the manage-dialog freeze
+// regression returns.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Simulations of inventoryTabCtxValue / mixesTabCtxValue isolation ─────────
+// Same pattern as WarehouseTabGuardProvider: dep arrays are driven by the
+// registry files so the simulators stay in sync with the real dep lists (and
+// with the static guards below).
+function InventoryTabGuardProvider({
+  liveExtras,
+  dialogExtras,
+  children,
+}: {
+  liveExtras: Record<string, unknown>;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  const ctxValue = useMemo(
+    () => ({ ...liveExtras, ...dialogExtras }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [...INVENTORY_TAB_CTX_DEP_FIELDS.map((field) => liveExtras[field])],
+  );
+  return <InventoryTabCtx.Provider value={ctxValue}>{children}</InventoryTabCtx.Provider>;
+}
+
+function MixesTabGuardProvider({
+  liveExtras,
+  dialogExtras,
+  children,
+}: {
+  liveExtras: Record<string, unknown>;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  const ctxValue = useMemo(
+    () => ({ ...liveExtras, ...dialogExtras }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [...MIXES_TAB_CTX_DEP_FIELDS.map((field) => liveExtras[field])],
+  );
+  return <MixesTabCtx.Provider value={ctxValue}>{children}</MixesTabCtx.Provider>;
+}
+
+// Realistic baseline production data — referentially stable so the simulators'
+// useMemo deps never change unless a test explicitly swaps them.
+const BASE_INVENTORY_EXTRAS: Record<string, unknown> = {
+  dayState: { runs: [], substitutions: [], substitutionLog: [] },
+  inventoryCandidates: [{ name: "Mozzarella", sku: "MZ" }],
+  inventoryRunValues: [],
+  inventorySubstitutionOptions: ["Mozzarella"],
+};
+
+const BASE_MIXES_EXTRAS: Record<string, unknown> = {
+  canManageInventory: true,
+  currentRunId: "r1",
+  dayState: { runs: [{ id: "r1", brand: "Acme", flavor: "Plain" }], stagedItems: {} },
+  freezerSurplus: { lots: [], allocations: [] },
+  mixMakeDay: "2026-09-05",
+  mixPlanItems: [],
+  mixes: [{ id: "m1", name: "Veggie Mix" }],
+  scheduledDays: [],
+};
+
+describe("LiveTabMemo — Suite 4: Inventory & Mixes tab contexts stable across ALL dialog-state field changes (registry guards)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("render count stays at 1 for the Inventory subscriber across every DIALOG_REGISTRY toggle", async () => {
+    let renderCount = 0;
+
+    const InventorySim = memo(function InventorySimInner() {
+      renderCount++;
+      const ctx = useInventoryTabCtx() as {
+        inventoryCandidates: Array<{ name: string }>;
+        dayState: { substitutions?: unknown[] };
+      };
+      return <span data-testid="inv-live">{ctx.inventoryCandidates.length}|{(ctx.dayState.substitutions ?? []).length}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <InventoryTabGuardProvider liveExtras={BASE_INVENTORY_EXTRAS} dialogExtras={{}}>
+        <InventorySim />
+      </InventoryTabGuardProvider>,
+    );
+
+    expect(getByTestId("inv-live").textContent).toBe("1|0");
+    const initialRenderCount = renderCount;
+    expect(initialRenderCount).toBe(1);
+
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      await act(async () => {
+        rerender(
+          <InventoryTabGuardProvider
+            liveExtras={BASE_INVENTORY_EXTRAS}
+            dialogExtras={{ [field]: openValue }}
+          >
+            <InventorySim />
+          </InventoryTabGuardProvider>,
+        );
+      });
+      await act(async () => {
+        rerender(
+          <InventoryTabGuardProvider liveExtras={BASE_INVENTORY_EXTRAS} dialogExtras={{}}>
+            <InventorySim />
+          </InventoryTabGuardProvider>,
+        );
+      });
+    }
+
+    expect(getByTestId("inv-live").textContent).toBe("1|0");
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
+  it("render count stays at 1 for the Mixes subscriber across every DIALOG_REGISTRY toggle", async () => {
+    let renderCount = 0;
+
+    const MixesSim = memo(function MixesSimInner() {
+      renderCount++;
+      const ctx = useMixesTabCtx() as {
+        mixes: Array<{ id: string }>;
+        mixMakeDay: string;
+      };
+      return <span data-testid="mix-live">{ctx.mixes.length}|{ctx.mixMakeDay}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <MixesTabGuardProvider liveExtras={BASE_MIXES_EXTRAS} dialogExtras={{}}>
+        <MixesSim />
+      </MixesTabGuardProvider>,
+    );
+
+    expect(getByTestId("mix-live").textContent).toBe("1|2026-09-05");
+    const initialRenderCount = renderCount;
+    expect(initialRenderCount).toBe(1);
+
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      await act(async () => {
+        rerender(
+          <MixesTabGuardProvider
+            liveExtras={BASE_MIXES_EXTRAS}
+            dialogExtras={{ [field]: openValue }}
+          >
+            <MixesSim />
+          </MixesTabGuardProvider>,
+        );
+      });
+      await act(async () => {
+        rerender(
+          <MixesTabGuardProvider liveExtras={BASE_MIXES_EXTRAS} dialogExtras={{}}>
+            <MixesSim />
+          </MixesTabGuardProvider>,
+        );
+      });
+    }
+
+    expect(getByTestId("mix-live").textContent).toBe("1|2026-09-05");
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
+  it("Inventory data DOES update when substitutions change (not over-isolated)", async () => {
+    let renderCount = 0;
+
+    const InventorySim2 = memo(function InventorySim2Inner() {
+      renderCount++;
+      const ctx = useInventoryTabCtx() as { dayState: { substitutions?: unknown[] } };
+      return <span data-testid="inv-live2">{String((ctx.dayState.substitutions ?? []).length)}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <InventoryTabGuardProvider liveExtras={BASE_INVENTORY_EXTRAS} dialogExtras={{}}>
+        <InventorySim2 />
+      </InventoryTabGuardProvider>,
+    );
+
+    expect(getByTestId("inv-live2").textContent).toBe("0");
+    const countAfterMount = renderCount;
+
+    await act(async () => {
+      rerender(
+        <InventoryTabGuardProvider
+          liveExtras={{
+            ...BASE_INVENTORY_EXTRAS,
+            dayState: { runs: [], substitutions: [{ id: "s1" }], substitutionLog: [] },
+          }}
+          dialogExtras={{}}
+        >
+          <InventorySim2 />
+        </InventoryTabGuardProvider>,
+      );
+    });
+
+    expect(getByTestId("inv-live2").textContent).toBe("1");
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+
+  it("Mixes data DOES update when mixPlanItems changes (not over-isolated)", async () => {
+    let renderCount = 0;
+
+    const MixesSim2 = memo(function MixesSim2Inner() {
+      renderCount++;
+      const ctx = useMixesTabCtx() as { mixPlanItems: unknown[] };
+      return <span data-testid="mix-live2">{String(ctx.mixPlanItems.length)}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <MixesTabGuardProvider liveExtras={BASE_MIXES_EXTRAS} dialogExtras={{}}>
+        <MixesSim2 />
+      </MixesTabGuardProvider>,
+    );
+
+    expect(getByTestId("mix-live2").textContent).toBe("0");
+    const countAfterMount = renderCount;
+
+    await act(async () => {
+      rerender(
+        <MixesTabGuardProvider
+          liveExtras={{ ...BASE_MIXES_EXTRAS, mixPlanItems: [{ id: "m1", name: "Veggie Mix" }] }}
+          dialogExtras={{}}
+        >
+          <MixesSim2 />
+        </MixesTabGuardProvider>,
+      );
+    });
+
+    expect(getByTestId("mix-live2").textContent).toBe("1");
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+
+  it("registry entries are distinct (no duplicate field names)", () => {
+    expect(new Set(INVENTORY_TAB_CTX_DEP_FIELDS).size).toBe(INVENTORY_TAB_CTX_DEP_FIELDS.length);
+    expect(new Set(MIXES_TAB_CTX_DEP_FIELDS).size).toBe(MIXES_TAB_CTX_DEP_FIELDS.length);
+  });
+
+  it("no DIALOG_REGISTRY field appears in INVENTORY_TAB_CTX_DEP_FIELDS (static dep-list guard)", () => {
+    const depSet = new Set<string>(INVENTORY_TAB_CTX_DEP_FIELDS);
+    const violations = DIALOG_REGISTRY.map(({ field }) => field).filter((field) => depSet.has(field));
+    if (violations.length > 0) {
+      throw new Error(
+        `Dialog-state fields found in INVENTORY_TAB_CTX_DEP_FIELDS (inventoryTabCtxDeps.ts) — ` +
+        `remove them from inventoryTabCtxValue's dep list to prevent the freeze regression:
+  ` +
+        violations.join(", "),
+      );
+    }
+  });
+
+  it("no DIALOG_REGISTRY field appears in MIXES_TAB_CTX_DEP_FIELDS (static dep-list guard)", () => {
+    const depSet = new Set<string>(MIXES_TAB_CTX_DEP_FIELDS);
+    const violations = DIALOG_REGISTRY.map(({ field }) => field).filter((field) => depSet.has(field));
+    if (violations.length > 0) {
+      throw new Error(
+        `Dialog-state fields found in MIXES_TAB_CTX_DEP_FIELDS (mixesTabCtxDeps.ts) — ` +
+        `remove them from mixesTabCtxValue's dep list to prevent the freeze regression:
+  ` +
+        violations.join(", "),
+      );
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 — Setup tab context: narrow context ref is stable across
+// dialog-state changes (freeze regression guards)
+//
+// Mirrors the WarehouseTabCtx / InventoryTabCtx / MixesTabCtx guards for the
+// Setup panel (refactor step 5). The memo'd SetupContent subscribes to its own
+// narrow context whose value (setupTabCtxValue in home.tsx) is memoized on
+// setup-production deps ONLY — dialog/manage/merge/import fields must never
+// appear. If one does, every dialog open/close cycle creates a new context ref
+// → the memo'd Setup panel re-renders → the manage-dialog freeze regression
+// returns.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Simulation of setupTabCtxValue isolation ─────────────────────────────────
+// Same pattern as the other TabGuardProviders: the dep array is driven by the
+// registry file so the simulator stays in sync with the real dep list (and
+// with the static guards below).
+function SetupTabGuardProvider({
+  liveExtras,
+  dialogExtras,
+  children,
+}: {
+  liveExtras: Record<string, unknown>;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  const ctxValue = useMemo(
+    () => ({ ...liveExtras, ...dialogExtras }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [...SETUP_TAB_CTX_DEP_FIELDS.map((field) => liveExtras[field])],
+  );
+  return <SetupTabCtx.Provider value={ctxValue}>{children}</SetupTabCtx.Provider>;
+}
+
+// Realistic baseline setup data — referentially stable so the simulator's
+// useMemo deps never change unless a test explicitly swaps them.
+const BASE_SETUP_EXTRAS: Record<string, unknown> = {
+  v: { app1CheeseRecipe: [], app1OzPerPizza: 4, labelPosition: "", cartoned: "n-a" },
+  circles: ['12"'],
+  shipper: ["Shipper A"],
+  skidStacking: ["Standard"],
+  gripSheets: ["Grip A"],
+  isManager: true,
+  isSupervisor: true,
+  currentRun: { id: "r1", brand: "Acme", flavor: "Plain" },
+  doughSubTab: "dough",
+};
+
+describe("LiveTabMemo — Suite 4: Setup tab context stable across ALL dialog-state field changes (registry guards)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("render count stays at 1 for the Setup subscriber across every DIALOG_REGISTRY toggle", async () => {
+    let renderCount = 0;
+
+    const SetupSim = memo(function SetupSimInner() {
+      renderCount++;
+      const ctx = useSetupTabCtx() as {
+        isManager: boolean;
+        v: { cartoned?: string };
+      };
+      return <span data-testid="setup-live">{ctx.isManager ? "m" : "x"}|{ctx.v.cartoned ?? ""}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <SetupTabGuardProvider liveExtras={BASE_SETUP_EXTRAS} dialogExtras={{}}>
+        <SetupSim />
+      </SetupTabGuardProvider>,
+    );
+
+    expect(getByTestId("setup-live").textContent).toBe("m|n-a");
+    const initialRenderCount = renderCount;
+    expect(initialRenderCount).toBe(1);
+
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      await act(async () => {
+        rerender(
+          <SetupTabGuardProvider
+            liveExtras={BASE_SETUP_EXTRAS}
+            dialogExtras={{ [field]: openValue }}
+          >
+            <SetupSim />
+          </SetupTabGuardProvider>,
+        );
+      });
+      await act(async () => {
+        rerender(
+          <SetupTabGuardProvider liveExtras={BASE_SETUP_EXTRAS} dialogExtras={{}}>
+            <SetupSim />
+          </SetupTabGuardProvider>,
+        );
+      });
+    }
+
+    expect(getByTestId("setup-live").textContent).toBe("m|n-a");
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
+  it("Setup data DOES update when v changes (not over-isolated)", async () => {
+    let renderCount = 0;
+
+    const SetupSim2 = memo(function SetupSim2Inner() {
+      renderCount++;
+      const ctx = useSetupTabCtx() as { v: { cartoned?: string } };
+      return <span data-testid="setup-live2">{ctx.v.cartoned ?? ""}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <SetupTabGuardProvider liveExtras={BASE_SETUP_EXTRAS} dialogExtras={{}}>
+        <SetupSim2 />
+      </SetupTabGuardProvider>,
+    );
+
+    expect(getByTestId("setup-live2").textContent).toBe("n-a");
+    const countAfterMount = renderCount;
+
+    await act(async () => {
+      rerender(
+        <SetupTabGuardProvider
+          liveExtras={{ ...BASE_SETUP_EXTRAS, v: { ...(BASE_SETUP_EXTRAS.v as Record<string, unknown>), cartoned: "labeled" } }}
+          dialogExtras={{}}
+        >
+          <SetupSim2 />
+        </SetupTabGuardProvider>,
+      );
+    });
+
+    expect(getByTestId("setup-live2").textContent).toBe("labeled");
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+
+  it("registry entries are distinct (no duplicate field names)", () => {
+    expect(new Set(SETUP_TAB_CTX_DEP_FIELDS).size).toBe(SETUP_TAB_CTX_DEP_FIELDS.length);
+  });
+
+  it("no DIALOG_REGISTRY field appears in SETUP_TAB_CTX_DEP_FIELDS (static dep-list guard)", () => {
+    const depSet = new Set<string>(SETUP_TAB_CTX_DEP_FIELDS);
+    const violations = DIALOG_REGISTRY.map(({ field }) => field).filter((field) => depSet.has(field));
+    if (violations.length > 0) {
+      throw new Error(
+        `Dialog-state fields found in SETUP_TAB_CTX_DEP_FIELDS (setupTabCtxDeps.ts) — ` +
+        `remove them from setupTabCtxValue's dep list to prevent the freeze regression:
+  ` +
+        violations.join(", "),
+      );
     }
   });
 });

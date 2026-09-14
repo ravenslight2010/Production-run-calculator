@@ -13,6 +13,8 @@ import {
   computeUseFirstList,
   computeCasesInFreezer,
   computeCasesOnLine,
+  computeMixComponentConsumptionLines,
+  computeDailySupplyConsumptionLines,
   type IngredientSubstitution,
   type LocationStock,
   type RecipeRow,
@@ -968,5 +970,57 @@ describe("computeCasesOnLine", () => {
     const endedAt = base.startedAt + 2 * MIN;
     expect(computeCasesOnLine({ ...base, endedAt, now: endedAt })).toBe(9);
     expect(computeCasesOnLine({ ...base, endedAt, now: endedAt + 2 * MIN })).toBe(3);
+  });
+});
+
+// ── Feature B: Mix component consumption (offset honors amountAlreadyMade) ──
+describe("computeMixComponentConsumptionLines", () => {
+  it("scales component lbs proportionally to the fresh (remaining) portion", () => {
+    const components = [
+      { ingredient: "Mozzarella", lbs: 80 },
+      { ingredient: "Cheddar", lbs: 20 },
+    ];
+    // totalLbs = 100 + 15% waste + 20 startup = 135; amountAlreadyMade = 35
+    // → remainingLbs = 100 → scale = 100/135 ≈ 0.74074
+    const lines = computeMixComponentConsumptionLines(components, 135, 100);
+    expect(lines.length).toBe(2);
+    const mozz = lines.find((l) => l.itemKey === "ingredient:Mozzarella:lbs");
+    const chedd = lines.find((l) => l.itemKey === "ingredient:Cheddar:lbs");
+    expect(mozz?.qty).toBeCloseTo(80 * (100 / 135), 3);
+    expect(chedd?.qty).toBeCloseTo(20 * (100 / 135), 3);
+  });
+
+  it("returns nothing when remaining is 0 or total is 0", () => {
+    expect(computeMixComponentConsumptionLines([{ ingredient: "A", lbs: 10 }], 15, 0)).toEqual([]);
+    expect(computeMixComponentConsumptionLines([{ ingredient: "A", lbs: 10 }], 0, 5)).toEqual([]);
+  });
+
+  it("skips blank ingredient names and zero-lbs components", () => {
+    const lines = computeMixComponentConsumptionLines(
+      [{ ingredient: "  ", lbs: 5 }, { ingredient: "Veggie", lbs: 0 }, { ingredient: "X", lbs: 10 }],
+      20, 10,
+    );
+    expect(lines).toEqual([{ itemKey: "ingredient:X:lbs", qty: 5 }]);
+  });
+
+  it("folds duplicate ingredient names into one line", () => {
+    const lines = computeMixComponentConsumptionLines(
+      [
+        { ingredient: "Peppers", lbs: 10 },
+        { ingredient: "Peppers", lbs: 10 },
+      ],
+      20, 10,
+    );
+    expect(lines).toEqual([{ itemKey: "ingredient:Peppers:lbs", qty: 10 }]);
+  });
+});
+
+// ── Feature E7: Daily supply consumption ────────────────────────────────────
+describe("computeDailySupplyConsumptionLines", () => {
+  it("returns tape, glue, and ink at the daily rates", () => {
+    const lines = computeDailySupplyConsumptionLines();
+    expect(lines).toContainEqual({ itemKey: "packaging:tape:count", qty: 4 });
+    expect(lines).toContainEqual({ itemKey: "packaging:glue:count", qty: 0.286 });
+    expect(lines).toContainEqual({ itemKey: "packaging:ink:count", qty: 0.078 });
   });
 });

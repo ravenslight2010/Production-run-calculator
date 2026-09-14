@@ -27,6 +27,7 @@ import {
   type UseFirstItemInput,
   type UseFirstEntry,
 } from "@workspace/inventory-math";
+import type { MixPlanGroup } from "@workspace/mixes";
 
 // Consumption/summary math now lives in @workspace/inventory-math (shared with
 // mobile so the two can't drift). Re-export the types so this module's public
@@ -186,15 +187,33 @@ function transferSourcesForCoverage(
   };
 }
 
-/** Advisory comparison using the exact quantities sent to auto-deduction. */
+/** Per-run consumption source: runId maps to server lines, values supply the local fallback. */
+export type RunConsumptionSource = {
+  runId?: string | null;
+  values: FormValues;
+};
+
+/**
+ * Advisory comparison using the exact quantities sent to auto-deduction.
+ *
+ * When `serverConsumptionLinesByRunId` carries canonical lines for a run
+ * (streamed by the server in the sync SSE), those are used instead of the
+ * local derivation — the server is the authority online, local math remains
+ * the offline/absent fallback. Never blank: absent server data falls back to
+ * `computeRunConsumptionLines` per run.
+ */
 export function computeWarehouseCoverage(
-  runVals: FormValues[],
+  runSources: RunConsumptionSource[],
   items: InventoryItem[],
   productionIngredients: ProductionIngredient[],
+  serverConsumptionLinesByRunId?: Record<string, ConsumeLine[]>,
 ): WarehouseCoverage[] {
   const needs = new Map<string, { name: string; unit: string; qty: number }>();
-  for (const vals of runVals) {
-    for (const line of computeRunConsumptionLines(vals)) {
+  for (const source of runSources) {
+    const lines = source.runId && serverConsumptionLinesByRunId?.[source.runId]
+      ? serverConsumptionLinesByRunId[source.runId]
+      : computeRunConsumptionLines(source.values);
+    for (const line of lines) {
       if (!line.itemKey.startsWith("ingredient:") || line.qty <= 0) continue;
       const name = coverageName(line.itemKey);
       const unit = line.itemKey.split(":").at(-1) ?? "";
@@ -1193,6 +1212,38 @@ export const declinePasswordReset = (id: string) =>
   );
 
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+
+// Server-authority warehouse advisory snapshot. The server pre-computes the
+// reorder list, use-first list, and transfer warnings from canonical sync data
+// + inventory (same @workspace/inventory-math functions the client uses), so
+// every device online sees identical numbers. The web cards prefer this when
+// online and fall back to their own local computation when offline.
+export type WarehouseSnapshot = {
+  reorder: ReorderItem[];
+  useFirst: UseFirstEntry[];
+  transfer: TransferNeed[];
+  generatedAt: number;
+};
+export const fetchWarehouseSnapshot = () =>
+  api<WarehouseSnapshot>("/inventory/warehouse-snapshot");
+
+// Server-authority mix plan snapshot. The server builds the make-day plan
+// (buildMixPlan over canonical live + scheduled runs and the mix pool) so every
+// device online sees identical batches/lbs; the Mixes tab prefers this when
+// online and falls back to its own buildMixPlan call when offline.
+export type MixPlanSnapshot = {
+  plan: MixPlanGroup[];
+  generatedAt: number;
+};
+export function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export const fetchMixPlanSnapshot = (makeDay: string) =>
+  api<MixPlanSnapshot>(
+    `/inventory/mix-plan-snapshot?makeDay=${encodeURIComponent(makeDay)}&today=${encodeURIComponent(localToday())}`,
+  );
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");
 export const updateInventorySettings = (body: InventorySettings) =>

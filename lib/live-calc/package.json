@@ -11,6 +11,10 @@
     "@workspace/factory-constants": "workspace:*",
     "@workspace/inventory-math": "workspace:*"
   },
-  "scripts": { "test": "vitest run" },
-  "devDependencies": { "vitest": "^4.1.9" }
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "5.0.0"
+  }
 }

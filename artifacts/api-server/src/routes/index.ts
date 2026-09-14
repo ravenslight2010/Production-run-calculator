@@ -244,7 +244,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/count-observations", "POST /inventory/count-observations/:id/cancel",
     "POST /inventory/count-observations/:id/apply", "POST /inventory/adjust", "POST /inventory/locations",
     "PATCH /inventory/locations/:id", "DELETE /inventory/locations/:id", "POST /inventory/transfer",
-    "POST /inventory/merge", "PUT /inventory/settings",
+    "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",

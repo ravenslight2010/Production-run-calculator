@@ -139,7 +139,7 @@ function scopeQueueBody(body: string): string {
 
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase("manager action queue stale-write e2e");
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
   fixtureDedupKey = `e2e:${uniqueTestId("manager_queue_stale")}`;
   try {
     await db.connect();
@@ -254,7 +254,7 @@ test.beforeAll(async () => {
 // journey so later navigation checks do not depend on test order.
 test.beforeEach(async () => {
   if (staleWriteFixtureId === null || !process.env.DATABASE_URL) return;
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
     await db.query(
@@ -268,7 +268,7 @@ test.beforeEach(async () => {
 
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL) return;
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
     if (fixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [fixtureId]);
@@ -293,7 +293,7 @@ test("loads the active view without hiding large queue history", async ({ page }
   // explicit so the release gate does not fail at Playwright's generic 60s
   // limit while retaining every response, rendering, and browser assertion.
   test.setTimeout(180_000);
-  const username = uniqueTestId("e2e_manager_queue_scale");
+  const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -383,7 +383,7 @@ test("loads the active view without hiding large queue history", async ({ page }
 
 test("shows a stale update error, then refreshes and safely retries", async ({ browser }: { browser: Browser }, testInfo: TestInfo) => {
   test.setTimeout(120_000);
-  const username = uniqueTestId("e2e_manager_queue");
+  const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const firstContext = await browser.newContext();
   const secondContext = await browser.newContext();
@@ -426,7 +426,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await first.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action category").selectOption("report");
 
-    const title = `Stale queue item ${staleWriteDedupKey}`;
+  const title = `Resolved sync merge ${resolvedSyncDedupKey}`;
     await expect(first.getByText(title, { exact: true })).toBeVisible();
     await expect(second.getByText(title, { exact: true })).toBeVisible();
     await first.getByLabel("Filter action status").selectOption("all");
@@ -506,7 +506,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
 test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   page,
 }, testInfo: TestInfo) => {
-  const username = uniqueTestId("e2e_manager_queue_source");
+  const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -518,13 +518,12 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
 
   await signUp(page, username);
   await promoteToManager(username);
-  // Keep the established session and reload so the freshly promoted role is
-  // fetched again without paying for another full authentication journey.
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await openQueue(page);
+  await page.getByLabel("Filter action category").selectOption("sync");
 
-  const title = `Stale queue item ${fixtureDedupKey}`;
+  const title = `Resolved sync merge ${resolvedSyncDedupKey}`;
   // This journey exercises the real sync source link. Scope the queue before
   // locating it so accumulated historical action items do not turn a
   // navigation assertion into a full-history render.
@@ -556,7 +555,7 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
 test("downgrades a resolved sync merge to required review in the manager queue", async ({
   page,
 }, testInfo: TestInfo) => {
-  const username = uniqueTestId("e2e_manager_queue_resolved_sync");
+  const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -591,7 +590,7 @@ test("downgrades a resolved sync merge to required review in the manager queue",
 test("opens an incident queue item in the matching incident review surface", async ({
   page,
 }, testInfo: TestInfo) => {
-  const username = uniqueTestId("e2e_manager_incident_source");
+  const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -621,20 +620,33 @@ test("opens an incident queue item in the matching incident review surface", asy
   // not merely the hash that the source link wrote.
   await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
   await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
-  const selectedIncident = page
+  const selectedIncident = directPage
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
   const selectedIncidentCard = selectedIncident.locator("xpath=../../..");
   await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
   await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
-  await expect(selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("incident-queue-review-surface.png"), fullPage: true });
+  await expect(
+    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
+  ).toBeVisible();
+
+  await directPage.reload({ waitUntil: "domcontentloaded" });
+  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
+  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
+  await expect(selectedIncident).toBeVisible();
+  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
+  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
+  await expect(
+    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
+  ).toBeVisible();
+  await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
+  await directPage.close();
   expect(browserErrors).toEqual([]);
 });
 
-test("keeps a direct incident link focused after reload", async ({ page }, testInfo: TestInfo) => {
-  const username = uniqueTestId("e2e_manager_incident_reload");
+test("keeps a direct sync diagnostics link focused after reload", async ({ page }, testInfo: TestInfo) => {
+  const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));

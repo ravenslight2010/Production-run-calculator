@@ -14,6 +14,10 @@
     {
       "source": "verify-startup-failures.mts",
       "reason": "Deterministic startup-health evidence; it does not evaluate or retain AI/provider results."
+    },
+    {
+      "source": "compare-ai-evaluations.mts",
+      "reason": "Deterministic comparison utility; it reads existing manifests and does not create or retain provider evaluation results."
     }
   ]
 }

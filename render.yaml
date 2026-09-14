@@ -18,9 +18,10 @@ databases:
 services:
   - type: web
     name: runcalc
-    runtime: image
-    image:
-      url: ghcr.io/ravenslight2010/runcalc-api:latest
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerBuildTarget: api
     preDeployCommand: >-
       node migration/node_modules/drizzle-kit/bin.cjs push --force
       --config migration/drizzle.config.ts

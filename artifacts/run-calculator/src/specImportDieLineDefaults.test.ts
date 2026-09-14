@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { applySpecImport, loadProfile, saveProfile } from "./storage";
 import { DEFAULT_VALUES } from "./types";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 
@@ -48,7 +49,7 @@ describe("applySpecImport die line-setting blank-fill", () => {
     expect(prof).toMatchObject({
       crustsPerCycle: 6,
       cycleSpeed: 8,
-      speedAdjustment: 0.85,
+      speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
       freezerTime: 22,
       casesPerLayer: 6,
     });

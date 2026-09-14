@@ -127,6 +127,8 @@ export const formSchema = z.object({
   // Only meaningful when cartoned === "labeled": top / bottom / both.
   labelPosition: z.string().default(""),
   cartonsPerCase: z.coerce.number().min(0).default(0),
+  // Carton size: single=1, double=2, triple=3 pizzas per carton
+  cartonSize: z.coerce.number().min(1).max(3).default(1),
   // Only meaningful when cartoned === "labeled": labelsPerRoll for a single
   // top/bottom label position, the top/bottom pair when position is "both".
   labelsPerRoll: z.coerce.number().min(0).default(0),
@@ -266,6 +268,7 @@ export const DEFAULT_VALUES: FormValues = {
   cartoned: "cartoned",
   labelPosition: "",
   cartonsPerCase: 0,
+  cartonSize: 1,
   labelsPerRoll: 0,
   topLabelsPerRoll: 0,
   bottomLabelsPerRoll: 0,
@@ -310,6 +313,11 @@ export const LABEL_POSITION_OPTIONS = [
   { value: "both", label: "Both" },
 ] as const;
 
+export const CARTON_SIZE_OPTIONS = [
+  { value: "1", label: "Single (1)" },
+  { value: "2", label: "Double (2)" },
+  { value: "3", label: "Triple (3)" },
+] as const;
 /** Display label for a stored labelPosition value ("" when unset/unknown). */
 export function labelPositionLabel(val: string | undefined): string {
   const v = (val ?? "").trim().toLowerCase();
@@ -478,6 +486,17 @@ export type SyncPayload = {
         generation: string;
         sequence: number;
         nextDueAt: number;
+        /** Server auto-track schedule verdict (Step 6b): true when the server
+         * says this channel's claim is due RIGHT NOW. Advisory — the client
+         * keeps its local elapsed fallback. */
+        dueNow?: boolean;
+        /** False when this channel is still in the server's fresh-run wall-clock
+         * replay (no canonical claim yet). Step 7b: while a non-canonical entry
+         * is fresh AND dueNow:false, the server owns the next wall-clock claim,
+         * so connected tabs skip redundant local case/tray/batch writes.
+         * Absent on servers that never carried the field — treated as canonical
+         * so old servers never suppress the local fallback. */
+        canonical?: boolean;
         acceptedEventId?: string;
             acceptedRunValuesUpdatedAt?: number;
         updatedAt: number;
@@ -724,3 +743,9 @@ export const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 export const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+
+/** Display label for a stored cartonSize value ("Single (1)" when unset). */
+export function cartonSizeLabel(val: number | undefined): string {
+  const v = String(val ?? 1);
+  return CARTON_SIZE_OPTIONS.find((o) => o.value === v)?.label ?? "Single (1)";
+}

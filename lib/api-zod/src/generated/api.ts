@@ -2838,6 +2838,7 @@ export const ListMixesResponse = zod.object({
   "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
@@ -2864,6 +2865,7 @@ export const SaveMixesBody = zod.object({
   "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
@@ -2885,6 +2887,7 @@ export const SaveMixesResponse = zod.object({
   "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
@@ -2915,6 +2918,7 @@ export const DeleteMixesResponse = zod.object({
   "daysEarly": zod.int().describe('Days before the run this mix may be made ahead (default 0)'),
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "amountAlreadyMade": zod.number().describe('Pounds already made/on hand, subtracted from the total'),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day. Optional; when omitted or 0, assumed equal to the plan\'s needed amount. Greater than needed means overproduction of mix (deducted and tracked as surplus carry).'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
@@ -4270,6 +4274,7 @@ export const ListPremixSheetsResponse = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4298,6 +4303,7 @@ export const SavePremixSheetBody = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4323,6 +4329,7 @@ export const SavePremixSheetResponse = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),
@@ -4474,6 +4481,7 @@ export const DeletePremixSheetResponse = zod.object({
   "daysEarly": zod.number(),
   "notes": zod.string().optional(),
   "amountAlreadyMade": zod.number(),
+  "amountActualMade": zod.number().optional().describe('Pounds actually made for the current make-day (0 = assume needed)'),
   "components": zod.array(zod.object({
   "ingredient": zod.string(),
   "perPizza": zod.number().describe('Pounds of this ingredient per pizza'),

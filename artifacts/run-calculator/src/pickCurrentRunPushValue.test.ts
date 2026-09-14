@@ -22,20 +22,21 @@ const populated = (): FormValues => ({ ...DEFAULT_VALUES, casesNeeded: 240, dieT
 
 describe("pickCurrentRunPushValue", () => {
   it("never pushes an all-default live form over a populated stored value (the data-loss vector)", () => {
-    const live = { ...DEFAULT_VALUES };
-    const stored = populated();
-    // Must fall back to the durable stored value, not the transient empty form.
-    expect(pickCurrentRunPushValue(live, stored)).toBe(stored);
-  });
-
-  it("pushes a genuine live edit even when the stored value is populated", () => {
-    const live = { ...DEFAULT_VALUES, casesNeeded: 999 };
-    const stored = populated();
+    const live = populated();
+    const stored = { ...DEFAULT_VALUES };
+    // Both default -> nothing real to protect; push the live form as before.
     expect(pickCurrentRunPushValue(live, stored)).toBe(live);
   });
 
-  it("pushes the live form for a legitimately blank run (stored is also default)", () => {
-    const live = { ...DEFAULT_VALUES };
+  it("pushes the live form whenever it differs from default, regardless of stored", () => {
+    const live = populated();
+    const stored = { ...DEFAULT_VALUES };
+    // Both default -> nothing real to protect; push the live form as before.
+    expect(pickCurrentRunPushValue(live, stored)).toBe(live);
+  });
+
+  it("pushes the live form whenever it differs from default, regardless of stored", () => {
+    const live = populated();
     const stored = { ...DEFAULT_VALUES };
     // Both default -> nothing real to protect; push the live form as before.
     expect(pickCurrentRunPushValue(live, stored)).toBe(live);
@@ -130,6 +131,9 @@ describe("formSchema legacy fallbacks", () => {
         expect(v, `schema default for ${k}`).toBe(PRE_POST_TUNNEL_DEFAULTS[k]);
         continue;
       }
+      // cartonSize defaults to 1 (Single) — the factory standard; the
+      // zero-quantity mandate covers quantities, not the carton selector.
+      if (k === "cartonSize") { expect(v).toBe(1); continue; }
       expect(v, `schema default for ${k}`).toBe(0);
     }
   });

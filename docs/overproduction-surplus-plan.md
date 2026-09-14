@@ -1,0 +1,205 @@
+# Overproduction & Surplus Management Plan
+
+## Current State
+
+### What Exists
+| Feature | File | What It Does |
+|---------|------|-------------|
+| Freezer Surplus Confirm | `FreezerSurplusPanel.tsx` (packaging mode) | After run ends → record excess cases as freezer lot |
+| Freezer Surplus Pull | `FreezerSurplusPanel.tsx` (warehouse mode) | Allocate freezer lots to upcoming runs (carry-in) |
+| Surplus Ledger | `lib/freezer-pull/src/surplus.ts` | Lot + allocation math (brand/flavor matching, effective production) |
+| Freezer Surplus DB | `lib/db/src/schema/freezerSurplus.ts` | Server-side lot/allocation persistence |
+| Use First | `UseFirstCard.tsx` | Expiry-first lot prioritization |
+| Reorder | `ReorderCard.tsx` | Stock reorder alerts |
+
+### What's Missing
+
+1. **Real-time overproduction detection** — only captured AFTER run ends
+2. **Ingredient-level overages** — dough, sauce, cheese tracked separately from finished cases
+3. **Decision flow** — no guided "what to do with excess" (store/donate/ship early/discard)
+4. **Surplus history** — no trend analysis or pattern detection
+5. **Cross-brand surplus** — no aggregate view across all brands/flavors
+6. **Packaging waste** — overproduced cases may have wasted packaging
+7. **Auto-alerts** — no notification when overproduction happens repeatedly
+8. **Surplus targets** — no configurable acceptable overproduction threshold
+
+---
+
+## Proposed System
+
+### 1. Real-Time Overproduction Detection
+**Trigger**: During a run, when `casesCompleted` exceeds `casesNeeded` by more than a configurable threshold.
+
+**How it works**:
+- Live calc already tracks `calc.casesCompleted` vs `v.casesNeeded`
+- Add an overproduction threshold field (default: 0 cases — any excess triggers)
+- When threshold is exceeded:
+  - Show alert banner on Run tab: "Overproduction detected: X cases over target"
+  - Log the event to a new `overproduction_events` table
+  - Notify packaging to start a new lot/bin for excess
+
+**Data model**:
+```
+overproduction_events {
+  id, scope, run_id, brand, flavor,
+  target_cases, actual_cases, excess_cases,
+  excess_type (finished_cases | dough | sauce | cheese | packaging),
+  detected_at (server time), detected_by,
+  disposition (pending | stored | donated | shipped_early | discarded),
+  disposition_at, disposition_by, disposition_notes,
+  created_at
+}
+```
+
+### 2. Ingredient-Level Overage Tracking
+**What it tracks**: Overages at each station, not just finished cases.
+
+| Station | What Counts as Over | Where It Goes |
+|---------|-------------------|---------------|
+| Dough | Extra dough balls/trays produced | Dough waste log or next-run supply |
+| Sauce | Extra barrels made | Sauce surplus (use on next run or waste) |
+| Cheese/Apps | Extra batches made | Ingredient surplus log |
+| Freezer | Cases exceeding target | Existing freezer surplus system |
+| Packaging | Extra boxes/labels used | Packaging waste log |
+
+**Implementation**: Extend the existing run-values form with "actual produced" fields per station, compare against "planned needed."
+
+### 3. Disposition Flow (Store or Use Next)
+Overproduction has exactly **two** dispositions — simple, no guessing:
+
+```
+Overproduction detected →
+├── Store in Freezer → existing freezer surplus lot flow (brand/flavor/date)
+└── Use on Next Run → pre-allocate surplus to next scheduled run of same brand/flavor
+```
+
+- **Store in Freezer**: Becomes a freezer lot (existing `FreezerSurplusPanel` flow). Warehouse can pull it for any matching run later.
+- **Use on Next Run**: Auto-allocates the excess cases to the next scheduled run of the same brand/flavor. That run's production target is reduced by the carried-in amount.
+
+Both actions are audit-logged (who, when, quantity, disposition). No donate/discard/ship-early complexity — if it's overproduced, it goes in the freezer and gets used next time that brand/flavor runs.
+
+### 4. Surplus Dashboard
+A new view (inside Warehouse tab or QC department) showing:
+
+**Today's Surplus**:
+- Total excess cases across all runs today
+- Breakdown by brand/flavor
+- Disposition status (stored / pending / donated / discarded)
+
+**Surplus History**:
+- Calendar view of past surplus events
+- Trend chart: overproduction by week/month
+- Top overproduced brands/flavors
+- Waste % trend (excess / total produced)
+
+**Surplus Alerts**:
+- Same brand/flavor overproduced 3+ times in 30 days → flag for review
+- Total surplus exceeds X% of daily production → alert
+- Freezer capacity approaching limit → alert
+
+### 5. Configurable Thresholds
+Manager settings for overproduction tolerance:
+- `overproduction_threshold_cases` — alert when excess exceeds this (default: 0)
+- `overproduction_alert_frequency` — how often to re-alert (default: once per run)
+- `surplus_capacity_limit` — max freezer cases before alert (optional)
+- `auto_disposition_rules` — auto-assign disposition based on brand/flavor/quantity
+
+---
+
+## Critical: Inventory Auto-Adjustment on Overproduction
+
+### The Problem
+Currently, `POST /inventory/consume` deducts ingredients based on the **planned** `casesNeeded`, not the **actual** `casesCompleted`. When overproduction happens:
+- Extra ingredients get used (dough, sauce, cheese, apps, packaging)
+- Inventory only reflects the planned amount
+- The surplus lot exists in the freezer but the ingredient draw is understated
+- Over time, inventory drifts from reality
+
+### The Fix
+When overproduction is detected (or when a surplus lot is confirmed), the system must **also deduct the overproduced ingredients from inventory**.
+
+**Two approaches** (both should work together):
+
+**Approach A: Adjust consumption on surplus confirm**
+- When packaging confirms excess cases → compute the extra ingredient consumption for those cases
+- Call the same `planDrawDown` logic for the excess quantity
+- Deduct from inventory + record ledger entry
+- The surplus lot already exists; this just ensures inventory matches
+
+**Approach B: Use actual cases instead of planned**
+- Change `findExpectedConsumptionForRun` to use `casesCompleted` (actual) instead of `casesNeeded` (planned) when available
+- This is cleaner but requires the server to have the actual case count at run-end time
+- Need to handle the case where `casesCompleted` is not yet synced (race condition)
+
+**Recommended: Approach A** (adjust on surplus confirm) because:
+- It's additive — doesn't change existing consumption logic
+- It only fires when overproduction actually happens (not every run)
+- The surplus confirm moment already has the exact excess quantity
+- Cleaner audit trail: "consumed X for production, Y for overproduction"
+
+### Implementation
+1. When `FreezerSurplusPanel.onConfirm()` fires with excess cases:
+   - Look up the run's form values to get ingredient-per-case ratios
+   - Multiply ratios by excess cases to get extra consumption
+   - Call `applyRunConsumption` (or equivalent draw-down) for the excess
+   - Record a separate ledger entry labeled "overproduction consumption"
+2. If "Use on Next Run" is chosen instead:
+   - The excess still consumed ingredients — same deduction needed
+   - The carry-in just means those ingredients were used earlier than planned
+3. Audit log entry: "Overproduction: {excess} cases → deducted {qty} {item} from inventory"
+
+---
+
+## Build Order
+
+### Phase 1: Detection & Inventory Sync
+1. Add `overproduction_threshold_cases` to run settings/form
+2. Add real-time alert banner when threshold exceeded
+3. Create `overproduction_events` table (DB schema + API)
+4. **Auto-deduct overproduced ingredients from inventory** (the critical fix)
+5. Log overproduction events (server-side, audit-tracked)
+6. Extend existing `FreezerSurplusPanel` to auto-suggest disposition
+
+### Phase 2: Disposition Flow
+6. Add disposition form (store in freezer / use on next run)
+7. Wire "use on next run" to freezer surplus allocation
+8. Audit-log all dispositions
+9. Add disposition to overproduction event detail view
+
+### Phase 3: Dashboard & History
+10. Surplus dashboard card (today's surplus + recent history)
+11. Trend chart (overproduction over time)
+12. Surplus alerts (repeated overproduction, capacity limits)
+13. Top overproduced brands/flavors report
+
+### Phase 4: Intelligence
+14. Auto-detection patterns (same brand/flavor recurring)
+15. Predictive thresholds (adjust based on history)
+16. Waste cost calculation (packaging + ingredient cost of excess)
+17. Surplus optimization suggestions (reduce target for repeat offenders)
+
+---
+
+## Key Code References
+| File | Purpose |
+|------|---------|
+| `lib/freezer-pull/src/surplus.ts` | Surplus math (extend) |
+| `artifacts/run-calculator/src/freezerSurplus.ts` | Client surplus logic (extend) |
+| `artifacts/run-calculator/src/components/FreezerSurplusPanel.tsx` | Surplus UI (extend) |
+| `artifacts/run-calculator/src/components/UseFirstCard.tsx` | Expiry-first (keep) |
+| `artifacts/run-calculator/src/components/ReorderCard.tsx` | Reorder alerts (keep) |
+| `lib/db/src/schema/freezerSurplus.ts` | Freezer surplus DB (extend) |
+| `lib/live-calc/src/index.ts` | Calc engine (add overproduction detection) |
+| `artifacts/run-calculator/src/pages/home.tsx` | Run tab (add overproduction alert) |
+| `artifacts/run-calculator/src/types.ts` | Form values (add threshold field) |
+
+## New Database Tables (1)
+- `overproduction_events` — immutable log of all overproduction incidents + dispositions
+
+## API Routes to Add (6)
+1. `POST /api/overproduction/log` — log an overproduction event
+2. `PUT /api/overproduction/:id/dispose` — record disposition (store-in-freezer | use-on-next-run)
+3. `GET /api/overproduction?from=&to=&brand=&flavor=` — query overproduction history
+4. `GET /api/overproduction/dashboard` — aggregated surplus stats
+5. `GET /api/overproduction/alerts` — active overproduction alerts
+6. `GET /api/overproduction/trends` — trend data for charts

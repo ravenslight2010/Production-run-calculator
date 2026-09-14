@@ -138,6 +138,8 @@ import {
   todayStr,
   writeDayResetAt,
   runLabel,
+  shouldSignOutAfterRollover,
+  shouldPublishFreshRolloverState,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { fetchWithTimeout } from "../fetchWithTimeout";
@@ -153,7 +155,6 @@ import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
   pauseDecisionRemainingMs,
-  pauseStopsTunnel,
   canChoosePauseTunnelPolicy,
   shouldClosePauseDecision,
 } from "../pausePolicy";
@@ -205,6 +206,7 @@ import {
   applyMixCheeseOverlapDedupeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   applyProfileCleanupIfNeeded,
+  archiveDayToHistory,
   deleteProfilesForBrand,
   deleteProfileEntry,
   applyIngredientMerge,
@@ -468,9 +470,12 @@ import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
+  consumeRun,
   consumeSauceBarrel,
   deriveCandidateItems,
   scoreNameMatch,
+  type ConsumeLine,
+  type RunConsumptionSource,
 } from "../inventoryShared";
 import {
   applyRecipeSubstitutions,
@@ -671,6 +676,7 @@ import {
   Users,
   Truck,
   RefreshCw,
+  MapPin,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
@@ -734,6 +740,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
+import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -7785,6 +7792,9 @@ export default function Home() {
   // adopt these refs without changing today's client-owned ticking semantics.
   const serverCalcRef = useRef<{ runId: string; calc: Calc } | null>(null);
   const [serverCalc, setServerCalc] = useState<Calc | null>(null);
+  // Server-computed summary stats keyed by run ID — used when online to avoid local recomputation.
+  const serverSummaryStatsRef = useRef<Record<string, unknown>>({});
+  const serverRunLinesRef = useRef<Record<string, unknown>>({});
   const serverProjectionRef = useRef<OperationalProjection | null>(null);
   const [serverProjection, setServerProjection] = useState<OperationalProjection | null>(null);
   const serverClockOffsetMsRef = useRef(0);
@@ -8941,7 +8951,26 @@ export default function Home() {
     })();
   }, []);
 
-  // ── Factory KV: startup fetch + write-through hook registration ──
+  // ── Feature B+E7: Day-start inventory consumption (once per mount) ─────
+  // Best-effort call to POST /inventory/consume-day-start on first load. The
+  // server is idempotent per date (runId = "day-start:{today}"), so subsequent
+  // calls within the same day return applied=false with zero side-effects.
+  // Managers-only gate on the server; non-managers get a harmless 403.
+  useEffect(() => {
+    (async () => {
+      try {
+        await fetch("/api/inventory/consume-day-start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: todayStr() }),
+        });
+      } catch {
+        /* best-effort — daily reset will retry next boot if needed */
+      }
+    })();
+  }, []);
+
+    // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
   // localStorage (for cached keys) and module state (for server-only keys:
   // stop reasons, packaging settings), then refresh React state.  After that,
@@ -9154,6 +9183,8 @@ export default function Home() {
           serverCalc?: { runId: string; calc: Calc } | null;
           operationalProjection?: OperationalProjection | null;
           autoTrackSchedule?: AutoTrackSchedule | null;
+          summaryStats?: Record<string, unknown>;
+          runLines?: Record<string, unknown>;
           serverTime?: number;
           canonicalRevision?: number;
           masterDataChanged?: boolean;
@@ -9180,6 +9211,13 @@ export default function Home() {
           setServerProjection(null);
           serverCalcReceiptRef.current = null;
           setServerCalcReceipt(null);
+        }
+        // Adopt server-computed summary stats when available (offline fallback: compute locally)
+        if (msg.summaryStats && typeof msg.summaryStats === "object") {
+          serverSummaryStatsRef.current = msg.summaryStats;
+        }
+        if (msg.runLines && typeof msg.runLines === "object") {
+          serverRunLinesRef.current = msg.runLines;
         }
         if (msg.initial) {
           // An initial frame is also the reconnect baseline: refresh every
@@ -9705,6 +9743,163 @@ export default function Home() {
     }
     if (changed) saveCheeseRecipePresets(presets);
   }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
+
+  // Detect day change while the tab is open (visibility change + periodic check)
+  useEffect(() => {
+    async function checkDateRollover() {
+      // A Home mount immediately after sign-in is already today's
+      // re-authentication. Consume this marker before the async rollover work
+      // so a duplicate interval/timer check cannot make the same session skip
+      // a later rollover.
+      const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
+      const stored = (() => {
+        try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
+      })();
+      if (stored.date && stored.date !== todayStr()) {
+        // Auto-end any active run before archiving yesterday
+        const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
+        if (prevDs && stored.date) {
+          // Auto-deduct inventory for every run being closed by the rollover, the
+          // same as an explicit endRun. consume is idempotent per runId, so runs
+          // already deducted via endRun won't double-count.
+          for (const r of prevDs.runs) {
+            if (r.startedAt && !r.endedAt) {
+              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+            }
+          }
+          const finalDs: DayState = {
+            ...prevDs,
+            runs: prevDs.runs.map(r =>
+              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+            ),
+          };
+          archiveDayToHistory(finalDs, stored.date);
+        }
+        const newDate = todayStr();
+        // Try to load any pre-scheduled data for the new day.
+        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
+        // there are no scheduled runs (GET succeeded with an empty row). If the
+        // GET itself fails (network error, transient 5xx), do NOT push — an
+        // empty push with a newer resetAt would wholesale-adopt over any
+        // previously saved scheduled runs (protectRunValues escape hatch). The
+        // session boundary (resetBoundaryAt) will be established on the next
+        // successful push once the connection recovers.
+        let serverConfirmedNoRuns = false;
+        // Retry once after a short delay when the initial fetch fails.
+        // On Render free-tier the service spins down after inactivity; a
+        // cold-start GET can time out while the server is still waking.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(`/api/sync/${newDate}`);
+            if (res.ok) {
+              const payload = await res.json() as SyncPayload | null;
+              if (payload?.dayState?.runs?.length) {
+              // Apply the saved line-type (dough/crusts) preference to each run
+              // that has no subTab set — so brands always scheduled as "crusts"
+              // start in the right mode without a manual toggle every morning.
+              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
+                if (r.subTab) return r;
+                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
+                return pref ? { ...r, subTab: pref } : r;
+              });
+              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
+              clearActiveSubstitutions();
+              // Scheduled run values are a snapshot from scheduling time; blank
+              // sauce fields backfill from the CURRENT profile (mobile parity —
+              // its pull-up spreads the live profile).
+              const metaById = new Map(ds.runs.map(r => [r.id, r]));
+              const pulledVals: Record<string, FormValues> = {};
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
+                const meta = metaById.get(id);
+                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
+                saveRunValues(id, pulledVals[id]);
+              }
+              // Adopt the scheduled row's per-run value stamps: these values are
+              // server-sourced, not a local edit (stamping them with local time
+              // would fake one), but saving them completely unstamped would lose
+              // the per-run LWW merge to any peer that pushes a stamped copy.
+              {
+                const upd = loadRunValuesUpdated();
+                const remoteUpd = payload.runValuesUpdatedAt ?? {};
+                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
+                saveRunValuesUpdated(upd);
+              }
+              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
+              saveDayState(ds);
+              setDayState(ds);
+              if (ds.runToTime) setRunToTime(ds.runToTime);
+              const firstId = ds.runs[0]?.id;
+              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
+              lastFormRunIdRef.current = firstId ?? "";
+              form.reset(firstVals);
+              resetFieldArrays(firstVals);
+              schedulePush(ds, 0);
+              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
+              // A restored session must sign out after rollover so a hard
+              // refresh cannot bypass the daily re-authentication boundary.
+              // A session just established by sign-in has already
+              // re-authenticated for this production day.
+              if (shouldSignOut) void signOut();
+              return;
+            }
+            serverConfirmedNoRuns = true;
+          }
+          } catch {}
+          // Brief pause before retry to allow a cold-starting server to
+          // finish waking; skip on the final attempt.
+          if (attempt === 0 && !serverConfirmedNoRuns) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 5_000));
+          }
+        }
+        // Fallback: fresh empty state. Only push to the server if the GET
+        // confirmed there are no scheduled runs — otherwise we'd risk wiping
+        // them via the wholesale-adopt escape hatch (see comment above).
+        const fresh = { ...freshDayState(), resetAt: Date.now() };
+        clearActiveSubstitutions();
+        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
+        saveDayState(fresh);
+        setDayState(fresh);
+        setRunToTime("19:15");
+        lastFormRunIdRef.current = "";
+        form.reset(DEFAULT_VALUES);
+        resetFieldArrays(DEFAULT_VALUES);
+        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
+        // See note above: restored sessions sign out after the daily reset,
+        // while the current sign-in transition is already re-authenticated.
+        if (shouldSignOut) void signOut();
+      }
+    }
+    // Run once on mount too. loadDayState() only resets the in-memory view when
+    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
+    // boundary, or sign out. Without this immediate call, the rollover (and its
+    // signOut) only fires up to 60s later via the interval — by which
+    // time another device's pushed resetAt may have already 401-bounced us to
+    // login, so the user sees the logout but never the reset. Mobile already
+    // rolls over on its mount effect; this brings web to parity.
+    void checkDateRollover();
+    const interval = setInterval(checkDateRollover, 60_000);
+    document.addEventListener("visibilitychange", checkDateRollover);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", checkDateRollover);
+    };
+  }, []);
+
+  // Re-push on tab-foreground restore so a run-start (or any action) that
+  // fired while the tab was backgrounded or the screen was off doesn't stay
+  // unsynced. The browser can cancel an in-flight fetch when a tab is hidden,
+  // and setTimeout-based retries are throttled to ≥1 min on mobile — so the
+  // tab returning to the foreground is the reliable recovery point.
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        schedulePush(dayStateRef.current, 300);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   // The server's PUT epoch guard fails CLOSED once the scope has ever been
   // reset: any sync write that doesn't carry a current `?epoch=` is answered
@@ -14544,19 +14739,44 @@ export default function Home() {
   const needsInventorySnapshot = activeTab === "inventory";
   const needsSummarySnapshot = activeTab === "summary" || screenMode === "summary";
   const persistedRunSummaryStats = useMemo(
-    () => needsSummarySnapshot
-      ? buildRunSummarySnapshot(dayState.runs, persistedRunValues, computeSummaryStats)
-      : new Map(),
-    [needsSummarySnapshot, dayState.runs, persistedRunValues],
+    () => {
+      if (!needsSummarySnapshot) return new Map();
+      const summaries = new Map<string, ReturnType<typeof computeSummaryStats>>();
+      const serverSS = serverSummaryStatsRef.current;
+      const hasServer = isOnline && serverSS && typeof serverSS === "object" && Object.keys(serverSS).length > 0;
+      for (const run of dayState.runs) {
+        const runId = run.id;
+        const vals = persistedRunValues.get(runId);
+        if (!vals) continue;
+        // Use server-computed stats for persisted runs when available (offline fallback: compute locally)
+        if (hasServer && serverSS[runId] && typeof serverSS[runId] === "object") {
+          summaries.set(runId, serverSS[runId] as ReturnType<typeof computeSummaryStats>);
+        } else {
+          summaries.set(runId, computeSummaryStats(vals));
+        }
+      }
+      return summaries;
+    },
+    [needsSummarySnapshot, dayState.runs, persistedRunValues, isOnline],
   );
   const runSummaryStatsById = useMemo(
     () => {
       if (!needsSummarySnapshot) return new Map();
       const summaries = new Map(persistedRunSummaryStats);
-      if (currentRunId) summaries.set(currentRunId, computeSummaryStats(v));
+      if (currentRunId) {
+        const serverSS = serverSummaryStatsRef.current;
+        // Adopt server-computed stats for the current run when online and the
+        // server has data (it only has data after a sync push, which happens on
+        // every form change).  Offline or no server data → compute locally.
+        if (isOnline && serverSS && typeof serverSS === "object" && serverSS[currentRunId]) {
+          summaries.set(currentRunId, serverSS[currentRunId] as ReturnType<typeof computeSummaryStats>);
+        } else {
+          summaries.set(currentRunId, computeSummaryStats(v));
+        }
+      }
       return summaries;
     },
-    [needsSummarySnapshot, persistedRunSummaryStats, currentRunId, v],
+    [needsSummarySnapshot, persistedRunSummaryStats, currentRunId, v, isOnline],
   );
   const activeRunIds = useMemo(() => buildActiveRunIds(dayState.runs), [dayState.runs]);
   const activeRuns = useMemo(
@@ -14692,6 +14912,24 @@ export default function Home() {
       : [],
     [needsInventorySnapshot, dayState.runs, runValuesById, effectiveValuesForRun],
   );
+  // Per-run consumption sources: keep the run id alongside the effective values
+  // so server-streamed consumption lines (runLines) can replace local math per
+  // run, with the local derivation as the offline/absent fallback.
+  const inventoryRunSources = useMemo<RunConsumptionSource[]>(
+    () => needsInventorySnapshot
+      ? dayState.runs.map((run) => ({
+          runId: run.id,
+          values: effectiveValuesForRun(run, runValuesById.get(run.id) ?? DEFAULT_VALUES),
+        }))
+      : [],
+    [needsInventorySnapshot, dayState.runs, runValuesById, effectiveValuesForRun],
+  );
+  const inventoryServerRunLines = useMemo(
+    () => needsInventorySnapshot
+      ? (serverRunLinesRef.current as Record<string, ConsumeLine[]>)
+      : {},
+    [needsInventorySnapshot],
+  );
   const inventoryCandidates = useMemo(
     () => needsInventorySnapshot ? deriveCandidateItems(inventoryRunValues) : [],
     [needsInventorySnapshot, inventoryRunValues],
@@ -14733,11 +14971,13 @@ export default function Home() {
     refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
     todayScheduledValues, toggleStagedItem]);
   const inventoryTabCtxValue = useMemo<InventoryTabContextValue>(() => ({
-    candidates: inventoryCandidates, runValsList: inventoryRunValues, coverageRunVals: inventoryRunValues,
+    candidates: inventoryCandidates, runValsList: inventoryRunValues,
+    coverageRunSources: inventoryRunSources, serverRunLines: inventoryServerRunLines,
     substitutions: dayState.substitutions ?? [], substitutionLog: dayState.substitutionLog ?? [],
     substitutionOptions: inventorySubstitutionOptions, onAddSubstitution: addSubstitution,
     onRemoveSubstitution: removeSubstitution, onClearSubstitutions: clearSubstitutions,
-  }), [dayState, inventoryCandidates, inventoryRunValues, inventorySubstitutionOptions,
+  }), [dayState, inventoryCandidates, inventoryRunValues, inventoryRunSources,
+    inventoryServerRunLines, inventorySubstitutionOptions,
     addSubstitution, removeSubstitution, clearSubstitutions]);
   const mixesTabCtxValue = useMemo<MixesTabContextValue>(() => ({
     canManageInventory, currentRunId, dayState, effectiveValuesForRun, form, mixMakeDay,
@@ -19140,7 +19380,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+    calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
     casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     showBatchDue, setShowBatchDue,
@@ -19150,6 +19390,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
     operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
+  const [showLineMap, setShowLineMap] = useState(false);
   useAutomaticUpdateReloadBlocker(
     "live-run-operational-alert",
     Boolean(stallPrompt || showPaceAlert || showBatchDue),
@@ -19191,6 +19432,22 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   displayState={operationalDisplayState}
                   receipt={operationalSnapshotReceipt}
                 />
+                {/* ─── Line Map toggle ─── */}
+                <div className="flex justify-end mb-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowLineMap(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
+                      showLineMap
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/60"
+                    }`}
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Line Map</span>
+                  </button>
+                </div>
+                {showLineMap && <LineMapDashboard />}
                 {/* Blank-run sweep confirmation dialog */}
                 {confirmRemoveBlanks && (
                   <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
@@ -19603,20 +19860,22 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   endedAt: refEndedAt,
                   stoppages: lastEndedRun.stoppages,
                 });
-                const phases2 = computeLinePhases({
-                  elapsedBatchSec: endedElapsedSec,
-                  pausedAt: null,
-                  lastResumeWallMs: 0,
-                  lastPauseStartWallMs: 0,
-                  pauseStopsTunnel: true,
-                  lastPauseStopsTunnel: true,
-                  runStatus: "ended",
-                  preTunnelMin: preTun2,
-                  postTunnelMin: postTun2,
-                  freezerTime: freezerMin2,
-                  nowMs: nowMs2,
-                  endedAt: refEndedAt,
-                });
+                const phases2 = lastEndedRun?.id === currentRun?.id
+                  ? linePhases
+                  : computeLinePhases({
+                      elapsedBatchSec: endedElapsedSec,
+                      pausedAt: null,
+                      lastResumeWallMs: 0,
+                      lastPauseStartWallMs: 0,
+                      pauseStopsTunnel: true,
+                      lastPauseStopsTunnel: true,
+                      runStatus: "ended",
+                      preTunnelMin: preTun2,
+                      postTunnelMin: postTun2,
+                      freezerTime: freezerMin2,
+                      nowMs: nowMs2,
+                      endedAt: refEndedAt,
+                    });
                 const activePhase = pickMostActivePhase(phases2);
                 if (!activePhase) return (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
@@ -19671,30 +19930,9 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     const freezerMin = Number(ve.freezerTime) || 0;
                     if (freezerMin <= 0) return null;
                     if (calc.ppm <= 0 && runStatus === "running") return null;
-                    const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                    const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                    // Last resume: most recent closed "pause" stoppage (endedAt=resume, startedAt=pause start).
-                    const lastClosedPause = (currentRun?.stoppages ?? [])
-                      .filter((s: any) => s.type === "pause" && s.endedAt)
-                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
-                    const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
-                    const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
-                    const openPause = (currentRun?.stoppages ?? [])
-                      .filter((s: any) => s.type === "pause" && !s.endedAt)
-                      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
-                    const phases = computeLinePhases({
-                      elapsedBatchSec,
-                      pausedAt: currentRun?.pausedAt ?? null,
-                      lastResumeWallMs,
-                      lastPauseStartWallMs,
-                      pauseStopsTunnel: pauseStopsTunnel(openPause),
-                      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
-                      runStatus: runStatus as string,
-                      preTunnelMin: preTun,
-                      postTunnelMin: postTun,
-                      freezerTime: freezerMin,
-                      nowMs: nowTime.getTime(),
-                    });
+                    // Thin display of the server-adopted context model (the
+                    // context falls back locally when offline/lagging).
+                    const phases = linePhases;
                     const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
                     // Hide the strip entirely when everything is in steady-state or empty.
                     const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
@@ -20633,7 +20871,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec,
+    calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs, packagingDrainActive, coordinationStatus,
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
@@ -20796,55 +21034,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   const showEmptying =
                     freezerMin > 0 && !!lastEndedRun?.endedAt && lastEndedRun.id === currentRunId;
                   if (!showFilling && !showEmptying) return null;
-                  const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                  const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
                   const nowMs = nowTime.getTime();
-                  let phases;
-                  if (showFilling) {
-                    const lastClosedPause2 = (currentRun?.stoppages ?? [])
-                      .filter((s: any) => s.type === "pause" && s.endedAt)
-                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
-                    const lastResumeWallMs2 = lastClosedPause2?.endedAt ?? 0;
-                    const lastPauseStartWallMs2 = lastClosedPause2?.startedAt ?? 0;
-                    phases = computeLinePhases({
-                      elapsedBatchSec,
-                      pausedAt: currentRun?.pausedAt ?? null,
-                      lastResumeWallMs: lastResumeWallMs2,
-                      lastPauseStartWallMs: lastPauseStartWallMs2,
-                      pauseStopsTunnel: pauseStopsTunnel((currentRun?.stoppages ?? [])
-                        .filter((s: any) => s.type === "pause" && !s.endedAt)
-                        .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any)),
-                      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause2),
-                      runStatus: runStatus as string,
-                      preTunnelMin: preTun,
-                      postTunnelMin: postTun,
-                      freezerTime: freezerMin,
-                      nowMs,
-                    });
-                  } else {
-                    // Compute actual virtual (pause-excluded) elapsed for the ended run.
-                    // computeEndedRunElapsedSec caps open/unclosed pause stoppages at
-                    // endedAt so auto-ended paused runs don't count the pause as production.
-                    const erElapsedSec = computeEndedRunElapsedSec({
-                      startedAt: lastEndedRun!.startedAt,
-                      endedAt: lastEndedRun!.endedAt!,
-                      stoppages: lastEndedRun!.stoppages,
-                    });
-                    phases = computeLinePhases({
-                      elapsedBatchSec: erElapsedSec,
-                      pausedAt: null,
-                      lastResumeWallMs: 0,
-                      lastPauseStartWallMs: 0,
-                      pauseStopsTunnel: true,
-                      lastPauseStopsTunnel: true,
-                      runStatus: "ended",
-                      preTunnelMin: preTun,
-                      postTunnelMin: postTun,
-                      freezerTime: freezerMin,
-                      nowMs,
-                      endedAt: lastEndedRun!.endedAt!,
-                    });
-                  }
+                  // Thin display of the server-adopted context model: it covers the
+                  // current run in every lifecycle state (running / paused / ended),
+                  // falling back locally inside LiveRunContext when offline/lagging.
+                  const phases = linePhases;
                   const rows = [phases.stage1, phases.stage2, phases.stage3];
                   const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
                   if (!anyVisible && !showEmptying) return null;
