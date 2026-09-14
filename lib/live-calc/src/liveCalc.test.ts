@@ -5,10 +5,10 @@ import {
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
   computeServerCalc,
+  buildOperationalProjection,
   deriveOperationalRunView,
   OperationalRunViewError,
   getAutoTrackTiming,
-  type CalcRunMeta,
 } from "./index";
 
 describe("shared live calculation boundary", () => {
@@ -32,10 +32,7 @@ describe("shared live calculation boundary", () => {
 
   it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {
     const result = computeServerCalc({
-      dayState: {
-        runs: [{ id: "invalid", brand: "A", flavor: "B" }] as unknown as CalcRunMeta[],
-        currentIndex: 0,
-      },
+      dayState: { runs: [{ id: "invalid", brand: "A", flavor: "B" }], currentIndex: 0 },
       runValues: {
         invalid: {
           casesNeeded: 240,
@@ -221,5 +218,151 @@ describe("shared live calculation boundary", () => {
       ...request,
       snapshot: { ...base, dayState: { ...base.dayState, runs: [{ id: "run-1" }, { id: "run-1" }] } } as never,
     })).toThrow(OperationalRunViewError);
+  });
+
+  it("builds a deterministic server projection with pause and end anchors", () => {
+    const base = {
+      dayState: {
+        currentIndex: 0,
+        runs: [{
+          id: "run-projection",
+          metaUpdatedAt: 11,
+          startedAt: 1_000,
+          stoppages: [{ type: "stop", startedAt: 3_000, endedAt: 4_000 }],
+        }],
+      },
+      runValues: {
+        "run-projection": {
+          pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
+          crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
+          freezerTime: 10, traysOnLine: 4, batchesReady: 2,
+          sauceBarrelsMade: 1, app1BatchesMade: 2,
+        },
+      },
+    } as never;
+    const serverCalc = computeServerCalc(base, [], 10_000)!;
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-projection",
+      startedAt: 1_000,
+      metaUpdatedAt: 11,
+      nowMs: 10_000,
+      v: base.runValues["run-projection"] as never,
+      calc: serverCalc.calc,
+    });
+    const args = {
+      payload: base,
+      serverCalc,
+      schedule,
+      nowMs: 10_000,
+      calculationRevision: 8,
+    };
+    const first = buildOperationalProjection(args);
+    const second = buildOperationalProjection(args);
+    expect(second).toEqual(first);
+    expect(first).toMatchObject({
+      version: 1,
+      runId: "run-projection",
+      lifecycleGeneration: "run-projection:11",
+      serverTimeMs: 10_000,
+      capturedAtServerMs: 10_000,
+      calculationRevision: 8,
+      effectiveElapsedSec: 8,
+      counters: { traysOnLine: 4, batchesReady: 2, sauceBarrelsMade: 1, app1BatchesMade: 2 },
+    });
+
+    const paused = {
+      ...base,
+      dayState: {
+        ...base.dayState,
+        runs: [{ ...base.dayState.runs[0], pausedAt: 7_000 }],
+      },
+    } as never;
+    const pausedCalc = computeServerCalc(paused, [], 10_000)!;
+    const pausedSchedule = computeAutoTrackSchedule({
+      runId: "run-projection",
+      startedAt: 1_000,
+      pausedAt: 7_000,
+      metaUpdatedAt: 11,
+      nowMs: 10_000,
+      v: paused.runValues["run-projection"] as never,
+      calc: pausedCalc.calc,
+    });
+    expect(buildOperationalProjection({
+      payload: paused,
+      serverCalc: pausedCalc,
+      schedule: pausedSchedule,
+      nowMs: 10_000,
+    }).effectiveElapsedSec).toBe(5);
+  });
+});
+describe("operational projection — batch timing (slice 4)", () => {
+  function projectionFor(values: Record<string, unknown>, runMeta: Record<string, unknown> = {}) {
+    const base = {
+      dayState: {
+        currentIndex: 0,
+        runs: [{ id: "run-timing", startedAt: 1_000, ...runMeta }],
+      },
+      runValues: {
+        "run-timing": {
+          pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
+          crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
+          freezerTime: 10, doughballsPerTray: 6, doughBatchYield: 300,
+          targetDoughballWeight: 5,
+          ...values,
+        },
+      },
+    } as never;
+    const serverCalc = computeServerCalc(base, [], 8_000)!;
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-timing",
+      startedAt: 1_000,
+      metaUpdatedAt: 22,
+      nowMs: 8_000,
+      v: base.runValues["run-timing"] as never,
+      calc: serverCalc.calc,
+    });
+    return buildOperationalProjection({
+      payload: base,
+      serverCalc,
+      schedule,
+      nowMs: 8_000,
+    });
+  }
+
+  it("matches the client batch-timing formulas from effectiveElapsedSec", () => {
+    const p = projectionFor({});
+    const tc = p.calc.timePerBatchSec;
+    const eff = p.effectiveElapsedSec;
+    expect(p.timers.currentBatchNum).toBe(tc > 0 ? Math.floor(eff / tc) : 0);
+    expect(p.timers.secUntilNextBatch).toBe(tc > 0 ? tc - (eff % tc) : 0);
+    expect(p.timers.totalBatchesNeeded).toBe(
+      tc > 0 && p.calc.totalTimeSec > 0 ? Math.ceil(p.calc.totalTimeSec / tc) : 0,
+    );
+  });
+
+  it("is deterministic across two builds", () => {
+    const args = (() => {
+      const base = {
+        dayState: { currentIndex: 0, runs: [{ id: "run-timing", startedAt: 1_000 }] },
+        runValues: { "run-timing": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, doughballsPerTray: 6, doughBatchYield: 300, targetDoughballWeight: 5 } },
+      } as never;
+      const serverCalc = computeServerCalc(base, [], 8_000)!;
+      const schedule = computeAutoTrackSchedule({
+        runId: "run-timing", startedAt: 1_000, metaUpdatedAt: 22, nowMs: 8_000,
+        v: base.runValues["run-timing"] as never, calc: serverCalc.calc,
+      });
+      return { payload: base, serverCalc, schedule, nowMs: 8_000 };
+    })();
+    expect(buildOperationalProjection(args)).toEqual(buildOperationalProjection(args));
+  });
+
+  it("never emits NaN/Infinity when timePerBatchSec is zero", () => {
+    const p = projectionFor({ doughballsPerTray: 0, doughBatchYield: 0, targetDoughballWeight: 0 });
+    expect(p.timers.currentBatchNum).toBe(0);
+    expect(p.timers.secUntilNextBatch).toBe(0);
+    expect(p.timers.totalBatchesNeeded).toBe(0);
+    expect(Number.isFinite(p.timers.currentBatchNum)).toBe(true);
+    expect(Number.isFinite(p.timers.secUntilNextBatch)).toBe(true);
+    expect(Number.isFinite(p.timers.totalBatchesNeeded)).toBe(true);
   });
 });
