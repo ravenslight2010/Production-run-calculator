@@ -465,3 +465,22 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: completes the line-phase migration (server owns the model end-to-end), removes per-render client derivations, and guarantees the visible strips agree with cross-device server state.
 
 **Verification**: run-calculator typecheck clean; focused suites 104/104 (linePhases, LiveRunContext.linePhases, LiveRunContext.calcTick, operationalState, autoTrackFreezerDrain, autoTrackTraysBatches); browser/e2e phase-strip checks run in CI.
+
+## Warehouse coverage adopts server consumption lines (slice 7)
+
+**Date**: 2026-09-14
+**Branch**: `feat/warehouse-coverage-server-runlines`
+**Files changed**:
+- `artifacts/run-calculator/src/inventoryShared.ts` — `computeWarehouseCoverage` takes `RunConsumptionSource[]` (`{ runId?, values }`) and optional `serverConsumptionLinesByRunId`; per run it uses the server-streamed lines when the run id matches, else `computeRunConsumptionLines(values)` (server replaces, never doubles, the local derivation).
+- `artifacts/run-calculator/src/pages/home.tsx` — `inventoryRunSources` (run id + effective values) and `inventoryServerRunLines` (reads `serverRunLinesRef`) memos; `inventoryTabCtxValue` exposes both; dep registry `inventoryTabCtxDeps.ts` updated in step-lock.
+- `artifacts/run-calculator/src/contexts/InventoryTabCtx.ts` — value contract gains `coverageRunSources` + `serverRunLines`.
+- `artifacts/run-calculator/src/components/InventoryTabContent.tsx` / `InventoryTab.tsx` — props thread through; coverage memo passes server lines.
+- `artifacts/run-calculator/src/warehouseCoverage.test.ts` — call sites updated; 2 new tests (server-line preference with deterministic delta, unmatched server run ids ignored).
+
+**What was wrong / missing**: slice 3 streamed canonical per-run `runLines` but the client stored them in `serverRunLinesRef` and never read them — the warehouse coverage advisory still derived each run's consumption locally, so the Inventory tab disagreed with the server-canonical consumption the rest of the app adopts.
+
+**What the fix was**: the coverage computation now prefers the server-streamed lines for any run with a known id (the home page feeds run ids + the ref through the Inventory context), keeping local `computeRunConsumptionLines` as the offline/absent fallback — same adoption pattern as slices 1–6.
+
+**Why it was needed**: cross-device consistency for the coverage/consumption surface, using the data the server already owns — client becomes a thin display layer.
+
+**Verification**: warehouseCoverage 7/7; regressions 93/93 (warehouseCoverage, warehouseGrouping, inventoryFinalizationCoverage, inventoryShared.incidentReporting, LiveTabMemo.snappy); run-calculator typecheck clean.
