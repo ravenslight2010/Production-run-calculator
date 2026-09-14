@@ -412,3 +412,20 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 
 **Verification**: api-server `sync.liveCalcTick` 20/20; run-calculator `operationalState` + `LiveRunContext.calcTick` + clock-isolation 28/28; api-server + run-calculator + libs typechecks clean.
 
+## Live server-calc streaming (slice 4)
+
+**Date**: 2026-09-14
+**Branch**: `feat/live-calc-stream-slice4`
+**Files changed**:
+- `lib/live-calc/src/operationalProjection.ts` — `OperationalProjection.timers` extended with `currentBatchNum`, `secUntilNextBatch`, `totalBatchesNeeded`, computed server-side from `effectiveElapsedSec` + `calc.timePerBatchSec`/`totalTimeSec` (verbatim formulas from the client).
+- `lib/live-calc/src/liveCalc.test.ts` — 3 new projection tests (formula parity, determinism, zero/NaN guard); 19/19 pass.
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — `currentBatchNum` / `secUntilNextBatch` / `totalBatchesNeeded` read from `confirmedProjection.timers` when present (older servers fall back to local derivation).
+
+**What was wrong / missing**: batch counter and next-batch countdown were still recomputed locally every render from each device's own elapsed anchor, so devices could drift and the derivation ran on every clock tick.
+
+**What the fix was**: moved the batch-timing formulas into `buildOperationalProjection` (server-authoritative anchor) and had the client read them from the confirmed projection when available, keeping the local path as the offline/older-server fallback. Pure read-only — no day-state writes.
+
+**Why it was needed**: cross-device consistency for the batch timing surface and less per-render derivation, completing the server timing authority for the calc stream.
+
+**Verification**: lib live-calc 19/19; run-calculator web suites 48/48 (operationalState, calcTick, clock-isolation, autoTrackTraysBatches); api-server `sync.liveCalcTick` 20/20; integration suites need `DATABASE_URL` (CI-only); run-calculator typecheck clean.
+
