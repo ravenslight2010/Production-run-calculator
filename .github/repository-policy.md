@@ -70,10 +70,12 @@ pnpm run check:github-signed-commit-policy -- \
 
 The command is read-only and delegates authentication to the GitHub CLI. Never
 put a GitHub token, private signing key, or authenticated remote URL in this
-file or elsewhere in the repository. The credential-free activation result is
-retained in `.github/signed-commit-policy-evidence.md`. If the CLI is not
-authenticated, record the check as unavailable; do not substitute a public
-unauthenticated response for live private settings.
+file or elsewhere in the repository. The legacy guarded push helper likewise
+reads the workspace `GIT_URL` secret only at push time and never stores it in
+Git configuration. The credential-free activation result is retained in
+`.github/signed-commit-policy-evidence.md`. If the CLI is not authenticated,
+record the check as unavailable; do not substitute a public unauthenticated
+response for live private settings.
 
 ## Continuous drift detection
 

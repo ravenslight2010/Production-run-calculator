@@ -22,18 +22,24 @@ committing explicitly staged changes and attempting to push them directly to
 
 4. Ensure the worktree has no other tracked, deleted, renamed, or untracked
    changes. The command refuses to mix staged work with unstaged work.
-5. Ensure the shell's normal Git authentication can push to `origin/main`.
+5. Ensure the workspace `GIT_URL` secret contains the authenticated GitHub push
+   URL. The helper reads it only for the push subprocess.
 6. If signing enforcement is enabled, configure Git to sign and verify commits
    before running the command.
 
-In Replit, an authenticated remote URL may be supplied through the workspace's
-secure `GIT_URL` secret without printing or committing it:
+In Replit, configure the authenticated remote URL in the workspace's secure
+`GIT_URL` secret. The helper keeps `origin` credential-free for fetches and
+injects `GIT_URL` into Git's process-local configuration only while pushing.
+It does not print, commit, or persist the value:
 
 ```sh
-git remote set-url origin "$GIT_URL"
+git config --get remote.origin.url
+pnpm run push:main -- --message "Describe the change"
 ```
 
-Do not put the URL, access token, SSH key, or password in the repository.
+Do not run `git remote set-url origin "$GIT_URL"` or put the URL, access token,
+SSH key, or password in the repository. If `GIT_URL` is missing, the helper
+refuses to create a commit or attempt a push.
 
 ## What the command does
 
@@ -131,9 +137,11 @@ in GitHub before delivering to `main`.
   the remote before retrying. A commit may already exist locally after a
   server-side rejection; inspect `git log` and do not create a duplicate
   commit blindly.
-- **Authentication failure:** repair the Git credential or remote setup
-  without pasting credentials into chat or committing them, then retry the
-  existing local commit only after confirming the intended history.
+- **Authentication failure:** rotate or revoke the exposed GitHub credential
+  through GitHub's credential-management UI, update the workspace `GIT_URL`
+  secret without pasting credentials into chat, and retry the existing local
+  commit only after confirming the intended history. Never put the replacement
+  value in Git configuration.
 
 The workflow leaves failed commits in place rather than rewriting history or
 force-pushing. It never uses `--force` or `--force-with-lease`.
