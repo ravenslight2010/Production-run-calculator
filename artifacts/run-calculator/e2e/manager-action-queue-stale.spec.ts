@@ -21,6 +21,9 @@ let fixtureId: number | null = null;
 let fixtureDedupKey = "";
 let staleWriteFixtureId: number | null = null;
 let staleWriteDedupKey = "";
+let resolvedSyncConflictFixtureId: number | null = null;
+let resolvedSyncQueueFixtureId: number | null = null;
+let resolvedSyncDedupKey = "";
 let incidentFixtureId = "";
 let incidentQueueFixtureId: number | null = null;
 const LARGE_HISTORY_COUNT = 750;
@@ -168,6 +171,40 @@ test.beforeAll(async () => {
       ["live", fixtureDedupKey, `Stale queue item ${fixtureDedupKey}`, "Two managers must recover this stale update.", fixtureDedupKey],
     );
     fixtureId = result.rows[0].id as number;
+    const resolvedSync = await db.query(
+      `INSERT INTO sync_conflict_logs
+        (scope, date, fields_with_conflicts, conflict_count, resolution,
+         client_state_hash, server_state_hash, merged_state_hash)
+       VALUES ('live', '2026-09-06', $1::jsonb, 6, 'server-wins',
+         'e2e-client-hash', 'e2e-server-hash', 'e2e-merged-hash')
+       RETURNING id`,
+      [JSON.stringify([
+        "runValues:r1",
+        "runValues:r2",
+        "runValues:r3",
+        "packagingProgress:r1",
+        "packagingProgress:r2",
+        "dayState.runs.meta:r3",
+      ])],
+    );
+    resolvedSyncConflictFixtureId = resolvedSync.rows[0].id as number;
+    resolvedSyncDedupKey = `sync:${resolvedSyncConflictFixtureId}`;
+    const resolvedSyncQueue = await db.query(
+      `INSERT INTO action_items
+        (scope, dedup_key, category, severity, title, description,
+         source_type, source_id, source_path, status, assignee_id,
+         assignee_name, resolution_note, version)
+       VALUES ('live', $1, 'sync', 'error', $2, 'Old blocker copy',
+         'sync', $3, '#sync-diagnostics', 'open', 'prior-manager',
+         'Prior manager', 'Reviewed during the prior shift', 4)
+       RETURNING id`,
+      [
+        resolvedSyncDedupKey,
+        `Resolved sync merge ${resolvedSyncDedupKey}`,
+        String(resolvedSyncConflictFixtureId),
+      ],
+    );
+    resolvedSyncQueueFixtureId = resolvedSyncQueue.rows[0].id as number;
     const staleWriteResult = await db.query(
       `INSERT INTO action_items
          (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
@@ -236,6 +273,8 @@ test.afterAll(async () => {
     await db.connect();
     if (fixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [fixtureId]);
     if (staleWriteFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [staleWriteFixtureId]);
+    if (resolvedSyncQueueFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [resolvedSyncQueueFixtureId]);
+    if (resolvedSyncConflictFixtureId !== null) await db.query("DELETE FROM sync_conflict_logs WHERE id = $1", [resolvedSyncConflictFixtureId]);
     if (incidentQueueFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [incidentQueueFixtureId]);
     if (largeHistoryPrefix) await db.query("DELETE FROM action_items WHERE dedup_key LIKE $1", [`${largeHistoryPrefix}:%`]);
     if (incidentFixtureId) {
@@ -511,6 +550,41 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   await page.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
   await expect(page.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("queue-source-sync-workflow.png") });
+  expect(browserErrors).toEqual([]);
+});
+
+test("downgrades a resolved sync merge to required review in the manager queue", async ({
+  page,
+}, testInfo: TestInfo) => {
+  const username = uniqueTestId("e2e_manager_queue_resolved_sync");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await openQueue(page);
+  await page.getByLabel("Filter action category").selectOption("sync");
+
+  const title = `Resolved sync merge ${resolvedSyncDedupKey}`;
+  const itemTitle = page.getByText(title, { exact: true });
+  await expect(itemTitle).toBeVisible();
+  const itemCard = itemTitle.locator(
+    "xpath=ancestor::div[.//button[normalize-space(.)='Details']][1]",
+  );
+  await expect(itemCard.getByTestId(`attention-state-${resolvedSyncQueueFixtureId}`)).toHaveText("Required review");
+  await expect(itemCard).toContainText("Protected sync merge completed");
+  await expect(itemCard).toContainText("Review sync history");
+  await expect(itemCard).toContainText("not an active unsent-write failure");
+  await expect(itemCard).toContainText("Next: Review sync history");
+  await page.screenshot({ path: testInfo.outputPath("queue-resolved-sync-review.png") });
   expect(browserErrors).toEqual([]);
 });
 

@@ -32,7 +32,7 @@
 - [AI memory and corrections](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) + [reviewer coverage](ai-corrections-full-coverage.md) + [health](ai-memory-health-audits.md) — shared corrections and aliases, fail-safe review, historic aliases are evidence.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded; gate dough trays/batches decrement on front-of-line feed completion; web+mobile.
-- [Schedule safety](multi-sheet-schedule-import.md) + [recipe warnings](scheduled-recipe-check.md) + [canonical moves](schedule-move-canonical-writes.md) + [dated auth](scheduled-day-client-date.md) — imported days and moves preserve canonical writes.
+- [Schedule safety](multi-sheet-schedule-import.md) + [recipe warnings](scheduled-recipe-check.md) + [canonical moves](schedule-move-canonical-writes.md) — imported days, missing setups, and moves preserve canonical writes.
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Merge deny, history, and tombstones](merge-deny-and-change-history.md) + [merge-tombstones](merge-tombstones.md) — denied pairs, undo history, tombstones, and un-delete stamps preserve safe cross-device master-data merges.
 - [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — one fail-safe grounding path; keyed nudges are deduped while all-staff Q&A stays separate from manager-only optimize.
@@ -45,6 +45,7 @@
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Prior-run drain completion](prior-run-drain-completion.md) — completing a draining skid adds a skid without erasing cases already moved onto the next skid.
 - [Multi-file and premix imports](multi-file-ai-import.md) + [premix-import.md] — sequential fault-tolerant reads, merge-not-clobber, deterministic premix parsing, review before commit, web+mobile parity.
+- [Scheduled-day and import auth](scheduled-day-client-date.md) + [schedule-import-401.md] — key sync by client date and stop raw-fetch writes on 401 before hydration or reporting per-day failures.
 - [Server empty-over-populated guard](server-empty-over-populated-guard.md) — /api/sync protectRunValues rejects all-default-over-populated in BOTH the additive path AND the wholesale-adopt (reset) path; blank-over-populated during a rollover push keeps stored value + advances stamp.
 - [Pep applicator combine + B slot](pep-applicator-combine.md) — web-only pep1Combined (default true, doubles sticks) + per-app "B" pep type; EVERY DEFAULT-merge load path must call resolvePep1Combined or legacy 2-pep runs wrongly combine.
 - [Import "reload" causes](web-form-button-submit-reload.md) + [cold-start hang](cold-start-import-hang.md) — import blanks via sandbox auto-reset or dev HMR reload; autoscale scale-to-zero can hang fetches at the edge — blocking-dialog fetches need AbortSignal.timeout + Cancel.
@@ -55,7 +56,7 @@
 - [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [One-time heals and placeholders](one-time-data-heals.md) + [data reset](one-time-data-purge.md) + [seeded-placeholder-runs.md] — use marker/epoch guards; seeded blank runs stay local-only and clients must never hold zero runs.
-- [Master-data merge re-pointing](merge-server-master-data-repoint.md) — re-point server pools during merges so later imports do not resurrect old names.
+- [Master-data merge](merge-server-master-data-repoint.md) — re-point server pools so merging or renaming master data does not destroy recipe references.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
 - [Import units, sources, and dedup](spec-import-batch-vs-perpizza.md) + [import-source-file-semantics.md] + [import-order-dedup-keys.md] — preserve native units and order spec→dough/sauce→cheese/premix; dedup uses kind-specific keys.
 - [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher for importer link passes; only loose-key equality may auto-rename, reorder/typo/family-fold are declinable suggestions (prod cross-link incident).
@@ -115,7 +116,6 @@
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
 - [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
 - [Browser fixture seeding](browser-fixture-seeding.md) — reloads can replace browser-only master-data seeds during server hydration; seed through server fixtures or use stable built-ins.
-- [Multi-day import auth](schedule-import-401.md) — raw-fetch write loops must stop on 401 and trigger the normal unauthorized path instead of reporting misleading per-day failures.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake sync claim fence](wake-sync-claim-fence.md) — monotonic wake acknowledgment fences stale claims without deadlocking same-tick dough claim requests.
@@ -156,4 +156,3 @@
 - [AI evaluation framework boundary](ai-evaluation-framework-boundary.md) — adapt provider-neutral invariants into project-owned offline TypeScript/Vitest; do not import external harness runtimes.
 - [AI benchmark network boundary](ai-benchmark-network-boundary.md) — routine evaluations stay offline; live provider checks require explicit opt-in and are never CI evidence.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
-- [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.

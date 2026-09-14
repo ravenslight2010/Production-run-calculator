@@ -15,9 +15,11 @@ import { signToken } from "../lib/auth";
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
+let actionItemsTable: DbModule["actionItemsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let finalizedOperationalReportsTable: DbModule["finalizedOperationalReportsTable"];
+let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -76,9 +78,11 @@ beforeAll(async () => {
   const routerMod = await import("./index");
   db = dbMod.db;
   pool = dbMod.pool;
+  actionItemsTable = dbMod.actionItemsTable;
   dailySyncTable = dbMod.dailySyncTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   finalizedOperationalReportsTable = dbMod.finalizedOperationalReportsTable;
+  syncConflictLogsTable = dbMod.syncConflictLogsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -115,7 +119,7 @@ beforeEach(async () => {
   process.env.OPERATIONAL_REPORT_SIGNING_KEYS = JSON.stringify(REPORT_SIGNING_KEYRING);
   clearUserValidityCache();
   clearSandboxCache();
-  await db.execute(sql`TRUNCATE ${finalizedOperationalReportsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${actionItemsTable}, ${syncConflictLogsTable}, ${finalizedOperationalReportsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
@@ -154,6 +158,116 @@ function snapshot(run: Record<string, unknown>, casesNeeded = 100, date = "2026-
 }
 
 describe("operational report endpoints", () => {
+  it("keeps resolved sync conflicts review-only and repairs old queue severity without losing manager metadata", async () => {
+    const [conflict] = await db.insert(syncConflictLogsTable).values({
+      scope: "live",
+      date: "2026-09-06",
+      fieldsWithConflicts: [
+        "runValues:r1",
+        "runValues:r2",
+        "runValues:r3",
+        "runValues:r4",
+        "packagingProgress:r1",
+        "dayState.runs.meta:r2",
+      ],
+      conflictCount: 6,
+      resolution: "server-wins",
+      clientStateHash: "client-hash",
+      serverStateHash: "server-hash",
+      mergedStateHash: "merged-hash",
+    }).returning({ id: syncConflictLogsTable.id });
+    expect(conflict?.id).toBeTypeOf("number");
+
+    const dedupKey = `sync:${conflict!.id}`;
+    const [oldQueueItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey,
+      category: "sync",
+      severity: "error",
+      title: "Old sync blocker copy",
+      description: "Old blocker description",
+      sourceType: "sync",
+      sourceId: String(conflict!.id),
+      sourcePath: "#sync-diagnostics",
+      status: "in_progress",
+      assigneeId: "prior-manager",
+      assigneeName: "Prior manager",
+      deferReason: "Waiting for historical review",
+      resolutionNote: "Reviewed during the prior shift",
+      version: 7,
+    }).returning({ id: actionItemsTable.id });
+
+    const queueResponse = await req(MANAGER, "GET", "/api/manager-action-queue?category=sync");
+    expect(queueResponse.status).toBe(200);
+    const queue = await queueResponse.json() as {
+      items: Array<{
+        id: number;
+        dedupKey: string;
+        severity: string;
+        title: string;
+        description: string;
+        sourcePath: string;
+        status: string;
+        assigneeName: string | null;
+        deferReason: string | null;
+        resolutionNote: string | null;
+        version: number;
+      }>;
+    };
+    const repaired = queue.items.find((item) => item.dedupKey === dedupKey);
+    expect(repaired).toMatchObject({
+      id: oldQueueItem!.id,
+      dedupKey,
+      severity: "warning",
+      title: "Review completed sync merge",
+      description: expect.stringContaining("Protected sync merge completed"),
+      sourcePath: "#sync-diagnostics",
+      status: "in_progress",
+      assigneeName: "Prior manager",
+      deferReason: "Waiting for historical review",
+      resolutionNote: "Reviewed during the prior shift",
+      version: 7,
+    });
+    expect(repaired?.description).toContain("Review sync history for context");
+    expect(repaired?.description).toContain("not an active unsent-write failure");
+    expect(repaired?.severity).not.toBe("error");
+
+    const persisted = await db.select().from(actionItemsTable)
+      .where(eq(actionItemsTable.id, oldQueueItem!.id));
+    expect(persisted).toMatchObject([{
+      severity: "warning",
+      status: "in_progress",
+      assigneeId: "prior-manager",
+      assigneeName: "Prior manager",
+      deferReason: "Waiting for historical review",
+      resolutionNote: "Reviewed during the prior shift",
+      version: 7,
+    }]);
+
+    const handoffResponse = await req(MANAGER, "GET", "/api/reports/handoff?date=2026-09-06");
+    expect(handoffResponse.status).toBe(200);
+    const handoff = await handoffResponse.json() as {
+      items: Array<{
+        id: string;
+        source: string;
+        status: string;
+        severity: string;
+        attentionState: string;
+        nextAction: string;
+        historical: boolean;
+      }>;
+    };
+    expect(handoff.items).toContainEqual(expect.objectContaining({
+      id: `sync:${conflict!.id}`,
+      source: "sync",
+      status: "historical",
+      severity: "high",
+      attentionState: "stale",
+      nextAction: "Review when convenient",
+      historical: true,
+    }));
+  });
+
   it("rejects signed-out and capability-less callers, while review-incidents users pass", async () => {
     expect((await req(null, "GET", "/api/reports/operational-view?date=2026-09-06&runId=x")).status).toBe(401);
     expect((await req(OPERATOR, "POST", "/api/reports/operational", { scope: "day", date: "2026-09-06" })).status).toBe(403);

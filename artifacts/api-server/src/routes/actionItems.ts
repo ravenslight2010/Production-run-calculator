@@ -117,12 +117,15 @@ async function candidates(): Promise<Candidate[]> {
   });
   for (const item of conflicts) out.push({
     dedupKey: `sync:${item.id}`, category: "sync",
-    severity: item.conflictCount > 5 ? "error" : "warning",
-    title: "Sync conflict needs review",
-    description: `${item.conflictCount} conflicting field${item.conflictCount === 1 ? "" : "s"} on ${item.date}`,
+    // The protective merge has already completed before this historical log is
+    // written. A large field count is useful review context, but it is not an
+    // active unsent-write failure and must not become a queue blocker.
+    severity: "warning",
+    title: "Review completed sync merge",
+    description: `Protected sync merge completed for ${item.conflictCount} conflicting field${item.conflictCount === 1 ? "" : "s"} on ${item.date}. Review sync history for context; this is historical merge evidence, not an active unsent-write failure.`,
     sourceType: "sync", sourceId: String(item.id), sourcePath: "#sync-diagnostics",
-    attentionState: attentionStateFor(item.conflictCount > 5 ? "error" : "warning"),
-    nextAction: "Review and reconcile",
+    attentionState: attentionStateFor("warning"),
+    nextAction: "Review sync history",
   });
   for (const item of rules.filter((rule) => (rule.checklist?.length ?? 0) > 0)) out.push({
     dedupKey: `production-rule:${item.id}`, category: "production-rule", severity: "warning",
