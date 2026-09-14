@@ -464,6 +464,8 @@ import {
   consumeSauceBarrel,
   deriveCandidateItems,
   scoreNameMatch,
+  type ConsumeLine,
+  type RunConsumptionSource,
 } from "../inventoryShared";
 import {
   applyRecipeSubstitutions,
@@ -14723,6 +14725,24 @@ export default function Home() {
       : [],
     [needsInventorySnapshot, dayState.runs, runValuesById, effectiveValuesForRun],
   );
+  // Per-run consumption sources: keep the run id alongside the effective values
+  // so server-streamed consumption lines (runLines) can replace local math per
+  // run, with the local derivation as the offline/absent fallback.
+  const inventoryRunSources = useMemo<RunConsumptionSource[]>(
+    () => needsInventorySnapshot
+      ? dayState.runs.map((run) => ({
+          runId: run.id,
+          values: effectiveValuesForRun(run, runValuesById.get(run.id) ?? DEFAULT_VALUES),
+        }))
+      : [],
+    [needsInventorySnapshot, dayState.runs, runValuesById, effectiveValuesForRun],
+  );
+  const inventoryServerRunLines = useMemo(
+    () => needsInventorySnapshot
+      ? (serverRunLinesRef.current as Record<string, ConsumeLine[]>)
+      : {},
+    [needsInventorySnapshot],
+  );
   const inventoryCandidates = useMemo(
     () => needsInventorySnapshot ? deriveCandidateItems(inventoryRunValues) : [],
     [needsInventorySnapshot, inventoryRunValues],
@@ -14764,11 +14784,13 @@ export default function Home() {
     refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
     todayScheduledValues, toggleStagedItem]);
   const inventoryTabCtxValue = useMemo<InventoryTabContextValue>(() => ({
-    candidates: inventoryCandidates, runValsList: inventoryRunValues, coverageRunVals: inventoryRunValues,
+    candidates: inventoryCandidates, runValsList: inventoryRunValues,
+    coverageRunSources: inventoryRunSources, serverRunLines: inventoryServerRunLines,
     substitutions: dayState.substitutions ?? [], substitutionLog: dayState.substitutionLog ?? [],
     substitutionOptions: inventorySubstitutionOptions, onAddSubstitution: addSubstitution,
     onRemoveSubstitution: removeSubstitution, onClearSubstitutions: clearSubstitutions,
-  }), [dayState, inventoryCandidates, inventoryRunValues, inventorySubstitutionOptions,
+  }), [dayState, inventoryCandidates, inventoryRunValues, inventoryRunSources,
+    inventoryServerRunLines, inventorySubstitutionOptions,
     addSubstitution, removeSubstitution, clearSubstitutions]);
   const mixesTabCtxValue = useMemo<MixesTabContextValue>(() => ({
     canManageInventory, currentRunId, dayState, effectiveValuesForRun, form, mixMakeDay,

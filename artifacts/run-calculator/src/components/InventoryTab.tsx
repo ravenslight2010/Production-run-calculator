@@ -41,7 +41,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   type CandidateItem,
+  type ConsumeLine,
   type InventoryItem,
+  type RunConsumptionSource,
   computeWarehouseCoverage,
   type WarehouseCoverage,
   type InventoryLot,
@@ -145,7 +147,8 @@ export default function InventoryTab({
   onAddSubstitution = () => {},
   onRemoveSubstitution = () => {},
   onClearSubstitutions = () => {},
-  coverageRunVals = [],
+  coverageRunSources = [],
+  serverRunLines = {},
 }: {
   candidates: CandidateItem[];
   runValsList?: FormValues[];
@@ -155,7 +158,8 @@ export default function InventoryTab({
   onAddSubstitution?: (sub: IngredientSubstitution) => void;
   onRemoveSubstitution?: (id: string) => void;
   onClearSubstitutions?: () => void;
-  coverageRunVals?: FormValues[];
+  coverageRunSources?: RunConsumptionSource[];
+  serverRunLines?: Record<string, ConsumeLine[]>;
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
@@ -256,10 +260,10 @@ export default function InventoryTab({
     return { low, expiring, expired };
   }, [items, expirySoonDays]);
   const coverage = useMemo(
-    () => canManageInventory && coverageRunVals.length > 0
-      ? computeWarehouseCoverage(coverageRunVals, items, productionIngredients)
+    () => canManageInventory && coverageRunSources.length > 0
+      ? computeWarehouseCoverage(coverageRunSources, items, productionIngredients, serverRunLines)
       : [],
-    [canManageInventory, coverageRunVals, items, productionIngredients],
+    [canManageInventory, coverageRunSources, serverRunLines, items, productionIngredients],
   );
 
   const grouped = useMemo(() => {

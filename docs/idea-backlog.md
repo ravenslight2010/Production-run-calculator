@@ -430,6 +430,8 @@ Move more logic from client to server to improve consistency, reduce battery, an
 
 - **Live server-calc streaming (slice 6 — DONE)** — phase display strips adopt the server model: the three `computeLinePhases` call sites in `home.tsx` (ended-run badge, 3-phase line status strip, line-stage section) now read `useLiveRun().linePhases` (server-adopted with internal local fallback); local derivations remain only as defensive fallbacks. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice6-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice6.md`.
 
+- **Warehouse coverage adopts streamed run lines (DONE)** — the Inventory tab's coverage advisory now consumes the server-streamed per-run consumption `runLines` (slice 3 built the stream; the client previously never read it) via `computeWarehouseCoverage(..., serverConsumptionLinesByRunId?)`, falling back to local `computeRunConsumptionLines` per run when offline/absent. Spec: `docs/superpowers/specs/2026-09-14-server-warehouse-coverage-runlines-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-warehouse-coverage-runlines.md`.
+
 ### Code References
 - `lib/live-calc/src/index.ts` — core calculation engine
 - `artifacts/run-calculator/src/liveRunCalc.ts` — client-side calc (to be migrated)

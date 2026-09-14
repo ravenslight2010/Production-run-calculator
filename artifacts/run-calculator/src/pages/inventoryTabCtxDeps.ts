@@ -22,7 +22,8 @@
 export const INVENTORY_TAB_CTX_DEP_FIELDS = [
   // ── Inventory production data ──
   "dayState",
-  "inventoryCandidates", "inventoryRunValues", "inventorySubstitutionOptions",
+  "inventoryCandidates", "inventoryRunValues", "inventoryRunSources",
+  "inventoryServerRunLines", "inventorySubstitutionOptions",
 ] as const;
 
 export type InventoryTabCtxDepField = (typeof INVENTORY_TAB_CTX_DEP_FIELDS)[number];
