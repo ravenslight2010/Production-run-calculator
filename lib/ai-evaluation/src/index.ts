@@ -40,6 +40,23 @@ export type EvaluationManifest = {
   };
 };
 
+export type EvaluationManifestChange = {
+  path: string;
+  before: unknown;
+  after: unknown;
+};
+
+export type EvaluationManifestComparison = {
+  format: "evaluation-manifest-comparison";
+  formatVersion: 1;
+  compatible: true;
+  limitations: string[];
+  identityChanges: EvaluationManifestChange[];
+  metricChanges: EvaluationManifestChange[];
+  outcomeChanges: EvaluationManifestChange[];
+  summary: string;
+};
+
 type LegacyReport = Record<string, unknown>;
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -220,6 +237,7 @@ export function validateEvaluationManifest(value: unknown): EvaluationManifest {
   };
 }
 
+
 const unavailable = (reason: string): Measurement => ({ state: "unavailable", reason });
 
 export function readEvaluationManifest(
@@ -364,4 +382,123 @@ export function readEvaluationManifest(
     });
   }
   throw new Error("unrecognized evaluation report shape");
+}
+
+function compareValues(
+  before: unknown,
+  after: unknown,
+  path: string,
+): EvaluationManifestChange[] {
+  if (
+    before !== null
+    && after !== null
+    && typeof before === "object"
+    && typeof after === "object"
+    && !Array.isArray(before)
+    && !Array.isArray(after)
+  ) {
+    const beforeRecord = before as Record<string, unknown>;
+    const afterRecord = after as Record<string, unknown>;
+    return [...new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])]
+      .sort()
+      .flatMap((key) =>
+        compareValues(
+          beforeRecord[key],
+          afterRecord[key],
+          path ? `${path}.${key}` : key,
+        )
+      );
+  }
+  return Object.is(before, after) ? [] : [{ path, before, after }];
+}
+
+function requireComparisonBinding(
+  manifest: EvaluationManifest,
+  label: "baseline" | "candidate",
+): void {
+  if (manifest.provenance.evidence.state !== "hashed") {
+    throw new Error(
+      `${label} manifest is unbound: provenance evidence hash is unavailable (${manifest.provenance.evidence.reason})`,
+    );
+  }
+}
+
+export function compareEvaluationManifests(
+  baselineValue: unknown,
+  candidateValue: unknown,
+): EvaluationManifestComparison {
+  const baseline = validateEvaluationManifest(baselineValue);
+  const candidate = validateEvaluationManifest(candidateValue);
+  requireComparisonBinding(baseline, "baseline");
+  requireComparisonBinding(candidate, "candidate");
+
+  if (baseline.evaluation.id !== candidate.evaluation.id) {
+    throw new Error(
+      `incompatible evaluation manifests: evaluation.id changed from "${baseline.evaluation.id}" to "${candidate.evaluation.id}"`,
+    );
+  }
+  if (baseline.evaluation.kind !== candidate.evaluation.kind) {
+    throw new Error(
+      `incompatible evaluation manifests: evaluation.kind changed from "${baseline.evaluation.kind}" to "${candidate.evaluation.kind}"`,
+    );
+  }
+  const limitations = ([
+    ["baseline", baseline],
+    ["candidate", candidate],
+  ] as const).flatMap(([label, manifest]) =>
+    manifest.provenance.evaluator.state === "unavailable"
+      ? [`${label} evaluator identity is unavailable: ${manifest.provenance.evaluator.reason}`]
+      : []
+  );
+
+  const identityChanges = compareValues(
+    {
+      manifestVersion: baseline.manifestVersion,
+      evaluation: baseline.evaluation,
+      corpus: baseline.corpus,
+      thresholds: baseline.thresholds,
+      dependencies: baseline.dependencies,
+      provider: baseline.provider,
+      execution: baseline.execution,
+      privacy: baseline.privacy,
+      provenance: baseline.provenance,
+    },
+    {
+      manifestVersion: candidate.manifestVersion,
+      evaluation: candidate.evaluation,
+      corpus: candidate.corpus,
+      thresholds: candidate.thresholds,
+      dependencies: candidate.dependencies,
+      provider: candidate.provider,
+      execution: candidate.execution,
+      privacy: candidate.privacy,
+      provenance: candidate.provenance,
+    },
+    "",
+  );
+  const metricChanges = compareValues(
+    baseline.performance,
+    candidate.performance,
+    "performance",
+  );
+  const outcomeChanges = compareValues(
+    baseline.outcome,
+    candidate.outcome,
+    "outcome",
+  );
+  const total = identityChanges.length + metricChanges.length + outcomeChanges.length;
+  const summary = total === 0
+    ? `No changes: ${baseline.evaluation.id} manifests are identical.`
+    : `${total} change${total === 1 ? "" : "s"}: ${identityChanges.length} identity, ${metricChanges.length} metric, ${outcomeChanges.length} outcome.`;
+
+  return {
+    format: "evaluation-manifest-comparison",
+    formatVersion: 1,
+    compatible: true,
+    limitations,
+    identityChanges,
+    metricChanges,
+    outcomeChanges,
+    summary,
+  };
 }
