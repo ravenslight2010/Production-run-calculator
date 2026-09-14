@@ -13,6 +13,7 @@ import json
 import re
 import stat
 import sys
+import unicodedata
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -22,6 +23,10 @@ from typing import Iterable, Sequence
 DEFAULT_MAX_ENTRIES = 100_000
 DEFAULT_MAX_ENTRY_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_EXPANDED_BYTES = 512 * 1024 * 1024
+
+# NFC preserves the spelling users generally expect while treating canonically
+# equivalent member names as the same path during safety checks.
+ZIP_MEMBER_UNICODE_NORMALIZATION = "NFC"
 
 # This is intentionally a path-only check. It does not inspect member content,
 # and its output is always a count rather than the matching path.
@@ -46,9 +51,11 @@ def sha256_file(path: Path) -> str:
 
 
 def normalized_member_path(raw_name: str) -> tuple[str, bool]:
-    """Return a host-independent path key and whether the raw path is unsafe."""
+    """Return an NFC-normalized, host-independent path key and its safety."""
 
-    name = raw_name.replace("\\", "/")
+    name = unicodedata.normalize(ZIP_MEMBER_UNICODE_NORMALIZATION, raw_name).replace(
+        "\\", "/"
+    )
     parts = name.split("/")
     unsafe = (
         "\x00" in name
@@ -86,6 +93,7 @@ def _empty_archive_result(filename: str) -> dict[str, object]:
         "largest_entry_bytes": 0,
         "unsafe_path_count": 0,
         "duplicate_normalized_path_count": 0,
+        "unicode_normalization_collision_count": 0,
         "case_fold_collision_count": 0,
         "encrypted_entry_count": 0,
         "special_file_count": 0,
@@ -131,6 +139,7 @@ def inspect_archive(
             result["entry_limit_exceeded"] = len(infos) > max_entries
 
             normalized_counts: defaultdict[str, int] = defaultdict(int)
+            unicode_name_variants: defaultdict[str, set[str]] = defaultdict(set)
             casefold_names: defaultdict[str, set[str]] = defaultdict(set)
             expanded_size = 0
             largest_entry = 0
@@ -145,7 +154,15 @@ def inspect_archive(
             for info in infos:
                 normalized, unsafe = normalized_member_path(info.filename)
                 normalized_counts[normalized] += 1
-                casefold_names[normalized.casefold()].add(normalized)
+                nfc_name = unicodedata.normalize(
+                    ZIP_MEMBER_UNICODE_NORMALIZATION, info.filename
+                )
+                unicode_name_variants[nfc_name].add(info.filename)
+                casefold_names[
+                    unicodedata.normalize(
+                        ZIP_MEMBER_UNICODE_NORMALIZATION, normalized.casefold()
+                    )
+                ].add(normalized)
                 unsafe_paths += int(unsafe)
 
                 if info.is_dir():
@@ -172,6 +189,11 @@ def inspect_archive(
             result["duplicate_normalized_path_count"] = sum(
                 count - 1 for count in normalized_counts.values() if count > 1
             )
+            result["unicode_normalization_collision_count"] = sum(
+                len(names) - 1
+                for names in unicode_name_variants.values()
+                if len(names) > 1
+            )
             result["case_fold_collision_count"] = sum(
                 1 for names in casefold_names.values() if len(names) > 1
             )
@@ -196,6 +218,7 @@ def inspect_archive(
         or result["entry_size_limit_exceeded"]
         or result["unsafe_path_count"]
         or result["duplicate_normalized_path_count"]
+        or result["unicode_normalization_collision_count"]
         or result["case_fold_collision_count"]
         or result["encrypted_entry_count"]
         or result["special_file_count"]
@@ -258,6 +281,7 @@ def inventory_archives(
         "label": "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL",
         "read_only": True,
         "member_data_opened": False,
+        "member_name_unicode_normalization": ZIP_MEMBER_UNICODE_NORMALIZATION,
         "limits": {
             "max_entries": max_entries,
             "max_entry_bytes": max_entry_bytes,
@@ -321,6 +345,7 @@ def _text_report(report: dict[str, object]) -> str:
                     f"expanded_bytes={archive['expanded_size_bytes']}",
                     f"unsafe_paths={archive['unsafe_path_count']}",
                     f"duplicate_paths={archive['duplicate_normalized_path_count']}",
+                    f"unicode_normalization_collisions={archive['unicode_normalization_collision_count']}",
                     f"case_fold_collisions={archive['case_fold_collision_count']}",
                     f"encrypted={archive['encrypted_entry_count']}",
                     f"special_files={archive['special_file_count']}",

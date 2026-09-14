@@ -152,6 +152,48 @@ class ZipAssetInventoryTests(unittest.TestCase):
             self.assertNotIn("encrypted.txt", process.stdout)
             self.assertIn("NOT INSTALLATION APPROVAL", process.stdout)
 
+    def test_canonically_equivalent_member_names_are_redacted_and_unsafe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "unicode-equivalent.zip"
+            composed = "reports/café.txt"
+            decomposed = "reports/cafe\u0301.txt"
+            self.assertNotEqual(composed, decomposed)
+
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(composed, "not read")
+                archive.writestr(decomposed, "not read")
+
+            result = inspect_archive(archive_path)
+            self.assertEqual(result["duplicate_normalized_path_count"], 1)
+            self.assertEqual(result["unicode_normalization_collision_count"], 1)
+            self.assertTrue(result["unsafe_metadata"])
+            self.assertEqual(result["status"], "unsafe-metadata")
+
+            report = inventory_archives([archive_path])
+            self.assertEqual(report["member_name_unicode_normalization"], "NFC")
+            self.assertFalse(report["member_data_opened"])
+            serialized = json.dumps(report, ensure_ascii=False)
+            self.assertNotIn(composed, serialized)
+            self.assertNotIn(decomposed, serialized)
+
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    str(archive_path),
+                    "--format",
+                    "text",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(REPOSITORY_ROOT / "scripts")},
+            )
+            self.assertEqual(process.returncode, 1)
+            self.assertIn("unicode_normalization_collisions=1", process.stdout)
+            self.assertNotIn(composed, process.stdout)
+            self.assertNotIn(decomposed, process.stdout)
+
     def test_malformed_archive_is_an_error_not_a_pass(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "not-a-zip.zip"
