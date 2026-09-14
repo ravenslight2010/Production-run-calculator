@@ -187,15 +187,33 @@ function transferSourcesForCoverage(
   };
 }
 
-/** Advisory comparison using the exact quantities sent to auto-deduction. */
+/** Per-run consumption source: runId maps to server lines, values supply the local fallback. */
+export type RunConsumptionSource = {
+  runId?: string | null;
+  values: FormValues;
+};
+
+/**
+ * Advisory comparison using the exact quantities sent to auto-deduction.
+ *
+ * When `serverConsumptionLinesByRunId` carries canonical lines for a run
+ * (streamed by the server in the sync SSE), those are used instead of the
+ * local derivation — the server is the authority online, local math remains
+ * the offline/absent fallback. Never blank: absent server data falls back to
+ * `computeRunConsumptionLines` per run.
+ */
 export function computeWarehouseCoverage(
-  runVals: FormValues[],
+  runSources: RunConsumptionSource[],
   items: InventoryItem[],
   productionIngredients: ProductionIngredient[],
+  serverConsumptionLinesByRunId?: Record<string, ConsumeLine[]>,
 ): WarehouseCoverage[] {
   const needs = new Map<string, { name: string; unit: string; qty: number }>();
-  for (const vals of runVals) {
-    for (const line of computeRunConsumptionLines(vals)) {
+  for (const source of runSources) {
+    const lines = source.runId && serverConsumptionLinesByRunId?.[source.runId]
+      ? serverConsumptionLinesByRunId[source.runId]
+      : computeRunConsumptionLines(source.values);
+    for (const line of lines) {
       if (!line.itemKey.startsWith("ingredient:") || line.qty <= 0) continue;
       const name = coverageName(line.itemKey);
       const unit = line.itemKey.split(":").at(-1) ?? "";
