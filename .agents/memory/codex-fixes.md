@@ -3,6 +3,16 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-09-14 — Add metadata-only ZIP upload inventory
+
+**File(s):** `scripts/zip_asset_inventory.py`, `scripts/test_zip_asset_inventory.py`, `scripts/package.json`
+
+**Problem:** Uploaded ZIP review depended on manual hashing, duplicate reconciliation, and symlink/path safety inspection before anyone could safely open an archive.
+
+**Fix:** Added a dependency-free inventory command and focused regression tests. The command reads only ZIP central-directory metadata, emits redacted counts and hashes, identifies exact duplicate uploads, and exits nonzero for unsafe metadata or scan errors.
+
+**Context:** Future upload reviews need repeatable evidence without extracting, executing, or printing credential-like paths from untrusted archives.
+
 # Codex Fixes Log
 
 This file documents every fix Codex has made to this repository. **Check this before making changes** — if a fix is already listed here, do NOT re-apply it.
