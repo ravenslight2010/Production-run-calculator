@@ -710,9 +710,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       environmentIndex >= 0 && process.argv[environmentIndex + 1]
         ? process.argv[environmentIndex + 1]
         : process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT;
+    const revisionIndex = process.argv.indexOf("--revision");
+    const requestedRevision =
+      revisionIndex >= 0 && process.argv[revisionIndex + 1]
+        ? process.argv[revisionIndex + 1]
+        : process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION;
     const output = {
       verifier: "source-library-reconciliation",
       environment: requestedEnvironment ?? "unknown",
+      revision: requestedRevision ?? "unknown",
+      capturedAt: new Date().toISOString(),
       ok: false,
       failures: [{ check: "input-or-database", count: 1 }],
       error: error instanceof Error ? error.message : "Verification failed",

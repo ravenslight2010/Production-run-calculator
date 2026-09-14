@@ -157,3 +157,4 @@
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [AI evaluation framework boundary](ai-evaluation-framework-boundary.md) — adapt provider-neutral invariants into project-owned offline TypeScript/Vitest; do not import external harness runtimes.
 - [AI benchmark network boundary](ai-benchmark-network-boundary.md) — routine evaluations stay offline; live provider checks require explicit opt-in and are never CI evidence.
+- [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
