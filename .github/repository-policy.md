@@ -17,6 +17,12 @@ The required GitHub Actions checks are:
 - `Typecheck`
 - `Unit tests (web + libs)`
 
+The local policy verifier extracts the named jobs from `.github/workflows/ci.yml`
+and compares them with this six-check contract. A required job rename must update
+this list in the same change. Jobs in release, browser-evidence, schema-rollback,
+and release-concurrency workflows are intentionally outside this required-CI
+contract.
+
 Each required check must be reported by the GitHub Actions app (app ID `15368`).
 The read-only verifier checks this identity as well as the exact check names
 above. `Desktop and phone department journey`, release gates, schema rollback,

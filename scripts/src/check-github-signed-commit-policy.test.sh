@@ -11,6 +11,7 @@ TEST_ROOT=$(mktemp -d)
 FAKE_BIN="${TEST_ROOT}/bin"
 PROTECTION_FIXTURE="${TEST_ROOT}/protection.json"
 SIGNATURE_FIXTURE="${TEST_ROOT}/signatures.json"
+REPOSITORY_FIXTURE="${TEST_ROOT}/repository"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
 mkdir -p "$FAKE_BIN"
@@ -44,6 +45,11 @@ EOF
 chmod +x "${FAKE_BIN}/gh"
 
 write_valid_fixtures() {
+  mkdir -p "${REPOSITORY_FIXTURE}/.github/workflows"
+  cp "${SCRIPT_DIR}/../../.github/repository-policy.md" \
+    "${REPOSITORY_FIXTURE}/.github/repository-policy.md"
+  cp "${SCRIPT_DIR}/../../.github/workflows/ci.yml" \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
   cat > "$PROTECTION_FIXTURE" <<'EOF'
 {
   "required_status_checks": {
@@ -74,6 +80,7 @@ run_check() {
   set +e
   CHECK_OUTPUT=$(
     PATH="${FAKE_BIN}:$PATH" \
+      CHECK_REPOSITORY_ROOT="$REPOSITORY_FIXTURE" \
       FAKE_GH_PROTECTION="$PROTECTION_FIXTURE" \
       FAKE_GH_SIGNATURES="$SIGNATURE_FIXTURE" \
       bash "$CHECK_SCRIPT" --repo owner/repository 2>&1
@@ -175,6 +182,56 @@ test_rejects_check_identity_mismatch() {
   echo "PASS: rejects a non-GitHub-Actions check identity"
 }
 
+test_rejects_renamed_ci_job_without_policy_update() {
+  write_valid_fixtures
+  sed -i 's/^    name: Typecheck$/    name: Typecheck renamed/' \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  run_check
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a CI job rename without a policy update to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "required check 'Typecheck' from ${REPOSITORY_FIXTURE}/.github/repository-policy.md has no matching named job in ${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  assert_contains "$CHECK_OUTPUT" \
+    "if the job was renamed, update the policy contract in the same change"
+  echo "PASS: rejects a renamed required CI job without a policy update"
+}
+
+test_accepts_explicit_ci_job_rename_policy_update() {
+  write_valid_fixtures
+  sed -i 's/^    name: Typecheck$/    name: Typecheck renamed/' \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  sed -i "s/^- \`Typecheck\`$/- \`Typecheck renamed\`/" \
+    "${REPOSITORY_FIXTURE}/.github/repository-policy.md"
+  jq '(.required_status_checks.checks[] | select(.context == "Typecheck")).context = "Typecheck renamed"' \
+    "$PROTECTION_FIXTURE" > "${PROTECTION_FIXTURE}.tmp"
+  mv "${PROTECTION_FIXTURE}.tmp" "$PROTECTION_FIXTURE"
+  run_check
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected an explicitly updated CI job rename to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  echo "PASS: accepts a CI job rename with an explicit policy update"
+}
+
+test_rejects_incomplete_required_check_contract() {
+  write_valid_fixtures
+  sed -i "/^- \`Typecheck\`$/d" \
+    "${REPOSITORY_FIXTURE}/.github/repository-policy.md"
+  run_check
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected an incomplete required-check contract to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "required-check contract in ${REPOSITORY_FIXTURE}/.github/repository-policy.md must list exactly six checks; found 5"
+  echo "PASS: rejects an incomplete required-check contract"
+}
+
 test_redacts_cli_errors() {
   write_valid_fixtures
   set +e
@@ -229,5 +286,8 @@ test_rejects_field_mismatch \
 test_rejects_signed_commit_mismatch
 test_rejects_check_count_mismatch
 test_rejects_check_identity_mismatch
+test_rejects_renamed_ci_job_without_policy_update
+test_accepts_explicit_ci_job_rename_policy_update
+test_rejects_incomplete_required_check_contract
 test_redacts_cli_errors
 echo "All GitHub branch-protection policy tests passed."
