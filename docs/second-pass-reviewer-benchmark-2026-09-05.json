@@ -158,5 +158,80 @@
     },
     "reason": "No uniquely caught material errors exist in the labeled retained corpus.",
     "authority": "Deterministic sanitizers, canonicalization, source evidence, and explicit human confirmation remain authoritative."
+  },
+  "evaluationManifest": {
+    "manifestVersion": 1,
+    "evaluation": {
+      "id": "second-pass-reviewer",
+      "kind": "provider-backed"
+    },
+    "corpus": {
+      "sha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+      "cases": 304,
+      "sourceAuthority": "deterministic-reconciliation-and-human-review"
+    },
+    "thresholds": {
+      "minimumUniqueMaterialCatchRate": 0.2,
+      "maximumFalseWarningRate": 0.05,
+      "maximumAddedCostRatio": 0.35,
+      "maximumAddedLatencyP95Ms": 1500,
+      "maximumReviewerFailureRate": 0.05,
+      "minimumUniqueMaterialCatches": 5
+    },
+    "dependencies": {
+      "node": "24.13.0",
+      "pnpmLockSha256": "5bcbc33711b90779a3c9736edb7deecff28aac40f9c8b84b4b83a37934655db5",
+      "benchmarkReporter": "1",
+      "benchmarkReporterSha256": "4c86b7f2ee28654c3d132e91a4711675f843a1cdea8231d1eb10967920af2466"
+    },
+    "provider": {
+      "identityState": "identified",
+      "name": "gemini",
+      "model": "gemini-2.5-flash"
+    },
+    "performance": {
+      "inputTokens": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain complete input token counts"
+      },
+      "outputTokens": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain complete output token counts"
+      },
+      "cost": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain measured cost"
+      },
+      "latencyP95": {
+        "state": "measured",
+        "value": 24169,
+        "unit": "ms"
+      }
+    },
+    "execution": {
+      "retries": 0,
+      "seed": null
+    },
+    "privacy": {
+      "mode": "metadata-only",
+      "rawProviderPayloadsRetained": false,
+      "retainedEvaluationContent": "none"
+    },
+    "outcome": {
+      "state": "failed",
+      "reason": "No uniquely caught material errors exist in the labeled retained corpus."
+    },
+    "provenance": {
+      "sourceSha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+      "evidence": {
+        "state": "hashed",
+        "sha256": "0e3145c637fa4c0bb561057bdb774d7053f1058da3c10a23417a971316e0ceb8"
+      },
+      "evidenceType": "deterministic-reconciliation-with-provider-observations",
+      "evaluator": {
+        "state": "unavailable",
+        "reason": "retained historical observations predate evaluator source binding"
+      }
+    }
   }
 }

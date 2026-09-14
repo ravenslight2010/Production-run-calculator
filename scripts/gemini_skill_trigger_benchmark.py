@@ -11,6 +11,7 @@ adapter instead.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +27,8 @@ from typing import Any, Callable, Iterable
 DECISIONS = {"trigger", "do_not_trigger", "uncertain"}
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_CONFIDENCE = 0.75
+MINIMUM_ACCURACY = 0.8
+MINIMUM_COVERAGE = 0.8
 MAX_RATIONALE_CHARS = 500
 MAX_MANUAL_REASON_CHARS = 1000
 DEFAULT_MANUAL_DECISIONS = Path("gemini-skill-trigger-manual-decisions.json")
@@ -287,7 +290,102 @@ PROVIDER_FAILURE_STATUSES = {
 def provider_failure_cases(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [record for record in records if record["status"] in PROVIDER_FAILURE_STATUSES]
 
-
+def evaluation_manifest(
+    corpus_bytes: bytes,
+    corpus: dict[str, Any],
+    records: list[dict[str, Any]],
+    model: str,
+    confidence_threshold: float,
+    retries: int,
+) -> dict[str, Any]:
+    corpus_hash = hashlib.sha256(corpus_bytes).hexdigest()
+    result_metrics = metrics(records)
+    total_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
+    lockfile_hash = hashlib.sha256(
+        (Path(__file__).resolve().parents[1] / "pnpm-lock.yaml").read_bytes()
+    ).hexdigest()
+    failures = provider_failure_cases(records)
+    if records and all(record["status"] == "provider_unavailable" for record in records):
+        state = "unavailable"
+        reason = "provider configuration was unavailable"
+    elif failures:
+        state = "failed"
+        reason = "one or more provider calls or structured outputs failed"
+    elif (
+        result_metrics["evaluated"] < 1
+        or total_cases == 0
+        or result_metrics["evaluated"] / total_cases < MINIMUM_COVERAGE
+        or result_metrics["accuracy"] is None
+        or result_metrics["accuracy"] < MINIMUM_ACCURACY
+    ):
+        state = "failed" if total_cases > 0 else "unavailable"
+        reason = (
+            "quality or coverage thresholds failed"
+            if total_cases > 0
+            else "corpus contained no evaluation cases"
+        )
+    else:
+        state = "passed"
+        reason = None
+    return {
+        "manifestVersion": 1,
+        "evaluation": {"id": "gemini-skill-trigger", "kind": "provider-backed"},
+        "corpus": {
+            "sha256": corpus_hash,
+            "cases": total_cases,
+            "sourceAuthority": "held-out-reviewed-skill-trigger-corpus",
+        },
+        "thresholds": {
+            "minimumConfidence": confidence_threshold,
+            "maximumProviderFailureRate": 0,
+            "minimumEvaluatedCases": 1,
+            "minimumCoverage": MINIMUM_COVERAGE,
+            "minimumAccuracy": MINIMUM_ACCURACY,
+        },
+        "dependencies": {
+            "python": ".".join(map(str, sys.version_info[:3])),
+            "pnpmLockSha256": lockfile_hash,
+            "benchmarkReporter": "1",
+        },
+        "provider": {
+            "identityState": "identified",
+            "name": "gemini",
+            "model": model,
+        },
+        "performance": {
+            "inputTokens": {"state": "unavailable", "reason": "provider adapter does not retain token counts"},
+            "outputTokens": {"state": "unavailable", "reason": "provider adapter does not retain token counts"},
+            "cost": {"state": "unavailable", "reason": "provider adapter does not retain measured cost"},
+            "latencyP95": {"state": "unavailable", "reason": "provider adapter does not retain per-case latency"},
+        },
+        "execution": {
+            "retries": max(
+                (max(0, int(record.get("attempts", 1)) - 1) for record in records),
+                default=0,
+            ),
+            "seed": None,
+        },
+        "privacy": {
+            "mode": "content-retained",
+            "rawProviderPayloadsRetained": False,
+            "retainedEvaluationContent": "queries-and-model-output",
+        },
+        "outcome": {"state": state, "reason": reason},
+        "provenance": {
+            "sourceSha256": corpus_hash,
+            "evidence": {
+                "state": "hashed",
+                "sha256": hashlib.sha256(
+                    json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            },
+            "evidenceType": "held-out-corpus-byte-hash",
+            "evaluator": {
+                "state": "hashed",
+                "sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            },
+        },
+    }
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
@@ -437,7 +535,8 @@ def main() -> None:
             "benchmark is offline by default; pass --live-provider only for an "
             "intentional provider-backed check (not CI evidence)"
         )
-    corpus = json.loads(args.corpus.read_text())
+    corpus_bytes = args.corpus.read_bytes()
+    corpus = json.loads(corpus_bytes)
     adapter = GeminiAdapter(model=args.model)
     records = evaluate(corpus, adapter, args.confidence_threshold, args.retries)
     result = {
@@ -449,6 +548,14 @@ def main() -> None:
         "claude_evidence": "unavailable and intentionally unchanged",
         "metrics": metrics(records),
         "results": records,
+        "evaluationManifest": evaluation_manifest(
+            corpus_bytes,
+            corpus,
+            records,
+            args.model,
+            args.confidence_threshold,
+            args.retries,
+        ),
     }
     args.results.write_text(json.dumps(result, indent=2) + "\n")
     args.queue.write_text(json.dumps({"provider": "gemini", "manual_decisions_excluded_from_metrics": True, "cases": review_queue(records)}, indent=2) + "\n")

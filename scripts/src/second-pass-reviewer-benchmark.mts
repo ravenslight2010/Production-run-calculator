@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { validateEvaluationManifest } from "@workspace/ai-evaluation";
 
 type FindingName =
   | "wrongQuantities"
@@ -270,13 +271,78 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
   );
   const observationsFile = JSON.parse(fs.readFileSync(observationsPath, "utf8")) as {
     sourceHash: string;
+    model: unknown;
     operations: Record<string, unknown>;
   };
   const sourceHash = createHash("sha256").update(fs.readFileSync(sourcePath)).digest("hex");
+  const observationsHash = createHash("sha256")
+    .update(fs.readFileSync(observationsPath))
+    .digest("hex");
   if (observationsFile.sourceHash !== sourceHash) {
     throw new Error("reviewer observations do not match the pinned reconciliation source");
   }
+  if (typeof observationsFile.model !== "string" || observationsFile.model.trim() === "") {
+    throw new Error("reviewer observations must identify the provider model");
+  }
   const report = evaluateReviewerEvidence(source.findings, observationsFile.operations);
+  const values = Object.values(report.measuredEffects.observationsByOperation);
+  const measuredTokens = values.every(
+    (value) => value.inputTokens !== null && value.outputTokens !== null,
+  );
+  const totalInputTokens = values.reduce((sum, value) => sum + (value.inputTokens ?? 0), 0);
+  const totalOutputTokens = values.reduce((sum, value) => sum + (value.outputTokens ?? 0), 0);
+  const evaluationManifest = validateEvaluationManifest({
+    manifestVersion: 1,
+    evaluation: { id: "second-pass-reviewer", kind: "provider-backed" },
+    corpus: {
+      sha256: sourceHash,
+      cases: report.corpus.labeledCases,
+      sourceAuthority: report.corpus.sourceAuthority,
+    },
+    thresholds: ACCEPTANCE,
+    dependencies: {
+      node: process.versions.node,
+      pnpmLockSha256: createHash("sha256")
+        .update(fs.readFileSync(path.join(root, "pnpm-lock.yaml")))
+        .digest("hex"),
+      benchmarkReporter: "1",
+      benchmarkReporterSha256: createHash("sha256")
+        .update(fs.readFileSync(path.join(import.meta.dirname, "second-pass-reviewer-benchmark.mts")))
+        .digest("hex"),
+    },
+    provider: { identityState: "identified", name: "gemini", model: observationsFile.model },
+    performance: {
+      inputTokens: measuredTokens
+        ? { state: "measured", value: totalInputTokens, unit: "tokens" }
+        : { state: "unavailable", reason: "provider observations did not retain complete input token counts" },
+      outputTokens: measuredTokens
+        ? { state: "measured", value: totalOutputTokens, unit: "tokens" }
+        : { state: "unavailable", reason: "provider observations did not retain complete output token counts" },
+      cost: { state: "unavailable", reason: "provider observations did not retain measured cost" },
+      latencyP95: report.measuredEffects.p95LatencyMs === null
+        ? { state: "unavailable", reason: "provider observations did not retain latency" }
+        : { state: "measured", value: report.measuredEffects.p95LatencyMs, unit: "ms" },
+    },
+    execution: { retries: report.latencyAndRetry.reviewerRetries, seed: null },
+    privacy: {
+      mode: "metadata-only",
+      rawProviderPayloadsRetained: false,
+      retainedEvaluationContent: "none",
+    },
+    outcome: {
+      state: report.decision.retain ? "passed" : "failed",
+      reason: report.decision.reason,
+    },
+    provenance: {
+      sourceSha256: sourceHash,
+      evidence: { state: "hashed", sha256: observationsHash },
+      evidenceType: "deterministic-reconciliation-with-provider-observations",
+      evaluator: {
+        state: "unavailable",
+        reason: "retained historical observations predate evaluator source binding",
+      },
+    },
+  });
   const output = {
     benchmarkVersion: 1,
     sourceHash,
@@ -285,6 +351,7 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
       sanitization: "allowlisted-metrics; raw prompts and source/provider payloads excluded",
     },
     ...report,
+    evaluationManifest,
   };
   return output;
 }

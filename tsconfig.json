@@ -100,6 +100,9 @@
       "path": "./lib/ai-memory"
     },
     {
+      "path": "./lib/ai-evaluation"
+    },
+    {
       "path": "./lib/recipe-apply"
     },
     {

@@ -11,6 +11,7 @@ from gemini_skill_trigger_benchmark import (
     Classification,
     GeminiAdapter,
     evaluate,
+    evaluation_manifest,
     metrics,
     list_review_cases,
     provider_failure_cases,
@@ -46,9 +47,11 @@ class GeminiBenchmarkTests(unittest.TestCase):
         with patch.dict(PROMPTS, {
             "missing-skill": (["trigger"], ["near miss"]),
         }):
+
             with self.assertRaisesRegex(
                 SystemExit,
                 "Benchmark prompts reference unavailable skills",
+
             ):
                 build()
 
@@ -69,7 +72,6 @@ class GeminiBenchmarkTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-
             payload = json.loads(generated.read_text())
             project_owned = {
                 path.parent.name
@@ -125,7 +127,9 @@ class GeminiBenchmarkTests(unittest.TestCase):
     def test_checked_in_benchmark_only_references_available_skills(self):
         root = Path(__file__).resolve().parents[1]
         available = {
+
             path.parent.name
+
             for skill_root in (
                 root / ".agents" / "skills",
                 root / ".local" / "secondary_skills",
@@ -216,6 +220,57 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["confusion"], {"true_positive": 1, "false_positive": 1, "true_negative": 1, "false_negative": 1})
         self.assertEqual(result["accuracy"], 0.5)
         self.assertEqual(result["excluded"], 1)
+
+    def test_manifest_distinguishes_unavailable_and_failed_without_payloads(self):
+        with patch.dict("os.environ", {
+            "AI_INTEGRATIONS_GEMINI_API_KEY": "",
+            "AI_INTEGRATIONS_GEMINI_BASE_URL": "",
+        }, clear=False):
+            unavailable_records = evaluate(
+                corpus(),
+                GeminiAdapter(api_key="", base_url=""),
+                retries=0,
+            )
+        manifest = evaluation_manifest(
+            json.dumps(corpus()).encode(),
+            corpus(),
+            unavailable_records,
+            "fixture-model",
+            0.75,
+            0,
+        )
+        self.assertEqual(manifest["outcome"]["state"], "unavailable")
+        self.assertEqual(manifest["execution"]["retries"], 0)
+        self.assertFalse(manifest["privacy"]["rawProviderPayloadsRetained"])
+        self.assertEqual(manifest["privacy"]["mode"], "content-retained")
+        self.assertNotIn("results", manifest)
+        failed = [{**unavailable_records[0], "status": "provider_failure"}]
+        self.assertEqual(
+            evaluation_manifest(
+                b"{}",
+                {"skills": []},
+                failed,
+                "fixture-model",
+                0.75,
+                2,
+            )["outcome"]["state"],
+            "failed",
+        )
+        retried = [{
+            "status": "included",
+            "expected": "trigger",
+            "decision": "trigger",
+            "attempts": 2,
+        }]
+        retried_manifest = evaluation_manifest(
+            b"{}",
+            {"skills": [{"evals": [{}]}]},
+            retried,
+            "fixture-model",
+            0.75,
+            2,
+        )
+        self.assertEqual(retried_manifest["execution"]["retries"], 1)
 
     def test_manual_decisions_are_stored_separately_and_removed_from_pending(self):
         with TemporaryDirectory() as directory:

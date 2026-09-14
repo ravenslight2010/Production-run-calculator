@@ -19,3 +19,9 @@ TypeScript. Keep normal CI no-network, make provider checks opt-in, use
 synthetic minimized privacy fixtures, and record provider/model identity,
 source hashes, thresholds, costs, retries, and unavailable-versus-failed
 states in any shared evaluation result contract.
+
+For comparable retained runs, bind three identities separately: the source
+corpus, the produced evidence, and the evaluator implementation. Never reuse
+one digest for another; represent unavailable historical identity explicitly.
+Privacy metadata must also describe retained normalized queries/model output,
+not only whether the raw provider envelope was discarded.

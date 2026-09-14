@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/ai-evaluation": "workspace:*",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/premix-import": "workspace:*",
     "@workspace/shipping-import": "workspace:*",

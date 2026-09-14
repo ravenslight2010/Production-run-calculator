@@ -6,6 +6,7 @@ import {
   buildReviewerBenchmark,
   evaluateReviewerEvidence,
 } from "./second-pass-reviewer-benchmark.mts";
+import { readEvaluationManifest } from "@workspace/ai-evaluation";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const actual = buildReviewerBenchmark(root);
@@ -37,6 +38,11 @@ assert.equal(actual.pairedOutcome.reviewer.reviewerFailures, 301);
 assert.equal(actual.pairedOutcome.reviewer.falseWarningRate, null);
 assert.equal(actual.measuredEffects.p95LatencyMs, 24_169);
 assert.match(actual.decision.authority, /human confirmation/);
+const manifest = readEvaluationManifest(actual);
+assert.equal(manifest.corpus.sha256, actual.sourceHash);
+assert.equal(manifest.provider.model, "gemini-2.5-flash");
+assert.equal(manifest.outcome.state, "failed");
+assert.equal(manifest.performance.inputTokens.state, "unavailable");
 
 const source = JSON.parse(
   fs.readFileSync(
