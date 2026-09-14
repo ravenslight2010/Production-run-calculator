@@ -91,3 +91,17 @@ worker, so the intended abort never ran and the reconnect assertion timed out.
 
 **How to apply:** Set `serviceWorkers: "block"` only on transport-fault smoke
 fixtures; keep normal browser coverage free to exercise the service worker.
+
+When replaying preserved work onto a materially newer live branch, an empty
+cherry-pick is evidence that the behavior is already present, not a reason to
+force an empty commit. Keep the current implementation, document the overlap,
+and port only the non-empty reviewed delta. Retained browser reports remain
+immutable evidence for their recorded revision.
+
+**Why:** Historical branches can contain superseded copies of release and
+runtime work. Replaying them wholesale can overwrite newer safeguards or make
+older evidence appear current.
+
+**How to apply:** Compare each selected commit against live main, skip empty
+replays, preserve current-main behavior on conflicts, and bind every new or
+retained report to the exact revision that produced it.

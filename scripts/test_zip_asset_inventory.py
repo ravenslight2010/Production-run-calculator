@@ -347,6 +347,29 @@ class ZipAssetInventoryTests(unittest.TestCase):
             self.assertFalse(first["unsafe_metadata"])
             self.assertFalse(second["unsafe_metadata"])
 
+    def test_exact_duplicate_uploads_are_reconciled_by_hash_without_fixture_assets(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_path = root / "first-upload.zip"
+            second_path = root / "second-upload.zip"
+            with zipfile.ZipFile(first_path, "w") as archive:
+                archive.writestr("README.md", "same archive bytes")
+            second_path.write_bytes(first_path.read_bytes())
+
+            report = inventory_archives([first_path, second_path])
+
+            self.assertEqual(report["summary"]["duplicate_archive_group_count"], 1)
+            self.assertEqual(report["summary"]["duplicate_archive_count"], 1)
+            archives = report["archives"]
+            self.assertEqual(len(archives), 2)
+            self.assertEqual(archives[0]["sha256"], archives[1]["sha256"])
+            self.assertTrue(archives[0]["archive_duplicate"])
+            self.assertTrue(archives[1]["archive_duplicate"])
+            self.assertFalse(archives[0]["unsafe_metadata"])
+            self.assertFalse(archives[1]["unsafe_metadata"])
+
     def test_current_report_symlink_archives_are_detected_without_opening_members(
         self,
     ) -> None:

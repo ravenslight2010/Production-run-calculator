@@ -568,7 +568,11 @@ def is_special_file(info: zipfile.ZipInfo) -> bool:
     mode = (info.external_attr >> 16) & 0xFFFF
     if not mode:
         return False
-    return not stat.S_ISREG(mode)
+    file_type = stat.S_IFMT(mode)
+    # Some ZIP writers preserve only Unix permission bits. With no explicit
+    # file-type bits, treat the entry as an ordinary file; only an explicit
+    # non-regular type is a special-file finding.
+    return file_type not in (0, stat.S_IFREG)
 
 
 def _empty_archive_result(filename: str) -> dict[str, object]:
