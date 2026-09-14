@@ -729,6 +729,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
@@ -7241,6 +7243,7 @@ export default function Home() {
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
+  const [scheduleCalendarOpen, setScheduleCalendarOpen] = useState(false);
   // True when the editor was opened on the LIVE day (Today card): the date is
   // locked so today's live run ids can't be copied onto another date's row.
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
@@ -7315,6 +7318,7 @@ export default function Home() {
   const scheduleEditorLoadedRunIdsRef = useRef<Set<string>>(new Set());
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
+    setScheduleCalendarOpen(false);
     // TODAY is the live day — seed the editor from the in-memory day state (the
     // freshest copy this tab has, including in-flight form edits), NOT the
     // server row. Saving routes back through the live day-state path below.
@@ -18078,27 +18082,59 @@ export default function Home() {
               ) : scheduleView === "editor" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
-                    <button type="button" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                    <button type="button" aria-label="Back to scheduled days" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
-                    <h2 className="text-base font-bold flex-1">
+                    <h2 id="scheduled-days-dialog-title" className="text-base font-bold flex-1">
                       {scheduleEditorDate ? `Plan for ${new Date(scheduleEditorDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Plan Future Day"}
                     </h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <button type="button" aria-label="Close schedule editor" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-5 min-h-0">
                     {/* Date picker */}
                     <div>
                       <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Date</label>
-                      <input
-                        type="date"
-                        value={scheduleEditorDate}
-                        min={todayStr()}
-                        disabled={scheduleEditorIsLiveDay}
-                        onChange={e => setScheduleEditorDate(e.target.value)}
-                        className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-60"
-                      />
+                      <Popover open={scheduleCalendarOpen} onOpenChange={setScheduleCalendarOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={scheduleEditorIsLiveDay}
+                            aria-label="Choose production date"
+                            data-testid="schedule-date-trigger"
+                            data-date-value={scheduleEditorDate}
+                            className="w-full h-9 justify-between bg-muted/40 px-3 text-sm font-normal outline-none focus:border-primary/60 disabled:opacity-60"
+                          >
+                            <span>
+                              {scheduleEditorDate
+                                ? new Date(`${scheduleEditorDate}T12:00:00`).toLocaleDateString(undefined, {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })
+                                : "Select a date"}
+                            </span>
+                            <CalendarDays className="w-4 h-4 text-muted-foreground" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : undefined}
+                            defaultMonth={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : new Date()}
+                            disabled={{ before: new Date(`${todayStr()}T12:00:00`) }}
+                            onSelect={date => {
+                              if (!date) return;
+                              const year = date.getFullYear();
+                              const month = String(date.getMonth() + 1).padStart(2, "0");
+                              const day = String(date.getDate()).padStart(2, "0");
+                              setScheduleEditorDate(`${year}-${month}-${day}`);
+                              setScheduleCalendarOpen(false);
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
                       {scheduleEditorIsLiveDay && (
                         <p className="text-[11px] text-muted-foreground mt-1">You're editing today's live plan — changes apply right away.</p>
                       )}
@@ -18242,13 +18278,13 @@ export default function Home() {
                 <>
                   {/* ── Advanced Settings full-form view ──────────────────────── */}
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
-                    <button type="button" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                    <button type="button" aria-label="Back to schedule editor" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <h2 className="text-base font-bold flex-1 min-w-0 truncate">
+                    <h2 id="scheduled-days-dialog-title" className="text-base font-bold flex-1 min-w-0 truncate">
                       {(() => { const r = scheduleEditorRuns.find(r => r.id === scheduleAdvancedRunId); return r?.brand ? `${r.brand}${r.flavor ? ` / ${r.flavor}` : ""} — Settings` : "Advanced Settings"; })()}
                     </h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <button type="button" aria-label="Close advanced schedule settings" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 min-h-0 space-y-6">
                     {/* ── Dough & Crust ──────────────────────────────────────── */}

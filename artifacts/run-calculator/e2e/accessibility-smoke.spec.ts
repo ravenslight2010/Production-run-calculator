@@ -33,6 +33,7 @@ async function scan(
   page: Page,
   screen: string,
   additionalDisabledRules: string[] = [],
+  include?: string,
 ): Promise<void> {
   const documentedRules = new Set([
     ...DOCUMENT_SHELL_RULES,
@@ -49,11 +50,12 @@ async function scan(
     undocumentedRules,
     `Accessibility scan on ${screen} used an undocumented rule suppression`,
   ).toEqual([]);
-  const results = await new AxeBuilder({ page })
+  let builder = new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "best-practice"])
     .exclude("#replit-dev-banner")
-    .disableRules(additionalDisabledRules)
-    .analyze();
+    .disableRules(additionalDisabledRules);
+  if (include) builder = builder.include(include);
+  const results = await builder.analyze();
   const details = results.violations.map((violation) => {
     const nodes = violation.nodes
       .map((node) => `${node.target.join(", ")}: ${node.failureSummary}`)
@@ -565,6 +567,36 @@ test.describe("accessibility smoke", () => {
     ).toBeGreaterThanOrEqual(3);
     await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
     await assertKeyboardTraversal(page, "reported issues field checks", 8);
+  });
+
+  test("schedule calendar is labeled, keyboard operable, and free of obvious violations", async ({
+    page,
+  }) => {
+    await signUp(page);
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+    await expect(scheduledDaysDialog).toBeVisible();
+    await scheduledDaysDialog.getByRole("button", { name: "Schedule New Day" }).click();
+    const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
+    await assertDialogContract(page, scheduleEditor, "schedule editor");
+    const scheduleDateTrigger = scheduleEditor.getByRole("button", {
+      name: "Choose production date",
+    });
+    await expect(scheduleDateTrigger).toBeVisible();
+    await scheduleDateTrigger.focus();
+    await page.keyboard.press("Enter");
+    const scheduleCalendar = page.locator('[data-slot="calendar"]');
+    await expect(scheduleCalendar.getByRole("grid")).toBeVisible();
+    await scan(page, "schedule calendar", [], '[data-slot="calendar"]');
+    const selectedDay = scheduleCalendar.locator('button[data-selected-single="true"]');
+    await expect(selectedDay).toBeVisible();
+    await selectedDay.focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await expect(scheduleCalendar).toBeHidden();
+    await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
+    await expect(scheduleEditor).toBeHidden();
   });
 
   test("supervisors can review field checks without physical-device attestation controls", async ({ page }) => {
