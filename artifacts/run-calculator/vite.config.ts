@@ -31,7 +31,7 @@ const webBuildId =
 // full-reloading the page and aborting whatever the user was doing (e.g. a
 // spec/Excel import that takes longer than the drop interval). We can't keep the
 // socket alive (that's the proxy's behavior) and `server.hmr: false` does NOT
-// remove the client's reconnect-reload in Vite 7, so we patch the served client
+// remove the client's reconnect-reload in Vite 8, so we patch the served client
 // to turn its `location.reload()` calls into no-ops. HMR module updates still
 // apply while the socket is up; only the disruptive full-page reloads are gone.
 function suppressViteClientReload(): Plugin {
