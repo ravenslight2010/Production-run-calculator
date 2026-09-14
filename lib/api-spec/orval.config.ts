@@ -14,7 +14,9 @@ const apiZodSrc = outputRoot
   ? path.resolve(outputRoot, "api-zod")
   : path.resolve(root, "lib", "api-zod", "src");
 
-async function trimGeneratedTrailingBlankLines(directory: string): Promise<void> {
+async function trimGeneratedTrailingBlankLines(
+  directory: string,
+): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const entryPath = path.resolve(directory, entry.name);
     if (entry.isDirectory()) {
@@ -52,6 +54,9 @@ export default defineConfig({
       clean: true,
       prettier: true,
       override: {
+        query: {
+          version: 5,
+        },
         fetch: {
           includeHttpResponseReturnType: false,
         },
@@ -103,7 +108,9 @@ export default defineConfig({
           ].join("\n"),
         );
         await Promise.all([
-          trimGeneratedTrailingBlankLines(path.resolve(apiClientReactSrc, "generated")),
+          trimGeneratedTrailingBlankLines(
+            path.resolve(apiClientReactSrc, "generated"),
+          ),
           trimGeneratedTrailingBlankLines(path.resolve(apiZodSrc, "generated")),
         ]);
       },

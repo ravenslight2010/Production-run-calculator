@@ -1,0 +1,51 @@
+# Workspace dependency update inventory — 2026-09-14
+
+This inventory records the registry snapshot used for the staged workspace
+dependency update. The source was `pnpm outdated -r --format json`, run with
+the repository's pinned pnpm 11.5.2 toolchain on 2026-09-14. The workspace
+minimum release age and all existing overrides remain enabled.
+
+## Applied safe updates
+
+The following direct dependencies were updated within their compatible release
+line and the lockfile was regenerated:
+
+- API and server tooling: `@google/genai` 2.18.0 → 2.22.0,
+  `http-proxy-middleware` 4.1.1 → 4.2.0, `p-limit` 7.3.0 → 7.3.2,
+  `pg` 8.20.0 → 8.23.0, `@types/pg` 8.20.0 → 8.23.1, and
+  `esbuild` 0.28.1 → 0.28.2.
+- API generation and workspace tooling: `orval` 8.26.0 → 8.32.0,
+  `prettier` 3.8.3 → 3.9.6, and `tsx` 4.23.12 → 4.23.13.
+- React-compatible UI dependencies: React and React DOM 19.1.0 → 19.3.0,
+  React type packages 19.2.x → 19.3.0, TanStack Query 5.100.9 → 5.102.8,
+  the Radix UI patch/minor updates, React Hook Form 7.75.0 → 7.88.0,
+  Playwright 1.61.1 → 1.63.0, input-otp 1.4.2 → 1.5.0,
+  react-icons 5.6.0 → 5.7.0, and wouter 3.10.0 → 3.11.0.
+- Build and styling patches: Tailwind CSS and its Vite adapter 4.3.0 →
+  4.3.3, tailwind-merge 3.5.0 → 3.7.0, testing-library React 16.3.2 →
+  16.3.3, testing-library user-event 14.6.1 → 14.6.7, and sonner 2.0.7 →
+  2.0.8. This slice also includes input-otp 1.4.2 → 1.5.0 and
+  `@tailwindcss/typography` 0.5.19 → 0.5.20.
+
+## Deferred major or compatibility-sensitive candidates
+
+These candidates remain on their current compatible lines. They require an
+isolated migration and are not part of this dependency refresh:
+
+| Candidate                                    | Current line           | Registry candidate     | Reason deferred                                                  |
+| -------------------------------------------- | ---------------------- | ---------------------- | ---------------------------------------------------------------- |
+| TypeScript                                   | 5.9.x                  | 7.0.2                  | Major compiler and language-service compatibility review         |
+| Node types                                   | 25.x                   | 26.5.1                 | Major ambient-runtime type review                                |
+| Vite and React plugin                        | 7.x / 5.x              | 8.3.0 / 6.1.1          | Major build pipeline and plugin compatibility review             |
+| Vitest                                       | 4.x                    | 5.0.0                  | Major test-runner configuration and environment review           |
+| Zod                                          | 3.x                    | 4.6.4                  | Major schema/API compatibility review                            |
+| Replit Vite cartographer                     | 0.5.x                  | 0.6.1                  | 0.x minor release treated as a compatibility-sensitive migration |
+| `@hookform/resolvers`                        | 3.x                    | 5.9.1                  | Major peer and form-schema adapter review                        |
+| `date-fns`, `jsdom`, `openai`, `p-retry`     | 3.x / 29.x / 6.x / 7.x | 4.x / 30.x / 7.x / 8.x | Major API and runtime behavior review                            |
+| `pino`, `pino-http`, `thread-stream`         | 9.x / 10.x / 3.x       | 10.x / 11.x / 4.x      | Coupled server logging/runtime migration                         |
+| React Day Picker, resizable panels, Recharts | 9.x / 2.x / 2.x        | 10.x / 4.x / 3.x       | UI API and behavior review                                       |
+| Framer Motion and Lucide React               | 12.x / 0.x             | 13.x / 1.x             | UI runtime/icon API review                                       |
+
+The production audit overrides, platform-specific optional-package exclusions,
+workspace links, AI provider boundaries, and benchmark safety behavior are
+unchanged by this staged update.
