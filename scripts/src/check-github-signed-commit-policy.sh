@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-# Read-only validation of GitHub's native main-branch protection rule.
+# Read-only validation of GitHub's native main-branch protection rule and
+# applicable main-branch rulesets.
 # Authentication is delegated to the GitHub CLI; this script never reads,
 # stores, or prints credentials.
 
@@ -316,8 +317,136 @@ check_required_workflow_contract() {
   done
 }
 
+github_actions_app_id=15368
+expected_checks=()
+
+compare_required_checks() {
+  local source_label="$1"
+  local mismatch_prefix="$2"
+  local index
+
+  if [[ "${#actual_checks[@]}" -ne "${#expected_checks[@]}" ]]; then
+    fail "${mismatch_prefix}: expected exactly ${#expected_checks[@]} GitHub Actions checks, got ${#actual_checks[@]}"
+  fi
+  for index in "${!expected_checks[@]}"; do
+    if [[ "${actual_checks[$index]}" != "${expected_checks[$index]}" ]]; then
+      if [[ "$source_label" == "classic protection" ]]; then
+        fail "${mismatch_prefix}[${index}]: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
+      fi
+      fail "${source_label} required check ${index}: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
+    fi
+  done
+}
+
 protection_endpoint() {
   printf 'repos/%s/branches/main/protection\n' "$repo"
+}
+
+rulesets_endpoint() {
+  printf 'repos/%s/rulesets?includes_parents=true&per_page=100\n' "$repo"
+}
+
+check_main_rulesets() {
+  local rulesets_response
+  local applicable_rulesets
+  local applicable_count
+  local ruleset_check_rule_count
+  local ruleset_check_count
+  local ruleset_checks_output
+  local ruleset_index
+  local ruleset_check
+  local check_name
+  local check_app_id
+
+  if ! rulesets_response=$(gh api \
+    --method GET \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    --paginate \
+    --slurp \
+    "$(rulesets_endpoint)" 2>/dev/null); then
+    fail "Ruleset verification unavailable for ${repo}:main; check GitHub CLI authentication and repository access"
+  fi
+
+  if ! applicable_rulesets=$(jq -c '
+    def is_main_ref:
+      . == "main"
+      or . == "refs/heads/main"
+      or . == "~DEFAULT_BRANCH"
+      or . == "~ALL"
+      or . == "*";
+    def applies_to_main:
+      (.conditions.ref_name // {}) as $ref
+      | ($ref.include // []) as $include
+      | ($ref.exclude // []) as $exclude
+      | (($include | length) == 0 or any($include[]; is_main_ref))
+      and (any($exclude[]; is_main_ref) | not);
+    if type == "array" and length > 0 and (.[0] | type == "array")
+    then add
+    else .
+    end
+    | [
+        .[]?
+        | select((.target // "") == "branch")
+        | select((.enforcement // "") == "active")
+        | select(applies_to_main)
+      ]
+  ' <<< "$rulesets_response"); then
+    fail "Ruleset verification unavailable for ${repo}:main; GitHub returned an unreadable ruleset result"
+  fi
+
+  applicable_count=$(jq 'length' <<< "$applicable_rulesets")
+  if [[ "$applicable_count" -eq 0 ]]; then
+    printf 'Ruleset verification: no active main-branch ruleset is configured for %s:main.\n' "$repo"
+    return
+  fi
+
+  ruleset_check_rule_count=$(jq '
+    [
+      .[] | .rules[]?
+      | select((.type // "") == "required_status_checks")
+    ] | length
+  ' <<< "$applicable_rulesets")
+  if [[ "$ruleset_check_rule_count" -eq 0 ]]; then
+    printf 'Ruleset verification: %s active main-branch ruleset(s) found; none contains required status checks.\n' \
+      "$applicable_count"
+    return
+  fi
+
+  ruleset_checks_output=$(jq -r '
+    [
+      .[] | .rules[]?
+      | select((.type // "") == "required_status_checks")
+      | .parameters.required_status_checks[]?
+      | [(.context // ""), ((.integration_id // "null") | tostring)]
+    ]
+    | unique
+    | sort_by(.[0], .[1])
+    | .[]
+    | @tsv
+  ' <<< "$applicable_rulesets")
+  mapfile -t ruleset_checks < <(printf '%s\n' "$ruleset_checks_output" | sed '/^$/d')
+  actual_checks=("${ruleset_checks[@]}")
+  ruleset_check_count="${#actual_checks[@]}"
+  [[ "$ruleset_check_count" -gt 0 ]] || \
+    fail "Ruleset verification failed for ${repo}:main; a required status-check rule has no checks"
+
+  compare_required_checks \
+    "ruleset" \
+    "main ruleset field required_status_checks.checks"
+
+  for ruleset_index in "${!actual_checks[@]}"; do
+    ruleset_check="${actual_checks[$ruleset_index]}"
+    check_name="${ruleset_check%%$'\t'*}"
+    check_app_id="${ruleset_check#*$'\t'}"
+    [[ -n "$check_name" ]] || \
+      fail "main ruleset field required_status_checks.checks[${ruleset_index}]: required check name is empty"
+    [[ "$check_app_id" == "$github_actions_app_id" ]] || \
+      fail "main ruleset field required_status_checks.checks[${ruleset_index}]: expected GitHub Actions app ${github_actions_app_id}, got ${check_app_id}"
+  done
+
+  printf 'Ruleset verification: verified %s active main-branch ruleset(s) with the six-check GitHub Actions contract.\n' \
+    "$applicable_count"
 }
 
 repo="${GITHUB_REPOSITORY:-}"
@@ -349,6 +478,9 @@ done
 [[ "$repo" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] \
   || fail "supply a repository as OWNER/REPOSITORY with --repo or GITHUB_REPOSITORY"
 check_required_workflow_contract
+for required_check in "${sorted_required_checks[@]}"; do
+  expected_checks+=("${required_check}"$'\t'"${github_actions_app_id}")
+done
 command -v gh >/dev/null 2>&1 \
   || fail "the GitHub CLI (gh) is required; authenticate it without putting credentials in the repository"
 
@@ -359,7 +491,7 @@ if ! enabled=$(gh api \
   --header 'X-GitHub-Api-Version: 2022-11-28' \
   --jq '.enabled // false' \
   "repos/${repo}/branches/main/protection/required_signatures" 2>/dev/null); then
-  fail "could not read required-signatures protection for ${repo}:main; check GitHub CLI authentication and repository access"
+  fail "Classic branch protection verification unavailable for ${repo}:main; could not read required-signatures protection; check GitHub CLI authentication and repository access"
 fi
 
 [[ "$enabled" == "true" ]] \
@@ -389,7 +521,7 @@ if ! protection_values=$(gh api \
     | @tsv
   ' \
   "$(protection_endpoint)" 2>/dev/null); then
-  fail "could not read branch protection for ${repo}:main; check GitHub CLI authentication and repository access"
+  fail "Classic branch protection verification unavailable for ${repo}:main; could not read branch protection; check GitHub CLI authentication and repository access"
 fi
 
 declare -A actual_values=()
@@ -420,16 +552,10 @@ for expected_field in "${expected_fields[@]}"; do
     fail "main protection field ${field}: expected ${expected}, got ${actual}"
 done
 
-expected_checks=()
-for required_check in "${sorted_required_checks[@]}"; do
-  expected_checks+=("${required_check}"$'\t15368')
-done
-if [[ "${#actual_checks[@]}" -ne "${#expected_checks[@]}" ]]; then
-  fail "main protection field required_status_checks.checks: expected exactly ${#expected_checks[@]} GitHub Actions checks, got ${#actual_checks[@]}"
-fi
-for index in "${!expected_checks[@]}"; do
-  [[ "${actual_checks[$index]}" == "${expected_checks[$index]}" ]] || \
-    fail "main protection field required_status_checks.checks[${index}]: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
-done
+compare_required_checks \
+  "classic protection" \
+  "main protection field required_status_checks.checks"
 
+printf 'Classic branch protection: verified for %s:main.\n' "$repo"
+check_main_rulesets
 printf 'GitHub policy active: %s:main requires signed commits, pull-request review, and six required checks.\n' "$repo"

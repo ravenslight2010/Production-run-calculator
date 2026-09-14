@@ -11,6 +11,7 @@ TEST_ROOT=$(mktemp -d)
 FAKE_BIN="${TEST_ROOT}/bin"
 PROTECTION_FIXTURE="${TEST_ROOT}/protection.json"
 SIGNATURE_FIXTURE="${TEST_ROOT}/signatures.json"
+RULESETS_FIXTURE="${TEST_ROOT}/rulesets.json"
 REPOSITORY_FIXTURE="${TEST_ROOT}/repository"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -22,6 +23,10 @@ set -euo pipefail
 endpoint="${@: -1}"
 if [[ "${FAKE_GH_FAIL:-0}" == "1" ]]; then
   echo "authentication failed for https://user:super-secret@example.invalid/repo.git" >&2
+  exit 1
+fi
+if [[ "$endpoint" == */rulesets* && "${FAKE_GH_RULESETS_FAIL:-0}" == "1" ]]; then
+  echo "ruleset access denied for https://user:super-secret@example.invalid/repo.git" >&2
   exit 1
 fi
 
@@ -38,9 +43,15 @@ done
 fixture="${FAKE_GH_SIGNATURES}"
 if [[ "$endpoint" == */branches/main/protection ]]; then
   fixture="${FAKE_GH_PROTECTION}"
+elif [[ "$endpoint" == */rulesets* ]]; then
+  fixture="${FAKE_GH_RULESETS}"
 fi
 
-jq -r "$filter" "$fixture"
+if [[ -n "$filter" ]]; then
+  jq -r "$filter" "$fixture"
+else
+  cat "$fixture"
+fi
 EOF
 chmod +x "${FAKE_BIN}/gh"
 
@@ -74,6 +85,7 @@ write_valid_fixtures() {
 }
 EOF
   printf '{"enabled":true}\n' > "$SIGNATURE_FIXTURE"
+  printf '[]\n' > "$RULESETS_FIXTURE"
 }
 
 run_check() {
@@ -83,6 +95,7 @@ run_check() {
       CHECK_REPOSITORY_ROOT="$REPOSITORY_FIXTURE" \
       FAKE_GH_PROTECTION="$PROTECTION_FIXTURE" \
       FAKE_GH_SIGNATURES="$SIGNATURE_FIXTURE" \
+      FAKE_GH_RULESETS="$RULESETS_FIXTURE" \
       bash "$CHECK_SCRIPT" --repo owner/repository 2>&1
   )
   CHECK_STATUS=$?
@@ -269,6 +282,114 @@ test_rejects_incomplete_required_check_contract() {
   echo "PASS: rejects an incomplete required-check contract"
 }
 
+write_matching_ruleset_fixture() {
+  jq -n '
+    [{
+      "id": 17,
+      "name": "Main checks",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+      "rules": [{
+        "type": "required_status_checks",
+        "parameters": {
+          "required_status_checks": [
+            {"context": "Typecheck", "integration_id": 15368},
+            {"context": "Unit tests (web + libs)", "integration_id": 15368},
+            {"context": "API tests (Postgres)", "integration_id": 15368},
+            {"context": "Security audit (prod deps)", "integration_id": 15368},
+            {"context": "Docker image", "integration_id": 15368},
+            {"context": "Build (web + API)", "integration_id": 15368}
+          ]
+        }
+      }]
+    }]
+  ' > "$RULESETS_FIXTURE"
+}
+
+test_accepts_matching_main_ruleset() {
+  write_valid_fixtures
+  write_matching_ruleset_fixture
+  run_check
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected a matching main ruleset to pass. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "Classic branch protection: verified for owner/repository:main."
+  assert_contains "$CHECK_OUTPUT" \
+    "Ruleset verification: verified 1 active main-branch ruleset(s) with the six-check GitHub Actions contract."
+  echo "PASS: accepts a matching main-branch ruleset"
+}
+
+test_rejects_ruleset_check_mismatch() {
+  write_valid_fixtures
+  write_matching_ruleset_fixture
+  jq '.[0].rules[0].parameters.required_status_checks[0].integration_id = 99999' \
+    "$RULESETS_FIXTURE" > "${RULESETS_FIXTURE}.tmp"
+  mv "${RULESETS_FIXTURE}.tmp" "$RULESETS_FIXTURE"
+  run_check
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a ruleset app identity mismatch to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "ruleset required check 4: expected 'Typecheck"
+  assert_contains "$CHECK_OUTPUT" $'\t15368'
+  assert_contains "$CHECK_OUTPUT" $'\t99999'
+  echo "PASS: rejects a ruleset check identity mismatch"
+}
+
+test_ignores_non_main_rulesets() {
+  write_valid_fixtures
+  jq -n '[
+    {
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {"ref_name": {"include": ["refs/heads/release"], "exclude": []}},
+      "rules": [{"type": "required_status_checks", "parameters": {"required_status_checks": []}}]
+    },
+    {
+      "target": "branch",
+      "enforcement": "disabled",
+      "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+      "rules": [{"type": "required_status_checks", "parameters": {"required_status_checks": []}}]
+    }
+  ]' > "$RULESETS_FIXTURE"
+  run_check
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected non-applicable rulesets to be ignored. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "Ruleset verification: no active main-branch ruleset is configured for owner/repository:main."
+  echo "PASS: ignores inactive and non-main rulesets"
+}
+
+test_reports_ruleset_access_unavailable() {
+  write_valid_fixtures
+  set +e
+  CHECK_OUTPUT=$(
+    PATH="${FAKE_BIN}:$PATH" \
+      CHECK_REPOSITORY_ROOT="$REPOSITORY_FIXTURE" \
+      FAKE_GH_PROTECTION="$PROTECTION_FIXTURE" \
+      FAKE_GH_SIGNATURES="$SIGNATURE_FIXTURE" \
+      FAKE_GH_RULESETS="$RULESETS_FIXTURE" \
+      FAKE_GH_RULESETS_FAIL=1 \
+      bash "$CHECK_SCRIPT" --repo owner/repository 2>&1
+  )
+  CHECK_STATUS=$?
+  set -e
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected unavailable ruleset access to fail. Output:\n%s\n' "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "Ruleset verification unavailable for owner/repository:main"
+  assert_not_contains "$CHECK_OUTPUT" "super-secret"
+  echo "PASS: reports unavailable ruleset access without raw CLI output"
+}
+
 test_redacts_cli_errors() {
   write_valid_fixtures
   set +e
@@ -286,7 +407,7 @@ test_redacts_cli_errors() {
     return 1
   }
   assert_contains "$CHECK_OUTPUT" \
-    "could not read required-signatures protection for owner/repository:main"
+    "Classic branch protection verification unavailable for owner/repository:main; could not read required-signatures protection"
   assert_not_contains "$CHECK_OUTPUT" "super-secret"
   echo "PASS: suppresses credentials from CLI errors"
 }
@@ -328,5 +449,9 @@ test_accepts_explicit_ci_job_rename_policy_update
 test_accepts_comments_and_quoted_ci_job_names
 test_rejects_unsupported_ci_job_name_layout
 test_rejects_incomplete_required_check_contract
+test_accepts_matching_main_ruleset
+test_rejects_ruleset_check_mismatch
+test_ignores_non_main_rulesets
+test_reports_ruleset_access_unavailable
 test_redacts_cli_errors
 echo "All GitHub branch-protection policy tests passed."

@@ -18,15 +18,18 @@ The required GitHub Actions checks are:
 - `Unit tests (web + libs)`
 
 The local policy verifier extracts the named jobs from `.github/workflows/ci.yml`
-and compares them with this six-check contract. A required job rename must update
-this list in the same change. Jobs in release, browser-evidence, schema-rollback,
-and release-concurrency workflows are intentionally outside this required-CI
+and compares them with this six-check contract in both the classic branch-
+protection response and every active ruleset that applies to `main` (including
+the `~DEFAULT_BRANCH` ruleset target). A required job rename must update this
+list in the same change. Jobs in release, browser-evidence, schema-rollback, and
+release-concurrency workflows are intentionally outside this required-CI
 contract.
 
-Each required check must be reported by the GitHub Actions app (app ID `15368`).
-The read-only verifier checks this identity as well as the exact check names
-above. `Desktop and phone department journey`, release gates, schema rollback,
-and release-concurrency checks remain separate workflows and are not currently
+Each required check must be reported by the GitHub Actions app (classic
+protection `app_id` and ruleset `integration_id` `15368`). The read-only
+verifier checks this identity as well as the exact check names above.
+`Desktop and phone department journey`, release gates, schema rollback, and
+release-concurrency checks remain separate workflows and are not currently
 required status checks on `main`.
 
 Development uses the `Replit` branch. Local `main` is a comparison base and
@@ -96,7 +99,9 @@ When the workflow fails:
 3. Use the failure's named field (for example,
    `required_status_checks.checks[2]`) to compare the live rule under
    **Settings → Rules → Rulesets** or **Settings → Branches**, depending on
-   which GitHub UI manages `main`.
+   which GitHub UI manages `main`. A result marked **Ruleset verification
+   unavailable** means the CLI could not read ruleset metadata; it is not
+   evidence that no ruleset exists.
 4. Repair the mismatched setting manually to match the live contract recorded
    in this document, including the exact required check names and GitHub Actions
    app ID `15368`, then use **Run workflow** to confirm the rule converges.
