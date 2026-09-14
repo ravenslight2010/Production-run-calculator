@@ -22,7 +22,14 @@ from gemini_skill_trigger_benchmark import (
     validate_classification,
     write_benchmark_artifacts,
 )
-from skill_trigger_benchmark import MANAGED_FIXTURE_SKILLS, PROMPTS, build
+from skill_trigger_benchmark import (
+    FOCUSED_LEXICAL_REVIEWS,
+    MANAGED_FIXTURE_SKILLS,
+    PROMPTS,
+    build,
+    frontmatter,
+    preflight,
+)
 
 
 def corpus():
@@ -46,6 +53,34 @@ class Fixture:
 
 
 class GeminiBenchmarkTests(unittest.TestCase):
+    def test_folded_skill_descriptions_are_fully_parsed(self):
+        root = Path(__file__).resolve().parents[1]
+        _, description = frontmatter(root / ".agents" / "skills" / "sync-invariant-check" / "SKILL.md")
+        self.assertIn("routes/sync.ts", description)
+        self.assertIn("stale writes", description)
+        self.assertNotEqual(description, ">")
+
+    def test_focused_lexical_reviews_resolve_all_current_flags(self):
+        payload = build()
+        self.assertEqual(
+            {review["skill"] for review in FOCUSED_LEXICAL_REVIEWS},
+            {
+                "customer-import-audit",
+                "db-schema-change",
+                "error-handling",
+                "production-go",
+                "sync-invariant-check",
+                "ad-creative",
+                "deep-research",
+                "design-thinker",
+                "recipe-creator",
+            },
+        )
+        self.assertEqual(
+            [row["name"] for row in preflight(payload) if row["status"] == "review"],
+            [],
+        )
+
     def test_generator_rejects_prompts_for_unavailable_skills(self):
         with patch.dict(PROMPTS, {
             "missing-skill": (["trigger"], ["near miss"]),

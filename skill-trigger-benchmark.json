@@ -307,6 +307,71 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     }
   ],
+  "focused_lexical_reviews": [
+    {
+      "skill": "customer-import-audit",
+      "case": "customer-import-audit-trigger-2",
+      "cause": "weak positive wording",
+      "evidence": "positive overlap 1: brand",
+      "resolution": "State the post-import audit and customer-workbook boundary explicitly."
+    },
+    {
+      "skill": "db-schema-change",
+      "case": "db-schema-change-trigger-2",
+      "cause": "weak positive wording",
+      "evidence": "positive overlap 1: column",
+      "resolution": "Name the Drizzle/Postgres schema-migration work instead of relying on the word column."
+    },
+    {
+      "skill": "error-handling",
+      "case": "error-handling-near-miss-2",
+      "cause": "overly close near miss",
+      "evidence": "negative overlap 5: behavior, error, failure, recovery, typescript",
+      "resolution": "Keep the component boundary but remove explicit failure and recovery language from a non-error task."
+    },
+    {
+      "skill": "production-go",
+      "case": "production-go-near-miss-1",
+      "cause": "overly close near miss",
+      "evidence": "negative overlap 5: before, checklist, decide, run, whether",
+      "resolution": "Separate evidence gathering from the explicitly excluded release decision."
+    },
+    {
+      "skill": "sync-invariant-check",
+      "case": "sync-invariant-check-trigger-1, sync-invariant-check-trigger-2",
+      "cause": "folded-description parser defect",
+      "evidence": "positive overlaps 0, 0 because description parsed as >",
+      "resolution": "Parse folded YAML frontmatter so the full trigger description reaches preflight."
+    },
+    {
+      "skill": "ad-creative",
+      "case": "ad-creative-trigger-1, ad-creative-trigger-2",
+      "cause": "weak positive wording",
+      "evidence": "positive overlaps 1, 1: static; display",
+      "resolution": "Use the static ad-creative and advertising-campaign boundary terms in both positives."
+    },
+    {
+      "skill": "deep-research",
+      "case": "deep-research-trigger-2",
+      "cause": "weak positive wording",
+      "evidence": "positive overlap 1: research",
+      "resolution": "Make multi-source research, source scoring, and structured reporting explicit."
+    },
+    {
+      "skill": "design-thinker",
+      "case": "design-thinker-trigger-2",
+      "cause": "weak positive wording",
+      "evidence": "positive overlap 0",
+      "resolution": "Name design thinking, audience definition, validation, and prioritization."
+    },
+    {
+      "skill": "recipe-creator",
+      "case": "recipe-creator-trigger-2",
+      "cause": "weak positive wording",
+      "evidence": "positive overlap 0",
+      "resolution": "State recipe creation, ingredients, and substitutions rather than relying on cookable."
+    }
+  ],
   "skills": [
     {
       "name": "api-design",
@@ -413,7 +478,7 @@
         },
         {
           "id": "customer-import-audit-trigger-2",
-          "query": "Please verify the imported brand's recipes, links, and names without changing the importer or repairing data.",
+          "query": "Run a post-import audit of the new customer's workbook and confirm the imported brand landed correctly in recipes, links, and profiles without repairing data.",
           "should_trigger": true
         },
         {
@@ -503,7 +568,7 @@
         },
         {
           "id": "db-schema-change-trigger-2",
-          "query": "Remove a persisted database column safely and route any stored-data impact through the schema-change guardrails.",
+          "query": "Remove a persisted Drizzle column through a safe Postgres schema migration and route any stored-data impact through the schema-change guardrails.",
           "should_trigger": true
         },
         {
@@ -573,7 +638,7 @@
         },
         {
           "id": "error-handling-near-miss-2",
-          "query": "Fix a TypeScript type error in a component that has no failure or recovery behavior.",
+          "query": "Rename a component prop and update its imports; rendered output stays unchanged.",
           "should_trigger": false
         }
       ]
@@ -718,7 +783,7 @@
         },
         {
           "id": "production-go-near-miss-1",
-          "query": "Please run the pre-publish checklist before I decide whether to deploy.",
+          "query": "Run the pre-publish tests and typechecks and report the evidence; do not issue a release decision.",
           "should_trigger": false
         },
         {
@@ -824,7 +889,7 @@
       "ownership": "project-owned",
       "coverage": "project-owned",
       "path": ".agents/skills/schema-change-checklist/SKILL.md",
-      "description": "Use this skill whenever you are adding a new column or field to an existing database table \u2014",
+      "description": "Use this skill whenever you are adding a new column or field to an existing database table \u2014 whether to mixes, production rules, freezer-pull items, or any other server-persisted entity. Triggers on: \"add a column\", \"add a field\", \"new DB column\", \"extend the schema\", \"add isPrep\", \"add a boolean/text/integer column\", or any task that requires drizzle schema + API changes together. Walks through every ordered step so nothing is silently missed.",
       "evals": [
         {
           "id": "schema-change-checklist-trigger-1",
@@ -914,7 +979,7 @@
       "ownership": "project-owned",
       "coverage": "project-owned",
       "path": ".agents/skills/state-accuracy-check/SKILL.md",
-      "description": "Verify that timers, counters, and live state remain accurate and consistent",
+      "description": "Verify that timers, counters, and live state remain accurate and consistent after modifying LiveRunContext, useAutoTrack, autosave logic, press/freezer math, dough supply, Frontline/Sauce cadence, or pause/resume handling. Use this skill whenever you touch any of those areas to prevent silent accuracy regressions from shipping. Triggers on changes to: LiveRunContext.tsx, useAutoTrack.ts, home.tsx autosave effect, press-done / pressCasesLeft math, dough tray/batch supply logic, run pause or resume handlers, SSE sync receive, or cross-run form resets.",
       "evals": [
         {
           "id": "state-accuracy-check-trigger-1",
@@ -944,7 +1009,7 @@
       "ownership": "project-owned",
       "coverage": "project-owned",
       "path": ".agents/skills/sync-invariant-check/SKILL.md",
-      "description": "Pre-ship checklist for sync-related code changes. Trigger when an agent",
+      "description": "Pre-ship checklist for sync-related code changes. Trigger when an agent modifies routes/sync.ts, storage.ts, home.tsx sync handlers, day-state shape, SSE handlers, stamp logic, reset/epoch logic, or the protectRunValues merge. Trigger it too for awake/sleeping-device handoffs, foreground wake reconciliation, stale writes, reset epochs, or live counter synchronization. Each invariant below traces back to a real production incident.",
       "evals": [
         {
           "id": "sync-invariant-check-trigger-1",
@@ -1098,12 +1163,12 @@
       "evals": [
         {
           "id": "ad-creative-trigger-1",
-          "query": "Create three static Instagram and LinkedIn ads for our product, with copy, a CTA, and square and portrait variants.",
+          "query": "Create three static ad creatives for a social media advertising campaign on Instagram and LinkedIn, with copy, a CTA, and square and portrait variants.",
           "should_trigger": true
         },
         {
           "id": "ad-creative-trigger-2",
-          "query": "Refresh our display banner campaign into several A/B-tested visual ad concepts using the brand assets I uploaded.",
+          "query": "Refresh our display advertising campaign into several A/B-tested static ad creatives using the brand assets I uploaded.",
           "should_trigger": true
         },
         {
@@ -1133,7 +1198,7 @@
         },
         {
           "id": "deep-research-trigger-2",
-          "query": "Research whether we should enter this market, triangulate current evidence, and synthesize an evidence-backed briefing with citations.",
+          "query": "Conduct thorough multi-source research on whether we should enter this market, triangulate evidence, score sources, and deliver a structured cited report.",
           "should_trigger": true
         },
         {
@@ -1163,7 +1228,7 @@
         },
         {
           "id": "design-thinker-trigger-2",
-          "query": "Before investing in this idea, run a structured human-centered validation exercise and narrow us to one concept.",
+          "query": "Apply design thinking before we invest: validate the idea with users, define the audience, and prioritize one direction.",
           "should_trigger": true
         },
         {
@@ -1193,7 +1258,7 @@
         },
         {
           "id": "recipe-creator-trigger-2",
-          "query": "Turn my grandmother's notes into a complete cookable recipe and save it to my recipe collection.",
+          "query": "Create a complete cookable recipe from my grandmother's notes, including ingredients, dietary substitutions, and steps, and save it to my recipe collection.",
           "should_trigger": true
         },
         {
@@ -1286,15 +1351,15 @@
       "name": "customer-import-audit",
       "positive_overlap": [
         5,
-        1
+        6
       ],
       "negative_overlap": [
         0,
         4
       ],
-      "under_trigger_signal": 1,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "data-cleanup",
@@ -1328,15 +1393,15 @@
       "name": "db-schema-change",
       "positive_overlap": [
         9,
-        1
+        5
       ],
       "negative_overlap": [
         4,
         1
       ],
-      "under_trigger_signal": 1,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "documentation-claim-review",
@@ -1360,11 +1425,11 @@
       ],
       "negative_overlap": [
         1,
-        5
+        0
       ],
       "under_trigger_signal": 0,
-      "over_trigger_signal": 1,
-      "status": "review"
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
     },
     {
       "name": "evidence-hygiene",
@@ -1429,12 +1494,12 @@
         2
       ],
       "negative_overlap": [
-        5,
+        2,
         0
       ],
       "under_trigger_signal": 0,
-      "over_trigger_signal": 1,
-      "status": "review"
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
     },
     {
       "name": "property-based-testing",
@@ -1481,12 +1546,12 @@
     {
       "name": "schema-change-checklist",
       "positive_overlap": [
-        3,
-        3
+        7,
+        5
       ],
       "negative_overlap": [
         1,
-        1
+        3
       ],
       "under_trigger_signal": 0,
       "over_trigger_signal": 0,
@@ -1523,12 +1588,12 @@
     {
       "name": "state-accuracy-check",
       "positive_overlap": [
-        5,
-        4
+        13,
+        7
       ],
       "negative_overlap": [
-        2,
-        0
+        3,
+        1
       ],
       "under_trigger_signal": 0,
       "over_trigger_signal": 0,
@@ -1537,16 +1602,16 @@
     {
       "name": "sync-invariant-check",
       "positive_overlap": [
-        0,
-        0
+        6,
+        2
       ],
       "negative_overlap": [
-        0,
-        0
+        2,
+        1
       ],
-      "under_trigger_signal": 2,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "test-gap-triage",
@@ -1607,58 +1672,58 @@
     {
       "name": "ad-creative",
       "positive_overlap": [
-        1,
-        1
+        5,
+        4
       ],
       "negative_overlap": [
         0,
         0
       ],
-      "under_trigger_signal": 2,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "deep-research",
       "positive_overlap": [
         2,
-        1
+        5
       ],
       "negative_overlap": [
         0,
         0
       ],
-      "under_trigger_signal": 1,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "design-thinker",
       "positive_overlap": [
         2,
-        0
+        6
       ],
       "negative_overlap": [
         0,
         0
       ],
-      "under_trigger_signal": 1,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "recipe-creator",
       "positive_overlap": [
         2,
-        0
+        4
       ],
       "negative_overlap": [
         0,
         1
       ],
-      "under_trigger_signal": 1,
+      "under_trigger_signal": 0,
       "over_trigger_signal": 0,
-      "status": "review"
+      "status": "no lexical flag"
     },
     {
       "name": "seo-auditor",
