@@ -25,7 +25,7 @@ describe("computeEffectiveLineSpeed", () => {
     expect(computeEffectiveLineSpeed({ ...base, crustsPerCycle: 0 })).toBe(0);
     expect(computeEffectiveLineSpeed({ ...base, cycleSpeed: 0 })).toBe(0);
     expect(computeEffectiveLineSpeed({ ...base, speedAdjustment: 0 })).toBe(0);
-    expect(computeEffectiveLineSpeed({ ...base, speedAdjustment: undefined })).toBe(80);
+    expect(computeEffectiveLineSpeed({ ...base, speedAdjustment: undefined })).toBe(73.6);
     expect(computeEffectiveLineSpeed({ ...base, cycleSpeed: Number.NaN })).toBe(0);
   });
 });

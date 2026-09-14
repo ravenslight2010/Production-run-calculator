@@ -19,7 +19,7 @@ export const dieLineDefaultsTable = pgTable(
     name: text("name").notNull(),
     crustsPerCycle: doublePrecision("crusts_per_cycle").notNull().default(0),
     cycleSpeed: doublePrecision("cycle_speed").notNull().default(0),
-    speedAdjustment: doublePrecision("speed_adjustment").notNull().default(1),
+    speedAdjustment: doublePrecision("speed_adjustment").notNull().default(0.92),
     freezerTime: doublePrecision("freezer_time").notNull().default(0),
     casesPerLayer: doublePrecision("cases_per_layer").notNull().default(0),
     preTunnelMin: doublePrecision("pre_tunnel_min"),

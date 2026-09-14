@@ -52,7 +52,7 @@ export const DOCUMENTED_DEFAULTS: Record<string, number> = {
   casesNeeded: 384,
   crustsPerCycle: 5,
   cycleSpeed: 7.8,
-  speedAdjustment: 1.0,
+  speedAdjustment: 0.92,
   freezerTime: 15,
   pizzasPerCase: 12,
   casesPerSkid: 48,

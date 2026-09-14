@@ -20,13 +20,13 @@ export const formSchema = z.object({
   // DEFAULT_VALUES below — a blank run starts all-zero, and every default-vs-set
   // guard (isEmptyOverPopulated, backfillFromProfile, profileAutofill blanks)
   // keys off DEFAULT_VALUES. speedAdjustment is the one meaningful numeric
-  // default (a 1.0 multiplier). Historical note: these once carried example
+  // default (the factory-standard 0.92 multiplier). Historical note: these once carried example
   // line numbers (casesNeeded 384, cycleSpeed 7.8, pep batch 25 lbs, …) which
   // made untouched fields indistinguishable from deliberately-set ones.
   casesNeeded: z.coerce.number().min(0).default(0),
   crustsPerCycle: z.coerce.number().min(0).default(0),
   cycleSpeed: z.coerce.number().min(0).default(0),
-  speedAdjustment: z.coerce.number().min(0.01).default(1.0),
+  speedAdjustment: z.coerce.number().min(0.01).default(0.92),
   approxLineSpeed: z.coerce.number().min(0).default(0),
   // Compatibility-preserved field name. This is the total physical Freeze
   // tunnel line time, not warehouse freezer storage time.
@@ -180,7 +180,7 @@ export const DEFAULT_VALUES: FormValues = {
   casesNeeded: 0,
   crustsPerCycle: 0,
   cycleSpeed: 0,
-  speedAdjustment: 1.0,
+  speedAdjustment: 0.92,
   approxLineSpeed: 0,
   freezerTime: 0,
   pizzasPerCase: 0,

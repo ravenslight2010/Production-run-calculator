@@ -28,11 +28,11 @@ export function computeEffectiveLineSpeed(input: EffectiveLineSpeedInput): numbe
 
   const crustsPerCycle = finiteOrZero(input.crustsPerCycle);
   const cycleSpeed = finiteOrZero(input.cycleSpeed);
-  // The schema default is 1. A missing legacy value should retain that safe
+  // The schema default is 0.92. A missing legacy value should retain that safe
   // default, while an explicit zero remains disabled instead of inventing a
   // line speed.
   const speedAdjustment = input.speedAdjustment == null || !Number.isFinite(input.speedAdjustment)
-    ? 1
+    ? 0.92
     : Number(input.speedAdjustment);
   const adjustedPpm = crustsPerCycle * cycleSpeed * speedAdjustment;
   return adjustedPpm > 0 ? Math.round(adjustedPpm * 100) / 100 : 0;

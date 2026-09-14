@@ -55,7 +55,7 @@ function normalizeEntry(raw: unknown): ApiEntry | null {
     name,
     crustsPerCycle: 0,
     cycleSpeed: 0,
-    speedAdjustment: 1,
+    speedAdjustment: 0.92,
     freezerTime: 0,
     casesPerLayer: 0,
   };

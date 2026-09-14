@@ -644,7 +644,7 @@ function stringsEqual(a: string, b: string, kind: DesiredKind, field?: string, b
 /**
  * A current numeric value counts as "blank" (fillable) when it is not a real
  * positive number OR still sits at a non-zero schema default (today only
- * speedAdjustment 1.0 — all quantity defaults are 0, so a stored positive
+ * speedAdjustment 0.92 — all quantity defaults are 0, so a stored positive
  * value like a pep batch weight of 25 counts as real data).
  */
 function numberIsBlank(field: string, value: number): boolean {

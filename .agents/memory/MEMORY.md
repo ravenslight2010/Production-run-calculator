@@ -32,7 +32,7 @@
 - [AI memory and corrections](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) + [reviewer coverage](ai-corrections-full-coverage.md) + [health](ai-memory-health-audits.md) — shared corrections and aliases, fail-safe review, historic aliases are evidence.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded; gate dough trays/batches decrement on front-of-line feed completion; web+mobile.
-- [Schedule safety](multi-sheet-schedule-import.md) + [recipe warnings](scheduled-recipe-check.md) + [canonical moves](schedule-move-canonical-writes.md) — imported days, missing setups, and moves preserve canonical writes.
+- [Schedule safety](multi-sheet-schedule-import.md) + [recipe warnings](scheduled-recipe-check.md) + [canonical moves](schedule-move-canonical-writes.md) + [dated auth](scheduled-day-client-date.md) — imported days and moves preserve canonical writes.
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Merge deny, history, and tombstones](merge-deny-and-change-history.md) + [merge-tombstones](merge-tombstones.md) — denied pairs, undo history, tombstones, and un-delete stamps preserve safe cross-device master-data merges.
 - [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — one fail-safe grounding path; keyed nudges are deduped while all-staff Q&A stays separate from manager-only optimize.
@@ -45,7 +45,6 @@
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Prior-run drain completion](prior-run-drain-completion.md) — completing a draining skid adds a skid without erasing cases already moved onto the next skid.
 - [Multi-file and premix imports](multi-file-ai-import.md) + [premix-import.md] — sequential fault-tolerant reads, merge-not-clobber, deterministic premix parsing, review before commit, web+mobile parity.
-- [Scheduled-day and import auth](scheduled-day-client-date.md) + [schedule-import-401.md] — key sync by client date and stop raw-fetch writes on 401 before hydration or reporting per-day failures.
 - [Server empty-over-populated guard](server-empty-over-populated-guard.md) — /api/sync protectRunValues rejects all-default-over-populated in BOTH the additive path AND the wholesale-adopt (reset) path; blank-over-populated during a rollover push keeps stored value + advances stamp.
 - [Pep applicator combine + B slot](pep-applicator-combine.md) — web-only pep1Combined (default true, doubles sticks) + per-app "B" pep type; EVERY DEFAULT-merge load path must call resolvePep1Combined or legacy 2-pep runs wrongly combine.
 - [Import "reload" causes](web-form-button-submit-reload.md) + [cold-start hang](cold-start-import-hang.md) — import blanks via sandbox auto-reset or dev HMR reload; autoscale scale-to-zero can hang fetches at the edge — blocking-dialog fetches need AbortSignal.timeout + Cancel.
