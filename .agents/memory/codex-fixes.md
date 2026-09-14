@@ -396,3 +396,19 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 
 **Verification**: api-server `sync.liveCalcTick` 20/20; api-server typecheck clean; run-calculator `operationalState` 11/11 + `LiveRunContext.calcTick` 6/6 + clock-isolation 3/3 = 28/28; web typecheck clean.
 
+## Live server-calc streaming (slice 3)
+
+**Date**: 2026-09-14
+**Branch**: `feat/live-calc-stream-slice3`
+**Files changed**:
+- `artifacts/api-server/src/routes/sync.ts` — `computeServerLiveState` now also computes `runLines` (per-run ingredient + packaging consumption via `computeRunConsumptionLines`, same `pepTypes` derivation as the run-end rollup) and returns it in the SSE live payload alongside `summaryStats`.
+- `artifacts/run-calculator/src/pages/home.tsx` — SSE receive stores `serverRunLinesRef`; `runSummaryStatsById` now adopts server `summaryStats` for the current run when online (previously always computed locally), with local fallback when offline/no server data.
+
+**What was wrong / missing**: the server already streamed `summaryStats`, but the current run always recomputed locally, and the warehouse/inventory consumption derivations (`computeRunConsumptionLines`) were never streamed — every device derived them independently, risking cross-device drift and extra per-render work.
+
+**What the fix was**: the server computes and streams `runLines` for every run with `runValues` in each SSE frame; the client stores them and adopts server summaryStats for the current run when online.
+
+**Why it was needed**: consistent server-authoritative derivation for the consumption/inventory surface, matching the existing `summaryStats` adoption pattern, with the same offline fallback (never blank).
+
+**Verification**: api-server `sync.liveCalcTick` 20/20; run-calculator `operationalState` + `LiveRunContext.calcTick` + clock-isolation 28/28; api-server + run-calculator + libs typechecks clean.
+
