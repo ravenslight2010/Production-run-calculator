@@ -368,6 +368,7 @@ import ManagerAttentionDialog, {
   managerAttentionCount,
   type ManagerAttentionItem,
 } from "../components/ManagerAttentionDialog";
+import ApplicatorEvidenceReview from "../components/ApplicatorEvidenceReview";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
 import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
@@ -24745,13 +24746,19 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                               {expandedHistoryDay === day.date && (
                                 <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
                                   {day.runs.map((run: any) => (
-                                    <SummaryCard
-                                      key={run.id}
-                                      run={run}
-                                      readOnly
-                                      runVals={day.runValues[run.id] as FormValues | undefined}
-                                      onShowDetail={() => setIngredientDetailRunId(run.id)}
-                                    />
+                                    <div key={run.id} className="space-y-2">
+                                      <SummaryCard
+                                        run={run}
+                                        readOnly
+                                        runVals={day.runValues[run.id] as FormValues | undefined}
+                                        onShowDetail={() => setIngredientDetailRunId(run.id)}
+                                      />
+                                      <ApplicatorEvidenceReview
+                                        day={day}
+                                        run={run}
+                                        values={(day.runValues?.[run.id] ?? DEFAULT_VALUES) as FormValues}
+                                      />
+                                    </div>
                                   ))}
                                 </div>
                               )}

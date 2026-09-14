@@ -89,6 +89,7 @@ import {
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
 import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
 import { buildSyncHealthReport } from "../lib/syncHealth";
+import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
@@ -1625,6 +1626,19 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
             };
           }
           const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
+          if (applied.outcome === "accepted" && /^app[1-4]-batch$/.test(claim.channel)) {
+            const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
+            if (mutation) {
+              await appendAutomaticApplicatorEvidence(tx, {
+                scope,
+                date,
+                runId: claim.runId,
+                slot: Number(claim.channel[3]),
+                observedTotal: mutation.to,
+                eventId: claim.eventId,
+              });
+            }
+          }
           if (applied.outcome === "accepted") {
              if (applied.inventoryConsumption?.kind === "sauce-barrel") {
                const consumption = applied.inventoryConsumption;
@@ -2357,7 +2371,26 @@ export async function runAutoTrackServerTicks(opts: {
           }
           data = applied.data;
           acceptedHere++;
-          if (/^(sauce-barrel|app[1-4]-batch)$/.test(claim.channel)) acceptedNet.push(claim);
+          if (/^app[1-4]-batch$/.test(claim.channel)) {
+            const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
+            if (mutation) {
+              // Keep the server-owned progress and its independently verifiable
+              // observation in this same transaction. The event id is stable
+              // across tick retries, and the helper's scoped operation key
+              // makes a replay idempotent.
+              await appendAutomaticApplicatorEvidence(tx, {
+                scope,
+                date: row.date,
+                runId: claim.runId,
+                slot: Number(claim.channel[3]),
+                observedTotal: mutation.to,
+                eventId: claim.eventId,
+              });
+            }
+            acceptedNet.push(claim);
+          } else if (claim.channel === "sauce-barrel") {
+            acceptedNet.push(claim);
+          }
         }
         // A no-event bootstrap arm is safe to persist. Eventful arm-state is
         // committed only after every wall event in that state was accepted;

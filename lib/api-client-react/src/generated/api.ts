@@ -30,6 +30,10 @@ import type {
   AiMemoryHealthApplyResult,
   AnomalyInput,
   AnomalyResult,
+  ApplicatorBatchEvidenceConflict,
+  ApplicatorBatchEvidenceList,
+  ApplicatorBatchEvidenceMutationResult,
+  ApplicatorBatchFinalization,
   ApplyAiRetentionCleanup200,
   ApprovePasswordResetResult,
   AuditAiMemoryHealth200,
@@ -109,6 +113,7 @@ import type {
   InventorySettings,
   LabelVerifyInput,
   LabelVerifyResult,
+  ListApplicatorBatchEvidenceParams,
   ListCompletedHistoryParams,
   ListDeniedMergesParams,
   ListFinalizedOperationalReportsParams,
@@ -17215,6 +17220,203 @@ export const useFinalizeCompletedRun = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getFinalizeCompletedRunMutationOptions(options), queryClient);
+    }
+
+export const getListApplicatorBatchEvidenceUrl = (params?: ListApplicatorBatchEvidenceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/applicator-batch-evidence?${stringifiedParams}` : `/api/applicator-batch-evidence`
+}
+
+/**
+ * @summary List append-only applicator batch observations and manager attestations
+ */
+export const listApplicatorBatchEvidence = async (params?: ListApplicatorBatchEvidenceParams, options?: Parameters<typeof customFetch>[1]): Promise<ApplicatorBatchEvidenceList> => {
+
+  return customFetch<ApplicatorBatchEvidenceList>(getListApplicatorBatchEvidenceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListApplicatorBatchEvidenceQueryKey = (params?: ListApplicatorBatchEvidenceParams,) => {
+    return [
+    `/api/applicator-batch-evidence`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListApplicatorBatchEvidenceQueryOptions = <TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListApplicatorBatchEvidenceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>> = ({ signal }) => listApplicatorBatchEvidence(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListApplicatorBatchEvidenceQueryResult = NonNullable<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>>
+export type ListApplicatorBatchEvidenceQueryError = ErrorType<unknown>
+
+
+export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
+ params: undefined |  ListApplicatorBatchEvidenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listApplicatorBatchEvidence>>,
+          TError,
+          Awaited<ReturnType<typeof listApplicatorBatchEvidence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
+ params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listApplicatorBatchEvidence>>,
+          TError,
+          Awaited<ReturnType<typeof listApplicatorBatchEvidence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
+ params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List append-only applicator batch observations and manager attestations
+ */
+
+export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
+ params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListApplicatorBatchEvidenceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getFinalizeApplicatorBatchTotalUrl = () => {
+
+
+
+
+  return `/api/applicator-batch-evidence/finalize`
+}
+
+/**
+ * Attests a slot only for an existing immutable completed run in this authenticated scope. Corrections append a new manager record and reference the latest finalization.
+ * @summary Append an immutable manager-confirmed physical applicator total
+ */
+export const finalizeApplicatorBatchTotal = async (applicatorBatchFinalization: ApplicatorBatchFinalization, options?: Parameters<typeof customFetch>[1]): Promise<ApplicatorBatchEvidenceMutationResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ApplicatorBatchEvidenceMutationResult>(getFinalizeApplicatorBatchTotalUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(applicatorBatchFinalization)
+  }
+);}
+
+
+
+
+
+export const getFinalizeApplicatorBatchTotalMutationKey = () => ['finalizeApplicatorBatchTotal'] as const;
+
+export const getFinalizeApplicatorBatchTotalMutationOptions = <TError = ErrorType<void | ApplicatorBatchEvidenceConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeApplicatorBatchTotal>>, TError,FinalizeApplicatorBatchTotalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finalizeApplicatorBatchTotal>>, TError,FinalizeApplicatorBatchTotalMutationVariables, TContext> => {
+
+const mutationKey = getFinalizeApplicatorBatchTotalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finalizeApplicatorBatchTotal>>, FinalizeApplicatorBatchTotalMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  finalizeApplicatorBatchTotal(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinalizeApplicatorBatchTotalMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeApplicatorBatchTotal>>>
+    export type FinalizeApplicatorBatchTotalMutationBody = BodyType<ApplicatorBatchFinalization>
+    export type FinalizeApplicatorBatchTotalMutationError = ErrorType<void | ApplicatorBatchEvidenceConflict>
+    export type FinalizeApplicatorBatchTotalMutationVariables = {data: BodyType<ApplicatorBatchFinalization>}
+
+    /**
+ * @summary Append an immutable manager-confirmed physical applicator total
+ */
+export const useFinalizeApplicatorBatchTotal = <TError = ErrorType<void | ApplicatorBatchEvidenceConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeApplicatorBatchTotal>>, TError,FinalizeApplicatorBatchTotalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof finalizeApplicatorBatchTotal>>,
+        TError,
+        FinalizeApplicatorBatchTotalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFinalizeApplicatorBatchTotalMutationOptions(options), queryClient);
     }
 
 export const getGetSyncTodayUrl = (params?: GetSyncTodayParams,) => {

@@ -30,9 +30,11 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
+let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
+let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -70,6 +72,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
+  const syncMod = await import("./sync");
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
@@ -84,9 +87,11 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
+  applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
   dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
+  runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -129,7 +134,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -160,6 +165,218 @@ function managerAuthHeaders(): Record<string, string> {
 function sandboxAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(SANDBOX)}` };
 }
+
+const EVIDENCE_DATE = "2030-03-10";
+const EVIDENCE_RUN = "evidence-run";
+
+async function seedCompletedEvidenceRun(
+  scope: "live" | "sandbox" = "live",
+  runId = EVIDENCE_RUN,
+) {
+  await db.insert(completedRunHistoryTable).values({
+    id: `completed-${scope}-${runId}`,
+    scope,
+    operationId: `completed-op-${scope}-${runId}`,
+    runId,
+    date: EVIDENCE_DATE,
+    completedAt: new Date("2030-03-10T12:00:00.000Z"),
+    snapshot: { dayState: { runs: [{ id: runId, endedAt: 1 }] }, runValues: {} },
+    snapshotHash: `snapshot-${scope}-${runId}`,
+    actorId: USER,
+  });
+}
+
+function evidenceBody(
+  operationId: string,
+  finalTotal: number,
+  correctionOf?: string,
+  runId = EVIDENCE_RUN,
+) {
+  return {
+    operationId, date: EVIDENCE_DATE, runId, slot: 1, finalTotal,
+    ...(correctionOf ? { correctionOf } : {}),
+  };
+}
+
+async function postEvidence(
+  body: unknown,
+  headers: Record<string, string> = managerAuthHeaders(),
+) {
+  return fetch(`${baseUrl}/api/applicator-batch-evidence/finalize`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("POST /sync/applicator-batch-evidence/finalize — PostgreSQL authority", () => {
+  it("persists an initial manager finalization as 201 and acknowledges an exact duplicate as 200", async () => {
+    await seedCompletedEvidenceRun();
+    const body = evidenceBody("evidence-initial", 12);
+    const first = await postEvidence(body);
+    expect(first.status).toBe(201);
+    const duplicate = await postEvidence(body);
+    expect(duplicate.status).toBe(200);
+    const duplicateBody = await duplicate.json() as { duplicate?: boolean };
+    expect(duplicateBody.duplicate).toBe(true);
+    const rows = await db.select().from(applicatorBatchEvidenceTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe("manager-finalization");
+  });
+
+  it("rejects a same-operation different payload with 409 and rejects non-managers with 403", async () => {
+    await seedCompletedEvidenceRun();
+    const body = evidenceBody("evidence-conflict", 12);
+    expect((await postEvidence(body)).status).toBe(201);
+    expect((await postEvidence(evidenceBody("evidence-conflict", 13))).status).toBe(409);
+    expect((await postEvidence(evidenceBody("evidence-user", 4), authHeaders())).status).toBe(403);
+  });
+
+  it("requires a completed-history row in the same authenticated scope", async () => {
+    expect((await postEvidence(evidenceBody("evidence-missing", 4))).status).toBe(409);
+    await seedCompletedEvidenceRun("live");
+    expect((await postEvidence(evidenceBody("evidence-live", 4))).status).toBe(201);
+    // The sandbox manager cannot attest to the live completed run.
+    expect((await postEvidence(evidenceBody("evidence-sandbox-missing", 4), sandboxAuthHeaders())).status).toBe(409);
+    await seedCompletedEvidenceRun("sandbox");
+    expect((await postEvidence(evidenceBody("evidence-sandbox", 4), sandboxAuthHeaders())).status).toBe(201);
+    const rows = await db.select().from(applicatorBatchEvidenceTable);
+    expect(rows.map((row) => row.scope).sort()).toEqual(["live", "sandbox"]);
+  });
+
+  it("appends a first correction, while a stale correctionOf is rejected", async () => {
+    await seedCompletedEvidenceRun();
+    expect((await postEvidence(evidenceBody("evidence-head", 12))).status).toBe(201);
+    expect((await postEvidence(evidenceBody("evidence-correction", 14, "evidence-head"))).status).toBe(201);
+    expect((await postEvidence(evidenceBody("evidence-stale", 16, "evidence-head"))).status).toBe(409);
+    const rows = await db.select().from(applicatorBatchEvidenceTable);
+    expect(rows.filter((row) => row.source === "manager-correction")).toHaveLength(1);
+  });
+
+  it("serializes concurrent initial finalizations to one winner and one 409", async () => {
+    await seedCompletedEvidenceRun();
+    const [left, right] = await Promise.all([
+      postEvidence(evidenceBody("evidence-race-left", 10)),
+      postEvidence(evidenceBody("evidence-race-right", 11)),
+    ]);
+    expect([left.status, right.status].sort()).toEqual([201, 409]);
+    const rows = await db.select().from(applicatorBatchEvidenceTable);
+    expect(rows.filter((row) => row.source === "manager-finalization")).toHaveLength(1);
+  });
+
+  it("serializes concurrent corrections from one head to one successor and one 409", async () => {
+    await seedCompletedEvidenceRun();
+    expect((await postEvidence(evidenceBody("evidence-race-head", 10))).status).toBe(201);
+    const [left, right] = await Promise.all([
+      postEvidence(evidenceBody("evidence-race-correction-left", 11, "evidence-race-head")),
+      postEvidence(evidenceBody("evidence-race-correction-right", 12, "evidence-race-head")),
+    ]);
+    expect([left.status, right.status].sort()).toEqual([201, 409]);
+    const rows = await db.select().from(applicatorBatchEvidenceTable);
+    expect(rows.filter((row) => row.source === "manager-correction")).toHaveLength(1);
+  });
+});
+
+describe("server-owned applicator ticks — evidence transaction boundary", () => {
+  const TICK_DATE = "2030-03-10";
+  const TICK_RUN = "server-owned-applicator";
+  const TICK_NOW = new Date("2030-03-10T12:00:00.000Z").getTime();
+
+  async function seedServerApplicatorRun() {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: TICK_DATE,
+          currentIndex: 0,
+          runs: [{ id: TICK_RUN, subTab: "crusts", startedAt: TICK_NOW - 120_000, metaUpdatedAt: 1 }],
+        },
+        runValuesUpdatedAt: { [TICK_RUN]: 1 },
+        runValues: {
+          [TICK_RUN]: {
+            casesNeeded: 200, crustsPerCycle: 12, cycleSpeed: 600, speedAdjustment: 1,
+            approxLineSpeed: 400, freezerTime: 3, pizzasPerCase: 12, casesPerSkid: 48,
+            casesPerLayer: 12, doughballsPerTray: 36, crustsPerStack: 6, doughBatchYield: 150,
+            crustsPerCase: 12, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0,
+            batchesReady: 0, targetDoughballWeight: 8, doughRecipe: [],
+            sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+            sauceOzPerPizza: 0, frontlineRecipeName: "", frontlineRecipe: [],
+            app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+            app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
+            app1BatchCorrectionGeneration: 0,
+            app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
+            app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
+            app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
+            pep1Type: "", pep2Type: "", pep1Combined: true,
+          },
+        },
+      },
+    }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+  }
+
+  it("commits server-owned applicator progress and evidence together, with retry idempotency", async () => {
+    await seedServerApplicatorRun();
+    const first = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(first.accepted).toBeGreaterThan(0);
+    const firstEvidence = await db.select().from(applicatorBatchEvidenceTable);
+    expect(firstEvidence.filter((row) => row.source === "automatic-observation")).toHaveLength(1);
+    const [afterFirst] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const firstTotal = (afterFirst.data as any).runValues[TICK_RUN].app1BatchesMade;
+    expect(firstTotal).toBe(1);
+    // Hold the accepted claim's next due time in the future to replay the same
+    // server tick boundary without manufacturing a new physical batch event.
+    const heldData = afterFirst.data as any;
+    heldData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].nextDueAt = TICK_NOW + 60_000;
+    await db.update(dailySyncTable).set({ data: heldData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const retry = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(retry.outcomes.duplicate ?? 0).toBeGreaterThanOrEqual(0);
+    const secondEvidence = await db.select().from(applicatorBatchEvidenceTable);
+    expect(secondEvidence.filter((row) => row.source === "automatic-observation")).toHaveLength(1);
+    const [afterRetry] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect((afterRetry.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(firstTotal);
+  });
+
+  it("rolls back server-owned progress and ledger when evidence append fails", async () => {
+    await seedServerApplicatorRun();
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION reject_auto_applicator_evidence() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.source = 'automatic-observation' THEN
+          RAISE EXCEPTION 'test evidence append failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER reject_auto_applicator_evidence_trigger
+      BEFORE INSERT ON applicator_batch_evidence
+      FOR EACH ROW EXECUTE FUNCTION reject_auto_applicator_evidence();
+    `);
+    try {
+      const result = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+      expect(result.outcomes.error).toBe(1);
+      const [row] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect((row.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(0);
+      expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
+      expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+    } finally {
+      await db.execute(sql`
+        DROP TRIGGER IF EXISTS reject_auto_applicator_evidence_trigger ON applicator_batch_evidence;
+        DROP FUNCTION IF EXISTS reject_auto_applicator_evidence();
+      `);
+    }
+  });
+});
 
 describe("POST /sync/operational-intents — atomic run finalization", () => {
   const DATE = "2030-03-10";
@@ -867,12 +1084,25 @@ describe("POST /sync/auto-track/claim", () => {
       values.app1BatchesMade === 1 && values.app1BatchAnchorNetSec === 60
     )).toBe(true);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    const evidence = await db.select().from(applicatorBatchEvidenceTable);
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      scope: "live",
+      date: DATE,
+      runId: RUN,
+      slot: 1,
+      source: "automatic-observation",
+      observedTotal: 1,
+      confirmedTotal: null,
+    });
+    expect(evidence[0].evidenceHash).toMatch(/^[a-f0-9]{64}$/);
 
     const winner = bodies[0].outcome === "accepted"
       ? applicatorEvent("app-a", "app-a:app1:1")
       : applicatorEvent("app-b", "app-b:app1:1");
     expect((await (await post(winner)).json() as { outcome: string }).outcome).toBe("duplicate");
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(1);
   });
 
   it("atomically advances one Sauce barrel and deducts its inventory once across competing stations", async () => {

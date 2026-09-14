@@ -4361,6 +4361,66 @@ paths:
         "400": { description: Invalid or oversized snapshot }
         "409": { description: Different immutable completion already exists }
 
+  /applicator-batch-evidence:
+    get:
+      operationId: listApplicatorBatchEvidence
+      tags: [sync]
+      summary: List append-only applicator batch observations and manager attestations
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: runId
+          in: query
+          schema: { type: string, maxLength: 500 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
+      responses:
+        "200":
+          description: Historical applicator evidence for the authenticated scope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceList" }
+  /applicator-batch-evidence/finalize:
+    post:
+      operationId: finalizeApplicatorBatchTotal
+      tags: [sync]
+      summary: Append an immutable manager-confirmed physical applicator total
+      description: >-
+        Attests a slot only for an existing immutable completed run in this
+        authenticated scope. Corrections append a new manager record and
+        reference the latest finalization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplicatorBatchFinalization" }
+      responses:
+        "200":
+          description: Existing finalization acknowledged idempotently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceMutationResult" }
+        "201":
+          description: Finalization persisted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceMutationResult" }
+        "400": { description: Invalid finalization or no completed run in this scope }
+        "403": { description: Manager role required }
+        "409":
+          description: Different immutable finalization or stale correction
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceConflict" }
+
   /sync/today:
     get:
       operationId: getSyncToday
@@ -4537,6 +4597,61 @@ components:
         history:
           type: array
           items: { $ref: "#/components/schemas/CompletedHistoryRecord" }
+    ApplicatorBatchFinalization:
+      type: object
+      required: [operationId, date, runId, slot, finalTotal]
+      properties:
+        operationId: { type: string, minLength: 1, maxLength: 300, pattern: "^[A-Za-z0-9:_-]+$" }
+        date: { type: string, format: date, description: Valid calendar date (not only YYYY-MM-DD syntax) }
+        runId: { type: string, minLength: 1, maxLength: 500 }
+        slot: { type: integer, minimum: 1, maximum: 4 }
+        finalTotal: { type: integer, minimum: 0, maximum: 1000000 }
+        correctionOf: { type: string, minLength: 1, maxLength: 300, pattern: "^[A-Za-z0-9:_-]+$" }
+    ApplicatorBatchEvidenceMutationResult:
+      type: object
+      required: [acknowledged, duplicate, operationId, evidenceHash, canonical]
+      properties:
+        acknowledged: { type: boolean, const: true }
+        duplicate: { type: boolean }
+        operationId: { type: string }
+        evidenceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        canonical:
+          $ref: "#/components/schemas/ApplicatorBatchEvidence"
+    ApplicatorBatchEvidenceConflict:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        canonical:
+          $ref: "#/components/schemas/ApplicatorBatchEvidence"
+    ApplicatorBatchEvidence:
+      type: object
+      required: [id, operationId, date, runId, slot, source, evidenceHash, hashContract, createdAt]
+      properties:
+        id: { type: string }
+        operationId: { type: string }
+        date: { type: string, format: date }
+        runId: { type: string }
+        slot: { type: integer, minimum: 1, maximum: 4 }
+        source:
+          type: string
+          enum: [automatic-observation, manager-finalization, manager-correction]
+        observedTotal: { type: integer, minimum: 0 }
+        confirmedTotal: { type: integer, minimum: 0 }
+        correctionOf: { type: string }
+        evidenceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        hashContract: { type: string, enum: [canonical-json-v1] }
+        createdAt: { type: string, format: date-time }
+    ApplicatorBatchEvidenceList:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/ApplicatorBatchEvidence" }
+        nextCursor:
+          type: string
+          description: Opaque cursor for the next page; absent when complete.
     AiStatus:
       type: string
       enum: [deterministic, enriched, unavailable]
