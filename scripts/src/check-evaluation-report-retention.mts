@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 const SOURCE_EXTENSION = /\.(?:ts|mts)$/;
 const TEST_SOURCE = /\.(?:test|spec)\.(?:ts|mts)$/;
@@ -7,8 +8,7 @@ const PRIVACY_TEST = /\.privacy\.(?:test|spec)\.(?:ts|mts)$/;
 const EVALUATION_ENTRYPOINT_NAME = /(?:ai|benchmark|evaluation|reviewer)/i;
 const JSON_SERIALIZATION = /JSON\.stringify\s*\(/;
 const OUTPUT_SINK = /(?:writeFileSync|writeFile|stdout\.write)\s*\(/;
-const RAW_SERIALIZATION =
-  /JSON\.stringify\s*\(\s*(?:raw\w*|provider\w*|evaluation\w*|observations?|responses?)\s*[,)]/gi;
+const RAW_VALUE_NAME = /^(?:raw\w*|provider\w*|evaluation\w*|observations?|responses?)$/i;
 
 type Reporter = {
   source: string;
@@ -20,6 +20,76 @@ type NonReporter = {
   source: string;
   reason: string;
 };
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) =>
+    ts.isOmittedExpression(element) ? [] : bindingNames(element.name),
+  );
+}
+
+function isRawExpression(expression: ts.Expression, rawBindings: ReadonlySet<string>): boolean {
+  if (ts.isIdentifier(expression)) {
+    return RAW_VALUE_NAME.test(expression.text) || rawBindings.has(expression.text);
+  }
+  if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+    return isRawExpression(expression.expression, rawBindings);
+  }
+  return ts.isParenthesizedExpression(expression)
+    ? isRawExpression(expression.expression, rawBindings)
+    : false;
+}
+
+function findRawSerializations(source: string, fileName: string): string[] {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".mts") ? ts.ScriptKind.TS : undefined,
+  );
+  const rawBindings = new Set<string>();
+
+  // Resolve declaration aliases to a fixed point so declaration order and alias chains are harmless.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const visitAliases = (node: ts.Node): void => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer &&
+        isRawExpression(node.initializer, rawBindings)
+      ) {
+        for (const name of bindingNames(node.name)) {
+          if (!rawBindings.has(name)) {
+            rawBindings.add(name);
+            changed = true;
+          }
+        }
+      }
+      ts.forEachChild(node, visitAliases);
+    };
+    visitAliases(sourceFile);
+  }
+
+  const matches: string[] = [];
+  const visitSinks = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "JSON" &&
+      node.expression.name.text === "stringify" &&
+      node.arguments[0] &&
+      isRawExpression(node.arguments[0], rawBindings)
+    ) {
+      matches.push(node.getText(sourceFile));
+    }
+    ts.forEachChild(node, visitSinks);
+  };
+  visitSinks(sourceFile);
+  return matches;
+}
 
 export type RetentionCheckFailure = {
   file: string;
@@ -159,7 +229,7 @@ export function checkEvaluationReportRetention(
         reason: `allowlisted projection ${reporter.projection} must be exported and used`,
       });
     }
-    const rawMatches = [...source.matchAll(RAW_SERIALIZATION)].map((match) => match[0]);
+    const rawMatches = findRawSerializations(source, reporter.source);
     if (rawMatches.length > 0) {
       failures.push({
         file: reporter.source,

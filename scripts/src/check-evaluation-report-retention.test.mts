@@ -91,27 +91,54 @@ fs.writeFileSync("report.json", serialized);
   );
 });
 
-test("rejects direct raw provider serialization in a registered reporter", () => {
-  const unsafeSource = safeSource.replace(
-    "JSON.stringify(report)",
-    "JSON.stringify(providerResponse)",
-  ).replace(
+for (const [description, serialization] of [
+  ["direct", "JSON.stringify(providerResponse)"],
+  ["aliased", "JSON.stringify(payload)"],
+  ["chained alias", "JSON.stringify(output)"],
+  ["destructured", "JSON.stringify(payload)"],
+] as const) {
+  test(`rejects ${description} raw provider serialization in a registered reporter`, () => {
+    const setup = {
+      direct: "const providerResponse = { private: true };",
+      aliased:
+        "const providerResponse = { private: true }; const payload = providerResponse;",
+      "chained alias":
+        "const providerResponse = { private: true }; const payload = providerResponse; const output = payload;",
+      destructured:
+        "const providerResponse = { payload: { private: true } }; const { payload } = providerResponse;",
+    }[description];
+    const unsafeSource = safeSource
+      .replace("JSON.stringify(report)", serialization)
+      .replace("const report = retainMetrics(1);", `const report = retainMetrics(1); ${setup}`);
+    withSources(
+      {
+        [safeReporter.source]: unsafeSource,
+        [safeReporter.privacyTest]: privacyTest(safeReporter.source, safeReporter.projection),
+      },
+      [safeReporter],
+      (directory) => {
+        assert.ok(
+          checkEvaluationReportRetention(directory).some((failure) =>
+            /must not be serialized directly/.test(failure.reason),
+          ),
+        );
+      },
+    );
+  });
+}
+
+test("accepts a projected report derived from a raw provider value", () => {
+  const projectedSource = safeSource.replace(
     "const report = retainMetrics(1);",
-    "const report = retainMetrics(1); const providerResponse = { private: true };",
+    "const providerResponse = { private: true }; const report = retainMetrics(providerResponse);",
   );
   withSources(
     {
-      [safeReporter.source]: unsafeSource,
+      [safeReporter.source]: projectedSource,
       [safeReporter.privacyTest]: privacyTest(safeReporter.source, safeReporter.projection),
     },
     [safeReporter],
-    (directory) => {
-      assert.ok(
-        checkEvaluationReportRetention(directory).some((failure) =>
-          /must not be serialized directly/.test(failure.reason),
-        ),
-      );
-    },
+    (directory) => assert.deepEqual(checkEvaluationReportRetention(directory), []),
   );
 });
 
