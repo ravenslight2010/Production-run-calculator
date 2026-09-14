@@ -4,6 +4,7 @@ import {
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
+  computeLinePhases,
   computeServerCalc,
   buildOperationalProjection,
   deriveOperationalRunView,
@@ -364,5 +365,114 @@ describe("operational projection — batch timing (slice 4)", () => {
     expect(Number.isFinite(p.timers.currentBatchNum)).toBe(true);
     expect(Number.isFinite(p.timers.secUntilNextBatch)).toBe(true);
     expect(Number.isFinite(p.timers.totalBatchesNeeded)).toBe(true);
+  });
+});
+
+describe("operational projection — line phases (slice 5)", () => {
+  const BASE_RUN_VALUES = {
+    pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
+    crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
+    freezerTime: 10, preTunnelMin: 2.5, postTunnelMin: 2.5,
+    doughballsPerTray: 6, doughBatchYield: 300, targetDoughballWeight: 5,
+  };
+
+  function projectionFor(runMeta: Record<string, unknown>, values: Record<string, unknown> = {}) {
+    const runValues: Record<string, Record<string, unknown>> = {
+      "run-phases": { ...BASE_RUN_VALUES, ...values },
+    };
+    const base = {
+      dayState: {
+        currentIndex: 0,
+        runs: [{ id: "run-phases", startedAt: 1_000, metaUpdatedAt: 22, ...runMeta }],
+      },
+      runValues,
+    } as never;
+    const serverCalc = computeServerCalc(base, [], 8_000)!;
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-phases",
+      startedAt: Number(runMeta.endedAt) > 0 ? undefined : 1_000,
+      pausedAt: (runMeta.pausedAt as number | undefined) ?? undefined,
+      metaUpdatedAt: 22,
+      nowMs: 8_000,
+      v: runValues["run-phases"] as never,
+      calc: serverCalc.calc,
+    });
+    return buildOperationalProjection({
+      payload: base,
+      serverCalc,
+      schedule,
+      nowMs: 8_000,
+    });
+  }
+
+  it("derives the same phases the client does from the same day-state inputs", () => {
+    const p = projectionFor({});
+    const raw = BASE_RUN_VALUES;
+    const expected = computeLinePhases({
+      elapsedBatchSec: p.effectiveElapsedSec,
+      pausedAt: undefined,
+      lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0,
+      pauseStopsTunnel: true,
+      lastPauseStopsTunnel: true,
+      runStatus: "running",
+      preTunnelMin: 2.5,
+      postTunnelMin: 2.5,
+      freezerTime: 10,
+      nowMs: 8_000,
+    });
+    expect(p.linePhases).toEqual(expected);
+  });
+
+  it("models a paused run with the safe stop-tunnel policy as staged drain", () => {
+    const p = projectionFor({ pausedAt: 7_000 });
+    // Paused 1s ago; stage 1 (press/frontline) drains first, tunnel not yet stopped.
+    expect(p.facts.runStatus).toBe("paused");
+    expect(p.linePhases.stage1.state).toBe("draining");
+    expect(p.linePhases.stage1.remainMs).toBeGreaterThan(0);
+    expect(p.linePhases.stage2.state).toBe("empty");
+    expect(p.linePhases.stage3.state).toBe("empty");
+  });
+
+  it("models an ended run as a wall-clock sequential drain", () => {
+    const p = projectionFor({ endedAt: 7_000 });
+    expect(p.facts.runStatus).toBe("ended");
+    // freezerTime (10min) minus 1s of wall time remains; stage 1 drains first.
+    expect(p.linePhases.stage1.state).toBe("draining");
+    expect(p.linePhases.stage1.remainMs).toBeGreaterThan(0);
+  });
+
+  it("keeps a pending run fully empty", () => {
+    const p = projectionFor({ startedAt: undefined });
+    expect(p.facts.runStatus).toBe("pending");
+    expect(p.linePhases.stage1.state).toBe("empty");
+    expect(p.linePhases.stage2.state).toBe("empty");
+    expect(p.linePhases.stage3.state).toBe("empty");
+    expect(Number.isFinite(p.linePhases.stage1.remainMs)).toBe(true);
+  });
+
+  it("never emits NaN when timing values are missing or zero", () => {
+    const p = projectionFor({}, { freezerTime: 0, preTunnelMin: 0, postTunnelMin: 0 });
+    for (const stage of [p.linePhases.stage1, p.linePhases.stage2, p.linePhases.stage3]) {
+      expect(Number.isFinite(stage.remainMs)).toBe(true);
+    }
+  });
+
+  it("is deterministic across two builds", () => {
+    const args = (() => {
+      const runValues: Record<string, Record<string, unknown>> = { "run-phases": BASE_RUN_VALUES };
+      const base = {
+        dayState: { currentIndex: 0, runs: [{ id: "run-phases", startedAt: 1_000, metaUpdatedAt: 22 }] },
+        runValues,
+      } as never;
+      const serverCalc = computeServerCalc(base, [], 8_000)!;
+      const schedule = computeAutoTrackSchedule({
+        runId: "run-phases", startedAt: 1_000, metaUpdatedAt: 22, nowMs: 8_000,
+        v: runValues["run-phases"] as never, calc: serverCalc.calc,
+      });
+      return { payload: base, serverCalc, schedule, nowMs: 8_000 };
+    })();
+    expect(buildOperationalProjection(args).linePhases)
+      .toEqual(buildOperationalProjection(args).linePhases);
   });
 });
