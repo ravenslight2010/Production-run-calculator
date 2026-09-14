@@ -85,6 +85,7 @@ export * from './deleteBrandProfilesInput';
 export * from './deleteCheeseRecipesInput';
 export * from './deleteCycleCountSchedulesInput';
 export * from './deleteDieLineDefaultsInput';
+export * from './deleteDieLineDefaultsInputRevisions';
 export * from './deleteDieTypesInput';
 export * from './deleteFreezerPullItemsInput';
 export * from './deleteIngredientsInput';

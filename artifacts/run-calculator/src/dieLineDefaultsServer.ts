@@ -68,12 +68,16 @@ export async function saveDieLineDefaults(
 }
 
 export async function deleteDieLineDefaults(
-  names: string[],
+  entries: Pick<DieLineDefaultsEntry, "name" | "updatedAt">[],
 ): Promise<DieLineDefaultsEntry[]> {
+  const names = entries.map((entry) => entry.name);
+  const revisions = Object.fromEntries(
+    entries.flatMap((entry) => entry.updatedAt ? [[entry.name, entry.updatedAt]] : []),
+  );
   const res = await fetch("/api/die-line-defaults", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ names }),
+    body: JSON.stringify({ names, revisions }),
   });
   if (!res.ok) throw new Error(`Delete die line defaults failed (${res.status})`);
   const data = (await res.json()) as { entries: unknown };

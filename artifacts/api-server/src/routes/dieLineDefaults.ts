@@ -255,19 +255,57 @@ router.delete(
           .filter(Boolean),
       ),
     ];
+    const revisionsById = new Map<string, Date>();
+    for (const [name, revision] of Object.entries(parsed.data.revisions ?? {})) {
+      const date = revision instanceof Date ? revision : new Date(revision);
+      if (Number.isFinite(date.getTime())) revisionsById.set(dieId(name), date);
+    }
     try {
       if (ids.length > 0) {
-        await db
-          .delete(dieLineDefaultsTable)
-          .where(
-            and(
-              inArray(dieLineDefaultsTable.id, ids),
-              eq(dieLineDefaultsTable.scope, currentScope()),
-            ),
+        const scope = currentScope();
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${"die-line-defaults:" + scope}))`,
           );
+          const existingRows = await tx
+            .select()
+            .from(dieLineDefaultsTable)
+            .where(
+              and(
+                inArray(dieLineDefaultsTable.id, ids),
+                eq(dieLineDefaultsTable.scope, scope),
+              ),
+            )
+            .for("update");
+          const rejectedIds = existingRows
+            .filter((row) => {
+              const revision = revisionsById.get(row.id);
+              return !revision || revision.getTime() < row.updatedAt.getTime();
+            })
+            .map((row) => row.id);
+          if (rejectedIds.length > 0) {
+            throw new DieLineDefaultsRevisionConflict(rejectedIds);
+          }
+          await tx
+            .delete(dieLineDefaultsTable)
+            .where(
+              and(
+                inArray(dieLineDefaultsTable.id, ids),
+                eq(dieLineDefaultsTable.scope, scope),
+              ),
+            );
+        });
       }
       res.json({ entries: await listAll() });
     } catch (err) {
+      if (err instanceof DieLineDefaultsRevisionConflict) {
+        res.status(409).json({
+          error: "STALE_DIE_LINE_DEFAULTS_SNAPSHOT",
+          rejectedIds: err.rejectedIds,
+          entries: await listAll(),
+        });
+        return;
+      }
       req.log.error({ err }, "failed to delete die line defaults");
       res.status(500).json({ error: "Failed to delete die line defaults" });
     }

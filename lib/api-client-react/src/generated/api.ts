@@ -7486,7 +7486,7 @@ export const getDeleteDieLineDefaultsUrl = () => {
 }
 
 /**
- * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Manager role required.
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Existing rows require a current or newer revision in the revisions map; stale or revision-less resets are rejected atomically. Revision-less names remain compatible when no stored row exists. Manager role required.
  * @summary Delete per-die line-setting defaults by die name (manager only)
  */
 export const deleteDieLineDefaults = async (deleteDieLineDefaultsInput: DeleteDieLineDefaultsInput, options?: Parameters<typeof customFetch>[1]): Promise<DieLineDefaultsList> => {

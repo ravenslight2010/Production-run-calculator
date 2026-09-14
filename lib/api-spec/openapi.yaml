@@ -1984,8 +1984,10 @@ paths:
       summary: Delete per-die line-setting defaults by die name (manager only)
       description: >-
         Removes stored per-die defaults by die name (case-insensitive), so
-        those dies fall back to the app's built-in defaults. Manager role
-        required.
+        those dies fall back to the app's built-in defaults. Existing rows
+        require a current or newer revision in the revisions map; stale or
+        revision-less resets are rejected atomically. Revision-less names
+        remain compatible when no stored row exists. Manager role required.
       requestBody:
         required: true
         content:
@@ -2003,6 +2005,8 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: One or more existing die-default revisions are stale or missing
 
   /run-suggestions:
     get:
@@ -8804,6 +8808,14 @@ components:
           description: Die names whose stored defaults should be removed
           items:
             type: string
+        revisions:
+          type: object
+          description: >-
+            Loaded updatedAt revisions keyed by die name. Required for each
+            name that currently has a stored override.
+          additionalProperties:
+            type: string
+            format: date-time
 
     RunSuggestion:
       type: object

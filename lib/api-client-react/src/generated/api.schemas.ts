@@ -3415,9 +3415,16 @@ export interface SaveDieLineDefaultsInput {
   entries: DieLineDefaultsEntry[];
 }
 
+/**
+ * Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override.
+ */
+export type DeleteDieLineDefaultsInputRevisions = {[key: string]: string};
+
 export interface DeleteDieLineDefaultsInput {
   /** Die names whose stored defaults should be removed */
   names: string[];
+  /** Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override. */
+  revisions?: DeleteDieLineDefaultsInputRevisions;
 }
 
 export type RunSuggestionType = typeof RunSuggestionType[keyof typeof RunSuggestionType];

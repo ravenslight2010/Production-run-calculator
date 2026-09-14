@@ -361,16 +361,68 @@ describe("die-line-defaults upsert semantics", () => {
 
 describe("die-line-defaults delete", () => {
   it("deletes by name case-insensitively so the die falls back to built-ins", async () => {
-    await req(MANAGER, "POST", "/api/die-line-defaults", {
+    const saved = await req(MANAGER, "POST", "/api/die-line-defaults", {
       entries: [
         entry({ preTunnelMin: 2.5, postTunnelMin: 4 }),
         entry({ name: "Argus Dies" }),
       ],
     });
-    const del = await req(MANAGER, "DELETE", "/api/die-line-defaults", { names: ['7" DIES'] });
+    const savedBody = (await saved.json()) as { entries: ApiEntry[] };
+    const revision = savedBody.entries.find((item) => item.name === '7" Dies')?.updatedAt;
+    const del = await req(MANAGER, "DELETE", "/api/die-line-defaults", {
+      names: ['7" DIES'],
+      revisions: { ['7" DIES']: revision },
+    });
     expect(del.status).toBe(200);
     const items = await listAs(MANAGER);
     expect(items).toHaveLength(1);
     expect(items[0].name).toBe("Argus Dies");
+  });
+
+  it("rejects stale and missing reset revisions without deleting newer defaults", async () => {
+    const created = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry()],
+    });
+    const createdBody = (await created.json()) as { entries: ApiEntry[] };
+    const oldRevision = createdBody.entries[0].updatedAt;
+
+    const updated = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry({ freezerTime: 25, updatedAt: oldRevision })],
+    });
+    const updatedBody = (await updated.json()) as { entries: ApiEntry[] };
+
+    const stale = await req(MANAGER, "DELETE", "/api/die-line-defaults", {
+      names: ['7" Dies'],
+      revisions: { ['7" Dies']: oldRevision },
+    });
+    expect(stale.status).toBe(409);
+    const staleBody = (await stale.json()) as {
+      error: string;
+      rejectedIds: string[];
+      entries: ApiEntry[];
+    };
+    expect(staleBody.error).toBe("STALE_DIE_LINE_DEFAULTS_SNAPSHOT");
+    expect(staleBody.rejectedIds).toEqual(['7" dies']);
+    expect(staleBody.entries[0]).toMatchObject({ freezerTime: 25 });
+
+    const missing = await req(MANAGER, "DELETE", "/api/die-line-defaults", {
+      names: ['7" Dies'],
+    });
+    expect(missing.status).toBe(409);
+
+    const current = await req(MANAGER, "DELETE", "/api/die-line-defaults", {
+      names: ['7" Dies'],
+      revisions: { ['7" Dies']: updatedBody.entries[0].updatedAt },
+    });
+    expect(current.status).toBe(200);
+    expect(await listAs(MANAGER)).toEqual([]);
+  });
+
+  it("keeps revision-less resets harmless when no stored row exists", async () => {
+    const del = await req(MANAGER, "DELETE", "/api/die-line-defaults", {
+      names: ["Never Saved Dies"],
+    });
+    expect(del.status).toBe(200);
+    expect(await listAs(MANAGER)).toEqual([]);
   });
 });
