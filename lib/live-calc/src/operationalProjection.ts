@@ -3,10 +3,15 @@ import {
   applyTemporaryOverrides,
   type Calc,
   type CalcRunMeta,
+  type CalcStoppage,
   type ServerCalcResult,
 } from "./index";
+import { computeLinePhases, type LinePhases } from "./linePhases";
 
 export const OPERATIONAL_PROJECTION_VERSION = 1 as const;
+
+/** Outer line stages default (press->tunnel, tunnel->packaging), in minutes. */
+export const PRE_POST_TUNNEL_DEFAULT_MIN = 2.5 as const;
 
 export type OperationalProjection = {
   version: typeof OPERATIONAL_PROJECTION_VERSION;
@@ -16,6 +21,8 @@ export type OperationalProjection = {
   capturedAtServerMs: number;
   calculationRevision: number;
   effectiveElapsedSec: number;
+  /** Day-state-owned 3-stage line model (press/frontline, tunnel, packaging). */
+  linePhases: LinePhases;
   timers: {
     nextBatchInSec: number;
     pressRemainingSec: number;
@@ -106,6 +113,37 @@ export function buildOperationalProjection(args: {
   const totalBatchesNeeded = calcTimePerBatch > 0 && args.serverCalc.calc.totalTimeSec > 0
     ? Math.ceil(args.serverCalc.calc.totalTimeSec / calcTimePerBatch)
     : 0;
+  // Slice 5: the 3-stage line-phase model is server-owned. It derives from the
+  // day-state run lifecycle (startedAt/pausedAt/endedAt/stoppages), the
+  // effective (override-applied) timing values, and the server clock — the
+  // same shared model the client uses as its offline/lag fallback.
+  const pauseRecords = (run.stoppages ?? []).filter((s) => s.type === "pause");
+  const openPause = pauseRecords
+    .filter((s) => !s.endedAt)
+    .reduce<CalcStoppage | undefined>(
+      (latest, s) => (!latest || s.startedAt > latest.startedAt ? s : latest),
+      undefined,
+    );
+  const lastClosedPause = pauseRecords
+    .filter((s) => !!s.endedAt)
+    .reduce<CalcStoppage | undefined>(
+      (latest, s) => (!latest || (s.endedAt ?? 0) > (latest.endedAt ?? 0) ? s : latest),
+      undefined,
+    );
+  const linePhases = computeLinePhases({
+    elapsedBatchSec: effectiveElapsedSec,
+    pausedAt: run.pausedAt,
+    lastResumeWallMs: lastClosedPause?.endedAt ?? 0,
+    lastPauseStartWallMs: lastClosedPause?.startedAt ?? 0,
+    pauseStopsTunnel: openPause?.stopTunnel !== false,
+    lastPauseStopsTunnel: lastClosedPause?.stopTunnel !== false,
+    runStatus: runStatus(run),
+    preTunnelMin: number(v.preTunnelMin) > 0 ? number(v.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
+    postTunnelMin: number(v.postTunnelMin) > 0 ? number(v.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
+    freezerTime: Math.max(0, number(v.freezerTime)),
+    nowMs: args.nowMs,
+    endedAt: run.endedAt,
+  });
 
   return {
     version: OPERATIONAL_PROJECTION_VERSION,
@@ -115,6 +153,7 @@ export function buildOperationalProjection(args: {
     capturedAtServerMs: args.nowMs,
     calculationRevision: args.calculationRevision ?? 0,
     effectiveElapsedSec,
+    linePhases,
     timers: {
       nextBatchInSec,
       pressRemainingSec: Math.max(0, args.serverCalc.calc.adjustedTimeSec - effectiveElapsedSec),
