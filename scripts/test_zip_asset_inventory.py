@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -14,7 +15,10 @@ import zipfile
 from pathlib import Path
 
 from zip_asset_inventory import (
+    COMMAND_ID,
     DEFAULT_MAX_EXPANDED_BYTES,
+    classify_environment,
+    current_revision,
     inspect_archive,
     inventory_archives,
 )
@@ -25,6 +29,91 @@ ASSET_ROOT = REPOSITORY_ROOT / "attached_assets"
 
 
 class ZipAssetInventoryTests(unittest.TestCase):
+    def test_report_has_bounded_scan_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "safe.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("safe.txt", "review metadata only")
+
+            report = inventory_archives([archive_path])
+
+        provenance = report["provenance"]
+        self.assertEqual(provenance["command"], COMMAND_ID)
+        self.assertIn(
+            provenance["environment"],
+            {"development", "isolated-test", "staging", "production", "unknown"},
+        )
+        self.assertLessEqual(len(provenance["captured_at"]), 32)
+        self.assertRegex(
+            provenance["captured_at"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
+        )
+        self.assertTrue(
+            provenance["revision"] == "unknown"
+            or re.fullmatch(r"[0-9a-f]{7,64}", provenance["revision"])
+        )
+        self.assertNotIn(str(Path(directory)), json.dumps(report))
+
+    def test_environment_classification_uses_only_approved_classes(self) -> None:
+        self.assertEqual(
+            classify_environment({"ZIP_ASSET_INVENTORY_ENVIRONMENT": "staging"}),
+            "staging",
+        )
+        self.assertEqual(
+            classify_environment(
+                {
+                    "REPLIT_ENVIRONMENT": "production",
+                    "REPLIT_DEPLOYMENT_ID": "",
+                    "CI": "",
+                }
+            ),
+            "unknown",
+        )
+        self.assertEqual(
+            classify_environment({"CI": "true"}),
+            "isolated-test",
+        )
+        self.assertEqual(
+            classify_environment({"REPLIT_DEPLOYMENT_ID": "deployment-marker"}),
+            "production",
+        )
+
+    def test_revision_lookup_fails_closed_without_leaking_git_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(current_revision(Path(directory)), "unknown")
+
+    def test_output_option_retains_json_without_echoing_local_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "safe.zip"
+            output_path = Path(directory) / "review.json"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                safe_entry = zipfile.ZipInfo("safe.txt")
+                safe_entry.external_attr = (stat.S_IFREG | 0o644) << 16
+                archive.writestr(safe_entry, "review metadata only")
+
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    str(archive_path),
+                    "--output",
+                    str(output_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(REPOSITORY_ROOT / "scripts")},
+            )
+
+            self.assertEqual(process.returncode, 0)
+            self.assertEqual(process.stdout, "")
+            retained = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                retained["label"], "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL"
+            )
+            self.assertEqual(retained["provenance"]["command"], COMMAND_ID)
+            self.assertNotIn(str(Path(directory)), output_path.read_text())
+
     def test_current_exact_duplicate_pairs_are_reconciled_by_hash(self) -> None:
         pairs = [
             (

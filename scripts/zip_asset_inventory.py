@@ -8,21 +8,28 @@ It never extracts or opens a member, and it never executes archive content.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
+import os
 import re
 import stat
+import subprocess
 import sys
 import unicodedata
 import zipfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 
 DEFAULT_MAX_ENTRIES = 100_000
 DEFAULT_MAX_ENTRY_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_EXPANDED_BYTES = 512 * 1024 * 1024
+COMMAND_ID = "scripts/zip_asset_inventory.py"
+ENVIRONMENT_CLASSES = frozenset(
+    {"development", "isolated-test", "staging", "production", "unknown"}
+)
 
 # NFC preserves the spelling users generally expect while treating canonically
 # equivalent member names as the same path during safety checks.
@@ -48,6 +55,70 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _truthy(value: str | None) -> bool:
+    return value is not None and value.strip().lower() in {"1", "true", "yes"}
+
+
+def classify_environment(environment: Mapping[str, str] | None = None) -> str:
+    """Return a bounded environment class without copying arbitrary env values."""
+
+    values = os.environ if environment is None else environment
+    declared = values.get("ZIP_ASSET_INVENTORY_ENVIRONMENT", "").strip().lower()
+    if declared in ENVIRONMENT_CLASSES - {"unknown"}:
+        return declared
+
+    # A deployment marker is stronger than the generic Replit environment label.
+    # In particular, isolated workspaces can report REPLIT_ENVIRONMENT=production.
+    if values.get("REPLIT_DEPLOYMENT_ID", "").strip() or _truthy(
+        values.get("REPLIT_DEPLOYMENT")
+    ):
+        return "production"
+    if _truthy(values.get("CI")) or _truthy(values.get("GITHUB_ACTIONS")):
+        return "isolated-test"
+
+    replit_environment = values.get("REPLIT_ENVIRONMENT", "").strip().lower()
+    if replit_environment == "development":
+        return "development"
+    if replit_environment == "staging":
+        return "staging"
+    return "unknown"
+
+
+def current_revision(repository_root: Path | None = None) -> str:
+    """Return only a validated Git revision, or ``unknown`` if unavailable."""
+
+    root = repository_root or Path(__file__).resolve().parents[1]
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+    revision = completed.stdout.strip()
+    if completed.returncode != 0 or not re.fullmatch(r"[0-9a-f]{7,64}", revision):
+        return "unknown"
+    return revision
+
+
+def build_provenance() -> dict[str, str]:
+    """Build bounded metadata for the exact scanner invocation that made a report."""
+
+    captured_at = datetime.datetime.now(datetime.timezone.utc).isoformat(
+        timespec="seconds"
+    ).replace("+00:00", "Z")
+    return {
+        "captured_at": captured_at,
+        "environment": classify_environment(),
+        "command": COMMAND_ID,
+        "revision": current_revision(),
+    }
 
 
 def normalized_member_path(raw_name: str) -> tuple[str, bool]:
@@ -279,6 +350,7 @@ def inventory_archives(
     return {
         "format": "zip-asset-inventory/v1",
         "label": "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL",
+        "provenance": build_provenance(),
         "read_only": True,
         "member_data_opened": False,
         "member_name_unicode_normalization": ZIP_MEMBER_UNICODE_NORMALIZATION,
@@ -324,6 +396,11 @@ def _parser() -> argparse.ArgumentParser:
         "--max-expanded-bytes",
         type=int,
         default=DEFAULT_MAX_EXPANDED_BYTES,
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write the JSON review evidence to this file instead of stdout",
     )
     parser.set_defaults(default_root=repository_root / "attached_assets")
     return parser
@@ -377,8 +454,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_expanded_bytes=args.max_expanded_bytes,
     )
     if args.format == "json":
-        print(json.dumps(report, indent=2, sort_keys=True))
+        rendered = f"{json.dumps(report, indent=2, sort_keys=True)}\n"
+        if args.output:
+            try:
+                args.output.write_text(rendered, encoding="utf-8")
+            except OSError:
+                parser.error("unable to write JSON review evidence")
+        else:
+            print(rendered, end="")
     else:
+        if args.output:
+            parser.error("--output is only supported with --format json")
         print(_text_report(report))
 
     return 1 if report["summary"]["unsafe_archive_count"] else 0

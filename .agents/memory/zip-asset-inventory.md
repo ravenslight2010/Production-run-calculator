@@ -8,3 +8,13 @@ Inspect uploaded ZIPs through the central directory only; never extract or open 
 **Why:** Uploaded skill bundles can contain symlinks, credential-like filenames, duplicate uploads, and unsafe paths; a metadata-only pass reduces exposure while preserving enough evidence to decide what needs manual review.
 
 **How to apply:** Keep reports redacted to archive identity, hashes, bounded counts, limits, and stable error codes. Label every result as review evidence rather than permission to install or execute.
+
+Retained JSON reviews also need bounded provenance: UTC capture time, an allowlisted environment
+class, a fixed scanner command identity, and a validated source revision. Do not copy output
+paths, command arguments, environment values, or archive contents into that envelope.
+
+**Why:** A retained scan must be attributable to the scanner revision that produced it without
+turning review metadata into a path, credential, or payload disclosure channel.
+
+**How to apply:** Use the scanner's explicit JSON output option for retention and keep the
+existing review-only/not-installation-approval label unchanged.

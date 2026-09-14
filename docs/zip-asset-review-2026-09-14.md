@@ -7,8 +7,10 @@
 - **Source identity:** each finding is bound to the exact uploaded filename and SHA-256 below. A repository URL is treated as a hint observed in archive documentation, not as independently verified provenance.
 - **Inspection performed:** SHA-256 hashing; ZIP central-directory manifest inspection; normalized-path, duplicate-path, case-fold collision, encryption, special-file, size, and compression checks; filename and sampled text scans for credential-like material; safe reading of selected README/license/package metadata.
 - **Not performed:** no extraction into the workspace, package installation, script/plugin/MCP/application execution, network service startup, dependency install, integration, or functional validation.
+- **Retained scan evidence:** future JSON captures should be produced with `python3 scripts/zip_asset_inventory.py --output <approved-review-file>`. The scanner records only a UTC capture timestamp, bounded environment class, fixed command identity, and validated source revision; it never records local paths, command arguments, archive member names, or archive contents in provenance metadata.
 - **Safety result:** no encrypted members, path-traversal entries, duplicate normalized paths, or case-fold collisions were observed. Symlink metadata was present in five archives and is called out below; those archives were not extracted.
 - **Credential handling:** credential-like paths and sensitive behavior are named only where useful for disposition. Values were not printed, copied, or reused. A filename or test fixture match is not evidence of a live credential.
+- **Evidence label:** retained scanner output remains **REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL**. A scan is a review artifact and does not authorize extraction, installation, execution, or integration.
 
 ## Disposition summary
 
