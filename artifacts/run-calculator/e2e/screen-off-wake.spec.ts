@@ -1635,6 +1635,26 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     "two live sessions converge through visible retry after an offline wake",
     async ({ page, browser }: { page: Page; browser: Browser }, testInfo) => {
       test.slow();
+      const contextDiagnostics = {
+        active: { consoleWarnings: 0, consoleErrors: 0, pageErrors: 0, failedRequests: 0 },
+        sleeping: { consoleWarnings: 0, consoleErrors: 0, pageErrors: 0, failedRequests: 0 },
+      };
+      const observeSanitizedDiagnostics = (
+        observedPage: Page,
+        diagnostics: typeof contextDiagnostics.active,
+      ) => {
+        observedPage.on("console", (message) => {
+          if (message.type() === "warning") diagnostics.consoleWarnings += 1;
+          if (message.type() === "error") diagnostics.consoleErrors += 1;
+        });
+        observedPage.on("pageerror", () => {
+          diagnostics.pageErrors += 1;
+        });
+        observedPage.on("requestfailed", () => {
+          diagnostics.failedRequests += 1;
+        });
+      };
+      observeSanitizedDiagnostics(page, contextDiagnostics.active);
       const safeBaseMs = await setupAndStartRun(
         page,
         "10",
@@ -1650,6 +1670,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         isMobile: true,
       });
       const sleepingPage = await peer.newPage();
+      observeSanitizedDiagnostics(sleepingPage, contextDiagnostics.sleeping);
       const observedClaims: string[] = [];
       const recordClaim = (request: Request) => {
         if (
@@ -1793,6 +1814,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           contentType: "application/json",
         });
       } finally {
+        if (testInfo.status !== testInfo.expectedStatus) {
+          await testInfo.attach("offline-wake-retry-failure-diagnostics.json", {
+            body: JSON.stringify({
+              environment: "isolated-test",
+              flow: "two-session-offline-wake-visible-retry",
+              dataClass: "fixture",
+              sanitization:
+                "Counts only; console text, errors, URLs, request payloads, headers, cookies, and operational values omitted.",
+              contexts: contextDiagnostics,
+            }, null, 2),
+            contentType: "application/json",
+          });
+        }
         sleepingPage.off("request", recordClaim);
         await peer.setOffline(false).catch(() => {});
         await peer.close();
