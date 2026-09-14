@@ -482,6 +482,17 @@ async function readLiveRunSnapshot(page: Page): Promise<{
   });
 }
 
+async function readPersistedRunValues(
+  page: Page,
+  runId: string,
+): Promise<Record<string, number | string | boolean | null | undefined>> {
+  return page.evaluate((id) => {
+    const raw = localStorage.getItem(`run-calc-run-${id}`);
+    if (!raw) throw new Error(`persisted run values missing for ${id}`);
+    return JSON.parse(raw) as Record<string, number | string | boolean | null | undefined>;
+  }, runId);
+}
+
 async function readLiveRunMeta(page: Page): Promise<{
   startedAt?: number;
   pausedAt?: number;
@@ -1617,6 +1628,175 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         trays: reconnectBeat.operationalProjection?.counters?.traysOnLine,
         batches: reconnectBeat.operationalProjection?.counters?.batchesReady,
       });
+    },
+  );
+
+  test(
+    "two live sessions converge through visible retry after an offline wake",
+    async ({ page, browser }: { page: Page; browser: Browser }, testInfo) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
+      const activeStatus = page.getByTestId("foreground-recovery-status");
+      await expect(activeStatus)
+        .toContainText("Production state synchronized.", { timeout: 20_000 });
+
+      const peer = await browser.newContext({
+        storageState: await page.context().storageState(),
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+      });
+      const sleepingPage = await peer.newPage();
+      const observedClaims: string[] = [];
+      const recordClaim = (request: Request) => {
+        if (
+          request.method() !== "POST"
+          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+        ) return;
+        const body = request.postDataJSON() as { claim?: { channel?: string } };
+        if (body.claim?.channel) observedClaims.push(body.claim.channel);
+      };
+
+      try {
+        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+        await sleepingPage.getByTestId("tab-run")
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
+          .waitFor({ state: "visible", timeout: 15_000 });
+        await installHiddenMock(sleepingPage);
+        const stale = await readLiveRunSnapshot(sleepingPage);
+        const staleOperational = {
+          skidsCompleted: stale.values.skidsCompleted,
+          casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
+          traysOnLine: stale.values.traysOnLine,
+          batchesReady: stale.values.batchesReady,
+        };
+        sleepingPage.on("request", recordClaim);
+        await sleepingPage.route("**/api/sync/events**", (route) => route.abort());
+        await simulateScreenOff(sleepingPage);
+        await peer.setOffline(true);
+
+        const advancedAt = safeBaseMs + 16 * 60_000;
+        await mockDateNow(page, advancedAt);
+        await expect.poll(async () => {
+          const snapshot = await readLiveRunSnapshot(page);
+          return Number(snapshot.values.casesOnCurrentSkid ?? 0)
+            + Number(snapshot.values.skidsCompleted ?? 0) * 10;
+        }, {
+          timeout: 15_000,
+          message: "active session did not advance canonical Packaging",
+        }).toBeGreaterThan(
+          Number(staleOperational.casesOnCurrentSkid ?? 0)
+            + Number(staleOperational.skidsCompleted ?? 0) * 10,
+        );
+        const canonicalAfterAdvance = await readLiveRunSnapshot(page);
+
+        await mockDateNow(sleepingPage, advancedAt, { tick: false });
+        await simulateWake(sleepingPage);
+        const sleepingStatus = sleepingPage.getByTestId("foreground-recovery-status");
+        await expect(sleepingStatus)
+          .toContainText("Couldn't confirm the current production state", { timeout: 10_000 });
+        await expect(sleepingPage.getByTestId("button-retry-foreground-recovery"))
+          .toBeVisible();
+        const failedAck = Number(
+          await sleepingStatus.getAttribute("data-foreground-sync-ack"),
+        );
+        await sleepingPage.waitForTimeout(1_200);
+        const stillFenced = await readPersistedRunValues(sleepingPage, stale.runId);
+        expect({
+          skidsCompleted: stillFenced.skidsCompleted,
+          casesOnCurrentSkid: stillFenced.casesOnCurrentSkid,
+          traysOnLine: stillFenced.traysOnLine,
+          batchesReady: stillFenced.batchesReady,
+        }, "failed recovery must not apply hidden-time Packaging or Dough progress")
+          .toEqual(staleOperational);
+        expect(observedClaims, "offline recovery emitted automatic claims").toEqual([]);
+
+        let failFirstOnlinePull = true;
+        await sleepingPage.route("**/api/sync/today**", async (route) => {
+          if (route.request().method() === "GET" && failFirstOnlinePull) {
+            failFirstOnlinePull = false;
+            await route.abort("connectionfailed");
+            return;
+          }
+          await route.continue();
+        });
+        await peer.setOffline(false);
+        await sleepingPage.evaluate(() => window.dispatchEvent(new Event("online")));
+        await expect.poll(() => failFirstOnlinePull, {
+          timeout: 10_000,
+          message: "the controlled first online recovery pull did not run",
+        }).toBe(false);
+        await expect(sleepingStatus)
+          .toContainText("Couldn't confirm the current production state", { timeout: 10_000 });
+        expect(Number(await sleepingStatus.getAttribute("data-foreground-sync-ack")))
+          .toBe(failedAck);
+        expect(observedClaims, "failed online recovery emitted automatic claims").toEqual([]);
+
+        await sleepingPage.getByTestId("button-retry-foreground-recovery").click();
+        await expect(sleepingStatus)
+          .toContainText("Production state synchronized.", { timeout: 15_000 });
+        expect(Number(await sleepingStatus.getAttribute("data-foreground-sync-ack")))
+          .toBeGreaterThan(failedAck);
+
+        const expected = {
+          skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,
+          casesOnCurrentSkid: canonicalAfterAdvance.values.casesOnCurrentSkid,
+          traysOnLine: canonicalAfterAdvance.values.traysOnLine,
+          batchesReady: canonicalAfterAdvance.values.batchesReady,
+        };
+        await expect.poll(async () => {
+          const values = await readPersistedRunValues(sleepingPage, stale.runId);
+          return {
+            skidsCompleted: values.skidsCompleted,
+            casesOnCurrentSkid: values.casesOnCurrentSkid,
+            traysOnLine: values.traysOnLine,
+            batchesReady: values.batchesReady,
+          };
+        }, {
+          timeout: 15_000,
+          message: "visible retry did not adopt the active session's canonical state",
+        }).toEqual(expected);
+        expect(
+          observedClaims.filter((channel) =>
+            channel === "sauce-barrel" || /^app[1-4]-batch$/.test(channel)
+          ),
+          "recovery duplicated Sauce or Frontline claims",
+        ).toEqual([]);
+
+        const activeFinal = await readPersistedRunValues(page, stale.runId);
+        const peerFinal = await readPersistedRunValues(sleepingPage, stale.runId);
+        expect({
+          skidsCompleted: peerFinal.skidsCompleted,
+          casesOnCurrentSkid: peerFinal.casesOnCurrentSkid,
+          traysOnLine: peerFinal.traysOnLine,
+          batchesReady: peerFinal.batchesReady,
+        }, "both live sessions must finish on the same operational counters").toEqual({
+          skidsCompleted: activeFinal.skidsCompleted,
+          casesOnCurrentSkid: activeFinal.casesOnCurrentSkid,
+          traysOnLine: activeFinal.traysOnLine,
+          batchesReady: activeFinal.batchesReady,
+        });
+
+        await testInfo.attach("offline-wake-retry-summary.json", {
+          body: JSON.stringify({
+            result: "pass",
+            devices: ["desktop-active", "phone-sleeping"],
+            failedRecoveryVisible: true,
+            retryAdoptedCanonicalState: true,
+            duplicateSauceOrFrontlineClaims: 0,
+            hiddenProgressWhileFenced: 0,
+          }, null, 2),
+          contentType: "application/json",
+        });
+      } finally {
+        sleepingPage.off("request", recordClaim);
+        await peer.setOffline(false).catch(() => {});
+        await peer.close();
+      }
     },
   );
 
