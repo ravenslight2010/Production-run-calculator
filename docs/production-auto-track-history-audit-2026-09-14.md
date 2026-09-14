@@ -165,3 +165,76 @@ production evidence is unavailable.
 The audit proves premature automatic stopping, not the exact number of
 physical batches made afterward. A repair is blocked until an authoritative
 production source can establish exact replacement values without guessing.
+
+## Restricted reconciliation review
+
+### Review disposition
+
+**Status: production remains unchanged; all three series require manager
+review because no exact replacement value is proven.**
+
+A follow-up read-only review on September 14, 2026 identified the three
+candidate series with pseudonymous references and projected only the slot,
+stored count, correction generation, accepted automatic sequence, and bounded
+source-presence counts:
+
+| Candidate reference | Slot | Stored count | Correction generation | Last accepted sequence |
+| --- | --- | ---: | ---: | ---: |
+| `135707dfdb22ed2167290f960d6d833c` | App 1 | 3 | 0 | 3 |
+| `3f2fc5c6871abec850c8fe9215ae0e06` | App 1 | 6 | 0 | 6 |
+| `5b97e32987c0600a278a91bae9f3cc10` | App 3 | 3 | 0 | 3 |
+
+These references are one-way database-generated pseudonyms used only to
+distinguish the candidates. They are not evidence of source integrity and do
+not reveal run, customer, recipe, actor, or device identifiers.
+
+### Manager-change exclusion
+
+The review also found one other App 1 automatic series on September 10. It was
+excluded because its stored count was 16 while its last accepted automatic
+sequence was 15. That mismatch means the current row no longer matches the
+audited automatic state and may reflect a later correction or change. Its
+reference and business data were not retained.
+
+All three retained candidates still had correction generation zero and stored
+count equal to the last accepted automatic sequence at review time. This
+establishes that they remained unchanged candidates; it does not establish how
+many physical batches were ultimately made.
+
+### Authoritative-source comparison
+
+For each candidate, the review checked the production sources available in the
+application database:
+
+- `completed_run_history`: zero matching finalized rows;
+- `inventory_ledger`: zero matching run-linked entries; and
+- `finalized_operational_reports`: zero reports covering September 10, 2026.
+
+The inventory system records no applicator-batch-specific consumption source
+for these runs. Planned cases and the corrected lifetime cap remain estimates
+of required production, not proof of physical output.
+
+### Decision
+
+No exact target count can be established from authoritative retained evidence.
+Therefore:
+
+- no data-heal marker or repair code was added;
+- no run value or run-value stamp was changed;
+- the three pseudonymous candidates remain queued for manager review; and
+- any future correction must supply an independently verified exact batch count
+  for the specific candidate and re-check that its stored count and correction
+  generation have not changed.
+
+If that evidence is supplied later, the repair must follow the one-time,
+idempotent, monotonic-stamp plan above. Setting any candidate to its planned
+lifetime cap without that evidence would be a guess.
+
+### Evidence handling
+
+- Capture: September 14, 2026, production PostgreSQL read replica
+- Application revision: unknown
+- Producing flow: parameterized, read-only SQL against bounded rows and sources
+- Sanitization: no raw identifiers, names, payloads, recipes, actors, devices,
+  credentials, or personal data retained
+- Unresolved gap: exact physical applicator batch totals are unavailable
