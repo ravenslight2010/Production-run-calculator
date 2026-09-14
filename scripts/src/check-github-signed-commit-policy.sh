@@ -66,38 +66,233 @@ check_required_workflow_contract() {
     policy_check_names["$required_check"]=1
   done
 
-  ci_job_names_output="$(
+  if ! ci_job_names_output="$(
     awk '
+      # This is intentionally a bounded parser for the job/name shape used by
+      # this repository. It is not a general YAML parser. Any shape it cannot
+      # interpret is reported instead of being treated as a missing job.
+      function trim(value) {
+        sub(/^[[:space:]]+/, "", value)
+        sub(/[[:space:]]+$/, "", value)
+        return value
+      }
+
+      function strip_comment(value,    i, character, quote, escaped) {
+        quote = ""
+        escaped = 0
+        for (i = 1; i <= length(value); i++) {
+          character = substr(value, i, 1)
+          if (quote == "\"") {
+            if (escaped) {
+              escaped = 0
+            } else if (character == "\\") {
+              escaped = 1
+            } else if (character == "\"") {
+              quote = ""
+            }
+          } else if (quote == "\047") {
+            if (character == "\047" && substr(value, i + 1, 1) == "\047") {
+              i++
+            } else if (character == "\047") {
+              quote = ""
+            }
+          } else if (character == "\"" || character == "\047") {
+            quote = character
+          } else if (character == "#" &&
+                     (i == 1 || substr(value, i - 1, 1) ~ /[[:space:]]/)) {
+            return substr(value, 1, i - 1)
+          }
+        }
+        return value
+      }
+
+      # Sets parsed_key and parsed_value for a mapping line at the requested
+      # indentation. Quoted keys are decoded just enough to validate job IDs.
+      function parse_mapping(line, indentation,    rest, i, character,
+                             quote, escaped, colon, key, value) {
+        parsed_key = ""
+        parsed_value = ""
+        if (substr(line, 1, indentation) != sprintf("%" indentation "s", "")) {
+          return 0
+        }
+        rest = substr(line, indentation + 1)
+        quote = ""
+        escaped = 0
+        colon = 0
+        for (i = 1; i <= length(rest); i++) {
+          character = substr(rest, i, 1)
+          if (quote == "\"") {
+            if (escaped) {
+              escaped = 0
+            } else if (character == "\\") {
+              escaped = 1
+            } else if (character == "\"") {
+              quote = ""
+            }
+          } else if (quote == "\047") {
+            if (character == "\047" && substr(rest, i + 1, 1) == "\047") {
+              i++
+            } else if (character == "\047") {
+              quote = ""
+            }
+          } else if (character == "\"" || character == "\047") {
+            quote = character
+          } else if (character == ":") {
+            colon = i
+            break
+          }
+        }
+        if (colon == 0 || quote != "") {
+          return 0
+        }
+
+        key = trim(substr(rest, 1, colon - 1))
+        value = trim(substr(rest, colon + 1))
+        if (key ~ /^\047.*\047$/) {
+          if (key !~ /^\047([^\047]|\047\047)*\047$/) {
+            return 0
+          }
+          sub(/^\047/, "", key)
+          sub(/\047$/, "", key)
+          gsub(/\047\047/, "\047", key)
+        } else if (key ~ /^".*"$/) {
+          if (key !~ /^"([^"\\]|\\.)*"$/) {
+            return 0
+          }
+          sub(/^"/, "", key)
+          sub(/"$/, "", key)
+          gsub(/\\"/, "\"", key)
+          gsub(/\\\\/, "\\", key)
+        } else if (key !~ /^[[:alpha:]_][[:alnum:]_-]*$/) {
+          return 0
+        }
+        parsed_key = key
+        parsed_value = value
+        return 1
+      }
+
+      # Sets decoded_value for a scalar that is either plain or one-line
+      # quoted. Block scalars are rejected because this parser cannot safely
+      # associate their continuation lines with a job name.
+      function decode_scalar(value,    first, last) {
+        decoded_value = trim(value)
+        if (decoded_value == "" ||
+            decoded_value == ">" || decoded_value == "|" ||
+            decoded_value ~ /^>[+-]$/ || decoded_value ~ /^\|[+-]$/) {
+          return 0
+        }
+        first = substr(decoded_value, 1, 1)
+        last = substr(decoded_value, length(decoded_value), 1)
+        if (first == "\047" || first == "\"") {
+          if (last != first) {
+            return 0
+          }
+          if (first == "\047") {
+            if (decoded_value !~ /^\047([^\047]|\047\047)*\047$/) {
+              return 0
+            }
+            sub(/^\047/, "", decoded_value)
+            sub(/\047$/, "", decoded_value)
+            gsub(/\047\047/, "\047", decoded_value)
+          } else {
+            if (decoded_value !~ /^"([^"\\]|\\.)*"$/) {
+              return 0
+            }
+            sub(/^"/, "", decoded_value)
+            sub(/"$/, "", decoded_value)
+            gsub(/\\"/, "\"", decoded_value)
+            gsub(/\\\\/, "\\", decoded_value)
+          }
+        } else if (first ~ /[!&*{}\[\],]/) {
+          return 0
+        }
+        return decoded_value != ""
+      }
+
+      function unsupported(reason) {
+        printf "line %d: %s\n", NR, reason
+        parse_failed = 1
+        exit 2
+      }
+
       function finish_job() {
         if (current_job_name != "") {
           print current_job_name
         }
         current_job_name = ""
+        current_job_name_seen = 0
       }
 
-      $0 == "jobs:" {
-        in_jobs = 1
-        next
-      }
-      in_jobs && $0 ~ /^[^[:space:]]/ {
-        finish_job()
-        exit
-      }
-      in_jobs && $0 ~ /^  [[:alnum:]_-]+:[[:space:]]*(#.*)?$/ {
-        finish_job()
-        next
-      }
-      in_jobs && $0 ~ /^    name:[[:space:]]+/ {
-        current_job_name = $0
-        sub(/^    name:[[:space:]]+/, "", current_job_name)
-        sub(/[[:space:]]+#.*$/, "", current_job_name)
+      {
+        line = $0
+        sub(/\r$/, "", line)
+        if (line ~ /^[\t]/) {
+          unsupported("tabs in indentation are not supported")
+        }
+        line = strip_comment(line)
+        if (line ~ /^[[:space:]]*$/) {
+          next
+        }
+
+        if (!in_jobs) {
+          if (parse_mapping(line, 0) && parsed_key == "jobs") {
+            if (parsed_value != "") {
+              unsupported("the top-level jobs mapping must not have an inline value")
+            }
+            in_jobs = 1
+            next
+          }
+          next
+        }
+
+        if (line !~ /^[[:space:]]/) {
+          finish_job()
+          in_jobs = 0
+          next
+        }
+        if (line ~ /^  [^[:space:]]/) {
+          if (!parse_mapping(line, 2) || parsed_value != "") {
+            unsupported("job entries must use an unquoted or quoted job ID followed by an empty mapping value")
+          }
+          finish_job()
+          current_job = parsed_key
+          next
+        }
+        if (line ~ /^ [^[:space:]]/) {
+          unsupported("job entries must be indented by exactly two spaces")
+        }
+        if (line ~ /^    [^[:space:]]/ && parse_mapping(line, 4)) {
+          if (parsed_key == "name") {
+            if (current_job == "") {
+              unsupported("a job name was found before a job ID")
+            }
+            if (current_job_name_seen) {
+              unsupported("a job cannot define name more than once")
+            }
+            if (!decode_scalar(parsed_value)) {
+              unsupported("job name must be a one-line plain or quoted scalar")
+            }
+            current_job_name = decoded_value
+            current_job_name_seen = 1
+          }
+          next
+        }
       }
 
       END {
+        if (parse_failed) {
+          exit 2
+        }
+        if (!in_jobs) {
+          print "the workflow does not contain a top-level jobs mapping"
+          exit 2
+        }
         finish_job()
       }
     ' "$ci_workflow"
-  )"
+  )"; then
+    fail "unsupported CI workflow layout in ${ci_workflow}: ${ci_job_names_output}"
+  fi
   mapfile -t ci_job_names < <(printf '%s\n' "$ci_job_names_output" | sed '/^$/d')
   ci_job_count="${#ci_job_names[@]}"
   (( ci_job_count > 0 )) || fail \

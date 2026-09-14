@@ -217,6 +217,43 @@ test_accepts_explicit_ci_job_rename_policy_update() {
   echo "PASS: accepts a CI job rename with an explicit policy update"
 }
 
+test_accepts_comments_and_quoted_ci_job_names() {
+  write_valid_fixtures
+  sed -i 's/^jobs:$/jobs: # CI required-check jobs/' \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  sed -i 's/^  typecheck:$/  "typecheck": # YAML-quoted job ID/' \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  sed -i 's/^    name: Typecheck$/    name: "Typecheck" # quoted display name/' \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  sed -i "s/^    name: Release concurrency fixture tests$/    name: 'Release # concurrency' # quoted display name/" \
+    "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  run_check
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected comments and quoted CI job names to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  echo "PASS: accepts comments and quoted CI job names"
+}
+
+test_rejects_unsupported_ci_job_name_layout() {
+  write_valid_fixtures
+  sed -i '/^    name: Typecheck$/c\
+    name: >-\
+      Typecheck' "${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  run_check
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected an unsupported CI job name layout to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "unsupported CI workflow layout in ${REPOSITORY_FIXTURE}/.github/workflows/ci.yml"
+  assert_contains "$CHECK_OUTPUT" \
+    "job name must be a one-line plain or quoted scalar"
+  echo "PASS: rejects an unsupported CI job name layout"
+}
+
 test_rejects_incomplete_required_check_contract() {
   write_valid_fixtures
   sed -i "/^- \`Typecheck\`$/d" \
@@ -288,6 +325,8 @@ test_rejects_check_count_mismatch
 test_rejects_check_identity_mismatch
 test_rejects_renamed_ci_job_without_policy_update
 test_accepts_explicit_ci_job_rename_policy_update
+test_accepts_comments_and_quoted_ci_job_names
+test_rejects_unsupported_ci_job_name_layout
 test_rejects_incomplete_required_check_contract
 test_redacts_cli_errors
 echo "All GitHub branch-protection policy tests passed."
