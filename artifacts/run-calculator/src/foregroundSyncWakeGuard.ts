@@ -8,41 +8,35 @@ export function createForegroundSyncWakeGuard(
 ): () => Promise<boolean> {
   let inFlight: Promise<boolean> | null = null;
   let queuedWake = false;
-  let automaticRetryUsed = false;
 
   const start = (): Promise<boolean> => {
-    const work = reconcile();
+    const work = (async () => {
+      try {
+        let firstError: unknown;
+        let succeeded = false;
+        try {
+          succeeded = await reconcile();
+        } catch (error) {
+          firstError = error;
+        }
+        if (!succeeded && queuedWake) {
+          // Keep the bounded retry inside this wake burst's shared promise. That
+          // gives focus/visibility/online one completion owner instead of
+          // detaching a second reconciliation that can release the barrier after
+          // callers already observed the first attempt settle.
+          queuedWake = false;
+          return await reconcile();
+        }
+        if (firstError !== undefined) throw firstError;
+        return succeeded;
+      } finally {
+        // A running reconciliation is never replaced: overlapping wakes only
+        // set queuedWake and return this same promise.
+        inFlight = null;
+        queuedWake = false;
+      }
+    })();
     inFlight = work;
-    void work.then(
-      (succeeded) => {
-        if (inFlight !== work) return;
-        inFlight = null;
-        if (!succeeded && queuedWake && !automaticRetryUsed) {
-          // A browser can deliver `online` or `focus` while the failed pull is
-          // still unwinding. Coalescing that signal into the failed promise
-          // leaves the client fenced with no request to recover it. Consume at
-          // most one overlapping signal as an automatic retry; later signals
-          // are allowed to start a fresh, explicit recovery pass.
-          queuedWake = false;
-          automaticRetryUsed = true;
-          void start();
-          return;
-        }
-        queuedWake = false;
-        if (succeeded) automaticRetryUsed = false;
-      },
-      () => {
-        if (inFlight !== work) return;
-        inFlight = null;
-        if (queuedWake && !automaticRetryUsed) {
-          queuedWake = false;
-          automaticRetryUsed = true;
-          void start();
-          return;
-        }
-        queuedWake = false;
-      },
-    );
     return work;
   };
 
@@ -51,7 +45,6 @@ export function createForegroundSyncWakeGuard(
       queuedWake = true;
       return inFlight;
     }
-    automaticRetryUsed = false;
     return start();
   };
 }

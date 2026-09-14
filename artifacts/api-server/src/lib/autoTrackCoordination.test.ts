@@ -302,6 +302,35 @@ describe("auto-track coordination", () => {
     });
   });
 
+  it("defaults a legacy configured Sauce correction generation to zero", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: {
+        "run-1": {
+          sauceBarrelsMade: 0,
+          sauceBarrelAnchorNetSec: 0,
+          sauceBarrelLbs: 200,
+          frontlineRecipeName: "Tomato Sauce",
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "sauce-barrel",
+      eventId: "legacy-client:sauce-barrel:1",
+      correctionGeneration: 0,
+      mutations: sauceMutations(0, 0, 0),
+    }), NOW);
+
+    expect(result.outcome).toBe("accepted");
+    expect(result.values).toMatchObject({
+      sauceBarrelsMade: 1,
+      sauceBarrelAnchorNetSec: 60,
+      sauceBarrelCorrectionGeneration: 0,
+    });
+    expect(result.inventoryConsumption?.kind).toBe("sauce-barrel");
+  });
+
   it("rejects sauce progress after a manual snapshot correction", () => {
     const stored = {
       dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },

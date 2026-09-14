@@ -17,11 +17,13 @@ const LIFECYCLE_MANAGER_FILE = path.join(__dirname, "hooks", "useRunLifecycleMan
 const SYNC_MANAGER_FILE = path.join(__dirname, "hooks", "useHomeSyncCoordination.ts");
 const HOOK_FILE = path.join(__dirname, "hooks", "useAutoTrack.ts");
 const SCHEDULER_FILE = path.join(__dirname, "visibleTabScheduler.ts");
+const RECOVERY_STATUS_FILE = path.join(__dirname, "components", "ForegroundRecoveryStatus.tsx");
 const homeSource = fs.readFileSync(HOME_FILE, "utf8");
 const lifecycleManagerSource = fs.readFileSync(LIFECYCLE_MANAGER_FILE, "utf8");
 const syncManagerSource = fs.readFileSync(SYNC_MANAGER_FILE, "utf8");
 const hookSource = fs.readFileSync(HOOK_FILE, "utf8");
 const schedulerSource = fs.readFileSync(SCHEDULER_FILE, "utf8");
+const recoveryStatusSource = fs.readFileSync(RECOVERY_STATUS_FILE, "utf8");
 
 describe("foreground wake sync barrier", () => {
   it("pulls the date-scoped row through the established inbound merge before releasing auto-track", () => {
@@ -123,8 +125,14 @@ describe("foreground wake sync barrier", () => {
     await Promise.resolve();
     expect(pullClientDateRow).toHaveBeenCalledTimes(2);
 
+    const wakeDuringRetry = reconcile();
+    expect(wakeDuringRetry).toBe(first);
+    expect(pullClientDateRow).toHaveBeenCalledTimes(2);
+
     resolveSecond(true);
-    await expect(first).rejects.toThrow("network failed");
+    await expect(first).resolves.toBe(true);
+    await expect(overlappingWake).resolves.toBe(true);
+    await expect(wakeDuringRetry).resolves.toBe(true);
     await vi.waitFor(() => expect(pullClientDateRow).toHaveBeenCalledTimes(2));
   });
 
@@ -161,7 +169,7 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain("reconciled = true");
     expect(homeSource).toContain("if (shouldPush)");
     expect(homeSource).toContain("foregroundRecoveryNotice");
-    expect(homeSource).toContain("Retry recovery");
+    expect(recoveryStatusSource).toContain("Retry recovery");
     expect(homeSource).toContain("tracking is paused");
 
     const catchBlock = homeSource.match(

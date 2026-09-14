@@ -85,19 +85,30 @@ export function computeAppSlotInfo(input: {
   recipe: Array<{ lbs: number }> | undefined;
   batchLbs: number;
   ozPerPizza: number;
-  required: number;
+  casesNeeded: number;
+  pizzasPerCase: number;
   ppm: number;
 }) {
   const recipeLbs = (input.recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
   const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : input.batchLbs;
   const type = String(input.type).trim();
+  const productionPizzas = input.casesNeeded > 0 && input.pizzasPerCase > 0
+    ? input.casesNeeded * input.pizzasPerCase
+    : 0;
+  // Auto-track completion is a lifetime run cap. The normal calculator's
+  // applicator requirement is intentionally a remaining-work value and shrinks
+  // as Packaging advances, so it cannot safely cap a cumulative "made" count.
+  const required = effectiveBatchLbs > 0 && input.ozPerPizza > 0 && productionPizzas > 0
+    ? (productionPizzas * input.ozPerPizza / 16 + 20) / effectiveBatchLbs
+    : 0;
   return {
     recipeLbs,
     effectiveBatchLbs,
+    required,
     cadence: effectiveBatchLbs > 0 && input.ozPerPizza > 0 && input.ppm > 0
       ? effectiveBatchLbs * 16 / input.ozPerPizza / input.ppm * 60 : 0,
     validForClaim: !!type && !type.toLowerCase().includes("mix") &&
-      effectiveBatchLbs > 0 && input.ozPerPizza > 0 && input.required > 0 && input.ppm > 0,
+      effectiveBatchLbs > 0 && input.ozPerPizza > 0 && required > 0 && input.ppm > 0,
   };
 }
 export function computeNetSecondDue(input: { currentDue: number; anchor: number; cadence: number }): number {

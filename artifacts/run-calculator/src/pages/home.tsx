@@ -31,6 +31,7 @@ import MixesTabContent from "../components/MixesTabContent";
 import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
+import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
@@ -17114,45 +17115,12 @@ export default function Home() {
               </div>
             )}
             {foregroundRecoveryNotice && (
-              <div
-                className={`print:hidden mb-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
-                  foregroundRecoveryNotice.kind === "failed"
-                    ? "border-red-500/40 bg-red-500/10 text-red-200"
-                    : foregroundRecoveryNotice.kind === "outcome"
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                      : "border-amber-500/40 bg-amber-500/10 text-amber-100"
-                }`}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                data-testid="foreground-recovery-status"
-                data-foreground-sync-ack={foregroundSyncAcknowledgement}
-                data-foreground-recovery-state={foregroundRecoveryNotice.kind}
-              >
-                {foregroundRecoveryNotice.kind === "outcome"
-                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                  : <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />}
-                <span className="min-w-0 flex-1">{foregroundRecoveryNotice.message}</span>
-                {foregroundRecoveryNotice.kind === "failed" && (
-                  <button
-                    type="button"
-                    onClick={() => { void foregroundRecoveryRetryRef.current?.(); }}
-                    className="shrink-0 rounded border border-current/40 px-2 py-1 text-xs font-semibold hover:bg-black/10"
-                    data-testid="button-retry-foreground-recovery"
-                  >
-                    Retry recovery
-                  </button>
-                )}
-                {foregroundRecoveryNotice.kind === "outcome" && (
-                  <button
-                    type="button"
-                    onClick={dismissForegroundRecoveryNotice}
-                    className="shrink-0 text-xs font-semibold opacity-80 hover:opacity-100"
-                  >
-                    Dismiss
-                  </button>
-                )}
-              </div>
+              <ForegroundRecoveryStatus
+                notice={foregroundRecoveryNotice}
+                acknowledgement={foregroundSyncAcknowledgement}
+                onRetry={() => { void foregroundRecoveryRetryRef.current?.(); }}
+                onDismiss={dismissForegroundRecoveryNotice}
+              />
             )}
             <HomeStationTabs activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as HomeTab)}>
               {/* ─── RUN ─── */}

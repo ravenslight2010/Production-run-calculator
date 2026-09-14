@@ -335,13 +335,11 @@ export function applyAutoTrackClaim(
     const correctionField = claim.channel === "sauce-barrel"
       ? "sauceBarrelCorrectionGeneration"
       : `app${claim.channel[3]}BatchCorrectionGeneration`;
-    // Applicator coordination was added after durable run values existed in
-    // the field. A missing progress register is its documented zero default;
-    // accept its first claim so a live legacy run can adopt the new register.
-    // Sauce intentionally remains strict because it can produce inventory work.
-    const correctionGeneration = claim.channel === "sauce-barrel"
-      ? values[correctionField]
-      : values[correctionField] ?? 0;
+    // These coordination fields were added after durable run values existed.
+    // Their schema default is zero, so a valid live legacy run may adopt the
+    // register on its first canonical claim. Recipe validation below still
+    // prevents Sauce from producing untrusted inventory work.
+    const correctionGeneration = values[correctionField] ?? 0;
     if (
       !Number.isSafeInteger(correctionGeneration)
       || correctionGeneration !== claim.correctionGeneration

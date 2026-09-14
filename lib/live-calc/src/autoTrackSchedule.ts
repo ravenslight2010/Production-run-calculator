@@ -129,11 +129,12 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
         recipe: input.v[`${slot}CheeseRecipe`],
         batchLbs: input.v[`${slot}BatchLbs`],
         ozPerPizza: input.v[`${slot}OzPerPizza`],
-        required: input.calc[`${slot}Batches`],
+        casesNeeded: number(input.v.casesNeeded),
+        pizzasPerCase: number(input.v.pizzasPerCase),
         ppm: input.calc.ppm,
       });
       const made = Math.max(0, number(input.progress?.[`${slot}BatchesMade`]));
-      if (!info.validForClaim || made >= Math.ceil(input.calc[`${slot}Batches`])) continue;
+      if (!info.validForClaim || made >= Math.ceil(info.required)) continue;
       const dueAt = Math.max(0, number(input.progress?.[`${slot}BatchAnchorNetSec`])) + info.cadence;
       const channel = `${slot}-batch` as AutoTrackScheduleChannel;
       const state = input.coordination?.[channel];
