@@ -428,6 +428,8 @@ Move more logic from client to server to improve consistency, reduce battery, an
 
 - **Live server-calc streaming (slice 5 — DONE)** — line-phase model moved server-side: `OperationalProjection` now carries `linePhases` (3-stage press/tunnel/packaging model) computed by `buildOperationalProjection` from day-state lifecycle, pause policies, and effective timing values; `LiveRunContext` adopts the confirmed projection's phases (extrapolating `remainMs` from `capturedAtServerMs`) with exact local fallback on lifecycle mismatch, missing field, or imminent phase transitions. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice5-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice5.md`.
 
+- **Live server-calc streaming (slice 6 — DONE)** — phase display strips adopt the server model: the three `computeLinePhases` call sites in `home.tsx` (ended-run badge, 3-phase line status strip, line-stage section) now read `useLiveRun().linePhases` (server-adopted with internal local fallback); local derivations remain only as defensive fallbacks. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice6-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice6.md`.
+
 ### Code References
 - `lib/live-calc/src/index.ts` — core calculation engine
 - `artifacts/run-calculator/src/liveRunCalc.ts` — client-side calc (to be migrated)
