@@ -156,3 +156,4 @@
 - [AI evaluation framework boundary](ai-evaluation-framework-boundary.md) — adapt provider-neutral invariants into project-owned offline TypeScript/Vitest; do not import external harness runtimes.
 - [AI benchmark network boundary](ai-benchmark-network-boundary.md) — routine evaluations stay offline; live provider checks require explicit opt-in and are never CI evidence.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
+- [React Day Picker v10 wrapper contract](react-day-picker-v10.md) — copied calendar wrappers must use the v10 month_grid class key and preserve default slot classes.
