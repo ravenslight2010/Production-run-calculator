@@ -429,3 +429,20 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 
 **Verification**: lib live-calc 19/19; run-calculator web suites 48/48 (operationalState, calcTick, clock-isolation, autoTrackTraysBatches); api-server `sync.liveCalcTick` 20/20; integration suites need `DATABASE_URL` (CI-only); run-calculator typecheck clean.
 
+## Live server-calc streaming (slice 5)
+
+**Date**: 2026-09-14
+**Branch**: `feat/server-line-phase-model`
+**Files changed**:
+- `lib/live-calc/src/operationalProjection.ts` — `OperationalProjection` now carries `linePhases: LinePhases` computed server-side in `buildOperationalProjection` from the day-state run lifecycle (`startedAt`/`pausedAt`/`endedAt`/pause `stoppages`), effective `preTunnelMin`/`postTunnelMin`/`freezerTime` (`applyTemporaryOverrides`), and the server clock — the same shared model the client uses locally.
+- `lib/live-calc/src/liveCalc.test.ts` — 6 new projection tests (parity with `computeLinePhases`, paused staged drain, ended sequential drain, pending empty, zero-value NaN guard, determinism); 25/25 pass.
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — `linePhases` exposed on the context value; adoption of `confirmedProjection.linePhases` when present, lifecycle matches (`facts.runStatus === runStatus`), with `remainMs` extrapolated from `capturedAtServerMs`; re-derives locally when an extrapolated countdown would cross zero or any adoption condition fails (offline / lifecycle mismatch / older server without the field).
+- `artifacts/run-calculator/src/contexts/__tests__/LiveRunContext.linePhases.test.tsx` — new suite: adopt+extrapolate, no-projection fallback, lifecycle-mismatch fallback, boundary-crossing fallback, older-server fallback; 5/5 pass.
+
+**What was wrong / missing**: the 3-stage line-phase model was the last time-varying surface still derived client-side from scratch every render — devices parsed local pause lists and local form values independently, so states could diverge across devices and the client remained the de-facto owner of pause/drain display.
+
+**What the fix was**: the server computes and streams the line-phase model in the operational projection (read-only derivation, no day-state writes); the client adopts it while confirmed with countdown extrapolation, keeping the local path only for offline/lag/edge cases. home.tsx display strips still derive locally (tracked as follow-up in the slice-5 spec).
+
+**Why it was needed**: completes server authority for the live time-varying surfaces (calc → consumption → timers → phases), giving cross-device consistency and a thin client display layer.
+
+**Verification**: lib live-calc 25/25; api-server `sync.liveCalcTick` 20/20; run-calculator 102/102 (calcTick, clock-isolation, wakeSnap, operationalState, linePhases suite + new linePhases.test.tsx, autoTrackFreezerDrain); run-calculator + api-server typechecks clean (no new live-calc test-file tsc errors beyond the pre-existing baseline in `liveCalc.test.ts`).
