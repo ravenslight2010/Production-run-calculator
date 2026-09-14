@@ -9325,7 +9325,11 @@ export default function Home() {
           // Check the reset epoch first because a device can miss the SSE reset
           // frame while asleep. The ordinary reset wipe remains the single
           // authority for clearing pre-reset local state.
-          const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+          const epochRes = await fetchWithTimeout(
+            "/api/sync/reset-epoch",
+            { cache: "no-store" },
+            10_000,
+          );
           if (epochRes.ok) {
             const epochBody = await epochRes.json().catch(() => null) as { epoch?: number; rollover?: boolean } | null;
             if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
@@ -9343,7 +9347,11 @@ export default function Home() {
 
            const snapshot = syncSnapshotIdRef.current;
            const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
-           const res = await fetch(snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl, { cache: "no-store" });
+            const res = await fetchWithTimeout(
+              snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
+              { cache: "no-store" },
+              10_000,
+            );
           if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
            const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string; canonicalRevision?: number } | null;
            adoptOperationalRevision(body && "canonicalRevision" in body ? body.canonicalRevision : undefined);

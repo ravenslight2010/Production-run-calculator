@@ -153,7 +153,11 @@ export function useHomeSyncCoordination() {
   ) => {
     const reconcile = createForegroundSyncWakeGuard(recover);
     const onOnline = () => {
-      if (!document.hidden) void reconcile();
+      // `online` is the recovery signal when a failed pull was left pending
+      // by a browser transport. Do not discard it because the page still
+      // reports hidden: WebKit can deliver the reconnect event before it
+      // updates visibility, and the wake guard keeps the retry bounded.
+      void reconcile();
     };
     window.addEventListener("online", onOnline);
     const unregister = scheduler.register({

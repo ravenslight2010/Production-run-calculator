@@ -80,3 +80,14 @@ current NO-GO.
 **How to apply:** Treat a stopped assessment as a checkpoint, not as the final
 report; preserve real failures and never fill omitted gate rows with assumed
 passes.
+
+WebKit network-fault smoke tests that use `page.route()` must block service
+workers for the test context; otherwise the service worker can answer the
+request before Playwright's route handler and the failure observer waits
+indefinitely.
+
+**Why:** WebKit served the sync request successfully from the app service
+worker, so the intended abort never ran and the reconnect assertion timed out.
+
+**How to apply:** Set `serviceWorkers: "block"` only on transport-fault smoke
+fixtures; keep normal browser coverage free to exercise the service worker.

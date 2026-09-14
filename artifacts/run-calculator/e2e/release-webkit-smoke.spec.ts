@@ -16,6 +16,11 @@ import {
 } from "./isolation";
 import { dismissOnboardingIfPresent, signUpAndHandleOnboarding } from "./onboarding";
 
+// This smoke intentionally injects a transport failure with page.route().
+// WebKit otherwise lets the app service worker answer the request before the
+// route handler, making the failure injection nondeterministic.
+test.use({ serviceWorkers: "block" });
+
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();

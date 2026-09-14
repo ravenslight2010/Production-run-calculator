@@ -98,6 +98,36 @@ describe("foreground wake sync barrier", () => {
     expect(pullClientDateRow).toHaveBeenCalledTimes(2);
   });
 
+  it("retries once when online arrives while a client-date pull is failing", async () => {
+    let rejectFirst!: (reason?: unknown) => void;
+    let resolveSecond!: (result: boolean) => void;
+    const pullClientDateRow = vi.fn()
+      .mockImplementationOnce(() => new Promise<boolean>((_resolve, reject) => {
+        rejectFirst = reject;
+      }))
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+        resolveSecond = resolve;
+      }));
+    const reconcile = createForegroundSyncWakeGuard(pullClientDateRow);
+
+    const first = reconcile();
+    const overlappingWake = reconcile();
+    expect(overlappingWake).toBe(first);
+    expect(pullClientDateRow).toHaveBeenCalledTimes(1);
+
+    rejectFirst(new Error("network failed"));
+    // Flush the rejection handler and bounded retry directly instead of
+    // polling; the full client suite may have fake timers active in another
+    // test file, which makes vi.waitFor's timer-driven polling flaky here.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pullClientDateRow).toHaveBeenCalledTimes(2);
+
+    resolveSecond(true);
+    await expect(first).rejects.toThrow("network failed");
+    await vi.waitFor(() => expect(pullClientDateRow).toHaveBeenCalledTimes(2));
+  });
+
   it("reconciles profile and factory domains only after the live row lands", () => {
     const liveApply = homeSource.indexOf("applySyncCallbackRef.current(payload)");
     const profiles = homeSource.indexOf("reconcileProfilesFromServerDetailed()", liveApply);
