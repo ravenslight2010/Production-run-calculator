@@ -304,6 +304,7 @@ function computeServerLiveState(
   autoTrackSchedule: AutoTrackSchedule | null;
   operationalProjection: OperationalProjection | null;
   summaryStats: Record<string, SummaryStats>;
+  runLines: Record<string, Array<{ itemKey: string; qty: number }>>;
   serverTime: number;
   calculationRevision: number;
   snapshotId?: string;
@@ -342,15 +343,28 @@ function computeServerLiveState(
       : null;
     // Pre-compute summaryStats for all runs so the client can read them
     // without recomputing locally (saves ~21 computeSummaryStats calls per render).
+    // Pre-compute summaryStats AND consumption runLines for all runs so the
+    // client can read them without recomputing locally (saves ~21
+    // computeSummaryStats calls per render plus the warehouse/inventory
+    // consumption derivations). Same pepTypes derivation as the run-end
+    // rollup path so lines stay in parity between live stream and finalize.
     const summaryStatsMap: Record<string, SummaryStats> = {};
+    const runLinesMap: Record<string, Array<{ itemKey: string; qty: number }>> = {};
     if (payload?.dayState?.runs && payload?.runValues) {
+      const ds = payload.dayState as Record<string, unknown> | undefined;
+      const pepTypes = Array.isArray(ds?.pepTypes)
+        ? (ds.pepTypes as unknown[]).filter((value: unknown): value is string => typeof value === "string")
+        : SERVER_DEFAULT_PEP_TYPES;
       for (const run of payload.dayState.runs) {
         const rid = run.id;
         if (typeof rid !== "string") continue;
         const vals = payload.runValues[rid] as unknown as SummaryStatsInput | undefined;
         if (!vals || typeof vals !== "object") continue;
         try {
-          summaryStatsMap[rid] = computeSummaryStats(vals, []);
+          summaryStatsMap[rid] = computeSummaryStats(vals, pepTypes);
+        } catch { /* skip malformed run */ }
+        try {
+          runLinesMap[rid] = computeRunConsumptionLines(vals as any, pepTypes);
         } catch { /* skip malformed run */ }
       }
     }
@@ -359,6 +373,7 @@ function computeServerLiveState(
       autoTrackSchedule,
       operationalProjection,
       summaryStats: summaryStatsMap,
+      runLines: runLinesMap,
       serverTime: nowMs,
       calculationRevision,
       ...(snapshotId ? { snapshotId } : {}),
@@ -369,6 +384,7 @@ function computeServerLiveState(
       autoTrackSchedule: null,
       operationalProjection: null,
       summaryStats: {} as Record<string, SummaryStats>,
+      runLines: {} as Record<string, Array<{ itemKey: string; qty: number }>>,
       serverTime: nowMs,
       calculationRevision,
       ...(snapshotId ? { snapshotId } : {}),

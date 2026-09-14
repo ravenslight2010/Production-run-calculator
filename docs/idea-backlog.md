@@ -423,7 +423,8 @@ Move more logic from client to server to improve consistency, reduce battery, an
 - Move run timing calculations to server
 - Client becomes thin display layer + input collector
 - **Live server-calc streaming (slice 2 — DONE)** — server tick widened to any selected run with `runValues` (not just active runs); the `shouldEmitSetupCalcTick` + `buildSetupCalcTickFrame` helpers emit a `setupTick: true` frame for pending runs so the Live tab gets a fresh server calc on switch without cold-start delay. Spec: `docs/superpowers/specs/2026-09-13-server-live-calc-stream-slice2-design.md`. Plan: `docs/superpowers/plans/2026-09-13-server-live-calc-stream-slice2.md`.
-- Live server-calc streaming slice 3: ingredient/consumption sums beyond server snapshots
+- **Live server-calc streaming (slice 3 — DONE)** — server streams per-run `runLines` (ingredient + packaging consumption, via `computeRunConsumptionLines`) in every SSE frame alongside `summaryStats`; client stores them in `serverRunLinesRef` and adopts server summaryStats for the **current** run when online (local fallback when offline/stale). Spec: `docs/superpowers/specs/2026-09-13-server-live-calc-stream-slice3-design.md`. Plan: `docs/superpowers/plans/2026-09-13-server-live-calc-stream-slice3.md`.
+- Live server-calc streaming slice 4: run-timing server authority
 
 ### Code References
 - `lib/live-calc/src/index.ts` — core calculation engine
