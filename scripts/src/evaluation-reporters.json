@@ -1,0 +1,15 @@
+{
+  "reporters": [
+    {
+      "source": "second-pass-reviewer-benchmark.mts",
+      "projection": "retainObservationMetrics",
+      "privacyTest": "second-pass-reviewer-benchmark.privacy.test.ts"
+    }
+  ],
+  "nonReporters": [
+    {
+      "source": "verify-startup-failures.mts",
+      "reason": "Deterministic startup-health evidence; it does not evaluate or retain AI/provider results."
+    }
+  ]
+}

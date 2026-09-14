@@ -10,6 +10,7 @@ import {
 import {
   OPERATION_FINDINGS,
   evaluateReviewerEvidence,
+  retainObservationMetrics,
   writeReviewerBenchmarkReport,
 } from "./second-pass-reviewer-benchmark.mts";
 
@@ -66,6 +67,13 @@ const RETAINED_OBSERVATION_FIELDS = [
 
 describe("retained reviewer benchmark privacy boundary", () => {
   it("retains only aggregate metrics from observations", () => {
+    const directlyRetained = retainObservationMetrics(
+      observationsWithSensitivePayloads()["parse-spec-sheet"],
+    );
+    expect(Object.keys(directlyRetained).sort()).toEqual(
+      [...RETAINED_OBSERVATION_FIELDS].sort(),
+    );
+
     const report = evaluateReviewerEvidence(
       EMPTY_FINDINGS,
       observationsWithSensitivePayloads(),
@@ -140,6 +148,7 @@ describe("retained reviewer benchmark privacy boundary", () => {
       observationsPath,
       JSON.stringify({
         sourceHash: createHash("sha256").update(sourceBytes).digest("hex"),
+        model: "synthetic-provider-model",
         operations: observations,
       }),
     );

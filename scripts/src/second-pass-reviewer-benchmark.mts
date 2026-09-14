@@ -105,7 +105,7 @@ function requireNullableNonNegativeInteger(
   return requireNonNegativeInteger(observation, field);
 }
 
-function retainObservationMetrics(observationInput: unknown): Observation {
+export function retainObservationMetrics(observationInput: unknown): Observation {
   const observation = requireObservationRecord(observationInput);
   const integers = Object.fromEntries(
     NON_NEGATIVE_INTEGER_METRICS.map((field) => [
