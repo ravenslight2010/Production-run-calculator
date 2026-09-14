@@ -18,6 +18,7 @@ from gemini_skill_trigger_benchmark import (
     record_manual_decision,
     review_queue,
     validate_classification,
+    write_benchmark_artifacts,
 )
 from skill_trigger_benchmark import MANAGED_FIXTURE_SKILLS, PROMPTS, build
 
@@ -242,7 +243,8 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(manifest["outcome"]["state"], "unavailable")
         self.assertEqual(manifest["execution"]["retries"], 0)
         self.assertFalse(manifest["privacy"]["rawProviderPayloadsRetained"])
-        self.assertEqual(manifest["privacy"]["mode"], "content-retained")
+        self.assertEqual(manifest["privacy"]["mode"], "metadata-only")
+        self.assertEqual(manifest["privacy"]["retainedEvaluationContent"], "none")
         self.assertNotIn("results", manifest)
         failed = [{**unavailable_records[0], "status": "provider_failure"}]
         self.assertEqual(
@@ -304,6 +306,72 @@ class GeminiBenchmarkTests(unittest.TestCase):
             record_manual_decision(queue, decisions, "one", "trigger", "reason")
             with self.assertRaises(SystemExit):
                 record_manual_decision(queue, decisions, "one", "trigger", "again")
+
+    def test_all_benchmark_artifacts_exclude_private_model_content(self):
+        private_values = {
+            "RAW_PROMPT_SENTINEL",
+            "PROVIDER_PAYLOAD_SENTINEL",
+            "CREDENTIAL_SENTINEL",
+            "CONVERSATION_TEXT_SENTINEL",
+        }
+        records = [{
+            "id": "synthetic-private-case",
+            "skill": "synthetic-skill",
+            "query": "RAW_PROMPT_SENTINEL CONVERSATION_TEXT_SENTINEL",
+            "expected": "trigger",
+            "attempts": 1,
+            "decision": "do_not_trigger",
+            "confidence": 0.91,
+            "rationale": "PROVIDER_PAYLOAD_SENTINEL",
+            "provider_payload": {"body": "PROVIDER_PAYLOAD_SENTINEL"},
+            "credential": "CREDENTIAL_SENTINEL",
+            "conversation": "CONVERSATION_TEXT_SENTINEL",
+            "status": "disagreement",
+        }]
+        result = {
+            "provider": "gemini",
+            "model": "synthetic-model",
+            "run_at": "2026-09-14T00:00:00+00:00",
+            "metrics": metrics(records),
+            "results": records,
+            "evaluationManifest": {
+                "privacy": {
+                    "mode": "metadata-only",
+                    "rawProviderPayloadsRetained": False,
+                    "retainedEvaluationContent": "none",
+                },
+            },
+        }
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = [
+                root / "results.json",
+                root / "queue.json",
+                root / "report.md",
+            ]
+            write_benchmark_artifacts(*paths, result, records)
+
+            retained = "\n".join(path.read_text() for path in paths)
+            for private_value in private_values:
+                self.assertNotIn(private_value, retained)
+
+            results_payload = json.loads(paths[0].read_text())
+            self.assertEqual(
+                results_payload["results"],
+                [{
+                    "id": "synthetic-private-case",
+                    "skill": "synthetic-skill",
+                    "expected": "trigger",
+                    "attempts": 1,
+                    "decision": "do_not_trigger",
+                    "confidence": 0.91,
+                    "status": "disagreement",
+                }],
+            )
+            queue_payload = json.loads(paths[1].read_text())
+            self.assertEqual(queue_payload["cases"][0]["reason"], "disagreement")
+            self.assertNotIn("query", queue_payload["cases"][0])
+            self.assertNotIn("rationale", queue_payload["cases"][0]["gemini"])
 
     def test_cli_review_workflow_and_benchmark_decisions_isolation(self):
         with TemporaryDirectory() as directory:

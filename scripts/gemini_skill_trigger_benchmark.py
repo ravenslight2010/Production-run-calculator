@@ -243,9 +243,8 @@ def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         {
             "id": r["id"],
             "skill": r["skill"],
-            "query": r["query"],
             "expected": r["expected"],
-            "gemini": {k: r[k] for k in ("decision", "confidence", "rationale") if k in r},
+            "gemini": {k: r[k] for k in ("decision", "confidence") if k in r},
             "error": r.get("error"),
             "reason": r["status"],
             "manual_decision": None,
@@ -278,6 +277,39 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         "Excluded cases are not treated as do-not-trigger decisions. See the manual-review queue for provider failures, invalid or uncertain responses, and disagreements.",
     ]
     path.write_text("\n".join(lines) + "\n")
+
+
+def retained_results(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project evaluation records onto the metadata safe to retain on disk."""
+    retained_keys = (
+        "id",
+        "skill",
+        "expected",
+        "attempts",
+        "decision",
+        "confidence",
+        "status",
+        "error",
+    )
+    return [{key: record[key] for key in retained_keys if key in record} for record in records]
+
+
+def write_benchmark_artifacts(
+    results_path: Path,
+    queue_path: Path,
+    report_path: Path,
+    result: dict[str, Any],
+    records: Iterable[dict[str, Any]],
+) -> None:
+    records = list(records)
+    retained_result = {**result, "results": retained_results(records)}
+    results_path.write_text(json.dumps(retained_result, indent=2) + "\n")
+    queue_path.write_text(json.dumps({
+        "provider": "gemini",
+        "manual_decisions_excluded_from_metrics": True,
+        "cases": review_queue(records),
+    }, indent=2) + "\n")
+    write_report(report_path, retained_result)
 
 
 PROVIDER_FAILURE_STATUSES = {
@@ -366,9 +398,9 @@ def evaluation_manifest(
             "seed": None,
         },
         "privacy": {
-            "mode": "content-retained",
+            "mode": "metadata-only",
             "rawProviderPayloadsRetained": False,
-            "retainedEvaluationContent": "queries-and-model-output",
+            "retainedEvaluationContent": "none",
         },
         "outcome": {"state": state, "reason": reason},
         "provenance": {
@@ -557,9 +589,7 @@ def main() -> None:
             args.retries,
         ),
     }
-    args.results.write_text(json.dumps(result, indent=2) + "\n")
-    args.queue.write_text(json.dumps({"provider": "gemini", "manual_decisions_excluded_from_metrics": True, "cases": review_queue(records)}, indent=2) + "\n")
-    write_report(args.report, result)
+    write_benchmark_artifacts(args.results, args.queue, args.report, result, records)
     print(json.dumps({"provider": "gemini", "evaluated": result["metrics"]["evaluated"], "excluded": result["metrics"]["excluded"]}, indent=2))
     failures = provider_failure_cases(records)
     if failures:
