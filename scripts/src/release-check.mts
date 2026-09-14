@@ -898,6 +898,17 @@ const steps: ReleaseStep[] = [
     concurrencyLimit: 1,
   },
   {
+    label: "browser calendar tests",
+    args: [
+      "--filter",
+      "@workspace/run-calculator",
+      "run",
+      "test:e2e:calendar",
+    ],
+    stage: "browser-calendar",
+    concurrencyLimit: 1,
+  },
+  {
     label: "browser accessibility tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
     env: {
@@ -998,6 +1009,7 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     "release-tests": [],
     "browser-guard": [],
     "browser-smoke": ["onboarding bypass guard"],
+    "browser-calendar": ["onboarding bypass guard"],
     "browser-accessibility": ["onboarding bypass guard"],
     "browser-webkit": ["onboarding bypass guard"],
     "browser-full": ["onboarding bypass guard"],

@@ -312,6 +312,14 @@ async function run(): Promise<void> {
   const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
   const fullReleaseGateInventory = releaseGateLabelsForMode("full");
   assert.ok(
+    standardReleaseGateInventory.includes("browser calendar tests"),
+    "the standard release must retain the isolated desktop-and-phone calendar gate",
+  );
+  assert.ok(
+    fullReleaseGateInventory.includes("browser calendar tests"),
+    "the full release must retain the standard isolated calendar gate",
+  );
+  assert.ok(
     RELEASE_CHECK_API_SHARD_STEPS.every(
       (step) =>
         step.group === "api-test-shards" &&
