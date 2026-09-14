@@ -15,6 +15,7 @@ import {
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
+  IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
@@ -33,6 +34,7 @@ import {
   resolveReleaseEvidenceDir,
   sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
+  validateReleaseAiEvaluationEvidence,
   validateReportKeyRotationEvidence,
   validateReleaseReport,
   validateWebKitBrowserEvidence,
@@ -85,6 +87,63 @@ function sourceEvidence(overrides: Record<string, unknown> = {}) {
     evidenceId: computeSourceLibraryEvidenceId(evidence),
   };
 }
+
+const aiDigest = "a".repeat(64);
+function aiEvaluationManifest(overrides: Record<string, unknown> = {}) {
+  return {
+    manifestVersion: 1,
+    evaluation: { id: "release-ai-fixture", kind: "deterministic" },
+    corpus: {
+      sha256: aiDigest,
+      cases: 2,
+      sourceAuthority: "reviewed-release-fixture",
+    },
+    thresholds: { minimumAccuracy: 1 },
+    dependencies: { evaluator: "1" },
+    provider: { identityState: "not-applicable", name: null, model: null },
+    performance: {
+      inputTokens: { state: "unavailable", reason: "not applicable" },
+      outputTokens: { state: "unavailable", reason: "not applicable" },
+      cost: { state: "measured", value: 0, unit: "USD" },
+      latencyP95: { state: "unavailable", reason: "not retained" },
+    },
+    execution: { retries: 0, seed: null },
+    privacy: {
+      mode: "metadata-only",
+      rawProviderPayloadsRetained: false,
+      retainedEvaluationContent: "none",
+    },
+    outcome: { state: "passed", reason: null },
+    provenance: {
+      sourceSha256: aiDigest,
+      evidence: { state: "hashed", sha256: "b".repeat(64) },
+      evidenceType: "release-fixture",
+      evaluator: { state: "hashed", sha256: "c".repeat(64) },
+    },
+    ...overrides,
+  };
+}
+
+const aiRequirements = {
+  evaluationId: "release-ai-fixture",
+  kind: "deterministic" as const,
+  source: {
+    sha256: aiDigest,
+    cases: 2,
+    sourceAuthority: "reviewed-release-fixture",
+  },
+  thresholds: { minimumAccuracy: 1 },
+  dependencies: { evaluator: "1" },
+  provider: {
+    identityState: "not-applicable" as const,
+    name: null,
+    model: null,
+  },
+  evidence: { state: "hashed" as const, sha256: "b".repeat(64) },
+  evidenceType: "release-fixture",
+  evaluator: { state: "hashed" as const, sha256: "c".repeat(64) },
+  requirePassedOutcome: true,
+};
 
 assert.equal(
   PRODUCTION_DEPENDENCY_AUDIT_STEP.timeoutMs,
@@ -149,6 +208,14 @@ async function fixture(
             })}\n`
         : file === SOURCE_LIBRARY_RECONCILIATION_EVIDENCE
           ? `${JSON.stringify(sourceEvidence())}\n`
+          : file === IMPORT_CORPUS_EVALUATION_EVIDENCE
+            ? await readFile(
+                new URL(
+                  "../../lib/corpus-harness/snapshots/evaluation-manifest.json",
+                  import.meta.url,
+                ),
+                "utf8",
+              )
           : "fixture evidence\n",
     );
   }
@@ -156,6 +223,106 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  assert.equal(
+    validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify(aiEvaluationManifest())),
+      aiRequirements,
+    ).evaluation.kind,
+    "deterministic",
+    "current deterministic evidence with matching source and provenance must be accepted",
+  );
+  const expectedProvider = {
+    identityState: "identified" as const,
+    name: "fixture-provider",
+    model: "fixture-model",
+  };
+  const providerManifest = aiEvaluationManifest({
+    evaluation: { id: "release-provider-fixture", kind: "provider-backed" },
+    provider: expectedProvider,
+  });
+  assert.equal(
+    validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify({ evaluationManifest: providerManifest })),
+      {
+        ...aiRequirements,
+        evaluationId: "release-provider-fixture",
+        kind: "provider-backed",
+        provider: expectedProvider,
+      },
+    ).evaluation.kind,
+    "provider-backed",
+    "provider-backed evidence must remain distinguishable and retain provider identity",
+  );
+  assert.throws(
+    () => validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify({
+        ...providerManifest,
+        provider: {
+          identityState: "identified",
+          name: "fixture-provider",
+          model: "different-model",
+        },
+      })),
+      {
+        ...aiRequirements,
+        evaluationId: "release-provider-fixture",
+        kind: "provider-backed",
+        provider: expectedProvider,
+      },
+    ),
+    /provider identity/,
+    "provider-backed evidence from another model must not be comparable",
+  );
+  assert.throws(
+    () => validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify(aiEvaluationManifest({ manifestVersion: 0 }))),
+      aiRequirements,
+    ),
+    /unsupported evaluation manifest version/,
+    "unsupported shared manifest versions must fail closed",
+  );
+  assert.throws(
+    () => validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify(aiEvaluationManifest({
+        corpus: {
+          ...aiRequirements.source,
+          sha256: "d".repeat(64),
+        },
+        provenance: {
+          ...aiEvaluationManifest().provenance,
+          sourceSha256: "d".repeat(64),
+        },
+      }))),
+      aiRequirements,
+    ),
+    /source identity/,
+    "evidence for another corpus must not be treated as comparable",
+  );
+  assert.throws(
+    () => validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify(aiEvaluationManifest({
+        provenance: {
+          ...aiEvaluationManifest().provenance,
+          evaluator: { state: "unavailable", reason: "not retained" },
+        },
+      }))),
+      aiRequirements,
+    ),
+    /required evaluator provenance is unavailable/,
+    "unavailable required provenance must fail closed",
+  );
+  assert.throws(
+    () => validateReleaseAiEvaluationEvidence(
+      Buffer.from(JSON.stringify({
+        provider: "gemini",
+        model: "legacy-model",
+        results: [],
+      })),
+      aiRequirements,
+    ),
+    /explicit shared evaluation manifest/,
+    "legacy AI reports must not qualify as release evidence",
+  );
   const rootPackage = JSON.parse(
     await readFile(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { scripts?: Record<string, string> };
@@ -957,6 +1124,132 @@ async function run(): Promise<void> {
         expectedLabels: validLabels,
       }),
       "an allowlisted evidence set should pass",
+    );
+    const retainedAiEvidencePath = join(
+      root,
+      IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    );
+    const retainedAiEvidence = JSON.parse(
+      await readFile(retainedAiEvidencePath, "utf8"),
+    ) as Record<string, unknown>;
+    const retainedCorpus = retainedAiEvidence.corpus as Record<string, unknown>;
+    const retainedProvenance = retainedAiEvidence.provenance as Record<string, unknown>;
+    await writeFile(
+      retainedAiEvidencePath,
+      JSON.stringify({
+        ...retainedAiEvidence,
+        corpus: { ...retainedCorpus, sha256: "d".repeat(64) },
+        provenance: {
+          ...retainedProvenance,
+          sourceSha256: "d".repeat(64),
+        },
+      }),
+      "utf8",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      /source identity/,
+      "the real release verifier must reject AI evidence for another corpus",
+    );
+    for (const [label, mutation, expectedError] of [
+      [
+        "thresholds",
+        { thresholds: { minimumCorpusFiles: 999 } },
+        /evaluation thresholds/,
+      ],
+      [
+        "dependencies",
+        { dependencies: { evaluator: "substituted" } },
+        /evaluation dependencies/,
+      ],
+      [
+        "evidence identity",
+        {
+          provenance: {
+            ...retainedProvenance,
+            evidence: { state: "hashed", sha256: "e".repeat(64) },
+          },
+        },
+        /evaluation evidence identity/,
+      ],
+      [
+        "evidence type",
+        {
+          provenance: {
+            ...retainedProvenance,
+            evidenceType: "substituted-evidence",
+          },
+        },
+        /evaluation evidence type/,
+      ],
+      [
+        "evaluator identity",
+        {
+          provenance: {
+            ...retainedProvenance,
+            evaluator: { state: "hashed", sha256: "f".repeat(64) },
+          },
+        },
+        /evaluation evaluator identity/,
+      ],
+    ] as const) {
+      await writeFile(
+        retainedAiEvidencePath,
+        JSON.stringify({ ...retainedAiEvidence, ...mutation }),
+        "utf8",
+      );
+      await assert.rejects(
+        verifyReleaseEvidence(root, {
+          currentRevision: "current-revision",
+          expectedMode: "standard",
+          expectedLabels: validLabels,
+        }),
+        expectedError,
+        `the real release verifier must reject changed ${label}`,
+      );
+    }
+    await writeFile(
+      retainedAiEvidencePath,
+      JSON.stringify({
+        provider: "gemini",
+        model: "legacy-model",
+        results: [],
+      }),
+      "utf8",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      /explicit shared evaluation manifest/,
+      "the real release verifier must reject legacy AI evidence",
+    );
+    await writeFile(
+      retainedAiEvidencePath,
+      `${JSON.stringify(retainedAiEvidence)}\n`,
+      "utf8",
+    );
+    await rm(retainedAiEvidencePath);
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      new RegExp(`Required release evidence is missing:[\\s\\S]*${IMPORT_CORPUS_EVALUATION_EVIDENCE}`),
+      "the real release verifier must require retained AI evaluation evidence",
+    );
+    await mkdir(join(retainedAiEvidencePath, ".."), { recursive: true });
+    await writeFile(
+      retainedAiEvidencePath,
+      `${JSON.stringify(retainedAiEvidence)}\n`,
+      "utf8",
     );
 
     await writeFile(

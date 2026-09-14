@@ -8,6 +8,10 @@
   ],
   "nonReporters": [
     {
+      "source": "compare-ai-evaluations.mts",
+      "reason": "Read-only comparison of two already-retained, validated manifests; it performs no evaluation and does not write a retained artifact or provider response."
+    },
+    {
       "source": "verify-startup-failures.mts",
       "reason": "Deterministic startup-health evidence; it does not evaluate or retain AI/provider results."
     }

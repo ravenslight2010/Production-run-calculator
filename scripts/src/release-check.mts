@@ -13,6 +13,12 @@ import {
 } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  validateComparableEvaluationManifest,
+  validateEvaluationManifest,
+  type EvaluationComparabilityRequirements,
+  type EvaluationManifest,
+} from "@workspace/ai-evaluation";
+import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
@@ -119,6 +125,80 @@ export type ReleaseEvidenceOptions = {
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   expectedSourceLibraryRevision?: string;
 };
+
+export function validateReleaseAiEvaluationEvidence(
+  evidence: Buffer,
+  requirements: EvaluationComparabilityRequirements,
+): EvaluationManifest {
+  let report: unknown;
+  try {
+    report = JSON.parse(evidence.toString("utf8"));
+  } catch {
+    throw new Error("AI evaluation evidence must be valid JSON");
+  }
+  if (!report || typeof report !== "object" || Array.isArray(report)) {
+    throw new Error("AI evaluation evidence must be an object");
+  }
+  const record = report as Record<string, unknown>;
+  const manifest = "evaluationManifest" in record
+    ? record.evaluationManifest
+    : record;
+  if (
+    !manifest
+    || typeof manifest !== "object"
+    || Array.isArray(manifest)
+    || !("manifestVersion" in manifest)
+  ) {
+    throw new Error(
+      "AI release evidence must contain an explicit shared evaluation manifest",
+    );
+  }
+  return validateComparableEvaluationManifest(manifest, requirements);
+}
+
+async function importCorpusEvaluationRequirements(): Promise<EvaluationComparabilityRequirements> {
+  let canonical: unknown;
+  try {
+    canonical = JSON.parse(
+      await readFile(IMPORT_CORPUS_EVALUATION_SOURCE, "utf8"),
+    );
+  } catch (error) {
+    throw new Error(
+      `Could not read canonical import corpus evaluation manifest: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  const manifest = validateEvaluationManifest(canonical);
+  if (
+    manifest.evaluation.id !== "deterministic-import-corpus"
+    || manifest.evaluation.kind !== "deterministic"
+  ) {
+    throw new Error(
+      "canonical import corpus evaluation manifest has an unexpected evaluation identity",
+    );
+  }
+  if (
+    manifest.provenance.evidence.state !== "hashed"
+    || manifest.provenance.evaluator.state !== "hashed"
+  ) {
+    throw new Error(
+      "canonical import corpus evaluation manifest requires hashed evidence and evaluator provenance",
+    );
+  }
+  return {
+    evaluationId: "deterministic-import-corpus",
+    kind: "deterministic",
+    source: manifest.corpus,
+    thresholds: manifest.thresholds,
+    dependencies: manifest.dependencies,
+    provider: manifest.provider,
+    evidence: manifest.provenance.evidence,
+    evidenceType: manifest.provenance.evidenceType,
+    evaluator: manifest.provenance.evaluator,
+    requirePassedOutcome: true,
+  };
+}
 
 export type BrowserDurationRegression = {
   file: string;
@@ -260,6 +340,12 @@ const webkitBrowserEvidencePath = resolve(
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
+export const IMPORT_CORPUS_EVALUATION_EVIDENCE =
+  "ai-evaluations/deterministic-import-corpus.json";
+const IMPORT_CORPUS_EVALUATION_SOURCE = resolve(
+  rootDir,
+  "lib/corpus-harness/snapshots/evaluation-manifest.json",
+);
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
@@ -274,6 +360,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "browser-full/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  IMPORT_CORPUS_EVALUATION_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
 ] as const;
@@ -1174,6 +1261,7 @@ export async function verifyReleaseEvidence(
   const requiresFullBrowserEvidence = evidenceMode === "full";
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
+    IMPORT_CORPUS_EVALUATION_EVIDENCE,
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -1227,6 +1315,10 @@ export async function verifyReleaseEvidence(
     expectedSourceLibraryEnvironment,
     expectedSourceLibraryRevision,
   });
+  validateReleaseAiEvaluationEvidence(
+    await readFile(resolve(evidenceRoot, IMPORT_CORPUS_EVALUATION_EVIDENCE)),
+    await importCorpusEvaluationRequirements(),
+  );
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
@@ -2322,6 +2414,20 @@ async function writeReleaseReport(
       : "release-check-report.md";
   const reportPath = resolve(rootDir, releaseEvidenceDir, reportFile);
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
+  if (metadata.reportKind !== "checkpoint") {
+    const retainedImportCorpusEvaluationPath = resolve(
+      rootDir,
+      releaseEvidenceDir,
+      IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    );
+    await mkdir(resolve(retainedImportCorpusEvaluationPath, ".."), {
+      recursive: true,
+    });
+    await writeFile(
+      retainedImportCorpusEvaluationPath,
+      await readFile(IMPORT_CORPUS_EVALUATION_SOURCE),
+    );
+  }
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
     file.startsWith("clean-start/"),
   );
@@ -2342,6 +2448,9 @@ async function writeReleaseReport(
         file !== undefined,
     ),
   );
+  if (metadata.reportKind !== "checkpoint") {
+    availableEvidenceFiles.add(IMPORT_CORPUS_EVALUATION_EVIDENCE);
+  }
   try {
     await access(
       resolve(

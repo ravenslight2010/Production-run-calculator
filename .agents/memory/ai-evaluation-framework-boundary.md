@@ -25,3 +25,15 @@ corpus, the produced evidence, and the evaluator implementation. Never reuse
 one digest for another; represent unavailable historical identity explicitly.
 Privacy metadata must also describe retained normalized queries/model output,
 not only whether the raw provider envelope was discarded.
+
+At a release boundary, matching the corpus alone is insufficient. Exact-match
+the thresholds, dependencies, evidence hash and type, evaluator hash, and
+provider/model identity against the reviewed canonical contract.
+
+**Why:** A valid manifest with the same corpus can still describe substituted
+evaluator code, altered acceptance criteria, different output, or another
+provider model and is therefore not comparable release proof.
+
+**How to apply:** Derive trusted expectations from the canonical manifest at
+the reviewed revision, require hashed evidence and evaluator provenance, and
+reject legacy or unavailable identities rather than translating them.

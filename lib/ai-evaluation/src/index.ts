@@ -40,6 +40,9 @@ export type EvaluationManifest = {
   };
 };
 
+export type EvaluationSourceIdentity = EvaluationManifest["corpus"];
+
+
 export type EvaluationManifestChange = {
   path: string;
   before: unknown;
@@ -237,6 +240,75 @@ export function validateEvaluationManifest(value: unknown): EvaluationManifest {
   };
 }
 
+export function validateComparableEvaluationManifest(
+  value: unknown,
+  requirements: EvaluationComparabilityRequirements,
+): EvaluationManifest {
+  const manifest = validateEvaluationManifest(value);
+  if (manifest.evaluation.id !== requirements.evaluationId) {
+    throw new Error(
+      `evaluation identity mismatch: expected ${requirements.evaluationId}, received ${manifest.evaluation.id}`,
+    );
+  }
+  if (manifest.evaluation.kind !== requirements.kind) {
+    throw new Error(
+      `evaluation kind mismatch: expected ${requirements.kind}, received ${manifest.evaluation.kind}`,
+    );
+  }
+  if (
+    manifest.corpus.sha256 !== requirements.source.sha256
+    || manifest.corpus.cases !== requirements.source.cases
+    || manifest.corpus.sourceAuthority !== requirements.source.sourceAuthority
+  ) {
+    throw new Error("evaluation source identity does not match the required corpus");
+  }
+  const sameRecord = (
+    actual: Record<string, number | string>,
+    expected: Record<string, number | string>,
+  ): boolean => {
+    const actualEntries = Object.entries(actual).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    const expectedEntries = Object.entries(expected).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
+  };
+  if (!sameRecord(manifest.thresholds, requirements.thresholds)) {
+    throw new Error("evaluation thresholds do not match the required contract");
+  }
+  if (!sameRecord(manifest.dependencies, requirements.dependencies)) {
+    throw new Error("evaluation dependencies do not match the required contract");
+  }
+  if (JSON.stringify(manifest.provider) !== JSON.stringify(requirements.provider)) {
+    throw new Error("evaluation provider identity does not match the required contract");
+  }
+  if (requirements.requirePassedOutcome && manifest.outcome.state !== "passed") {
+    throw new Error(
+      `evaluation outcome must be passed, received ${manifest.outcome.state}`,
+    );
+  }
+  if (manifest.provenance.evidence.state !== "hashed") {
+    throw new Error("required evaluation evidence provenance is unavailable");
+  }
+  if (
+    manifest.provenance.evidence.sha256 !== requirements.evidence.sha256
+  ) {
+    throw new Error("evaluation evidence identity does not match the required contract");
+  }
+  if (manifest.provenance.evidenceType !== requirements.evidenceType) {
+    throw new Error("evaluation evidence type does not match the required contract");
+  }
+  if (manifest.provenance.evaluator.state !== "hashed") {
+    throw new Error("required evaluator provenance is unavailable");
+  }
+  if (
+    manifest.provenance.evaluator.sha256 !== requirements.evaluator.sha256
+  ) {
+    throw new Error("evaluation evaluator identity does not match the required contract");
+  }
+  return manifest;
+}
 
 const unavailable = (reason: string): Measurement => ({ state: "unavailable", reason });
 
@@ -502,3 +574,22 @@ export function compareEvaluationManifests(
     summary,
   };
 }
+
+export type EvaluationComparabilityRequirements = {
+  evaluationId: string;
+  kind: EvaluationManifest["evaluation"]["kind"];
+  source: EvaluationSourceIdentity;
+  thresholds: Record<string, number>;
+  dependencies: Record<string, string>;
+  provider: EvaluationManifest["provider"];
+  evidence: Extract<
+    EvaluationManifest["provenance"]["evidence"],
+    { state: "hashed" }
+  >;
+  evidenceType: string;
+  evaluator: Extract<
+    EvaluationManifest["provenance"]["evaluator"],
+    { state: "hashed" }
+  >;
+  requirePassedOutcome?: boolean;
+};
