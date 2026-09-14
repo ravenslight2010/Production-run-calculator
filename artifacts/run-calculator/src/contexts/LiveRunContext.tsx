@@ -33,6 +33,7 @@ import {
   computeLinePhases,
   computePackagingDrainElapsedSec,
   lineHasPackagingDrain,
+  type LinePhases,
 } from "../linePhases";
 import { pauseStopsTunnel } from "../pausePolicy";
 import {
@@ -65,6 +66,8 @@ export interface LiveRunContextValue {
   calc: Calc;
   liveFreezerMin: number;
   elapsedBatchSec: number;
+  /** Day-state-owned line-phase model; server-adopted when confirmed, local fallback. */
+  linePhases: LinePhases;
   currentRunDowntimeMs: number;
   casesPct: number;
   casesFreezerPct: number;
@@ -286,6 +289,14 @@ export function LiveRunProvider({
       )
     : localElapsedBatchSec;
 
+  const serverLinePhases = confirmedProjection?.linePhases ?? null;
+  // Slice 5: the 3-stage line-phase model is server-owned. While a confirmed
+  // projection exists for the current run AND its lifecycle stamp matches the
+  // local run status (a just-paused/ended run falls back locally for at most
+  // one tick until the server delivers the new lifecycle frame), adopt the
+  // server phases and extrapolate the countdowns from capturedAtServerMs.
+  // When an extrapolated countdown would cross zero, re-derive locally — the
+  // math is identical, so the device and the next server tick agree.
   const linePhases = useMemo(() => {
     const pauses = (currentRun?.stoppages ?? []).filter((s) => s.type === "pause");
     const openPause = pauses
@@ -300,7 +311,7 @@ export function LiveRunProvider({
         (latest, s) => (!latest || (s.endedAt ?? 0) > (latest.endedAt ?? 0) ? s : latest),
         undefined,
       );
-    return computeLinePhases({
+    const local = computeLinePhases({
       elapsedBatchSec,
       pausedAt: currentRun?.pausedAt,
       lastResumeWallMs: lastClosedPause?.endedAt ?? 0,
@@ -314,7 +325,25 @@ export function LiveRunProvider({
       nowMs: operationalNowMs,
       endedAt: currentRun?.endedAt,
     });
+    if (
+      !serverLinePhases ||
+      !confirmedProjection ||
+      confirmedProjection.facts.runStatus !== runStatus
+    ) {
+      return local;
+    }
+    const deltaMs = Math.max(0, operationalNowMs - confirmedProjection.capturedAtServerMs);
+    const wouldTransition = [serverLinePhases.stage1, serverLinePhases.stage2, serverLinePhases.stage3]
+      .some((phase) => phase.remainMs > 0 && phase.remainMs - deltaMs <= 0);
+    if (wouldTransition) return local;
+    return {
+      stage1: { ...serverLinePhases.stage1, remainMs: Math.max(0, serverLinePhases.stage1.remainMs - deltaMs) },
+      stage2: { ...serverLinePhases.stage2, remainMs: Math.max(0, serverLinePhases.stage2.remainMs - deltaMs) },
+      stage3: { ...serverLinePhases.stage3, remainMs: Math.max(0, serverLinePhases.stage3.remainMs - deltaMs) },
+    };
   }, [
+    serverLinePhases,
+    confirmedProjection,
     currentRun?.endedAt,
     currentRun?.pausedAt,
     currentRun?.stoppages,
@@ -599,7 +628,7 @@ export function LiveRunProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -618,7 +647,7 @@ export function LiveRunProvider({
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
