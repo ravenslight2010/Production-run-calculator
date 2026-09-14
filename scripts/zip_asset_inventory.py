@@ -704,6 +704,11 @@ def inspect_archive(
             result["credential_like_path_count"] = credential_paths
             result["expanded_size_limit_exceeded"] = expanded_size > max_expanded_bytes
             result["entry_size_limit_exceeded"] = largest_entry > max_entry_bytes
+    except UnicodeDecodeError:
+        # ZIP filename decoding happens while the central directory is parsed.
+        # Keep malformed names out of review evidence and use a stable,
+        # metadata-only error code instead of exposing the parser detail.
+        errors.append("malformed_filename_encoding")
     except zipfile.BadZipFile:
         errors.append("malformed_zip")
     except (OSError, RuntimeError, ValueError):

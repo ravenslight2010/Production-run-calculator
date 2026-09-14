@@ -547,6 +547,69 @@ class ZipAssetInventoryTests(unittest.TestCase):
             self.assertIn("malformed_zip", result["error_codes"])
             self.assertTrue(result["unsafe_metadata"])
 
+    def test_malformed_filename_encoding_is_redacted_in_json_and_text(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "malformed-name-encoding.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("safe.txt", "review metadata only")
+
+            # A UTF-8 flag with invalid UTF-8 bytes makes zipfile fail while
+            # decoding the central-directory filename. Keep the malformed
+            # marker out of all expected report fields so any accidental echo
+            # is immediately visible.
+            data = bytearray(archive_path.read_bytes())
+            central_signature = b"PK\x01\x02"
+            central_offset = data.find(central_signature)
+            self.assertGreaterEqual(central_offset, 0)
+            filename_length = int.from_bytes(
+                data[central_offset + 28 : central_offset + 30], "little"
+            )
+            malformed_name = b"bad\xffname"
+            self.assertEqual(len(malformed_name), filename_length)
+            data[central_offset + 8 : central_offset + 10] = (
+                int.from_bytes(data[central_offset + 8 : central_offset + 10], "little")
+                | 0x800
+            ).to_bytes(2, "little")
+            name_start = central_offset + 46
+            data[name_start : name_start + filename_length] = malformed_name
+            archive_path.write_bytes(data)
+
+            result = inspect_archive(archive_path)
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_codes"], ["malformed_filename_encoding"])
+            self.assertTrue(result["unsafe_metadata"])
+
+            for output_format in ("json", "text"):
+                process = subprocess.run(
+                    [
+                        sys.executable,
+                        str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                        str(archive_path),
+                        "--format",
+                        output_format,
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "PYTHONPATH": str(REPOSITORY_ROOT / "scripts"),
+                    },
+                )
+                self.assertEqual(process.returncode, 1)
+                self.assertNotIn("bad", process.stdout)
+                self.assertNotIn("UnicodeDecodeError", process.stdout)
+                self.assertNotIn("invalid start byte", process.stdout)
+                if output_format == "json":
+                    report = json.loads(process.stdout)
+                    self.assertEqual(
+                        report["archives"][0]["error_codes"],
+                        ["malformed_filename_encoding"],
+                    )
+                    self.assertTrue(report["archives"][0]["unsafe_metadata"])
+                else:
+                    self.assertIn("status=error", process.stdout)
+
     def test_default_expanded_limit_covers_current_upload_batch(self) -> None:
         report = inventory_archives([ASSET_ROOT])
         self.assertEqual(report["limits"]["max_expanded_bytes"], DEFAULT_MAX_EXPANDED_BYTES)

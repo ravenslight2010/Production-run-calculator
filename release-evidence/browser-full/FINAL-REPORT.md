@@ -1,27 +1,27 @@
 # Full Browser Release Run
 
-Generated: 2026-09-14T10:50:09.540Z
-Revision: 0aeb654c59268e6a4f755a90e9476f5c773fcb79
+Generated: 2026-09-14T10:50:06.186Z
+Revision: 9cca9baeda454fdf5831e92f1ab1f3d3996cb742
 Result: FAIL
 Expected cases: 159
 Enumerated cases: 159
 Completed cases: 159
-Passed cases: 8
-Skipped cases: 124
-Failed cases: 27
+Passed cases: 4
+Skipped cases: 125
+Failed cases: 30
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 233581ms
+Duration: 229849ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 73901ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10219ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4959ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 1 | 0 | 1 | 0 | 26276ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 41586ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 73876ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 97392ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 0ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 0 | 1 | 1 | 0 | 0ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 0ms |
 | `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 0 | 1 | 1 | 0 | 0ms |
 | `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 0ms |
 | `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 0ms |
