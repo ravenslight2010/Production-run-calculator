@@ -1,7 +1,10 @@
 import * as z from "zod";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 import type { OperationalProjection } from "@workspace/live-calc";
-import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
+import {
+  FACTORY_SPEED_ADJUSTMENT_BASELINE,
+  FACTORY_TIMING_DEFAULTS,
+} from "@workspace/factory-constants";
 
 export type { IngredientSubstitution, SubstitutionLogEntry };
 
@@ -48,9 +51,9 @@ export const formSchema = z.object({
   // measured values. A saved/cleared 0 is folded back to the default on read
   // (see MACHINE_TIME_DEFAULTS). Mixer runs low then high speed
   // back-to-back; total spin = low + high. Hopper = one batch → doughballs.
-  mixerLowSec: z.coerce.number().min(0).default(330),
-  mixerHighSec: z.coerce.number().min(0).default(180),
-  hopperSec: z.coerce.number().min(0).default(70),
+  mixerLowSec: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.mixerLowSec),
+  mixerHighSec: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.mixerHighSec),
+  hopperSec: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.hopperSec),
   carryOverDone: z.boolean().default(false),
   sauceOzPerPizza: z.coerce.number().min(0).default(0),
   sauceBarrelLbs: z.coerce.number().min(0).default(0),
@@ -138,8 +141,8 @@ export const formSchema = z.object({
   // three physically distinct segments.  Default 2.5 min each (the factory
   // standard pre/post dwell).  A one-time boot heal writes 2.5 into any
   // existing profile that still has 0 stored from before this default was set.
-  preTunnelMin: z.coerce.number().min(0).default(2.5),
-  postTunnelMin: z.coerce.number().min(0).default(2.5),
+  preTunnelMin: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.preTunnelMin),
+  postTunnelMin: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.postTunnelMin),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.
   // Compatibility-preserved override field name for the Freeze tunnel time.
@@ -170,11 +173,11 @@ export function withTempOverrides<T extends Partial<Record<string, unknown>>>(v:
 export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
 export type DoughRecipePreset = { rows: RecipeRow[]; doughballWeightOz?: number };
 
-export const PRE_POST_TUNNEL_DEFAULT_MIN = 2.5;
+export const PRE_POST_TUNNEL_DEFAULT_MIN = FACTORY_TIMING_DEFAULTS.preTunnelMin;
 export const MACHINE_TIME_DEFAULTS = {
-  mixerLowSec: 330,
-  mixerHighSec: 180,
-  hopperSec: 70,
+  mixerLowSec: FACTORY_TIMING_DEFAULTS.mixerLowSec,
+  mixerHighSec: FACTORY_TIMING_DEFAULTS.mixerHighSec,
+  hopperSec: FACTORY_TIMING_DEFAULTS.hopperSec,
 } as const;
 
 export const DEFAULT_VALUES: FormValues = {

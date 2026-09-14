@@ -34,7 +34,10 @@ import fs from "fs";
 import path from "path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
+import {
+  FACTORY_SPEED_ADJUSTMENT_BASELINE,
+  FACTORY_TIMING_DEFAULTS,
+} from "@workspace/factory-constants";
 
 import { DEFAULT_VALUES, MACHINE_TIME_DEFAULTS, PRE_POST_TUNNEL_DEFAULT_MIN } from "./types";
 
@@ -60,6 +63,11 @@ const BASELINE_CONSUMER_FILES = [
   "lib/live-calc/src/index.ts",
   "lib/fill-missing/src/index.ts",
   "lib/db/src/schema/dieLineDefaults.ts",
+] as const;
+const TIMING_DEFAULT_CONSUMER_FILES = [
+  "artifacts/run-calculator/src/types.ts",
+  "artifacts/api-server/src/lib/protectRunValues.ts",
+  "lib/live-calc/src/operationalRunView.ts",
 ] as const;
 
 // ── AST value evaluator ──────────────────────────────────────────────────────
@@ -102,6 +110,17 @@ function evalLiteral(node: ts.Expression): unknown {
     node.text === "FACTORY_SPEED_ADJUSTMENT_BASELINE"
   ) {
     return FACTORY_SPEED_ADJUSTMENT_BASELINE;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "FACTORY_TIMING_DEFAULTS" &&
+    node.name.text in FACTORY_TIMING_DEFAULTS
+  ) {
+    return FACTORY_TIMING_DEFAULTS[
+      node.name.text as keyof typeof FACTORY_TIMING_DEFAULTS
+    ];
   }
 
   // Anything else (property access, identifier, …) cannot be safely evaluated
@@ -204,6 +223,30 @@ describe("source guard: CURRENT_BLANK_RUN_VALUE must mirror DEFAULT_VALUES keys 
     expect(currentBlankMap.get("speedAdjustment")?.value).toBe(FACTORY_SPEED_ADJUSTMENT_BASELINE);
     expect(legacyBlankMap.get("speedAdjustment")?.value).toBe(1);
     expect(legacyBlankMap.get("speedAdjustment")?.value).not.toBe(FACTORY_SPEED_ADJUSTMENT_BASELINE);
+  });
+
+  it("keeps current web and server timing defaults on the shared factory contract", () => {
+    expect(MACHINE_TIME_DEFAULTS).toEqual({
+      mixerLowSec: FACTORY_TIMING_DEFAULTS.mixerLowSec,
+      mixerHighSec: FACTORY_TIMING_DEFAULTS.mixerHighSec,
+      hopperSec: FACTORY_TIMING_DEFAULTS.hopperSec,
+    });
+    expect(PRE_POST_TUNNEL_DEFAULT_MIN).toBe(FACTORY_TIMING_DEFAULTS.preTunnelMin);
+    expect(FACTORY_TIMING_DEFAULTS.postTunnelMin).toBe(PRE_POST_TUNNEL_DEFAULT_MIN);
+
+    for (const [key, expected] of Object.entries(FACTORY_TIMING_DEFAULTS)) {
+      expect(currentBlankMap.get(key)?.value, `server current blank default for ${key}`).toBe(expected);
+    }
+  });
+
+  it("keeps timing-default consumers on the shared factory contract", () => {
+    for (const relativePath of TIMING_DEFAULT_CONSUMER_FILES) {
+      const source = fs.readFileSync(path.join(WORKSPACE_ROOT, relativePath), "utf8");
+      expect(
+        source,
+        `${relativePath} must consume FACTORY_TIMING_DEFAULTS so timing defaults cannot drift between services`,
+      ).toContain("FACTORY_TIMING_DEFAULTS");
+    }
   });
 
   it("CURRENT_BLANK_RUN_VALUE has every key that DEFAULT_VALUES has (and no extras)", () => {
