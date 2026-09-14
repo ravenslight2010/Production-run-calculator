@@ -73,6 +73,30 @@ successful prior run.
 - Do not let a successful build bypass required release evidence or production approval.
 - Route final readiness through `release-checklist` and `production-go`.
 
+### GitHub repository publication
+
+Distinguish repository publication from application deployment:
+
+- **First-public review:** before changing a private repository to public, inspect the full
+  reachable Git history, branches, tags, releases, issues, workflows, submodules, large
+  files, generated artifacts, and documentation for secrets or internal-only material.
+  Scanning only the current working tree is insufficient.
+- **Version-release review:** identify the exact tag/commit, release object, notes, assets,
+  provenance, and automation that will publish. Confirm the release does not expose debug
+  bundles, browser auth state, `.env` files, source maps with sensitive content, or
+  unrelated artifacts.
+- Check default-branch protection, required checks, environment approvals, release/tag
+  mutation authority, and whether automation can replace an existing release silently.
+- Separate assessment from mutation. Read-only findings do not authorize changing
+  visibility, protections, tags, releases, or repository settings.
+- Before an approved mutation, present the intended change, repository/ref, consequences,
+  rollback path, and post-change verification. If the state changes between assessment and
+  mutation, stop and reassess.
+
+Treat public exposure of a committed secret as credential exposure even if the file is later
+deleted. Remove it from reachable history where appropriate and rotate/revoke the credential;
+history cleanup alone does not invalidate it.
+
 ## Report format
 
 For each finding state:
@@ -96,5 +120,6 @@ Do not include working exploit payloads, secret values, or instructions for abus
 - [ ] External actions and workflow references have reviewed provenance and pinning.
 - [ ] Caches and artifacts do not cross trust boundaries unsafely.
 - [ ] Release artifacts are revision-bound.
+- [ ] Repository-publication scope and full-history exposure were checked when applicable.
 - [ ] Evidence is sanitized.
 - [ ] No workflow was triggered or repository setting changed during a read-only review.
