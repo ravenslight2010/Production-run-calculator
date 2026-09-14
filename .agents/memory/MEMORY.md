@@ -153,3 +153,4 @@
 - [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
+- [AI evaluation framework boundary](ai-evaluation-framework-boundary.md) — adapt provider-neutral invariants into project-owned offline TypeScript/Vitest; do not import external harness runtimes.
