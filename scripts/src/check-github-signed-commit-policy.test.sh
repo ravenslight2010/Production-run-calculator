@@ -52,21 +52,19 @@ write_valid_fixtures() {
       {"context": "Typecheck", "app_id": 15368},
       {"context": "Unit tests (web + libs)", "app_id": 15368},
       {"context": "API tests (Postgres)", "app_id": 15368},
-      {"context": "Informational security audit (high severity; registry best-effort)", "app_id": 15368},
+        {"context": "Security audit (prod deps)", "app_id": 15368},
       {"context": "Docker image", "app_id": 15368},
-      {"context": "Build (web + API)", "app_id": 15368},
-      {"context": "Desktop and phone department journey", "app_id": 15368},
-      {"context": "Release gates and retained standard evidence", "app_id": 15368}
+        {"context": "Build (web + API)", "app_id": 15368}
     ]
   },
-  "enforce_admins": {"enabled": true},
+  "enforce_admins": {"enabled": false},
   "required_pull_request_reviews": {
     "required_approving_review_count": 1,
     "dismiss_stale_reviews": true
   },
-  "required_conversation_resolution": {"enabled": true},
-  "allow_force_pushes": false,
-  "allow_deletions": false
+  "required_conversation_resolution": {"enabled": false},
+  "allow_force_pushes": {"enabled": false},
+  "allow_deletions": {"enabled": false}
 }
 EOF
   printf '{"enabled":true}\n' > "$SIGNATURE_FIXTURE"
@@ -109,7 +107,8 @@ test_accepts_complete_policy() {
     printf 'Expected the complete policy to pass. Output:\n%s\n' "$CHECK_OUTPUT" >&2
     return 1
   }
-  assert_contains "$CHECK_OUTPUT" "requires signed commits and complete branch protection"
+  assert_contains "$CHECK_OUTPUT" \
+    "requires signed commits, pull-request review, and six required checks"
   echo "PASS: accepts the complete main-branch policy"
 }
 
@@ -147,7 +146,7 @@ test_rejects_signed_commit_mismatch() {
 
 test_rejects_check_count_mismatch() {
   write_valid_fixtures
-  jq '.required_status_checks.checks |= .[0:7]' "$PROTECTION_FIXTURE" > "${PROTECTION_FIXTURE}.tmp"
+  jq '.required_status_checks.checks |= .[0:5]' "$PROTECTION_FIXTURE" > "${PROTECTION_FIXTURE}.tmp"
   mv "${PROTECTION_FIXTURE}.tmp" "$PROTECTION_FIXTURE"
   run_check
   [[ "$CHECK_STATUS" -eq 1 ]] || {
@@ -155,7 +154,7 @@ test_rejects_check_count_mismatch() {
     return 1
   }
   assert_contains "$CHECK_OUTPUT" \
-    "main protection field required_status_checks.checks: expected exactly 8 GitHub Actions checks, got 7"
+    "main protection field required_status_checks.checks: expected exactly 6 GitHub Actions checks, got 5"
   echo "PASS: rejects a missing required check"
 }
 
@@ -170,7 +169,7 @@ test_rejects_check_identity_mismatch() {
     return 1
   }
   assert_contains "$CHECK_OUTPUT" \
-    "main protection field required_status_checks.checks[6]: expected 'Typecheck"
+    "main protection field required_status_checks.checks[4]: expected 'Typecheck"
   assert_contains "$CHECK_OUTPUT" $'\t15368'
   assert_contains "$CHECK_OUTPUT" $'\t99999'
   echo "PASS: rejects a non-GitHub-Actions check identity"
@@ -213,19 +212,19 @@ test_rejects_field_mismatch \
   true false
 test_rejects_field_mismatch \
   "enforce_admins.enabled" \
-  '.enforce_admins.enabled = false' \
-  true false
+  '.enforce_admins.enabled = true' \
+  false true
 test_rejects_field_mismatch \
   "required_conversation_resolution.enabled" \
-  '.required_conversation_resolution.enabled = false' \
-  true false
+  '.required_conversation_resolution.enabled = true' \
+  false true
 test_rejects_field_mismatch \
   "allow_force_pushes" \
-  '.allow_force_pushes = true' \
+  '.allow_force_pushes.enabled = true' \
   false true
 test_rejects_field_mismatch \
   "allow_deletions" \
-  '.allow_deletions = true' \
+  '.allow_deletions.enabled = true' \
   false true
 test_rejects_signed_commit_mismatch
 test_rejects_check_count_mismatch

@@ -96,8 +96,9 @@ GitHub's native **required signed commits** rule is enabled for this repository'
 `main` branch. This server-side rule is independent of
 `push.main.requireSigned`: it rejects an unsigned commit whether it arrives from
 the guarded helper, a normal Git client, an API call, or GitHub Actions. The
-branch also requires pull requests, the repository's required checks, and
-resolved conversations before merging.
+live rule also requires pull requests, one approval, and six named status
+checks. Administrator enforcement and conversation resolution are currently
+disabled; consult `.github/repository-policy.md` for the bounded live contract.
 
 Use the read-only verifier below to confirm that the live repository rule is
 still active:

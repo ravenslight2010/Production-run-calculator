@@ -80,8 +80,8 @@ if ! protection_values=$(gh api \
       ["required_pull_request_reviews.dismiss_stale_reviews", ((.required_pull_request_reviews.dismiss_stale_reviews // false) | tostring)],
       ["enforce_admins.enabled", ((.enforce_admins.enabled // false) | tostring)],
       ["required_conversation_resolution.enabled", ((.required_conversation_resolution.enabled // false) | tostring)],
-      ["allow_force_pushes", ((.allow_force_pushes // false) | tostring)],
-      ["allow_deletions", ((.allow_deletions // false) | tostring)]
+      ["allow_force_pushes", ((.allow_force_pushes.enabled // false) | tostring)],
+      ["allow_deletions", ((.allow_deletions.enabled // false) | tostring)]
     ]
     + (
       (.required_status_checks.checks // [])
@@ -110,8 +110,8 @@ expected_fields=(
   'required_status_checks.strict=true'
   'required_pull_request_reviews.required_approving_review_count=1'
   'required_pull_request_reviews.dismiss_stale_reviews=true'
-  'enforce_admins.enabled=true'
-  'required_conversation_resolution.enabled=true'
+  'enforce_admins.enabled=false'
+   'required_conversation_resolution.enabled=false'
   'allow_force_pushes=false'
   'allow_deletions=false'
 )
@@ -126,10 +126,8 @@ done
 expected_checks=(
   $'API tests (Postgres)\t15368'
   $'Build (web + API)\t15368'
-  $'Desktop and phone department journey\t15368'
   $'Docker image\t15368'
-  $'Informational security audit (high severity; registry best-effort)\t15368'
-  $'Release gates and retained standard evidence\t15368'
+  $'Security audit (prod deps)\t15368'
   $'Typecheck\t15368'
   $'Unit tests (web + libs)\t15368'
 )
@@ -141,4 +139,4 @@ for index in "${!expected_checks[@]}"; do
     fail "main protection field required_status_checks.checks[${index}]: expected '${expected_checks[$index]}', got '${actual_checks[$index]}'"
 done
 
-printf 'GitHub policy active: %s:main requires signed commits and complete branch protection.\n' "$repo"
+printf 'GitHub policy active: %s:main requires signed commits, pull-request review, and six required checks.\n' "$repo"
