@@ -12,7 +12,8 @@ export default memo(function InventoryTabContent() {
   const {
     candidates,
     runValsList,
-    coverageRunVals,
+    coverageRunSources,
+    serverRunLines,
     substitutions,
     substitutionLog,
     substitutionOptions,
@@ -34,7 +35,8 @@ export default memo(function InventoryTabContent() {
       <InventoryTab
         candidates={candidates}
         runValsList={runValsList}
-        coverageRunVals={coverageRunVals}
+        coverageRunSources={coverageRunSources}
+        serverRunLines={serverRunLines}
         substitutions={substitutions}
         substitutionLog={substitutionLog}
         substitutionOptions={substitutionOptions}

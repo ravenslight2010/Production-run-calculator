@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { CandidateItem } from "../inventoryShared";
+import type { CandidateItem, ConsumeLine, RunConsumptionSource } from "../inventoryShared";
 import type {
   FormValues,
   IngredientSubstitution,
@@ -16,7 +16,10 @@ import type {
 export interface InventoryTabContextValue {
   candidates: CandidateItem[];
   runValsList: FormValues[];
-  coverageRunVals: FormValues[];
+  /** Per-run consumption sources (runId maps to server lines, values = local fallback). */
+  coverageRunSources: RunConsumptionSource[];
+  /** Server-streamed canonical per-run consumption lines (slice 7). */
+  serverRunLines: Record<string, ConsumeLine[]>;
   substitutions: IngredientSubstitution[];
   substitutionLog: SubstitutionLogEntry[];
   substitutionOptions: string[];
