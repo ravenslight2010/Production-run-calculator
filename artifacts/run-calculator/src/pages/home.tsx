@@ -152,7 +152,6 @@ import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
   pauseDecisionRemainingMs,
-  pauseStopsTunnel,
   canChoosePauseTunnelPolicy,
   shouldClosePauseDecision,
 } from "../pausePolicy";
@@ -19140,7 +19139,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+    calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
     casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     showBatchDue, setShowBatchDue,
@@ -19620,20 +19619,22 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   endedAt: refEndedAt,
                   stoppages: lastEndedRun.stoppages,
                 });
-                const phases2 = computeLinePhases({
-                  elapsedBatchSec: endedElapsedSec,
-                  pausedAt: null,
-                  lastResumeWallMs: 0,
-                  lastPauseStartWallMs: 0,
-                  pauseStopsTunnel: true,
-                  lastPauseStopsTunnel: true,
-                  runStatus: "ended",
-                  preTunnelMin: preTun2,
-                  postTunnelMin: postTun2,
-                  freezerTime: freezerMin2,
-                  nowMs: nowMs2,
-                  endedAt: refEndedAt,
-                });
+                const phases2 = lastEndedRun?.id === currentRun?.id
+                  ? linePhases
+                  : computeLinePhases({
+                      elapsedBatchSec: endedElapsedSec,
+                      pausedAt: null,
+                      lastResumeWallMs: 0,
+                      lastPauseStartWallMs: 0,
+                      pauseStopsTunnel: true,
+                      lastPauseStopsTunnel: true,
+                      runStatus: "ended",
+                      preTunnelMin: preTun2,
+                      postTunnelMin: postTun2,
+                      freezerTime: freezerMin2,
+                      nowMs: nowMs2,
+                      endedAt: refEndedAt,
+                    });
                 const activePhase = pickMostActivePhase(phases2);
                 if (!activePhase) return (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
@@ -19688,30 +19689,9 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     const freezerMin = Number(ve.freezerTime) || 0;
                     if (freezerMin <= 0) return null;
                     if (calc.ppm <= 0 && runStatus === "running") return null;
-                    const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                    const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                    // Last resume: most recent closed "pause" stoppage (endedAt=resume, startedAt=pause start).
-                    const lastClosedPause = (currentRun?.stoppages ?? [])
-                      .filter((s: any) => s.type === "pause" && s.endedAt)
-                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
-                    const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
-                    const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
-                    const openPause = (currentRun?.stoppages ?? [])
-                      .filter((s: any) => s.type === "pause" && !s.endedAt)
-                      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
-                    const phases = computeLinePhases({
-                      elapsedBatchSec,
-                      pausedAt: currentRun?.pausedAt ?? null,
-                      lastResumeWallMs,
-                      lastPauseStartWallMs,
-                      pauseStopsTunnel: pauseStopsTunnel(openPause),
-                      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
-                      runStatus: runStatus as string,
-                      preTunnelMin: preTun,
-                      postTunnelMin: postTun,
-                      freezerTime: freezerMin,
-                      nowMs: nowTime.getTime(),
-                    });
+                    // Thin display of the server-adopted context model (the
+                    // context falls back locally when offline/lagging).
+                    const phases = linePhases;
                     const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
                     // Hide the strip entirely when everything is in steady-state or empty.
                     const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
@@ -20650,7 +20630,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec,
+    calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs, packagingDrainActive, coordinationStatus,
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
@@ -20813,55 +20793,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   const showEmptying =
                     freezerMin > 0 && !!lastEndedRun?.endedAt && lastEndedRun.id === currentRunId;
                   if (!showFilling && !showEmptying) return null;
-                  const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                  const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
                   const nowMs = nowTime.getTime();
-                  let phases;
-                  if (showFilling) {
-                    const lastClosedPause2 = (currentRun?.stoppages ?? [])
-                      .filter((s: any) => s.type === "pause" && s.endedAt)
-                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
-                    const lastResumeWallMs2 = lastClosedPause2?.endedAt ?? 0;
-                    const lastPauseStartWallMs2 = lastClosedPause2?.startedAt ?? 0;
-                    phases = computeLinePhases({
-                      elapsedBatchSec,
-                      pausedAt: currentRun?.pausedAt ?? null,
-                      lastResumeWallMs: lastResumeWallMs2,
-                      lastPauseStartWallMs: lastPauseStartWallMs2,
-                      pauseStopsTunnel: pauseStopsTunnel((currentRun?.stoppages ?? [])
-                        .filter((s: any) => s.type === "pause" && !s.endedAt)
-                        .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any)),
-                      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause2),
-                      runStatus: runStatus as string,
-                      preTunnelMin: preTun,
-                      postTunnelMin: postTun,
-                      freezerTime: freezerMin,
-                      nowMs,
-                    });
-                  } else {
-                    // Compute actual virtual (pause-excluded) elapsed for the ended run.
-                    // computeEndedRunElapsedSec caps open/unclosed pause stoppages at
-                    // endedAt so auto-ended paused runs don't count the pause as production.
-                    const erElapsedSec = computeEndedRunElapsedSec({
-                      startedAt: lastEndedRun!.startedAt,
-                      endedAt: lastEndedRun!.endedAt!,
-                      stoppages: lastEndedRun!.stoppages,
-                    });
-                    phases = computeLinePhases({
-                      elapsedBatchSec: erElapsedSec,
-                      pausedAt: null,
-                      lastResumeWallMs: 0,
-                      lastPauseStartWallMs: 0,
-                      pauseStopsTunnel: true,
-                      lastPauseStopsTunnel: true,
-                      runStatus: "ended",
-                      preTunnelMin: preTun,
-                      postTunnelMin: postTun,
-                      freezerTime: freezerMin,
-                      nowMs,
-                      endedAt: lastEndedRun!.endedAt!,
-                    });
-                  }
+                  // Thin display of the server-adopted context model: it covers the
+                  // current run in every lifecycle state (running / paused / ended),
+                  // falling back locally inside LiveRunContext when offline/lagging.
+                  const phases = linePhases;
                   const rows = [phases.stage1, phases.stage2, phases.stage3];
                   const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
                   if (!anyVisible && !showEmptying) return null;

@@ -446,3 +446,22 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: completes server authority for the live time-varying surfaces (calc → consumption → timers → phases), giving cross-device consistency and a thin client display layer.
 
 **Verification**: lib live-calc 25/25; api-server `sync.liveCalcTick` 20/20; run-calculator 102/102 (calcTick, clock-isolation, wakeSnap, operationalState, linePhases suite + new linePhases.test.tsx, autoTrackFreezerDrain); run-calculator + api-server typechecks clean (no new live-calc test-file tsc errors beyond the pre-existing baseline in `liveCalc.test.ts`).
+
+## Live server-calc streaming (slice 6)
+
+**Date**: 2026-09-14
+**Branch**: `feat/line-phase-strips-server-adoption`
+**Files changed**:
+- `artifacts/run-calculator/src/pages/home.tsx` — three display call sites displaced onto the server-adopted context model:
+  1. Ended-run compact badge (`LiveRunTabContent`): uses `linePhases` when `lastEndedRun?.id === currentRun?.id`; legacy `computeEndedRunElapsedSec` + `computeLinePhases` stays as fallback.
+  2. 3-phase line status strip (`LiveRunTabContent`): now `const phases = linePhases;` (visibility guards unchanged).
+  3. Line-stage section (`LivePackagingTabContent`): now `const phases = linePhases;` for both filling and draining paths.
+  Also added `linePhases` to the component `useLiveRun()` destructures and removed the now-unused local pause parsing + `pauseStopsTunnel` import.
+
+**What was wrong / missing**: after slice 5, the context owned the line-phase model but the live phase strips still ran the local `computeLinePhases` derivation on every render, duplicating the model and keeping the client as the de-facto derivation owner for the most-visible phase UI.
+
+**What the fix was**: the strips now read the server-adopted context value (`useLiveRun().linePhases`), which internally falls back locally when offline/lagging — the client is a thin display for the phase surface. Display-only; auto-track gating already consumed the context model.
+
+**Why it was needed**: completes the line-phase migration (server owns the model end-to-end), removes per-render client derivations, and guarantees the visible strips agree with cross-device server state.
+
+**Verification**: run-calculator typecheck clean; focused suites 104/104 (linePhases, LiveRunContext.linePhases, LiveRunContext.calcTick, operationalState, autoTrackFreezerDrain, autoTrackTraysBatches); browser/e2e phase-strip checks run in CI.
