@@ -458,6 +458,8 @@ server genuinely cannot stream (unsaved edits, history, ended-run drain).
 - `docs/superpowers/specs/2026-09-14-server-warehouse-coverage-runlines-design.md`
 - Plans live alongside each spec under `docs/superpowers/plans/`.
 
+- **Live server-calc streaming (slice 5 — DONE)** — line-phase model moved server-side: `OperationalProjection` now carries `linePhases` (3-stage press/tunnel/packaging model) computed by `buildOperationalProjection` from day-state lifecycle, pause policies, and effective timing values; `LiveRunContext` adopts the confirmed projection's phases (extrapolating `remainMs` from `capturedAtServerMs`) with exact local fallback on lifecycle mismatch, missing field, or imminent phase transitions. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice5-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice5.md`.
+
 ### Code References
 - `lib/live-calc/src/index.ts` — shared calculation engine (client + server)
 - `lib/live-calc/src/operationalProjection.ts` — server projection (calc/timers/linePhases)
