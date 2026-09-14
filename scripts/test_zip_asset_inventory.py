@@ -489,6 +489,55 @@ class ZipAssetInventoryTests(unittest.TestCase):
             self.assertNotIn(composed, process.stdout)
             self.assertNotIn(decomposed, process.stdout)
 
+    def test_high_risk_unicode_confusables_are_redacted_and_unsafe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "unicode-confusable.zip"
+            members = (
+                "assets/logo.txt",
+                "assets/lоgo.txt",  # Cyrillic small o.
+                "docs/PORT.txt",
+                "docs/ΡΟRΤ.txt",  # Greek Rho, Omicron, Tau.
+                "fonts/сharset.json",  # Cyrillic small es; no collision.
+            )
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                for member in members:
+                    archive.writestr(member, "not read")
+
+            result = inspect_archive(archive_path)
+            self.assertEqual(result["unicode_confusable_ambiguity_count"], 3)
+            self.assertEqual(result["unicode_confusable_collision_count"], 2)
+            self.assertTrue(result["unsafe_metadata"])
+            self.assertEqual(result["status"], "unsafe-metadata")
+
+            report = inventory_archives([archive_path])
+            self.assertEqual(
+                report["member_name_unicode_confusable_policy"],
+                "high-risk-skeleton-v1",
+            )
+            self.assertFalse(report["member_data_opened"])
+            serialized = json.dumps(report, ensure_ascii=False)
+            for member in members:
+                self.assertNotIn(member, serialized)
+
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    str(archive_path),
+                    "--format",
+                    "text",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(REPOSITORY_ROOT / "scripts")},
+            )
+            self.assertEqual(process.returncode, 1)
+            self.assertIn("unicode_confusable_ambiguities=3", process.stdout)
+            self.assertIn("unicode_confusable_collisions=2", process.stdout)
+            for member in members:
+                self.assertNotIn(member, process.stdout)
+
     def test_malformed_archive_is_an_error_not_a_pass(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "not-a-zip.zip"

@@ -112,6 +112,49 @@ SUMMARY_KEYS = frozenset(
 # equivalent member names as the same path during safety checks.
 ZIP_MEMBER_UNICODE_NORMALIZATION = "NFC"
 
+# This is deliberately a small, review-only policy rather than a general
+# Unicode confusables implementation.  It covers characters that are commonly
+# substituted for ASCII letters in filenames and keeps the policy bounded and
+# auditable.  A name containing one of these characters is ambiguous even when
+# no second member produces the same skeleton.
+ZIP_MEMBER_UNICODE_CONFUSABLE_POLICY = "high-risk-skeleton-v1"
+ZIP_MEMBER_UNICODE_CONFUSABLE_TRANSLATIONS: dict[int, str] = str.maketrans(
+    {
+        # Cyrillic look-alikes.
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "х": "x",
+        "у": "y",
+        "і": "i",
+        "ј": "j",
+        "к": "k",
+        "м": "m",
+        "т": "t",
+        "в": "b",
+        "н": "h",
+        "һ": "h",
+        # Greek look-alikes.
+        "α": "a",
+        "β": "b",
+        "ε": "e",
+        "ι": "i",
+        "κ": "k",
+        "ν": "v",
+        "ο": "o",
+        "ρ": "p",
+        "τ": "t",
+        "υ": "y",
+        "χ": "x",
+        "ϲ": "c",
+        # Letter-like symbols frequently used in place of ASCII.
+        "ℓ": "l",
+        "℮": "e",
+    }
+)
+
 # This is intentionally a path-only check. It does not inspect member content,
 # and its output is always a count rather than the matching path.
 CREDENTIAL_LIKE_PATH_RE = re.compile(
@@ -505,7 +548,12 @@ def normalized_member_path(raw_name: str) -> tuple[str, bool]:
     normalized_parts = [part for part in parts if part not in ("", ".")]
     return "/".join(normalized_parts) or ".", unsafe
 
+def confusable_skeleton(normalized_name: str) -> tuple[str, bool]:
+    """Return a bounded confusable skeleton and whether it is ambiguous."""
 
+    folded = normalized_name.casefold()
+    skeleton = folded.translate(ZIP_MEMBER_UNICODE_CONFUSABLE_TRANSLATIONS)
+    return skeleton, skeleton != folded
 def is_symlink(info: zipfile.ZipInfo) -> bool:
     mode = (info.external_attr >> 16) & 0xFFFF
     return stat.S_ISLNK(mode)
@@ -533,6 +581,8 @@ def _empty_archive_result(filename: str) -> dict[str, object]:
         "unsafe_path_count": 0,
         "duplicate_normalized_path_count": 0,
         "unicode_normalization_collision_count": 0,
+        "unicode_confusable_ambiguity_count": 0,
+        "unicode_confusable_collision_count": 0,
         "case_fold_collision_count": 0,
         "encrypted_entry_count": 0,
         "special_file_count": 0,
@@ -579,6 +629,8 @@ def inspect_archive(
 
             normalized_counts: defaultdict[str, int] = defaultdict(int)
             unicode_name_variants: defaultdict[str, set[str]] = defaultdict(set)
+            confusable_skeleton_names: defaultdict[str, set[str]] = defaultdict(set)
+            confusable_names: set[str] = set()
             casefold_names: defaultdict[str, set[str]] = defaultdict(set)
             expanded_size = 0
             largest_entry = 0
@@ -597,6 +649,10 @@ def inspect_archive(
                     ZIP_MEMBER_UNICODE_NORMALIZATION, info.filename
                 )
                 unicode_name_variants[nfc_name].add(info.filename)
+                skeleton, ambiguous = confusable_skeleton(normalized)
+                confusable_skeleton_names[skeleton].add(normalized)
+                if ambiguous:
+                    confusable_names.add(normalized)
                 casefold_names[
                     unicodedata.normalize(
                         ZIP_MEMBER_UNICODE_NORMALIZATION, normalized.casefold()
@@ -633,6 +689,12 @@ def inspect_archive(
                 for names in unicode_name_variants.values()
                 if len(names) > 1
             )
+            result["unicode_confusable_ambiguity_count"] = len(confusable_names)
+            result["unicode_confusable_collision_count"] = sum(
+                len(names) - 1
+                for names in confusable_skeleton_names.values()
+                if len(names) > 1
+            )
             result["case_fold_collision_count"] = sum(
                 1 for names in casefold_names.values() if len(names) > 1
             )
@@ -658,6 +720,8 @@ def inspect_archive(
         or result["unsafe_path_count"]
         or result["duplicate_normalized_path_count"]
         or result["unicode_normalization_collision_count"]
+        or result["unicode_confusable_ambiguity_count"]
+        or result["unicode_confusable_collision_count"]
         or result["case_fold_collision_count"]
         or result["encrypted_entry_count"]
         or result["special_file_count"]
@@ -722,6 +786,7 @@ def inventory_archives(
         "read_only": True,
         "member_data_opened": False,
         "member_name_unicode_normalization": ZIP_MEMBER_UNICODE_NORMALIZATION,
+        "member_name_unicode_confusable_policy": ZIP_MEMBER_UNICODE_CONFUSABLE_POLICY,
         "limits": {
             "max_entries": max_entries,
             "max_entry_bytes": max_entry_bytes,
@@ -802,6 +867,8 @@ def _text_report(report: dict[str, object]) -> str:
                     f"unsafe_paths={archive['unsafe_path_count']}",
                     f"duplicate_paths={archive['duplicate_normalized_path_count']}",
                     f"unicode_normalization_collisions={archive['unicode_normalization_collision_count']}",
+                    f"unicode_confusable_ambiguities={archive['unicode_confusable_ambiguity_count']}",
+                    f"unicode_confusable_collisions={archive['unicode_confusable_collision_count']}",
                     f"case_fold_collisions={archive['case_fold_collision_count']}",
                     f"encrypted={archive['encrypted_entry_count']}",
                     f"special_files={archive['special_file_count']}",
