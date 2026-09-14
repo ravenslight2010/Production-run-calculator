@@ -43,3 +43,18 @@ package-manager installs and setup actions are not direct executable/archive
 downloads. The repository check is intentionally conservative and will fail a
 future workflow that introduces a recognizable binary/archive download without
 the required attestation gate.
+
+## Published container image evidence
+
+The trusted `docker-publish` job in `ci.yml` publishes exactly three images:
+the API runtime, API migration, and web images. Each image is labeled with
+`org.opencontainers.image.revision=${{ github.sha }}` and the Buildx output
+digest is checked after publication by pulling the immutable
+`image@sha256:digest` reference. The check requires both the pulled
+`RepoDigest` and the revision label to match the current `github.sha`.
+
+The check writes only image names, immutable digests, the expected/observed
+revision, and bounded pass/fail fields to
+`release-evidence-container-images.txt`. The file is retained as
+`release-evidence-container-images-${{ github.run_id }}` for 14 days; registry
+credentials are never written to the report.

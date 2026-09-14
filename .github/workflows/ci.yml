@@ -257,6 +257,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish api runtime image
+        id: publish-api
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -264,9 +265,12 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/${{ github.repository_owner }}/runcalc-api:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=docker-publish-api-${{ github.run_id }}
           cache-to: type=gha,mode=max,scope=docker-publish-api-${{ github.run_id }}
       - name: Publish api migration image
+        id: publish-api-migrate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -274,9 +278,12 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=docker-publish-api-migrate-${{ github.run_id }}
           cache-to: type=gha,mode=max,scope=docker-publish-api-migrate-${{ github.run_id }}
       - name: Publish web image (caddy static)
+        id: publish-web
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -284,8 +291,30 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/${{ github.repository_owner }}/runcalc-web:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=docker-publish-web-${{ github.run_id }}
           cache-to: type=gha,mode=max,scope=docker-publish-web-${{ github.run_id }}
+      - name: Verify published container provenance
+        if: always()
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+          API_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-api
+          API_MIGRATE_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate
+          WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-web
+          API_DIGEST: ${{ steps.publish-api.outputs.digest }}
+          API_MIGRATE_DIGEST: ${{ steps.publish-api-migrate.outputs.digest }}
+          WEB_DIGEST: ${{ steps.publish-web.outputs.digest }}
+          PROVENANCE_REPORT: ${{ runner.temp }}/release-evidence-container-images.txt
+        run: bash scripts/src/verify-published-container-provenance.sh
+      - name: Retain container image release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-evidence-container-images-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-evidence-container-images.txt
+          if-no-files-found: error
+          retention-days: 14
 
   build:
     name: Build (web + API)
